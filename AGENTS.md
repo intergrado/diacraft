@@ -137,10 +137,12 @@ item exists. Scores err low and each number is marked measured or estimated.
 
 ## Progress docs
 
-Follow the templates in `docs/progress-doc-templates.md`: exactly one status line per doc, replaced on every edit, and a revision
-table. When a change lands, update in the same change the docs it touches: the area row in `docs/target-app-parity.md`, the entry in
-`docs/gaps.md`, the checklist row, the milestone row in `docs/roadmap.md`, and `ROADMAP.md` when a headline number moves. Keep the
-README's status in step. `cargo xtask docs` and `cargo xtask parity --check` check part of this.
+Follow the templates in `docs/progress-doc-templates.md`. A status line, `> **Last reviewed:** YYYY-MM-DD` under the H1, is kept by
+the ten scored progress docs alone, and says only when their scores were last checked against evidence. The other docs have none, and
+no status line holds an edit date, a list of changes or a history: git records when a doc changed and what changed. Every
+doc ends with its revision table. When a change lands, update in the same change the docs it touches: the area row in
+`docs/target-app-parity.md`, the entry in `docs/gaps.md`, the checklist row, the milestone row in `docs/roadmap.md`, and `ROADMAP.md`
+when a headline number moves. Keep the README's status in step. `cargo xtask docs` and `cargo xtask parity --check` check part of this.
 
 ## Contributor credits
 

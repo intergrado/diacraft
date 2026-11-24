@@ -1,7 +1,5 @@
 # DiaCraft branding artwork
 
-> **Last updated:** 2026-11-24 · **Change:** minor (APPID: the application id is `app.diacraft`: the Linux desktop entry's name, `StartupWMClass` and icon, the window's app id and the macOS bundle id (owner, 2026-11-23); the registration of the earlier id is left where it is; before that, sentences reworded so that each reads whole on its own; nothing they say changes; before that, the reference product is named only in the format lists, and the page keeps to the words of the public tree; before that, the splash copy of the cover (836 × 470, 256 colours) and how it is made; before that, OS application icon with Linux desktop registration; no duplicate in-app mark)
-
 Original artwork for DiaCraft, integrated in and corrected in to the owner's requested placement. The desktop uses the icon for its OS window decoration, and the shared desktop/web File Home displays the cover. The web page declares a local favicon, and the README displays the cover. Feature-parity scores are unchanged. The reference app was not inspected and our output has not been opened in it by the project.
 
 ## Deliverables

@@ -1,13 +1,32 @@
-//! Progress docs damaged by merges: a table row that appears twice, a status line (`**Change:**
-//! kind (…; …)`) that lists the same item twice, or a doc with more than one status line (stacked
-//! status lines are merge damage too; docs/progress-doc-templates.md). All happen when a merge
-//! keeps both sides of a conflict; they are never wanted.
+//! The progress docs' status lines, and what merges leave in the docs (docs/progress-doc-templates.md).
+//!
+//! A merge that keeps both sides of a conflict leaves a table row twice, or a second status line; neither is ever wanted. The
+//! status line itself belongs to the scored docs ([`SCORED`]) alone, and holds the date their scores were last checked against
+//! evidence and nothing else: `> **Last reviewed:** YYYY-MM-DD`. Git records when a doc changed and what changed, so a `Last
+//! updated` date, a list of changes or a history in a status line is refused, and so is a status line in any other doc.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 /// A status line starts with one of these.
 const STATUS_STARTS: &[&str] = &["> **Last reviewed:**", "> **Last updated:**"];
+
+/// What a scored doc's status line holds before its date.
+const REVIEWED: &str = "> **Last reviewed:** ";
+
+/// The docs with scores, by their path from the root: each may have one status line, its review date. Every other doc has none.
+pub const SCORED: &[&str] = &[
+    "ROADMAP.md",
+    "docs/gaps.md",
+    "docs/roadmap.md",
+    "docs/parity-checklist.md",
+    "docs/parity-evidence.md",
+    "docs/target-app-parity.md",
+    "docs/ui-parity.md",
+    "docs/file-format-parity.md",
+    "docs/hardware-parity.md",
+    "docs/localization-parity.md",
+];
 
 /// Checks `ROADMAP.md` and `docs/*.md` under `root` (not the folders below `docs/`); prints each problem and fails
 /// if there were any. No page is left out.
@@ -17,11 +36,11 @@ pub fn run(root: &Path) -> Result<(), String> {
         println!("docs: ok");
         return Ok(());
     }
-    Err(format!("docs: repeats left by a merge, or docs that cannot be read:\n  {}", found.join("\n  ")))
+    Err(format!("docs: repeats left by a merge, status lines the docs may not have, or docs that cannot be read:\n  {}", found.join("\n  ")))
 }
 
-/// `file:line: what` for each repeat in the checked docs, and `file: why` for each doc or folder that
-/// cannot be read. A gate that cannot read a doc has not checked it, so only a `ROADMAP.md` or a
+/// `file:line: what` for each repeat and each status line out of place or out of form in the checked docs, and `file: why` for
+/// each doc or folder that cannot be read. A gate that cannot read a doc has not checked it, so only a `ROADMAP.md` or a
 /// `docs/` that does not exist (yet) is let through; a dangling link is not an absent file.
 pub fn check(root: &Path) -> Vec<String> {
     let mut found = Vec::new();
@@ -49,7 +68,10 @@ pub fn check(root: &Path) -> Vec<String> {
     for f in &files {
         let name = f.strip_prefix(root).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
         match std::fs::read_to_string(f) {
-            Ok(text) => found.extend(repeats(&text).into_iter().map(|r| format!("{name}:{r}"))),
+            Ok(text) => {
+                found.extend(repeats(&text).into_iter().map(|r| format!("{name}:{r}")));
+                found.extend(status_lines(&name, &text).into_iter().map(|r| format!("{name}:{r}")));
+            }
             Err(e) => found.push(format!("{name}: cannot read: {e}")),
         }
     }
@@ -69,8 +91,13 @@ fn exists(path: &Path, name: &str, found: &mut Vec<String>) -> bool {
     }
 }
 
+/// Whether `line` is a status line: a quote that starts with a `Last reviewed` or a `Last updated` date.
+fn is_status(line: &str) -> bool {
+    STATUS_STARTS.iter().any(|s| line.starts_with(s))
+}
+
 /// `line: what` for each table row that repeats an earlier one (header rows apart: tables share
-/// them), each status-line item listed twice, and each status line after the first.
+/// them), and each status line after the first.
 pub fn repeats(text: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     let separator = |l: &str| l.starts_with('|') && l.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '));
@@ -87,51 +114,50 @@ pub fn repeats(text: &str) -> Vec<String> {
                 }
             }
         }
-        if STATUS_STARTS.iter().any(|s| l.starts_with(s)) {
+        if is_status(l) {
             match first_status {
-                Some(first) => {
-                    out.push(format!("{}: a second status line (the first is on line {first}); keep one and replace it on every edit", i + 1))
-                }
+                Some(first) => out.push(format!("{}: a second status line (the first is on line {first}); a doc has one at most", i + 1)),
                 None => first_status = Some(i + 1),
-            }
-        }
-        if let Some(body) = status_items(l) {
-            let mut seen = Vec::new();
-            for item in body {
-                if seen.contains(&item) {
-                    out.push(format!("{}: status item listed twice: {}", i + 1, item.chars().take(100).collect::<String>()));
-                } else {
-                    seen.push(item);
-                }
             }
         }
     }
     out
 }
 
-/// The items of a status line's `**Change:** kind (…)`, split at `; ` outside brackets. `None`
-/// for other lines, or when the brackets never close.
-fn status_items(line: &str) -> Option<Vec<&str>> {
-    let open = line.find("**Change:**").and_then(|i| line.get(i..)?.find('(').map(|o| i + o))?;
-    let mut depth = 0usize;
-    let mut items = Vec::new();
-    let mut start = open + 1;
-    for (j, c) in line.char_indices().skip_while(|(j, _)| *j < open) {
-        match c {
-            '(' | '[' => depth += 1,
-            ')' | ']' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    items.push(line.get(start..j)?);
-                    return Some(items);
-                }
-            }
-            ';' if depth == 1 && line.get(j..)?.starts_with("; ") => {
-                items.push(line.get(start..j)?);
-                start = j + 2;
-            }
-            _ => {}
+/// `line: what` for each status line of the doc `name` (its path from the root, with `/`) that the doc may not have: one that
+/// holds a `Last updated` date, a `**Change:**` list or a history (`before that`), whatever the doc; one in a doc that is not in
+/// [`SCORED`]; and, in a scored doc, one that is anything but `> **Last reviewed:** YYYY-MM-DD`.
+pub fn status_lines(name: &str, text: &str) -> Vec<String> {
+    let scored = SCORED.contains(&name);
+    let mut out = Vec::new();
+    for (i, l) in text.lines().enumerate().filter(|(_, l)| is_status(l)) {
+        let n = i + 1;
+        let mut refused = false;
+        if l.contains("**Last updated:**") {
+            out.push(format!(
+                "{n}: a `Last updated` date in the status line: git records when a doc changed, and a status line holds only a scored doc's review date"
+            ));
+            refused = true;
+        }
+        if l.contains("**Change:**") || l.to_ascii_lowercase().contains("before that") {
+            out.push(format!("{n}: a change list or a history in the status line: git records what changed, and the revision table says it"));
+            refused = true;
+        }
+        if !scored {
+            out.push(format!(
+                "{n}: a status line in a doc that has no scores: only the scored progress docs have one, and git records the history of the others"
+            ));
+        } else if !refused && !l.strip_prefix(REVIEWED).is_some_and(is_date) {
+            out.push(format!(
+                "{n}: a status line that is not `> **Last reviewed:** YYYY-MM-DD` alone: it holds the date the doc's scores were last checked against evidence, and nothing else"
+            ));
         }
     }
-    None
+    out
+}
+
+/// Whether `s` is a date written `YYYY-MM-DD`: ten characters, digits with a hyphen after the fourth and the sixth. The
+/// calendar is not checked.
+fn is_date(s: &str) -> bool {
+    s.len() == 10 && s.bytes().enumerate().all(|(i, b)| if i == 4 || i == 7 { b == b'-' } else { b.is_ascii_digit() })
 }

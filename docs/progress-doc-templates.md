@@ -1,24 +1,24 @@
 # Progress-doc templates
 
-> **Last updated:** 2026-11-23 · **Change:** minor (the reference product is named only in the format lists, and the page keeps to the words of the public tree; before that, created from local notes)
-
 How the progress docs are kept. `cargo xtask docs` checks part of this.
 
 ## Status line
 
-Exactly one, directly under the H1, replaced on every edit:
+Only the scored progress docs have one: `ROADMAP.md`, `docs/gaps.md`, `docs/roadmap.md`, `docs/parity-checklist.md`, `docs/parity-evidence.md`, `docs/target-app-parity.md`, `docs/ui-parity.md`, `docs/file-format-parity.md`, `docs/hardware-parity.md` and `docs/localization-parity.md`. It is one line under the H1, and holds the date their scores were last checked against evidence and nothing else:
 
 ```
-**Last reviewed:** 2026-10-31 · **Last updated:** 2026-10-31 · **Change:** minor (one item; another item) · **Target:** the reference app's desktop edition
+**Last reviewed:** 2026-10-31
 ```
 
-In a doc it is a blockquote, starting `> `.
+In a doc it is a blockquote, starting `> `. The date moves when the scores are checked again, not on every edit. The line holds no date of the last edit, no list of changes and no history. What a scored doc measures against, its target, is said in its opening paragraph.
 
-`Change` is a level, `trivial`, `minor` or `major`, then one parenthesis of items separated by `; `, with no item twice. `Last reviewed` is when scores were last checked against evidence, and `Last updated` is the last edit. Docs with no scores leave out `Last reviewed` and `Target`.
+The other docs are reference docs, and have no status line: git records when each of them changed and what changed.
+
+`cargo xtask docs` refuses a second status line, a status line in a doc that has no scores, and one that holds anything but the date.
 
 ## Revision history
 
-The last section of every doc, newest first, with the columns Date, Change and Summary. The summary repeats the status line's `Change`. This page's own section below is the pattern.
+The last section of every doc, newest first, with the columns Date, Change and Summary. The Change column is a level: `trivial`, `minor` or `major`. This page's own section below is the pattern.
 
 ## Numbers
 
@@ -32,5 +32,6 @@ Progress docs state that the reference app was not inspected and that our output
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-24 | minor | Only the scored docs have a status line, and it holds their review date alone; the reference docs have none, as git records their history |
 | 2026-11-23 | minor | The reference product is named only in the format lists ("the reference app" or VSDX elsewhere), and the page keeps to the words of the public tree |
 | 2026-10-31 | major | Created from local notes |

@@ -1,8 +1,8 @@
 # Localization parity
 
-> **Last reviewed:** 2026-10-31 · **Last updated:** 2026-11-23 · **Change:** minor (the headline says the languages are looked into later, from public sources only; before that, the reference product is named only in the format lists, and the page keeps to the words of the public tree; before that, created for M0) · **Target:** the reference app's desktop edition (release set in M1)
+> **Last reviewed:** 2026-10-31
 
-The reference app was not inspected, nothing was launched or measured, and our output has not been opened in it by the project.
+The target is the reference app's desktop edition, and M1 sets which release. The reference app was not inspected, nothing was launched or measured, and our output has not been opened in it by the project.
 
 **Headline:** English only (measured). What the reference app ships in which languages is looked into later, from public sources only.
 

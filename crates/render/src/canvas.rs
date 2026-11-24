@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use diacraft_color::Rgba;
 use kurbo::{Affine, BezPath, Rect, Stroke};
-use vello_common::filter_effects::{EdgeMode, Filter, FilterPrimitive};
+use vello_cpu::filter_effects::{EdgeMode, Filter, FilterPrimitive};
 use vello_cpu::peniko::{self, ColorStop, Extend, Fill};
-use vello_cpu::{Pixmap, RenderContext, RenderSettings, Resources};
+use vello_cpu::{Pixmap, PixmapMut, RenderContext, RenderSettings, Resources};
 
 use crate::target::{Gradient, GradientKind, Paint, Target};
 
@@ -92,7 +92,7 @@ impl Canvas {
         if scratch.len() < need {
             scratch.resize(need, 0);
         }
-        let target = vello_common::pixmap::PixmapMut::new(self.width, rows, scratch.get_mut(..need)?)?;
+        let target = PixmapMut::new(self.width, rows, scratch.get_mut(..need)?)?;
         let mut resources = Resources::new();
         self.ctx.flush();
         self.ctx.render(target, &mut resources);
@@ -154,7 +154,9 @@ impl Target for Canvas {
     fn blurred<F: FnOnce(&mut Canvas)>(&mut self, sigma: f64, draw: F) {
         // The deviation is in the user units of the transform in force when the layer is pushed (a probe of `vello_cpu` 0.2 and again of 0.3
         // shows it scaled by the transform: 0.2 inch at 100 pixels to the inch blurs as 20 pixels do at 1), and our user unit is the paper inch.
-        let filter = Filter::from_primitive(FilterPrimitive::GaussianBlur { std_deviation: sigma as f32, edge_mode: EdgeMode::None });
+        // In 0.4 each axis has its own deviation, scaled through the transform's linear part (a turned or sheared view blurs per axis, where 0.3
+        // used the average scale factor), and `gaussian_blur` gives both axes the one value. `a_blur_reaches_the_same_paper_inches_at_every_pixel_density` holds it.
+        let filter = Filter::from_primitive(FilterPrimitive::gaussian_blur(sigma as f32, EdgeMode::None));
         self.ctx.set_transform(self.to_px);
         self.ctx.push_filter_layer(filter);
         self.open.push(Open::Layer);

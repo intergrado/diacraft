@@ -94,7 +94,7 @@ adler2 2.0.1
     licence 0BSD OR MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/oyvindln/adler2
     built into diacraft and diacraft-cli: Linux, Windows, macOS
-ahash 0.8.12
+ahash 0.8.13
     licence MIT OR Apache-2.0, used under MIT; text 22
     https://github.com/tkaitchuck/ahash
     built into diacraft: Linux, Windows, macOS
@@ -355,7 +355,7 @@ epaint 0.37.0
     https://github.com/emilk/egui/tree/main/crates/epaint
     built into diacraft: Linux, Windows, macOS
 epaint_default_fonts 0.37.0
-    licence (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0, used under MIT and OFL-1.1 and Ubuntu-font-1.0; text 53, 56, 140, 141
+    licence (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0, used under MIT and OFL-1.1 and Ubuntu-font-1.0; text 53, 56, 139, 140
     https://github.com/emilk/egui/tree/main/crates/epaint_default_fonts
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 equivalent 1.0.3
@@ -390,7 +390,7 @@ fearless_simd 0.4.1
     licence Apache-2.0 OR MIT, used under MIT; text 59
     https://github.com/linebender/fearless_simd
     built into diacraft: Linux, Windows, macOS
-fearless_simd 0.7.0
+fearless_simd 1.2.0
     licence Apache-2.0 OR MIT, used under MIT; text 59
     https://github.com/linebender/fearless_simd
     built into diacraft and diacraft-cli: Linux, Windows, macOS
@@ -407,7 +407,7 @@ fmt-derive 0.1.2
     https://github.com/danielschemmel/fmt-derive
     built into diacraft: Windows
 foldhash 0.2.0
-    licence Zlib; text 145
+    licence Zlib; text 144
     https://github.com/orlp/foldhash
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 font-types 0.11.3
@@ -450,16 +450,12 @@ gethostname 1.1.0
     licence Apache-2.0; text 2
     https://codeberg.org/swsnr/gethostname.rs.git
     built into diacraft: Linux
-getrandom 0.3.4
+getrandom 0.4.3
     licence MIT OR Apache-2.0, used under MIT; text 67
     https://github.com/rust-random/getrandom
-    built into diacraft: Linux
-getrandom 0.4.3
-    licence MIT OR Apache-2.0, used under MIT; text 68
-    https://github.com/rust-random/getrandom
-    built into diacraft: Windows
+    built into diacraft: Linux, Windows
 gif 0.14.2
-    licence MIT OR Apache-2.0, used under MIT; text 69
+    licence MIT OR Apache-2.0, used under MIT; text 68
     https://github.com/image-rs/image-gif
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 glow 0.17.0
@@ -471,11 +467,11 @@ glutin_wgl_sys 0.6.1
     https://github.com/rust-windowing/glutin
     built into diacraft: Windows
 gpu-allocator 0.28.0
-    licence MIT OR Apache-2.0, used under MIT; text 70
+    licence MIT OR Apache-2.0, used under MIT; text 69
     https://github.com/Traverse-Research/gpu-allocator
     built into diacraft: Linux, Windows
 guillotiere 0.7.0
-    licence MIT/Apache-2.0, used under MIT; text 13, 71
+    licence MIT/Apache-2.0, used under MIT; text 13, 70
     https://github.com/nical/guillotiere
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 half 2.7.1
@@ -483,23 +479,23 @@ half 2.7.1
     https://github.com/VoidStarKat/half-rs
     built into diacraft: Linux, Windows, macOS
 harfrust 0.12.0
-    licence MIT; text 72
+    licence MIT; text 71
     https://github.com/harfbuzz/harfrust
     built into diacraft: Linux, Windows, macOS
 harfrust 0.16.1
-    licence MIT; text 72
+    licence MIT; text 71
     https://github.com/harfbuzz/harfrust
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 hashbrown 0.16.1
-    licence MIT OR Apache-2.0, used under MIT; text 73
+    licence MIT OR Apache-2.0, used under MIT; text 72
     https://github.com/rust-lang/hashbrown
     built into diacraft: Linux, Windows
-hashbrown 0.17.1
-    licence MIT OR Apache-2.0, used under MIT; text 73
+hashbrown 0.17.2
+    licence MIT OR Apache-2.0, used under MIT; text 72
     https://github.com/rust-lang/hashbrown
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 hex 0.4.3
-    licence MIT OR Apache-2.0, used under MIT; text 74
+    licence MIT OR Apache-2.0, used under MIT; text 73
     https://github.com/KokaKiwi/rust-hex
     built into diacraft: Linux
 image 0.25.10
@@ -511,11 +507,11 @@ image-webp 0.2.4
     https://github.com/image-rs/image-webp
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 imagesize 0.14.0
-    licence MIT; text 75
+    licence MIT; text 74
     https://github.com/Roughsketch/imagesize
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 indexmap 2.14.2
-    licence Apache-2.0 OR MIT, used under MIT; text 76
+    licence Apache-2.0 OR MIT, used under MIT; text 75
     https://github.com/indexmap-rs/indexmap
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 itertools 0.15.0
@@ -547,7 +543,7 @@ kurbo 0.13.1
     https://github.com/linebender/kurbo
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 libc 0.2.191
-    licence MIT OR Apache-2.0, used under MIT; text 77
+    licence MIT OR Apache-2.0, used under MIT; text 76
     https://github.com/rust-lang/libc
     built into diacraft: Linux, Windows, macOS; diacraft-cli: Linux, macOS
 libloading 0.8.9
@@ -555,11 +551,11 @@ libloading 0.8.9
     https://github.com/nagisa/rust_libloading/
     built into diacraft: Linux, Windows, macOS
 libm 0.2.16
-    licence MIT; text 78
+    licence MIT; text 77
     https://github.com/rust-lang/compiler-builtins
     built into diacraft: Linux, Windows, macOS
 libmimalloc-sys 0.1.49
-    licence MIT; text 79, 80
+    licence MIT; text 78, 79
     https://github.com/purpleprotocol/mimalloc_rust/tree/master/libmimalloc-sys
     built into diacraft and diacraft-cli: Linux, Windows, macOS
     C code: it builds the mimalloc memory allocator, a C library, from the sources in the
@@ -582,7 +578,7 @@ linux-raw-sys 0.4.15
     https://github.com/sunfishcode/linux-raw-sys
     built into diacraft: Linux
 lock_api 0.4.14
-    licence MIT OR Apache-2.0, used under MIT; text 81
+    licence MIT OR Apache-2.0, used under MIT; text 80
     https://github.com/Amanieu/parking_lot
     built into diacraft: Linux, Windows, macOS
 log 0.4.35
@@ -594,19 +590,19 @@ memchr 2.8.3
     https://github.com/BurntSushi/memchr
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 memmap2 0.9.12
-    licence MIT OR Apache-2.0, used under MIT; text 82
+    licence MIT OR Apache-2.0, used under MIT; text 81
     https://github.com/RazrFalcon/memmap2-rs
     built into diacraft: Linux
 mimalloc 0.1.52
-    licence MIT; text 79
+    licence MIT; text 78
     https://github.com/purpleprotocol/mimalloc_rust
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 miniz_oxide 0.8.9
-    licence MIT OR Zlib OR Apache-2.0, used under MIT; text 83
+    licence MIT OR Zlib OR Apache-2.0, used under MIT; text 82
     https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 miniz_oxide 0.9.1
-    licence MIT OR Zlib OR Apache-2.0, used under MIT; text 83
+    licence MIT OR Zlib OR Apache-2.0, used under MIT; text 82
     https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 moxcms 0.8.1
@@ -614,15 +610,15 @@ moxcms 0.8.1
     https://github.com/awxkee/moxcms.git
     built into diacraft: Linux, Windows, macOS
 naga 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: Linux, Windows, macOS
 naga-types 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: Linux, Windows, macOS
 nohash-hasher 0.2.0
-    licence Apache-2.0 OR MIT, used under MIT; text 85
+    licence Apache-2.0 OR MIT, used under MIT; text 84
     https://github.com/paritytech/nohash-hasher
     built into diacraft: Linux, Windows, macOS
 num-traits 0.2.19
@@ -642,19 +638,19 @@ objc2 0.6.5
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-app-kit 0.2.2
-    licence MIT; text 86
+    licence MIT; text 85
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-app-kit 0.3.2
-    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 86
+    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 85
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-core-foundation 0.3.2
-    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 87
+    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 86
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-core-graphics 0.3.2
-    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 88
+    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 87
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-encode 4.1.0
@@ -662,23 +658,23 @@ objc2-encode 4.1.0
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-foundation 0.2.2
-    licence MIT; text 89
+    licence MIT; text 88
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-foundation 0.3.2
-    licence MIT; text 89
+    licence MIT; text 88
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-metal 0.3.2
-    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 90
+    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 89
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-quartz-core 0.3.2
-    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 91
+    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 90
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 objc2-uniform-type-identifiers 0.3.2
-    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 92
+    licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 91
     https://github.com/madsmtm/objc2
     built into diacraft: macOS
 once_cell 1.21.4
@@ -686,7 +682,7 @@ once_cell 1.21.4
     https://github.com/matklad/once_cell
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 ordered-float 5.5.1
-    licence MIT; text 93
+    licence MIT; text 92
     https://github.com/reem/rust-ordered-float
     built into diacraft: Linux, Windows
 ordered-stream 0.2.0
@@ -698,11 +694,11 @@ parking 2.2.1
     https://github.com/smol-rs/parking
     built into diacraft: Linux
 parking_lot 0.12.5
-    licence MIT OR Apache-2.0, used under MIT; text 81
+    licence MIT OR Apache-2.0, used under MIT; text 80
     https://github.com/Amanieu/parking_lot
     built into diacraft: Linux, Windows, macOS
 parking_lot_core 0.9.12
-    licence MIT OR Apache-2.0, used under MIT; text 81
+    licence MIT OR Apache-2.0, used under MIT; text 80
     https://github.com/Amanieu/parking_lot
     built into diacraft: Linux, Windows, macOS
 pdf-writer 0.15.0
@@ -714,15 +710,15 @@ peniko 0.6.1
     https://github.com/linebender/peniko
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 percent-encoding 2.3.2
-    licence MIT OR Apache-2.0, used under MIT; text 94
+    licence MIT OR Apache-2.0, used under MIT; text 93
     https://github.com/servo/rust-url/
     built into diacraft: Linux
 phf 0.14.0
-    licence MIT; text 95
+    licence MIT; text 94
     https://github.com/rust-phf/rust-phf
     built into diacraft: Linux
 phf_shared 0.14.0
-    licence MIT; text 95
+    licence MIT; text 94
     https://github.com/rust-phf/rust-phf
     built into diacraft: Linux
 pin-project-lite 0.2.18
@@ -734,7 +730,7 @@ piper 0.2.5
     https://github.com/smol-rs/piper
     built into diacraft: Linux
 png 0.18.1
-    licence MIT OR Apache-2.0, used under MIT; text 96
+    licence MIT OR Apache-2.0, used under MIT; text 95
     https://github.com/image-rs/image-png
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 polling 3.11.0
@@ -742,7 +738,7 @@ polling 3.11.0
     https://github.com/smol-rs/polling
     built into diacraft: Linux
 pollster 1.0.3
-    licence MIT OR Apache-2.0, used under MIT; text 97
+    licence MIT OR Apache-2.0, used under MIT; text 96
     https://github.com/zesterer/pollster
     built into diacraft: Linux, Windows, macOS
 polycool 0.4.0
@@ -750,7 +746,7 @@ polycool 0.4.0
     https://github.com/linebender/kurbo
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 presser 0.3.1
-    licence MIT OR Apache-2.0, used under MIT; text 98
+    licence MIT OR Apache-2.0, used under MIT; text 97
     https://github.com/EmbarkStudios/presser
     built into diacraft: Linux, Windows
 proc-macro2 1.0.107
@@ -758,7 +754,7 @@ proc-macro2 1.0.107
     https://github.com/dtolnay/proc-macro2
     built into diacraft: Linux
 profiling 1.0.18
-    licence MIT OR Apache-2.0, used under MIT; text 99
+    licence MIT OR Apache-2.0, used under MIT; text 98
     https://github.com/aclysma/profiling
     built into diacraft: Linux, Windows, macOS
 pxfm 0.1.30
@@ -766,11 +762,11 @@ pxfm 0.1.30
     https://github.com/awxkee/pxfm
     built into diacraft: Linux, Windows, macOS
 quick-error 2.0.1
-    licence MIT/Apache-2.0, used under MIT; text 100
+    licence MIT/Apache-2.0, used under MIT; text 99
     http://github.com/tailhook/quick-error
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 quick-xml 0.42.0
-    licence MIT; text 101
+    licence MIT; text 100
     https://github.com/tafia/quick-xml
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 quote 1.0.47
@@ -778,11 +774,11 @@ quote 1.0.47
     https://github.com/dtolnay/quote
     built into diacraft: Linux
 range-alloc 0.1.5
-    licence MIT OR Apache-2.0, used under MIT; text 102
+    licence MIT OR Apache-2.0, used under MIT; text 101
     https://github.com/gfx-rs/range-alloc
     built into diacraft: Windows
 raw-window-handle 0.6.2
-    licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 103
+    licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 102
     https://github.com/rust-windowing/raw-window-handle
     built into diacraft: Linux, Windows, macOS
 raw-window-metal 1.1.0
@@ -802,15 +798,15 @@ read-fonts 0.47.0
     https://github.com/googlefonts/fontations
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 renderdoc-sys 1.1.0
-    licence MIT OR Apache-2.0, used under MIT; text 104
+    licence MIT OR Apache-2.0, used under MIT; text 103
     https://github.com/ebkalderon/renderdoc-rs
     built into diacraft: Linux, Windows
 rfd 0.18.0
-    licence MIT; text 105, 106
+    licence MIT; text 104, 105
     https://github.com/PolyMeilex/rfd
     built into diacraft: Linux, Windows, macOS
 roxmltree 0.21.2
-    licence MIT OR Apache-2.0, used under MIT; text 107
+    licence MIT OR Apache-2.0, used under MIT; text 106
     https://github.com/RazrFalcon/roxmltree
     built into diacraft: Windows
 rustc-hash 1.1.0
@@ -838,7 +834,7 @@ scoped-tls 1.0.1
     https://github.com/alexcrichton/scoped-tls
     built into diacraft: Linux
 scopeguard 1.2.0
-    licence MIT OR Apache-2.0, used under MIT; text 108
+    licence MIT OR Apache-2.0, used under MIT; text 107
     https://github.com/bluss/scopeguard
     built into diacraft: Linux, Windows, macOS
 self_cell 1.3.0
@@ -858,11 +854,11 @@ serde_json 1.0.154
     https://github.com/serde-rs/json
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 signal-hook-registry 1.4.8
-    licence MIT OR Apache-2.0, used under MIT; text 109
+    licence MIT OR Apache-2.0, used under MIT; text 108
     https://github.com/vorner/signal-hook
     built into diacraft: Linux
 simd-adler32 0.3.10
-    licence MIT; text 110
+    licence MIT; text 109
     https://github.com/mcountryman/simd-adler32
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 siphasher 1.0.4
@@ -882,11 +878,11 @@ skrifa 0.50.0
     https://github.com/googlefonts/fontations
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 slab 0.4.12
-    licence MIT; text 111
+    licence MIT; text 110
     https://github.com/tokio-rs/slab
     built into diacraft: Linux
 smallvec 1.16.6
-    licence MIT OR Apache-2.0, used under MIT; text 112
+    licence MIT OR Apache-2.0, used under MIT; text 111
     https://github.com/smallvec/smallvec
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 smithay-client-toolkit 0.19.2
@@ -902,23 +898,23 @@ spirv 0.4.0+sdk-1.4.341.0
     https://github.com/gfx-rs/rspirv
     built into diacraft: Linux, Windows
 stable_deref_trait 1.2.1
-    licence MIT OR Apache-2.0, used under MIT; text 113
+    licence MIT OR Apache-2.0, used under MIT; text 112
     https://github.com/storyyeller/stable_deref_trait
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 static_assertions 1.1.0
-    licence MIT OR Apache-2.0, used under MIT; text 114
+    licence MIT OR Apache-2.0, used under MIT; text 113
     https://github.com/nvzqz/static-assertions-rs
     built into diacraft: Linux, Windows, macOS
 strict-num 0.1.1
-    licence MIT; text 115
+    licence MIT; text 114
     https://github.com/RazrFalcon/strict-num
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 strum 0.28.0
-    licence MIT; text 116
+    licence MIT; text 115
     https://github.com/Peternator7/strum
     built into diacraft: Windows
 subsetter 0.2.6
-    licence MIT OR Apache-2.0, used under MIT; text 41, 139
+    licence MIT OR Apache-2.0, used under MIT; text 41, 138
     https://github.com/typst/subsetter
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 syn 3.0.10
@@ -926,7 +922,7 @@ syn 3.0.10
     https://github.com/dtolnay/syn
     built into diacraft: Linux
 tempfile 3.27.0
-    licence MIT OR Apache-2.0, used under MIT; text 117
+    licence MIT OR Apache-2.0, used under MIT; text 116
     https://github.com/Stebalien/tempfile
     built into diacraft: Windows
 thiserror 1.0.69
@@ -942,19 +938,19 @@ tiny-skia-path 0.12.0
     https://github.com/linebender/tiny-skia/tree/master/path
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 tracing 0.1.44
-    licence MIT; text 118
+    licence MIT; text 117
     https://github.com/tokio-rs/tracing
     built into diacraft: Linux, Windows, macOS
 tracing-core 0.1.36
-    licence MIT; text 118, 119
+    licence MIT; text 117, 118
     https://github.com/tokio-rs/tracing
     built into diacraft: Linux, Windows, macOS
 type-map 0.5.1
-    licence MIT/Apache-2.0, used under MIT; text 120
+    licence MIT/Apache-2.0, used under MIT; text 119
     https://github.com/kardeiz/type-map
     built into diacraft: Linux, Windows, macOS
 unicode-bidi 0.3.18
-    licence MIT OR Apache-2.0, used under MIT; text 19, 121
+    licence MIT OR Apache-2.0, used under MIT; text 19, 120
     https://github.com/servo/unicode-bidi
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 unicode-general-category 1.1.0
@@ -962,7 +958,7 @@ unicode-general-category 1.1.0
     https://github.com/yeslogic/unicode-general-category
     built into diacraft: Linux, Windows, macOS
 unicode-ident 1.0.27
-    licence (MIT OR Apache-2.0) AND Unicode-3.0, used under MIT and Unicode-3.0; text 21, 142
+    licence (MIT OR Apache-2.0) AND Unicode-3.0, used under MIT and Unicode-3.0; text 21, 141
     https://github.com/dtolnay/unicode-ident
     built into diacraft: Linux, Windows, macOS
 unicode-linebreak 0.1.5
@@ -970,46 +966,46 @@ unicode-linebreak 0.1.5
     https://github.com/axelf4/unicode-linebreak
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 unicode-properties 0.1.5
-    licence (MIT OR Apache-2.0) AND Unicode-3.0, used under MIT and Unicode-3.0; text 12, 121, 143
+    licence (MIT OR Apache-2.0) AND Unicode-3.0, used under MIT and Unicode-3.0; text 12, 120, 142
     https://github.com/unicode-rs/unicode-properties
     built into diacraft: Linux, Windows, macOS
 unicode-segmentation 1.13.3
-    licence MIT OR Apache-2.0, used under MIT; text 12, 121
+    licence MIT OR Apache-2.0, used under MIT; text 12, 120
     https://github.com/unicode-rs/unicode-segmentation
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 unicode-width 0.2.3
-    licence MIT OR Apache-2.0, used under MIT; text 12, 121
+    licence MIT OR Apache-2.0, used under MIT; text 12, 120
     https://github.com/unicode-rs/unicode-width
     built into diacraft: Linux, Windows, macOS
 uuid 1.29.3
-    licence Apache-2.0 OR MIT, used under MIT; text 122
+    licence Apache-2.0 OR MIT, used under MIT; text 121
     https://github.com/uuid-rs/uuid
     built into diacraft: Linux, Windows, macOS
 vello_common 0.2.0
-    licence Apache-2.0 OR MIT, used under MIT; text 123
+    licence Apache-2.0 OR MIT, used under MIT; text 122
     https://github.com/linebender/vello
     built into diacraft: Linux, Windows, macOS
-vello_common 0.3.0
-    licence Apache-2.0 OR MIT, used under MIT; text 123
+vello_common 0.4.0
+    licence Apache-2.0 OR MIT, used under MIT; text 122
     https://github.com/linebender/vello
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 vello_cpu 0.2.0
-    licence Apache-2.0 OR MIT, used under MIT; text 123
+    licence Apache-2.0 OR MIT, used under MIT; text 122
     https://github.com/linebender/vello
     built into diacraft: Linux, Windows, macOS
-vello_cpu 0.3.0
-    licence Apache-2.0 OR MIT, used under MIT; text 123
+vello_cpu 0.4.0
+    licence Apache-2.0 OR MIT, used under MIT; text 122
     https://github.com/linebender/vello
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 wayland-backend 0.3.17
-    licence MIT; text 124
+    licence MIT; text 123
     https://github.com/smithay/wayland-rs
     built into diacraft: Linux
     C code: it builds a small C file of its own (log_shim.c, under the crate's licence) when its
     `log` feature is on; the Wayland client library itself is the computer's, loaded at run
     time.
 wayland-client 0.31.15
-    licence MIT; text 124
+    licence MIT; text 123
     https://github.com/smithay/wayland-rs
     built into diacraft: Linux
 wayland-csd-frame 0.3.0
@@ -1017,114 +1013,114 @@ wayland-csd-frame 0.3.0
     https://github.com/rust-windowing/wayland-csd-frame
     built into diacraft: Linux
 wayland-cursor 0.31.14
-    licence MIT; text 124
+    licence MIT; text 123
     https://github.com/smithay/wayland-rs
     built into diacraft: Linux
 wayland-protocols 0.32.13
-    licence MIT; text 124, 125
+    licence MIT; text 123, 124
     https://github.com/smithay/wayland-rs
     built into diacraft: Linux
 wayland-protocols-plasma 0.3.12
-    licence MIT; text 10, 124
+    licence MIT; text 10, 123
     https://github.com/smithay/wayland-rs
     built into diacraft: Linux
     plasma-wayland-protocols/COPYING.LIB: the text of the GNU Lesser General Public License. The
     crate's own licence is MIT, but the protocol description files that its macro turns into
     Rust code come from KDE's plasma-wayland-protocols, whose files say LGPL-2.1-or-later.
 wayland-protocols-wlr 0.3.12
-    licence MIT; text 124
+    licence MIT; text 123
     https://github.com/smithay/wayland-rs
     built into diacraft: Linux
 wayland-sys 0.31.11
-    licence MIT; text 124
+    licence MIT; text 123
     https://github.com/smithay/wayland-rs
     built into diacraft: Linux
 web-time 1.1.0
-    licence MIT OR Apache-2.0, used under MIT; text 126
+    licence MIT OR Apache-2.0, used under MIT; text 125
     https://github.com/daxpedda/web-time
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 weezl 0.1.12
-    licence MIT OR Apache-2.0, used under MIT; text 127
+    licence MIT OR Apache-2.0, used under MIT; text 126
     https://github.com/image-rs/weezl
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 wgpu 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: Linux, Windows, macOS
 wgpu-core 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: Linux, Windows, macOS
 wgpu-core-deps-apple 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: macOS
 wgpu-core-deps-windows-linux-android 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: Linux, Windows
 wgpu-hal 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: Linux, Windows, macOS
 wgpu-naga-bridge 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: Linux, Windows, macOS
 wgpu-types 30.0.2
-    licence MIT OR Apache-2.0, used under MIT; text 84
+    licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
     built into diacraft: Linux, Windows, macOS
 windows 0.62.2
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-collections 0.3.2
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-core 0.62.2
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-future 0.3.2
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-link 0.2.1
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-numerics 0.3.1
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-result 0.4.1
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-strings 0.5.1
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-sys 0.52.0
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-sys 0.61.2
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-targets 0.52.6
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows-threading 0.2.1
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 windows_x86_64_msvc 0.52.6
-    licence MIT OR Apache-2.0, used under MIT; text 128
+    licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
     built into diacraft: Windows
 winit 0.30.13
@@ -1140,7 +1136,7 @@ winprint 0.2.1
     https://github.com/ArcticLampyrid/winprint.rs/
     built into diacraft: Windows
 winsafe 0.0.29
-    licence MIT; text 129
+    licence MIT; text 128
     https://github.com/rodrigocfd/winsafe
     built into diacraft: Windows
 write-fonts 0.48.1
@@ -1152,27 +1148,27 @@ x11-dl 2.21.0
     https://github.com/AltF02/x11-rs.git
     built into diacraft: Linux
 x11rb 0.13.2
-    licence MIT OR Apache-2.0, used under MIT; text 130
+    licence MIT OR Apache-2.0, used under MIT; text 129
     https://github.com/psychon/x11rb
     built into diacraft: Linux
 x11rb-protocol 0.13.2
-    licence MIT OR Apache-2.0, used under MIT; text 130
+    licence MIT OR Apache-2.0, used under MIT; text 129
     https://github.com/psychon/x11rb
     built into diacraft: Linux
 xcursor 0.3.11
-    licence MIT; text 131
+    licence MIT; text 130
     https://github.com/esposm03/xcursor-rs
     built into diacraft: Linux
 xkbcommon-dl 0.4.2
-    licence MIT; text 132
+    licence MIT; text 131
     https://github.com/rust-windowing/xkbcommon-dl
     built into diacraft: Linux
 xkeysym 0.2.1
-    licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 133
+    licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 132
     https://github.com/notgull/xkeysym
     built into diacraft: Linux
 xml 1.4.0
-    licence MIT; text 134
+    licence MIT; text 133
     https://github.com/kornelski/xml-rs
     built into diacraft: Windows
 xmp-writer 0.3.3
@@ -1180,11 +1176,11 @@ xmp-writer 0.3.3
     https://github.com/typst/xmp-writer
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 yoke 0.8.4
-    licence Unicode-3.0; text 144
+    licence Unicode-3.0; text 143
     https://github.com/unicode-org/icu4x
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 zbus 5.19.0
-    licence MIT; text 135
+    licence MIT; text 134
     https://github.com/z-galaxy/zbus/
     built into diacraft: Linux
 zbus-lockstep 0.5.2
@@ -1192,23 +1188,23 @@ zbus-lockstep 0.5.2
     https://github.com/luukvanderduim/zbus-lockstep
     built into diacraft: Linux
 zbus_names 4.3.5
-    licence MIT; text 135
+    licence MIT; text 134
     https://github.com/z-galaxy/zbus/
     built into diacraft: Linux
 zbus_xml 5.2.1
-    licence MIT; text 135
+    licence MIT; text 134
     https://github.com/z-galaxy/zbus/
     built into diacraft: Linux
 zcheapstr 1.4.0
-    licence MIT; text 136
+    licence MIT; text 135
     https://github.com/z-galaxy/zcheapstr/
     built into diacraft: Linux
 zerocopy 0.8.64
-    licence BSD-2-Clause OR Apache-2.0 OR MIT, used under MIT; text 137
+    licence BSD-2-Clause OR Apache-2.0 OR MIT, used under MIT; text 136
     https://github.com/google/zerocopy
     built into diacraft: Linux, Windows, macOS
 zerofrom 0.1.8
-    licence Unicode-3.0; text 144
+    licence Unicode-3.0; text 143
     https://github.com/unicode-org/icu4x
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 zmij 1.0.23
@@ -1216,15 +1212,15 @@ zmij 1.0.23
     https://github.com/dtolnay/zmij
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 zune-core 0.5.3
-    licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 138
+    licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 137
     https://github.com/etemesi254/zune-image
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 zune-jpeg 0.5.15
-    licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 138
+    licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 137
     https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg
     built into diacraft and diacraft-cli: Linux, Windows, macOS
 zvariant 5.15.1
-    licence MIT; text 135
+    licence MIT; text 134
     https://github.com/z-galaxy/zbus/
     built into diacraft: Linux
 zvariant_utils 4.2.0
@@ -3251,7 +3247,7 @@ DEALINGS IN THE SOFTWARE.
 Text 22: MIT License
 ================================================================================
 From: LICENSE-MIT
-Carried by: ahash 0.8.12
+Carried by: ahash 0.8.13
 
 Copyright (c) 2018 Tom Kaitchuck
 
@@ -4404,7 +4400,7 @@ DEALINGS IN THE SOFTWARE.
 Text 59: MIT License
 ================================================================================
 From: LICENSE-MIT
-Carried by: fearless_simd 0.4.1, fearless_simd 0.7.0, kurbo 0.13.1, linesweeper 0.5.0,
+Carried by: fearless_simd 0.4.1, fearless_simd 1.2.0, kurbo 0.13.1, linesweeper 0.5.0,
     peniko 0.6.1, polycool 0.4.0
 
 Copyright (c) 2018 Raph Levien
@@ -4648,39 +4644,6 @@ DEALINGS IN THE SOFTWARE.
 Text 67: MIT License
 ================================================================================
 From: LICENSE-MIT
-Carried by: getrandom 0.3.4
-
-Copyright (c) 2018-2025 The rust-random Project Developers
-Copyright (c) 2014 The Rust Project Developers
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-================================================================================
-Text 68: MIT License
-================================================================================
-From: LICENSE-MIT
 Carried by: getrandom 0.4.3
 
 Copyright (c) 2018-2026 The rust-random Project Developers
@@ -4711,7 +4674,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 69: MIT License
+Text 68: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: gif 0.14.2
@@ -4739,7 +4702,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 70: MIT License
+Text 69: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: gpu-allocator 0.28.0
@@ -4753,7 +4716,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 71: MIT License
+Text 70: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: guillotiere 0.7.0
@@ -4780,7 +4743,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 72: MIT License
+Text 71: MIT License
 ================================================================================
 From: LICENSE
 Carried by: harfrust 0.12.0, harfrust 0.16.1
@@ -4809,10 +4772,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 73: MIT License
+Text 72: MIT License
 ================================================================================
 From: LICENSE-MIT
-Carried by: hashbrown 0.16.1, hashbrown 0.17.1
+Carried by: hashbrown 0.16.1, hashbrown 0.17.2
 
 Copyright (c) 2016 Amanieu d'Antras
 
@@ -4841,7 +4804,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 74: MIT License
+Text 73: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: hex 0.4.3
@@ -4868,7 +4831,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 75: MIT License
+Text 74: MIT License
 ================================================================================
 From: LICENSE
 Carried by: imagesize 0.14.0
@@ -4896,7 +4859,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 76: MIT License
+Text 75: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: indexmap 2.14.2
@@ -4928,7 +4891,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 77: MIT License
+Text 76: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: libc 0.2.191
@@ -4960,7 +4923,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 78: MIT License
+Text 77: MIT License
 ================================================================================
 From: LICENSE.txt
 Carried by: libm 0.2.16
@@ -5225,7 +5188,7 @@ have been licensed under extremely permissive terms.
 Copyright notices are retained in src/* files where relevant.
 
 ================================================================================
-Text 79: MIT License
+Text 78: MIT License
 ================================================================================
 From: LICENSE.txt
 Carried by: libmimalloc-sys 0.1.49, mimalloc 0.1.52
@@ -5257,7 +5220,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 80: MIT License
+Text 79: MIT License
 ================================================================================
 From: LICENSE
 Carried by: libmimalloc-sys 0.1.49
@@ -5285,7 +5248,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 81: MIT License
+Text 80: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: lock_api 0.4.14, parking_lot 0.12.5, parking_lot_core 0.9.12
@@ -5317,7 +5280,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 82: MIT License
+Text 81: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: memmap2 0.9.12
@@ -5350,7 +5313,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 83: MIT License
+Text 82: MIT License
 ================================================================================
 From: LICENSE, LICENSE-MIT.md
 Carried by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
@@ -5382,7 +5345,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 84: MIT License
+Text 83: MIT License
 ================================================================================
 From: LICENSE.MIT
 Carried by: naga 30.0.2, naga-types 30.0.2, wgpu 30.0.2, wgpu-core 30.0.2,
@@ -5412,7 +5375,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 85: MIT License
+Text 84: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: nohash-hasher 0.2.0
@@ -5437,7 +5400,7 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 86: MIT License
+Text 85: MIT License
 ================================================================================
 From: standard text
 Carried by: objc2-app-kit 0.2.2, objc2-app-kit 0.3.2
@@ -5465,7 +5428,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 87: MIT License
+Text 86: MIT License
 ================================================================================
 From: standard text
 Carried by: objc2-core-foundation 0.3.2
@@ -5493,7 +5456,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 88: MIT License
+Text 87: MIT License
 ================================================================================
 From: standard text
 Carried by: objc2-core-graphics 0.3.2
@@ -5521,7 +5484,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 89: MIT License
+Text 88: MIT License
 ================================================================================
 From: standard text
 Carried by: objc2-foundation 0.2.2, objc2-foundation 0.3.2
@@ -5549,7 +5512,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 90: MIT License
+Text 89: MIT License
 ================================================================================
 From: standard text
 Carried by: objc2-metal 0.3.2
@@ -5577,7 +5540,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 91: MIT License
+Text 90: MIT License
 ================================================================================
 From: standard text
 Carried by: objc2-quartz-core 0.3.2
@@ -5605,7 +5568,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 92: MIT License
+Text 91: MIT License
 ================================================================================
 From: standard text
 Carried by: objc2-uniform-type-identifiers 0.3.2
@@ -5633,7 +5596,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 93: MIT License
+Text 92: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: ordered-float 5.5.1
@@ -5665,7 +5628,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 94: MIT License
+Text 93: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: percent-encoding 2.3.2
@@ -5697,7 +5660,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 95: MIT License
+Text 94: MIT License
 ================================================================================
 From: LICENSE
 Carried by: phf 0.14.0, phf_shared 0.14.0
@@ -5724,7 +5687,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 96: MIT License
+Text 95: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: png 0.18.1
@@ -5756,7 +5719,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 97: MIT License
+Text 96: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: pollster 1.0.3
@@ -5788,7 +5751,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 98: MIT License
+Text 97: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: presser 0.3.1
@@ -5820,7 +5783,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 99: MIT License
+Text 98: MIT License
 ================================================================================
 From: standard text
 Carried by: profiling 1.0.18
@@ -5848,7 +5811,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 100: MIT License
+Text 99: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: quick-error 2.0.1
@@ -5874,7 +5837,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 101: MIT License
+Text 100: MIT License
 ================================================================================
 From: LICENSE-MIT.md
 Carried by: quick-xml 0.42.0
@@ -5904,7 +5867,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ================================================================================
-Text 102: MIT License
+Text 101: MIT License
 ================================================================================
 From: LICENSE.MIT
 Carried by: range-alloc 0.1.5
@@ -5932,7 +5895,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 103: MIT License
+Text 102: MIT License
 ================================================================================
 From: LICENSE-MIT.md
 Carried by: raw-window-handle 0.6.2
@@ -5960,7 +5923,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 104: MIT License
+Text 103: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: renderdoc-sys 1.1.0
@@ -5992,7 +5955,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 105: MIT License
+Text 104: MIT License
 ================================================================================
 From: LICENSE
 Carried by: rfd 0.18.0
@@ -6020,7 +5983,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 106: MIT License
+Text 105: MIT License
 ================================================================================
 From: LICENSE
 Carried by: rfd 0.18.0
@@ -6048,7 +6011,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 107: MIT License
+Text 106: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: roxmltree 0.21.2
@@ -6076,7 +6039,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 108: MIT License
+Text 107: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: scopeguard 1.2.0
@@ -6108,7 +6071,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 109: MIT License
+Text 108: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: signal-hook-registry 1.4.8
@@ -6140,7 +6103,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 110: MIT License
+Text 109: MIT License
 ================================================================================
 From: LICENSE.md
 Carried by: simd-adler32 0.3.10
@@ -6168,7 +6131,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 111: MIT License
+Text 110: MIT License
 ================================================================================
 From: LICENSE
 Carried by: slab 0.4.12
@@ -6200,7 +6163,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 112: MIT License
+Text 111: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: smallvec 1.16.6
@@ -6232,7 +6195,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 113: MIT License
+Text 112: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: stable_deref_trait 1.2.1
@@ -6264,7 +6227,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 114: MIT License
+Text 113: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: static_assertions 1.1.0
@@ -6292,7 +6255,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 115: MIT License
+Text 114: MIT License
 ================================================================================
 From: LICENSE
 Carried by: strict-num 0.1.1
@@ -6318,7 +6281,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ================================================================================
-Text 116: MIT License
+Text 115: MIT License
 ================================================================================
 From: LICENSE
 Carried by: strum 0.28.0
@@ -6346,7 +6309,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 117: MIT License
+Text 116: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: tempfile 3.27.0
@@ -6378,7 +6341,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 118: MIT License
+Text 117: MIT License
 ================================================================================
 From: LICENSE
 Carried by: tracing 0.1.44, tracing-core 0.1.36
@@ -6410,7 +6373,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 119: MIT License
+Text 118: MIT License
 ================================================================================
 From: LICENSE
 Carried by: tracing-core 0.1.36
@@ -6438,7 +6401,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 120: MIT License
+Text 119: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: type-map 0.5.1
@@ -6524,7 +6487,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 121: MIT License
+Text 120: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: unicode-bidi 0.3.18, unicode-properties 0.1.5, unicode-segmentation 1.13.3,
@@ -6557,7 +6520,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 122: MIT License
+Text 121: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: uuid 1.29.3
@@ -6590,10 +6553,10 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 123: MIT License
+Text 122: MIT License
 ================================================================================
 From: LICENSE-MIT
-Carried by: vello_common 0.2.0, vello_common 0.3.0, vello_cpu 0.2.0, vello_cpu 0.3.0
+Carried by: vello_common 0.2.0, vello_common 0.4.0, vello_cpu 0.2.0, vello_cpu 0.4.0
 
 Copyright 2020 the Vello Authors
 
@@ -6622,7 +6585,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 124: MIT License
+Text 123: MIT License
 ================================================================================
 From: LICENSE.txt
 Carried by: wayland-backend 0.3.17, wayland-client 0.31.15, wayland-cursor 0.31.14,
@@ -6650,7 +6613,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ================================================================================
-Text 125: MIT License
+Text 124: MIT License
 ================================================================================
 From: COPYING
 Carried by: wayland-protocols 0.32.13
@@ -6690,7 +6653,7 @@ The above is the version of the MIT "Expat" License used by X.org:
     http://cgit.freedesktop.org/xorg/xserver/tree/COPYING
 
 ================================================================================
-Text 126: MIT License
+Text 125: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: web-time 1.1.0
@@ -6718,7 +6681,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 127: MIT License
+Text 126: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: weezl 0.1.12
@@ -6746,7 +6709,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 128: MIT License
+Text 127: MIT License
 ================================================================================
 From: license-mit
 Carried by: windows 0.62.2, windows-collections 0.3.2, windows-core 0.62.2, windows-future
@@ -6778,7 +6741,7 @@ MIT License
     SOFTWARE
 
 ================================================================================
-Text 129: MIT License
+Text 128: MIT License
 ================================================================================
 From: LICENSE.md
 Carried by: winsafe 0.0.29
@@ -6804,7 +6767,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 130: MIT License
+Text 129: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: x11rb 0.13.2, x11rb-protocol 0.13.2
@@ -6836,7 +6799,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 131: MIT License
+Text 130: MIT License
 ================================================================================
 From: LICENSE
 Carried by: xcursor 0.3.11
@@ -6864,7 +6827,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 132: MIT License
+Text 131: MIT License
 ================================================================================
 From: LICENSE
 Carried by: xkbcommon-dl 0.4.2
@@ -6892,7 +6855,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 133: MIT License
+Text 132: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: xkeysym 0.2.1
@@ -6918,7 +6881,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 134: MIT License
+Text 133: MIT License
 ================================================================================
 From: LICENSE
 Carried by: xml 1.4.0
@@ -6946,7 +6909,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 135: MIT License
+Text 134: MIT License
 ================================================================================
 From: LICENSE
 Carried by: zbus 5.19.0, zbus_names 4.3.5, zbus_xml 5.2.1, zvariant 5.15.1
@@ -6978,7 +6941,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 136: MIT License
+Text 135: MIT License
 ================================================================================
 From: LICENSE
 Carried by: zcheapstr 1.4.0
@@ -7010,7 +6973,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 137: MIT License
+Text 136: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: zerocopy 0.8.64
@@ -7042,7 +7005,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ================================================================================
-Text 138: MIT License
+Text 137: MIT License
 ================================================================================
 From: LICENSE-MIT
 Carried by: zune-core 0.5.3, zune-jpeg 0.5.15
@@ -7070,7 +7033,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 139: Notice
+Text 138: Notice
 ================================================================================
 From: NOTICE
 Carried by: subsetter 0.2.6
@@ -7609,7 +7572,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Text 140: SIL Open Font License 1.1
+Text 139: SIL Open Font License 1.1
 ================================================================================
 From: OFL.txt
 Carried by: epaint_default_fonts 0.37.0
@@ -7708,7 +7671,7 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ================================================================================
-Text 141: Ubuntu Font Licence 1.0
+Text 140: Ubuntu Font Licence 1.0
 ================================================================================
 From: UFL.txt
 Carried by: epaint_default_fonts 0.37.0
@@ -7811,7 +7774,7 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER
 DEALINGS IN THE FONT SOFTWARE.
 
 ================================================================================
-Text 142: Unicode License v3
+Text 141: Unicode License v3
 ================================================================================
 From: LICENSE-UNICODE
 Carried by: unicode-ident 1.0.27
@@ -7857,7 +7820,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 
 ================================================================================
-Text 143: Unicode License v3
+Text 142: Unicode License v3
 ================================================================================
 From: LICENSE-UNICODE
 Carried by: unicode-properties 0.1.5
@@ -7903,7 +7866,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 
 ================================================================================
-Text 144: Unicode License v3
+Text 143: Unicode License v3
 ================================================================================
 From: LICENSE
 Carried by: yoke 0.8.4, zerofrom 0.1.8
@@ -7956,7 +7919,7 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 
 ================================================================================
-Text 145: zlib License
+Text 144: zlib License
 ================================================================================
 From: LICENSE
 Carried by: foldhash 0.2.0

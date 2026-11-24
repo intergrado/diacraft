@@ -22,7 +22,6 @@ diacraft-metafile = { workspace = true }
 diacraft-text = { workspace = true }
 kurbo = { workspace = true }
 png = { workspace = true }
-vello_common = { workspace = true }
 vello_cpu = { workspace = true }
 web-time = { workspace = true }
 zune-core = { workspace = true }

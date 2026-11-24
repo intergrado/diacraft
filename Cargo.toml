@@ -70,12 +70,11 @@ proptest = "1"
 # A counting allocator (MIT), the global allocator of `crates/sheetxml`'s test binary and of nothing else: the model's memory tests count the bytes
 # and the allocations a decode keeps, which the resident size of the process does not show. It passes every call on to the system's allocator. A dev-dependency only.
 stats_alloc = "0.1"
-# CPU rasteriser (0.3): without the `text` (glifo), `png` and `multithreading` features. The renderer draws glyph
-# outlines as paths, so it needs none of them; the web build has no threads. `std` and `u8_pipeline` are still the names in 0.3.
-vello_cpu = { version = "0.3", default-features = false, features = ["std", "u8_pipeline"] }
-# The filter types (a Gaussian blur for shadows) that `vello_cpu` 0.3 does not re-export.
-vello_common = { version = "0.3", default-features = false }
-# Curves and paths. The version `vello_cpu` 0.3 uses (through vello_common and peniko), so geom's paths and the renderer's share types.
+# CPU rasteriser (0.3, 0.4): without the `text` (glifo), `png` and `multithreading` features. The renderer draws glyph
+# outlines as paths, so it needs none of them; the web build has no threads. `std` and `u8_pipeline` are still the names in 0.4. It re-exports
+# `vello_common`'s filter types (the Gaussian blur of the shadows) and `PixmapMut`, so there is no direct dependency on `vello_common` any more.
+vello_cpu = { version = "0.4", default-features = false, features = ["std", "u8_pipeline"] }
+# Curves and paths. The version `vello_cpu` 0.4 uses (through vello_common and peniko 0.6), so geom's paths and the renderer's share types.
 kurbo = "0.13"
 # Fonts and text layout. skrifa 0.50 and harfrust 0.16 are the newest pair that share one `read-fonts` (0.47). They do NOT
 # match egui's `epaint`, which stays on skrifa 0.44 and harfrust 0.12 (its fontique pins `read-fonts` 0.41), nor krilla's PDF writer (skrifa

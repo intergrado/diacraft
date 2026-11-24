@@ -40,7 +40,9 @@ commands:
                   icon, font, colour-profile, audio, video, PDF, CAD, metafile or diagram-document format) has a row in ATTRIBUTION.md
   brands          check that user-visible text (labels, params docs, MCP, packaging) names no other vendor's products; fails on
                   any file that names another project's brand, link or app id (a few listed lines excepted)
-  docs            check ROADMAP.md and docs/*.md for repeated table rows, repeated status items and stacked status lines
+  docs            check ROADMAP.md and docs/*.md for repeated table rows and stacked status lines, and that only the ten scored docs
+                  have a status line, which holds their review date alone (`> **Last reviewed:** YYYY-MM-DD`): no `Last updated`
+                  date, no `**Change:**` list and no history, which git records
   site [--write|--release|--web [--dist DIR] [--out DIR] [--app-out DIR] [--app-url URL]]
                   check the static website; --write refreshes generated links and metadata (the pages' links to the app take app_url of site.json); --release
                   also checks release settings; --web also makes the two sites the website is: the pages (site/ with its links to the app at app_url, or at

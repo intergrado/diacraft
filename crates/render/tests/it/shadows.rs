@@ -92,6 +92,37 @@ fn a_blurred_shadow_fades_across_its_edge() {
     assert!((130..=215).contains(&edge), "about half way at the edge: {edge}");
 }
 
+/// Page 1 of `doc` at `ppi` pixels to the inch, the whole page.
+fn draw_at(doc: &diacraft_doc::Document, ppi: f64) -> Pic {
+    let view = diacraft_render::View::fit_page(doc, 1, ppi).expect("the page has a size");
+    let r = diacraft_render::Renderer::new().render(doc, 1, &view);
+    Pic { r, ppi, page_h: f64::from(view.height) / ppi }
+}
+
+#[test]
+fn a_blur_reaches_the_same_paper_inches_at_every_pixel_density() {
+    // The rasteriser takes a blur's deviation in the user units of the transform in force when the layer is pushed, and ours is the paper inch,
+    // so the same shadow blurs over the same stretch of paper at 100 and at 300 pixels to the inch. A deviation read as pixels would be a hard
+    // edge at both (a tenth of a pixel), and one that was never scaled would be the same at both. So each density is held to the profile of
+    // `a_blurred_shadow_fades_across_its_edge` (0.1 inch of deviation, a cell of 0.15: about half the darkness at the edge), and the two to each other.
+    let doc = one_page(vec![shadowed(0.0).cell("ShapeShdwBlur", "0.15")]);
+    let (coarse, fine) = (draw_at(&doc, 100.0), draw_at(&doc, 300.0));
+    for (pic, ppi) in [(&coarse, 100), (&fine, 300)] {
+        let grey = |x: f64| i32::from(pic.at(x, 1.7)[0]);
+        let (inside, edge, outside, far) = (grey(2.12), grey(2.3), grey(2.45), grey(2.8));
+        assert!(
+            inside < edge && edge < outside && outside <= far,
+            "a profile that lightens outward at {ppi} pixels to the inch: {inside} {edge} {outside} {far}"
+        );
+        assert!(inside < 160 && far > 240, "dark inside and clear far outside at {ppi} pixels to the inch: {inside} {far}");
+        assert!((130..=215).contains(&edge), "about half way at the edge at {ppi} pixels to the inch: {edge}");
+    }
+    for x in [2.0, 2.12, 2.3, 2.45, 2.6, 2.8] {
+        let (a, b) = (i32::from(coarse.at(x, 1.7)[0]), i32::from(fine.at(x, 1.7)[0]));
+        assert!((a - b).abs() <= 8, "the shadow at x = {x} inch is {a} at 100 pixels to the inch and {b} at 300");
+    }
+}
+
 #[test]
 fn a_shape_with_a_blurred_shadow_is_still_in_front_of_it() {
     let pic = draw(&one_page(vec![shadowed(0.0).cell("ShapeShdwBlur", "0.15")]));

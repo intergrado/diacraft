@@ -1,9 +1,11 @@
-//! `cargo xtask docs`: progress docs damaged by merges. The repeat checks are FigCraft's; the
-//! stacked-status-line check is DiaCraft's own (docs/progress-doc-templates.md).
+//! `cargo xtask docs`: what merges leave in the progress docs, and the form of the status line. The repeat checks are FigCraft's;
+//! the stacked-status-line check and the status line's form are DiaCraft's own (docs/progress-doc-templates.md): only the scored
+//! docs have a status line, and it holds the date their scores were last checked against evidence and nothing else.
 
-use xtask::docs_check::{check, repeats, run};
+use xtask::docs_check::{SCORED, check, repeats, run, status_lines};
 
-const STATUS: &str = "> **Last updated:** 2026-10-31 · **Change:** minor (a; b)";
+/// A scored doc's status line.
+const STATUS: &str = "> **Last reviewed:** 2026-10-31";
 
 #[test]
 fn repeated_table_row_is_reported() {
@@ -20,22 +22,11 @@ fn table_headers_are_not_repeats() {
 }
 
 #[test]
-fn repeated_change_item_is_reported() {
-    let doc = "> **Last updated:** 2026-10-31 · **Change:** minor (a (x; y); b; a (x; y)) · **Target:** t\n";
-    let found = repeats(doc);
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].starts_with("1: status item listed twice: a (x; y)"), "{found:?}");
-    // Distinct items, and a parenthesis that never closes, are left alone.
-    assert!(repeats("**Change:** minor (a; b (c; c)) · x\n| a | b |\n| a | c |\n").is_empty());
-    assert!(repeats("**Change:** minor (a; a (never closed\n").is_empty());
-}
-
-#[test]
 fn two_status_lines_in_one_doc_are_reported() {
-    for second in ["> **Last updated:** 2026-10-30 · **Change:** minor (c)", "> **Last reviewed:** 2026-10-30 · **Change:** minor (c)"] {
+    for second in ["> **Last reviewed:** 2026-10-30", "> **Last updated:** 2026-10-30 · **Change:** minor (c)"] {
         let found = repeats(&format!("# Title\n\n{STATUS}\n{second}\n\ntext\n"));
         assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].starts_with("4: a second status line (the first is on line 3)"), "{found:?}");
+        assert!(found[0].starts_with("4: a second status line (the first is on line 3); a doc has one at most"), "{found:?}");
     }
     // Three lines: both extra ones are named.
     let three = format!("{STATUS}\ntext\n{STATUS}\n> **Last reviewed:** 2026-10-29\n");
@@ -46,14 +37,112 @@ fn two_status_lines_in_one_doc_are_reported() {
 }
 
 #[test]
-fn one_status_line_passes() {
+fn one_status_line_is_no_repeat() {
     assert!(repeats(&format!("# Title\n\n{STATUS}\n\ntext\n")).is_empty());
-    // `Last reviewed` is optional: a status line without it is valid (docs/provenance.md).
-    assert!(repeats("> **Last updated:** 2026-10-31 · **Change:** major (created)\n").is_empty());
-    // One line with both dates is still one line.
-    assert!(repeats("> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (x) · **Target:** t\n").is_empty());
     // Other quotes are not status lines.
-    assert!(repeats("> **Note:** a\n> **Note:** b\n> a **Last updated:** mention\n").is_empty());
+    assert!(repeats("> **Note:** a\n> **Note:** b\n> a **Last reviewed:** mention\n").is_empty());
+}
+
+#[test]
+fn the_ten_scored_docs_each_keep_one_line_with_their_review_date() {
+    assert_eq!(
+        SCORED,
+        [
+            "ROADMAP.md",
+            "docs/gaps.md",
+            "docs/roadmap.md",
+            "docs/parity-checklist.md",
+            "docs/parity-evidence.md",
+            "docs/target-app-parity.md",
+            "docs/ui-parity.md",
+            "docs/file-format-parity.md",
+            "docs/hardware-parity.md",
+            "docs/localization-parity.md",
+        ]
+    );
+    for name in SCORED {
+        assert!(status_lines(name, &format!("# Title\n\n{STATUS}\n\ntext\n")).is_empty(), "{name}");
+        // The checker does not ask for the line.
+        assert!(status_lines(name, "# Title\n\ntext\n").is_empty(), "{name}");
+    }
+}
+
+#[test]
+fn a_last_updated_date_is_refused_in_every_doc() {
+    for name in ["docs/gaps.md", "docs/provenance.md"] {
+        for line in ["> **Last updated:** 2026-11-24", "> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-24"] {
+            let found = status_lines(name, &format!("# Title\n\n{line}\n"));
+            assert!(found.iter().any(|f| f.starts_with("3: a `Last updated` date in the status line")), "{name}: {line}: {found:?}");
+        }
+    }
+    // A scored doc's line is refused for that alone.
+    let found = status_lines("docs/gaps.md", "> **Last updated:** 2026-11-24\n");
+    assert_eq!(found.len(), 1, "{found:?}");
+    // Words that only mention it, past the start of a quote or outside one, are no status line.
+    assert!(status_lines("docs/gaps.md", "> a **Last updated:** mention\n**Last updated:** in prose\n").is_empty());
+}
+
+#[test]
+fn a_change_list_or_a_history_in_a_status_line_is_refused() {
+    for line in [
+        "> **Last reviewed:** 2026-11-01 · **Change:** minor (a; b)",
+        "> **Last reviewed:** 2026-11-01 (a; before that, b)",
+        "> **Last reviewed:** 2026-11-01 (a; Before that, b)",
+    ] {
+        let found = status_lines("ROADMAP.md", &format!("# Roadmap\n\n{line}\n"));
+        assert_eq!(found.len(), 1, "{line}: {found:?}");
+        assert!(found[0].starts_with("3: a change list or a history in the status line"), "{line}: {found:?}");
+    }
+    // The line the docs had until 2026-11-24 is refused for its date and for its history, each named once.
+    let old = "> **Last reviewed:** 2026-11-01 · **Last updated:** 2026-11-24 · **Change:** minor (a; before that, b) · **Target:** t";
+    let found = status_lines("docs/roadmap.md", &format!("{old}\n"));
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[0].starts_with("1: a `Last updated` date") && found[1].starts_with("1: a change list or a history"), "{found:?}");
+    // Elsewhere in a doc the words are free: in a revision row or in prose.
+    assert!(status_lines("docs/gaps.md", "| 2026-11-24 | minor | a; before that, b |\n**Change:** a\n").is_empty());
+}
+
+#[test]
+fn a_scored_doc_status_line_holds_its_review_date_and_nothing_else() {
+    for line in [
+        "> **Last reviewed:** 2026-11-01 · **Target:** the reference app's desktop edition",
+        "> **Last reviewed:** 2026-11-01 ",
+        "> **Last reviewed:** 2026-11-1",
+        "> **Last reviewed:** 2026/11/01",
+        "> **Last reviewed:** soon",
+        "> **Last reviewed:**",
+    ] {
+        let found = status_lines("docs/ui-parity.md", &format!("# UI parity\n\n{line}\n"));
+        assert_eq!(found.len(), 1, "{line:?}: {found:?}");
+        assert!(found[0].starts_with("3: a status line that is not `> **Last reviewed:** YYYY-MM-DD` alone"), "{line:?}: {found:?}");
+    }
+}
+
+#[test]
+fn a_status_line_in_a_doc_without_scores_is_refused() {
+    // The reference docs, a new doc, and names that are not a scored doc's whole path from the root.
+    for name in ["docs/provenance.md", "docs/editing-commands.md", "docs/new-page.md", "gaps.md", "docs/sub/gaps.md", "docs/Gaps.md", "roadmap.md"] {
+        let found = status_lines(name, &format!("# Title\n\n{STATUS}\n\ntext\n"));
+        assert_eq!(found.len(), 1, "{name}: {found:?}");
+        assert!(found[0].starts_with("3: a status line in a doc that has no scores"), "{name}: {found:?}");
+    }
+    // Each line is named.
+    let found = status_lines("docs/cli.md", &format!("{STATUS}\n{STATUS}\n"));
+    assert!(found.len() == 2 && found[0].starts_with("1: ") && found[1].starts_with("2: "), "{found:?}");
+}
+
+#[test]
+fn the_tree_check_applies_the_status_rules_by_path() {
+    let dir = crate::TempDir::new("docs-status-scope");
+    dir.write("ROADMAP.md", &format!("# Roadmap\n\n{STATUS}\n"));
+    dir.write("docs/gaps.md", &format!("# Gaps\n\n{STATUS}\n"));
+    dir.write("docs/cli.md", "# Command line\n\ntext\n");
+    assert!(check(dir.path()).is_empty(), "{:?}", check(dir.path()));
+    assert!(run(dir.path()).is_ok());
+    dir.write("docs/cli.md", &format!("# Command line\n\n{STATUS}\n"));
+    let found = check(dir.path());
+    assert!(found.len() == 1 && found[0].starts_with("docs/cli.md:3: a status line in a doc that has no scores"), "{found:?}");
+    assert!(run(dir.path()).is_err());
 }
 
 /// The reference notes that once sat in `docs/` have left the repository, and the gate keeps no list of docs it does not
@@ -72,7 +161,7 @@ fn every_page_in_docs_is_checked_even_one_named_like_a_note_that_used_to_be_skip
 
 #[test]
 fn only_the_root_roadmap_and_docs_pages_are_scanned() {
-    let bad = format!("{STATUS}\n{STATUS}\n");
+    let bad = format!("{STATUS}\n| a | b |\n| a | b |\n");
     let dir = crate::TempDir::new("docs-scope");
     dir.write("docs/notes/plans/design.md", &bad);
     dir.write("docs/notes.txt", &bad);
@@ -80,10 +169,10 @@ fn only_the_root_roadmap_and_docs_pages_are_scanned() {
     dir.write("README.md", &bad);
     assert!(check(dir.path()).is_empty(), "{:?}", check(dir.path()));
     dir.write("ROADMAP.md", &bad);
-    dir.write("docs/provenance.md", &bad);
+    dir.write("docs/gaps.md", &bad);
     let found = check(dir.path());
     assert_eq!(found.len(), 2, "{found:?}");
-    assert!(found[0].starts_with("ROADMAP.md:") && found[1].starts_with("docs/provenance.md:"), "{found:?}");
+    assert!(found[0].starts_with("ROADMAP.md:") && found[1].starts_with("docs/gaps.md:"), "{found:?}");
 }
 
 /// A doc the gate cannot read is a finding, not a pass: only a `ROADMAP.md` or `docs/` that does not
@@ -154,6 +243,18 @@ fn dangling_links_and_unreadable_files_are_reported() {
 #[test]
 fn a_tree_with_no_docs_passes() {
     assert!(check(crate::TempDir::new("docs-none").path()).is_empty());
+}
+
+/// A scored doc that moved, or lost its line, would leave the list and its date behind.
+#[test]
+fn every_scored_doc_is_in_the_tree_with_its_review_date() {
+    let root = xtask::root();
+    for name in SCORED {
+        let text = std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let lines: Vec<&str> = text.lines().filter(|l| l.starts_with("> **Last reviewed:**")).collect();
+        assert_eq!(lines.len(), 1, "{name}: {lines:?}");
+        assert!(status_lines(name, &text).is_empty(), "{name}: {:?}", status_lines(name, &text));
+    }
 }
 
 #[test]

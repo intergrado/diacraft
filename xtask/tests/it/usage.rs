@@ -43,6 +43,15 @@ fn the_brands_line_says_it_reads_every_file_for_another_projects_names() {
     assert!(text.contains("any file") && text.contains("another project"), "the usage of `brands` does not say it reads every file: {text}");
 }
 
+/// `docs` refuses a status line outside the scored docs and any history in one, and the usage spoke of repeated status items.
+#[test]
+fn the_docs_line_says_only_the_scored_docs_have_a_status_line_and_it_holds_their_review_date() {
+    let text = entry(&usage(), "docs ");
+    assert!(text.starts_with("  docs "), "{text}");
+    assert!(text.contains("scored docs") && text.contains("Last reviewed") && text.contains("Last updated"), "{text}");
+    assert!(!text.contains("status items"), "the usage of `docs` still describes the change items: {text}");
+}
+
 /// A helper that finds nothing would make the tests above pass on an empty string.
 #[test]
 fn the_entry_helper_finds_what_it_is_asked_for() {
