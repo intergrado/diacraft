@@ -1,0 +1,13 @@
+[package]
+name = "diacraft-units"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft units of measure: the unit names of the formula language and values stored in internal units"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]

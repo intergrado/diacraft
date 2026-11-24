@@ -1,0 +1,32 @@
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self'; style-src 'self'; manifest-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# The web app's own headers, for the Cloudflare Pages project of its own site: `cargo xtask site --web` puts this file in the app's folder as `_headers`, and the app is at the root of
+# that site. The pages have a file of their own (`site/_headers`) and nothing in it is the app's. The policy differs from the pages' in two places: 'wasm-unsafe-eval' (WebAssembly may be
+# compiled, and nothing else evaluated) and connect-src 'self' (the page fetches its own wasm file; the pages' policy allows GitHub's API only, for the release lookup the app does not have),
+# and it has manifest-src 'self', which only names the web app manifest that default-src allowed already. No cross-origin isolation headers: the build uses no threads and no shared
+# memory, which `cargo xtask site --web` checks. The other three headers are the pages' as they are.
+#
+# What is named by the hash of its own bytes is kept for a year, and nothing else is. No rule below matches a path that has no hash in its name, and the rules do not overlap,
+# so a path is sent one cache header and Pages' own revalidation stays for the rest: the page, the loader (start.js), manifest.json, the web app manifest and its icons, and the snippets of the glue
+# (the hash in their folder's name is of a crate's name and version, and not of the file). `cargo xtask site --web` reads this file as Pages applies it (a splat, joined headers) against every file
+# of the folder, and refuses a file that is kept and is not named by its own hash, a file that is named by its own hash and is not kept, and a page with no policy.
+# The parts of the app's module and the data it fetches:
+/parts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The three files Trunk makes at the app's root (the glue, the page's style and its icon): `site --web` names them by the SHA-256 of their bytes, as the parts and the data are named.
+/diacraft-web-*.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/page-*.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/diacraft-icon-256-*.png
+  Cache-Control: public, max-age=31536000, immutable

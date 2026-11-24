@@ -1,0 +1,30 @@
+[package]
+name = "diacraft-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft text layout: runs with ShapeSheet character, paragraph and block formats to lines of positioned glyphs"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Counts of the work a layout does (`work`), for the tests that hold a cost to a count and not to a time. Never part of the app.
+test-support = []
+
+[dependencies]
+diacraft-color = { workspace = true }
+diacraft-fonts = { workspace = true }
+kurbo = { workspace = true }
+unicode-bidi = { workspace = true }
+unicode-linebreak = { workspace = true }
+unicode-segmentation = { workspace = true }
+
+[dev-dependencies]
+# The synthetic faces the vectors need: faces whose every number is known (a letter 600 units wide, a face with no bold).
+diacraft-fonts = { workspace = true, features = ["test-support"] }
+# This crate's own tests read the counts of its work, so they turn its `test-support` feature on, whichever package is tested.
+diacraft-text = { workspace = true, features = ["test-support"] }
+proptest = { workspace = true }

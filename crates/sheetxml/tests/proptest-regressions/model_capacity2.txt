@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 56db1975e85156e73a76e771024127c4fdb38c852ba88fc70f8ded97a7f85ad2 # shrinks to before = Document { version: 0, title: "", props: DocProps { subject: None, creator: None, last_modified_by: None, keywords: None, description: None, category: None, company: None, manager: None, hyperlink_base: None, app_version: None, created: None, modified: None, last_printed: None, language: None, custom: [] }, pages: SharedVec { top: None, len: 0 }, masters: SharedVec { top: None, len: 0 }, styles: SharedVec { top: None, len: 0 }, themes: SharedVec { top: None, len: 0 }, colors: [], fonts: [], sheet: Sheet { links: Links { line: None, fill: None, text: None }, cells: {}, sections: [], raw: RawAttrs(None), passthrough: Passthrough(None), ext: Ext(None) }, passthrough: Passthrough(None), diacraft: None, ext: Ext(None), parts: SharedVec { top: None, len: 0 }, vsdx: None }, seeds = [(0, true, 0)], shared = false

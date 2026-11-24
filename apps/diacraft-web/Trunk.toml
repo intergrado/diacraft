@@ -1,0 +1,18 @@
+# Build with: trunk build --release   (from apps/diacraft-web), or `cargo xtask site --web`, which builds this and puts the result in the folder of the app's own site (the app at its root).
+# The files go to dist/web at the repository root, which git ignores. `index.html` asks for the `web` profile of the workspace (built for size: opt-level z,
+# fat LTO) and for `wasm-opt -Oz`; docs/website.md, "The web app", has the sizes and the 25 MiB Cloudflare Pages limit they are held to.
+[build]
+target = "index.html"
+dist = "../../dist/web"
+public_url = "./"
+filehash = true
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8797
+
+# The tools trunk runs besides cargo. `wasm-bindgen` is not pinned here: trunk reads the version of the `wasm-bindgen` crate from Cargo.lock, and the program
+# on the PATH (or the one trunk downloads) must be that version. `wasm-opt` is binaryen's, at the version the release workflow installs (a PATH tool is used only
+# at exactly this version; any other makes trunk download its own).
+[tools]
+wasm_opt = "version_133"

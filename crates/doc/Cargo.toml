@@ -1,0 +1,28 @@
+[package]
+name = "diacraft-doc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft document model: the ShapeSheet of pages, masters, styles and shapes, and how a cell inherits"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Counts of the work the model does (`work`), for the tests that hold a cost to a count and not to a time. Never part of the app.
+test-support = []
+
+[dependencies]
+diacraft-color = { workspace = true }
+diacraft-formula = { workspace = true }
+diacraft-units = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# This crate's own tests read the counts of its work, so they turn its `test-support` feature on, whichever package is tested.
+diacraft-doc = { workspace = true, features = ["test-support"] }
+# The testkit depends on this crate; Cargo allows that cycle for a dev-dependency (the engine does the same).
+diacraft-testkit = { workspace = true }
+proptest = { workspace = true }

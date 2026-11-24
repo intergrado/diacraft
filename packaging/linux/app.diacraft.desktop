@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DiaCraft
+GenericName=Diagram Editor
+Comment=Create and edit diagrams
+Exec=diacraft %F
+Icon=app.diacraft
+Terminal=false
+Categories=Graphics;2DGraphics;
+StartupWMClass=app.diacraft

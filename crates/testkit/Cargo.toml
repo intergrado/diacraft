@@ -1,0 +1,22 @@
+[package]
+name = "diacraft-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft test helpers: hostile values and ready-made documents and sessions"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+diacraft-doc = { workspace = true }
+diacraft-engine = { workspace = true }
+diacraft-vsdx = { workspace = true }
+serde_json = { workspace = true }
+# The archives of `package.rs`: the same two crates `opc` reads them with (pure Rust, builds for wasm32).
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.5"
+# The strategies of `model.rs`: whole models for the property tests of the codecs.
+proptest = { workspace = true }

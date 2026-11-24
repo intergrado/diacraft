@@ -1,0 +1,64 @@
+[package]
+name = "diacraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft desktop app"
+publish = false
+default-run = "diacraft"
+
+[lints]
+workspace = true
+
+# The command line, the control server and the logger are a library so the integration tests can reach them;
+# `main.rs` only wires them to the window. Named apart from the binary so the two never share an output name.
+[lib]
+name = "diacraft_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "diacraft"
+path = "src/main.rs"
+
+[dependencies]
+diacraft-engine = { workspace = true }
+diacraft-fonts = { workspace = true }
+diacraft-ui-egui = { workspace = true }
+# Decides who draws the window frame, the desktop or the app, as the other craft apps do.
+craft-window = { workspace = true }
+# The system's printing (`src/printing.rs`): CUPS on macOS and Linux, the spooler in this process on Windows. Only this app names it: the window
+# crate does not, so that it builds for the web.
+craft-print = { workspace = true }
+egui = { workspace = true }
+# `wgpu` draws the window; `wayland` and `x11` are the Linux display servers; `accesskit` is the
+# accessibility tree. Not `default_fonts`: see crates/ui-egui/Cargo.toml.
+eframe = { workspace = true, features = ["accesskit", "wayland", "wgpu", "x11"] }
+jiff = { workspace = true }
+log = { workspace = true }
+# Waits for wgpu's futures in the graphics probe (`src/graphics.rs`), as eframe does for its own; in the lock already, through eframe.
+pollster = { workspace = true }
+# The native Open dialog (`src/dialogs.rs`): the desktop portal on Linux, the system's dialog elsewhere. Native only.
+rfd = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# The build script (`build.rs`, with `build_info.rs`) says which git release and which year the build is, for the window's splash and About panel. The year of
+# `SOURCE_DATE_EPOCH` is read in UTC by jiff: all date conversion goes through it (AGENTS.md).
+[build-dependencies]
+jiff = { workspace = true }
+
+# The global allocator (`main.rs`): mimalloc, a C library, for every target but the browser's.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mimalloc = { workspace = true }
+
+# macOS only: Quit in the app menu (Cmd+Q) and in the Dock asks the window to close, as its close button does, so that unsaved changes are
+# asked about (`main.rs`). winit's own trait for it; the version is the one eframe uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+winit = { workspace = true }
+
+[dev-dependencies]
+# The live window test (`tests/it/window.rs`) reads the screenshot it asks for.
+png = { workspace = true }
+# The control protocol is fuzzed over TCP (tests/it/control_props.rs).
+proptest = { workspace = true }

@@ -1,0 +1,8 @@
+{
+  "domain": "https://diacraft.dev",
+  "app_url": "https://diacraft.app",
+  "repository": "intergrado/diacraft",
+  "linux_asset": "diacraft-{tag}-linux-x86_64.tar.gz",
+  "windows_asset": "diacraft-{tag}-windows-x86_64.zip",
+  "macos_asset": "diacraft-{tag}-macos-universal.zip"
+}

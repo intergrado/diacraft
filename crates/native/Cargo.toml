@@ -1,0 +1,33 @@
+[package]
+name = "diacraft-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft's own file format, .diacraft: the package (manifest, model parts, blobs stored once, state) written and read through the whole-model codec"
+publish = false
+
+[lints]
+workspace = true
+
+# Layer 3, a file format. It reads and writes the ZIP package through the container (layer 0, standalone), and the model as XML through the whole-model
+# codec of `diacraft-sheetxml` (layer 2); the model itself is `diacraft-doc` (layer 1). It names neither `vsdx` nor `odg`, which are crates of its own
+# layer: what a foreign format holds is data in the model, and a carrier puts it where its own format keeps it. Every dependency builds for wasm32.
+[dependencies]
+diacraft-container = { workspace = true }
+diacraft-doc = { workspace = true }
+diacraft-sheetxml = { workspace = true }
+# The checksum of a document part, to know whether a save changed it (the same crate the container checks every entry with).
+crc32fast = "1.5"
+
+[dev-dependencies]
+proptest = { workspace = true }
+# The generators of whole models (`model.rs`) and the drawings of the engine's fixtures. The test kit depends on the engine, which will depend on this crate
+# Cargo allows that cycle for a dev-dependency, as it does for `doc` and `sheetxml`.
+diacraft-testkit = { workspace = true }
+# A diacraft file is no OPC package: the OPC reader must find no `[Content_Types].xml` in one (the design's 2.3).
+diacraft-opc = { workspace = true }
+# The tests' own ZIP writer (`tests/it/zipbuild.rs`) builds what no honest writer makes (a `mimetype` that is deflated, one with an extra field, an entry that
+# the manifest does not list): the versions the container crate uses.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.5"

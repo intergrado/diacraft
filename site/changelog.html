@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Changelog · DiaCraft</title>
+  <meta name="description" content="Draft release notes for DiaCraft 0.2.0, including the native drawing format and file exchange." />
+  <link rel="canonical" href="https://diacraft.dev/changelog" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DiaCraft" />
+  <meta property="og:title" content="Changelog · DiaCraft" />
+  <meta property="og:description" content="Draft release notes for DiaCraft 0.2.0, including the native drawing format and file exchange." />
+  <meta property="og:url" content="https://diacraft.dev/changelog" />
+  <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
+  <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0c" />
+  <link rel="icon" href="/assets/icon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="preload" href="/assets/hashed/besley-roman.f57f2cfa6c84.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast mast-ruled">
+    <div class="wrap mast-inner">
+      <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
+      <nav class="links" aria-label="Main navigation">
+        <a href="/#features">Features</a>
+        <a href="/#guides">Guides</a>
+        <a href="/changelog.html" aria-current="page">Changelog</a>
+        <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+  </header>
+  <main id="main">
+    <header class="page-head">
+      <div class="wrap page-head-inner">
+        <div class="page-title">
+          <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Changelog</span></p>
+          <h1>Changelog</h1>
+          <p class="lead">Draft notes for 0.2.0, DiaCraft’s planned first public release. The changes below are in the development build, which says 0.2.0 followed by “dev” until the release is tagged. The release has no date yet, and the notes are still under review.</p>
+        </div>
+        <div class="title-block">
+          <dl class="spec">
+            <div><dt>Release</dt><dd><b>0.2.0</b></dd></div>
+            <div><dt>Date</dt><dd>Unreleased</dd></div>
+            <div><dt>Notes</dt><dd>A draft, still under review</dd></div>
+          </dl>
+        </div>
+      </div>
+    </header>
+    <div class="wrap doc">
+      <article class="prose">
+        <section id="native-default">
+          <h2>New drawings start in .diacraft</h2>
+          <p>The first time you save a new drawing, the desktop app offers <code>.diacraft</code> first. The file holds the drawing’s pages, shapes and styles, including details imported from VSDX and OpenDocument packages. Opening an existing <code>.vsdx</code> or <code>.odg</code> and choosing Save keeps its file type.</p>
+          <p>Grid, ruler, guide and connection-point visibility now travel with the drawing. Save after changing one of these settings to see it again when you reopen the file.</p>
+        </section>
+        <section id="exchange">
+          <h2>More ways to exchange an editable drawing</h2>
+          <ul>
+            <li>Save a native drawing as a VSDX drawing, an OpenDocument drawing (<code>.odg</code>) or an OpenDocument template (<code>.otg</code>).</li>
+            <li>Save a VSDX drawing as an OpenDocument drawing, or an OpenDocument drawing as a VSDX type.</li>
+            <li>Start an untitled drawing from an <code>.otg</code> template. Your first save gives the drawing its own filename.</li>
+            <li>Check a conversion with <code>diacraft-cli roundtrip</code> and <code>--via diacraft</code>. For a VSDX or ODG package, the report compares the original content with the copy written back to the source format.</li>
+          </ul>
+          <p>Testing a wider range of files remains part of the release work. <a href="/guides/file-formats.html">Read the current format limits</a>.</p>
+        </section>
+      </article>
+      <aside class="rail">
+        <nav class="toc" aria-label="On this page">
+          <p class="label">On this page</p>
+          <ol>
+            <li><a href="#native-default"><span>New drawings start in .diacraft</span></a></li>
+            <li><a href="#exchange"><span>More ways to exchange an editable drawing</span></a></li>
+          </ol>
+        </nav>
+      </aside>
+    </div>
+    <nav class="pager" aria-label="More">
+      <div class="wrap">
+        <a href="/guides/file-formats.html"><span class="label">The formats, in a guide</span><b>Open and save drawing <span class="nowrap">files <span class="arrow" aria-hidden="true"></span></span></b></a>
+        <a href="/#download"><span class="label">Or install it</span><b><span class="nowrap">Downloads <span class="arrow" aria-hidden="true"></span></span></b></a>
+      </div>
+    </nav>
+    <section class="closing closing-slim" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <div class="closing-copy">
+          <h2 id="closing-title">Get <em>DiaCraft.</em></h2>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a class="btn btn-ghost" href="/guides/getting-started.html">Follow the first guide <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="closing-note">Linux · Windows · macOS · Browser</p>
+        </div>
+        <img class="closing-art" src="/assets/hashed/octopus.79b55756b738.webp" alt="An engraved octopus holds a process rectangle and a decision diamond, joined by a connector." width="720" height="720" loading="lazy" />
+      </div>
+    </section>
+  </main>
+  <footer class="mast">
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+    <div class="wrap foot-inner foot-block">
+      <div class="foot-brand">
+        <a class="brand" href="/"><img src="/assets/icon-64.png" alt="" width="64" height="64" loading="lazy" />DiaCraft</a>
+        <p>Diagramming software for Linux, Windows, macOS and the browser. Free and open source, under the MIT or Apache 2.0 licence.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Guides</p><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
+        <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
+      </nav>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+    </div>
+  </footer>
+</body>
+</html>

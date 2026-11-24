@@ -1,0 +1,17 @@
+[package]
+name = "diacraft-formula"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft ShapeSheet formulas: a parser and a printer for the formula language, without evaluation"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+diacraft-units = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

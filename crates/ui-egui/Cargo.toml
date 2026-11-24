@@ -1,0 +1,62 @@
+[package]
+name = "diacraft-ui-egui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft egui interface: the window, its theme tokens and the control channel's side of it"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+diacraft-engine = { workspace = true }
+# The pictures of the Re-Layout Page gallery are the engine's own layout of a small diagram (`relayout_ui.rs`).
+diacraft-layout = { workspace = true }
+# The page's picture: drawn off the UI thread (`render_worker.rs`) and shown in the drawing area (`canvas/page_drawing.rs`).
+diacraft-fonts = { workspace = true }
+diacraft-render = { workspace = true }
+# The unit a page's rulers count in (`DrawingScale`'s `U`): `canvas/page_drawing.rs`, `canvas/grid.rs`.
+diacraft-units = { workspace = true }
+# The transform a view hands the renderer (`render::View::to_px`), the version `render` uses.
+kurbo = { workspace = true }
+# The title bar of an app-drawn frame (`title_bar::empty_area`), and the screenshot file written whole
+# (`craft_atomic`): shared with the other craft apps.
+craft-atomic = { workspace = true }
+craft-window = { workspace = true }
+# No `default_fonts` feature: it registers an icon font with the Windows and Apple logos and embeds its bytes
+# whatever the app installs. The two text typefaces are taken from `epaint_default_fonts` instead (src/fonts.rs).
+egui = { workspace = true }
+epaint_default_fonts = { workspace = true }
+# `wayland` and `x11`: winit builds no window system on Linux without one of them, so this crate (and its
+# tests) could not be built on its own. They change nothing on the other systems and on the web.
+eframe = { workspace = true, features = ["wayland", "x11"] }
+log = { workspace = true }
+png = { workspace = true }
+serde_json = { workspace = true }
+web-time = { workspace = true }
+
+# eframe's web runner builds only with a renderer. The web app draws with wgpu (WebGPU, with WebGL2 as the
+# fallback), so this names it: `cargo xtask wasm` checks this crate for the web on its own.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe = { workspace = true, features = ["wgpu"] }
+
+[dev-dependencies]
+# The counts of the work the model does (`work`), which the test of what reading a page costs reads: a count does not move with the load on the
+# machine, as a time does.
+diacraft-doc = { workspace = true, features = ["test-support"] }
+# Faces of known names, for the tests of the face the Font box names when the scan of the machine's faces ends (`tests/it/formatting.rs`): no face of the
+# machine is relied on.
+diacraft-fonts = { workspace = true, features = ["test-support"] }
+diacraft-testkit = { workspace = true }
+# Packages the tests read back (the parts of a saved file: `tests/it/macros_card.rs`, `tests/it/text_edit.rs`), and the manifest of a `.diacraft` they change.
+diacraft-opc = { workspace = true }
+diacraft-container = { workspace = true }
+# egui_kittest's `eframe` feature drives `eframe::App`s through `run_native_ext`, which eframe builds only
+# with a renderer. Naming `wgpu` here is what lets this crate's tests build on their own; the harness itself
+# renders nothing (see below).
+eframe = { workspace = true, features = ["wgpu"] }
+# `eframe`: drives an `eframe::App` frame by frame. No `wgpu` or `snapshot`: the harness then renders
+# nothing and never completes a screenshot request, which is how the tests see a window with no frame presented.
+egui_kittest = { workspace = true, features = ["eframe"] }

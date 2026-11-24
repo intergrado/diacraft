@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Draw your first diagram · DiaCraft</title>
+  <meta name="description" content="Build and label a two-step flowchart." />
+  <link rel="canonical" href="https://diacraft.dev/guides/getting-started" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DiaCraft" />
+  <meta property="og:title" content="Draw your first diagram · DiaCraft" />
+  <meta property="og:description" content="Build and label a two-step flowchart." />
+  <meta property="og:url" content="https://diacraft.dev/guides/getting-started" />
+  <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
+  <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0c" />
+  <link rel="icon" href="/assets/icon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="preload" href="/assets/hashed/besley-roman.f57f2cfa6c84.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast mast-ruled">
+    <div class="wrap mast-inner">
+      <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
+      <nav class="links" aria-label="Main navigation">
+        <a href="/#features">Features</a>
+        <a href="/#guides">Guides</a>
+        <a href="/changelog.html">Changelog</a>
+        <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+  </header>
+  <main id="main">
+    <header class="page-head">
+      <div class="wrap page-head-inner">
+        <div class="page-title">
+          <p class="label label-wire crumb"><a href="/#guides">Guides</a><i aria-hidden="true">/</i><span>1 of 5</span></p>
+          <h1>Draw your <em>first diagram</em></h1>
+          <p class="lead">Make a two-step review process. You’ll give each step a label, join the steps, then move one to see how the connector follows.</p>
+        </div>
+        <nav class="head-route" aria-label="Drawing guides">
+          <ol>
+            <li><a href="/guides/getting-started.html" aria-current="page"><span>Draw your first diagram</span></a></li>
+            <li><a href="/guides/file-formats.html"><span>Open and save drawing files</span></a></li>
+            <li><a href="/guides/native-format.html"><span>Work with .diacraft files</span></a></li>
+            <li><a href="/guides/command-line.html"><span>Convert drawings from the command line</span></a></li>
+            <li><a href="/guides/agents.html"><span>Draw with an AI agent</span></a></li>
+          </ol>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap doc">
+      <article class="prose">
+        <section id="two-shapes">
+          <h2>Start with two shapes</h2>
+          <p>Open DiaCraft and choose <strong>File → New → Blank drawing</strong>. If you are working from a configured source checkout, you can launch the desktop app from the repository directory with <code>cargo run --release -p diacraft</code>.</p>
+          <ol>
+            <li>In the Shapes window, choose <strong>Basic Shapes</strong>. Drag a rectangle onto the left of the page and a second rectangle onto the right. Leave a little space between them.</li>
+            <li>Double-click the first rectangle and type <strong>Draft</strong>. Click the page to finish editing. Label the other rectangle <strong>Review</strong> the same way.</li>
+            <li>On the Home tab, choose the <strong>Connector</strong> tool. Drag from Draft to Review. Press <kbd>Esc</kbd> to return to the Pointer Tool, then drag Review lower on the page. The connector should stay attached at both ends.</li>
+          </ol>
+          <figure class="shot">
+            <picture>
+              <source media="(max-width: 46rem) and (prefers-color-scheme: dark)" srcset="/assets/hashed/two-steps-detail-dark.d74b6e98c462.webp" width="640" height="400" />
+              <source media="(max-width: 46rem)" srcset="/assets/hashed/two-steps-detail-light.d586eaadd0c6.webp" width="640" height="400" />
+              <source media="(prefers-color-scheme: dark)" srcset="/assets/hashed/two-steps-dark.231331595f82.webp" width="1426" height="874" />
+              <img src="/assets/hashed/two-steps-light.80733c0c3e19.webp" alt="In the DiaCraft editor, a rectangle labelled Draft is joined by a right-angle connector to a rectangle labelled Review, which sits lower on the page and is selected." width="1426" height="874" loading="lazy" />
+            </picture>
+            <figcaption>The drawing after the third step: Review has been dragged lower, and the connector still joins the two shapes.</figcaption>
+          </figure>
+        </section>
+        <section id="save-and-share">
+          <h2>Save a drawing and share a copy</h2>
+          <p>Choose <strong>File → Save</strong> and name the drawing <code>review.diacraft</code>. Open it again with <strong>File → Open</strong> to continue editing the shapes and their connection.</p>
+          <p>To put the diagram in a report, use <strong>File → Export</strong> and choose PNG, SVG or PDF. To see how the drawing fits on paper, open <strong>File → Print</strong> and check the sheet preview.</p>
+        </section>
+      </article>
+      <aside class="rail">
+        <nav class="toc" aria-label="On this page">
+          <p class="label">On this page</p>
+          <ol>
+            <li><a href="#two-shapes"><span>Start with two shapes</span></a></li>
+            <li><a href="#save-and-share"><span>Save a drawing and share a copy</span></a></li>
+          </ol>
+        </nav>
+      </aside>
+    </div>
+    <nav class="pager" aria-label="More guides">
+      <div class="wrap">
+        <a href="/guides/file-formats.html"><span class="label">Next guide · 2 of 5</span><b>Open and save drawing <span class="nowrap">files <span class="arrow" aria-hidden="true"></span></span></b></a>
+        <a href="/#guides"><span class="label">Overview</span><b>All <span class="nowrap">guides <span class="arrow" aria-hidden="true"></span></span></b></a>
+      </div>
+    </nav>
+    <section class="closing closing-slim" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <div class="closing-copy">
+          <h2 id="closing-title">Get <em>DiaCraft.</em></h2>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="closing-note">Linux · Windows · macOS · Browser</p>
+        </div>
+        <img class="closing-art" src="/assets/hashed/octopus.79b55756b738.webp" alt="An engraved octopus holds a process rectangle and a decision diamond, joined by a connector." width="720" height="720" loading="lazy" />
+      </div>
+    </section>
+  </main>
+  <footer class="mast">
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+    <div class="wrap foot-inner foot-block">
+      <div class="foot-brand">
+        <a class="brand" href="/"><img src="/assets/icon-64.png" alt="" width="64" height="64" loading="lazy" />DiaCraft</a>
+        <p>Diagramming software for Linux, Windows, macOS and the browser. Free and open source, under the MIT or Apache 2.0 licence.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Guides</p><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
+        <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
+      </nav>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+    </div>
+  </footer>
+</body>
+</html>

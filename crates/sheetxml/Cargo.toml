@@ -1,0 +1,27 @@
+[package]
+name = "diacraft-sheetxml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft ShapeSheet XML codec: reads and writes the sheet, section, row and cell elements of a drawing, for the VSDX package and for the OpenDocument one"
+publish = false
+
+[lints]
+workspace = true
+
+# Layer 2. The document model (layer 1) and the bounded XML tree of the container (layer 0, standalone). Nothing of either package format:
+# which part holds a sheet, and which namespace its elements are in, are the caller's.
+[dependencies]
+diacraft-container = { workspace = true }
+diacraft-doc = { workspace = true }
+# The formula parser, for a formula read back with the budget of a decode (a formula whose text is a marker's is a formula and no marker).
+diacraft-formula = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+# The counting allocator of the test binary (`tests/it/main.rs`): `model_memory` counts what a decode keeps.
+stats_alloc = { workspace = true }
+# The test kit builds whole models (`model.rs`) for the codec's exactness property; it depends on the engine, which depends on this crate, and
+# Cargo allows that cycle for a dev-dependency (the doc crate does the same).
+diacraft-testkit = { workspace = true }

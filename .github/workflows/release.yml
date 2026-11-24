@@ -1,0 +1,560 @@
+# DiaCraft's own release workflow (AGENTS.md, "CI workflows": the shared release workflow needs org secrets and runners).
+#
+# A pushed tag `vMAJOR.MINOR.PATCH` (or with a `-suffix`, a pre-release) builds DiaCraft in release for Linux, Windows and macOS and
+# uploads these files to a DRAFT GitHub release of that tag, with a SHA256SUMS file that covers them all:
+#
+#   diacraft-<tag>-linux-x86_64.tar.gz     diacraft-<tag>-windows-x86_64.zip     diacraft-<tag>-macos-universal.zip
+#
+# The release stays a draft: the owner reads the notes and the files, then presses Publish. Running the workflow by hand (workflow_dispatch) on a
+# branch builds and tests the three downloads but uploads nothing; run on a tag, it does what the tag's push does. Every program is smoke tested
+# (packaging/smoke.sh) before anything is uploaded. How to cut a release, and what the owner fills in: docs/releasing.md.
+#
+# The programs are unsigned. The signing and notarisation steps are written below as comments, with the secrets they read, for the owner to switch on.
+# No third-party actions: only GitHub's own `checkout` and `upload-artifact`. The GitHub CLI (`gh`) on every runner uploads the files.
+#
+# The `site` job builds the website, which is two sites: `cargo xtask site --web` copies the pages (for diacraft.dev) into one folder, and runs trunk on
+# apps/diacraft-web and makes the web app (for diacraft.app, at the root of its own site) into another. The job keeps each as a workflow artifact (diacraft-site-<name> and
+# diacraft-app-<name>). Cloudflare's own build image has neither Rust nor the time for that build, so the sites are built here and the artifacts are what is deployed; the two deploy
+# steps are comments at the end of the job, with the secrets they read, for the owner to switch on (docs/website.md, "Deploy to Cloudflare Pages").
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run for a tag at a time, and a second never cancels the first half way.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+  # The same release as the gate's and the CI jobs': move all three together (docs/development.md).
+  RUST_VERSION: 1.100.0
+
+jobs:
+  # What is being built: the tag (the name in the file names and the build's own git release), the year of its commit, and whether files are uploaded.
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      name: ${{ steps.plan.outputs.name }}
+      year: ${{ steps.plan.outputs.year }}
+      publish: ${{ steps.plan.outputs.publish }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Name the release
+        id: plan
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The year of the commit, not of today: a build of one commit is the same build every time (apps/diacraft/build_info.rs).
+          year=$(git log -1 --format=%cs | cut -c1-4)
+          case $year in [0-9][0-9][0-9][0-9]) ;; *) echo "::error::cannot read the year of the commit"; exit 1 ;; esac
+          if [ "$REF_TYPE" = tag ]; then
+            tag=$REF_NAME
+            if ! printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+              echo "::error::the tag '$tag' is not vMAJOR.MINOR.PATCH, with an optional -suffix"
+              exit 1
+            fi
+            # --version prints the version of Cargo.toml, so the tag and the manifest must agree.
+            have=$(awk '/^\[workspace\.package\]/ {f=1; next} /^\[/ {f=0} f && /^version[[:space:]]*=/ {gsub(/^[^"]*"|"[^"]*$/, ""); print; exit}' Cargo.toml)
+            want=${tag#v}
+            if [ "$have" != "$want" ]; then
+              echo "::error::Cargo.toml says version '$have' and the tag says '$want': set [workspace.package] version, refresh Cargo.lock, and tag that commit"
+              exit 1
+            fi
+            publish=true
+            case $tag in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          else
+            # A run by hand on a branch: a name that cannot be mistaken for a release, and nothing uploaded.
+            tag="dev-${SHA::7}"
+            publish=false
+            prerelease=false
+          fi
+          {
+            echo "name=$tag"
+            echo "year=$year"
+            echo "publish=$publish"
+            echo "prerelease=$prerelease"
+          } >>"$GITHUB_OUTPUT"
+          echo "Building $tag (upload: $publish)"
+
+  # The draft release the files go to. Made once, before the builds, so that three jobs do not race to make it. Nothing to do when nothing is uploaded.
+  draft:
+    name: Draft release
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Make the draft release when there is none
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.name }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # A draft has no tag page, so ask for the list of releases (a re-run of this workflow finds the draft it made).
+          existing=$(gh api "repos/$REPO/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
+          if [ -n "$existing" ]; then
+            echo "The release of $TAG exists (id $existing)."
+            exit 0
+          fi
+          cat >notes.md <<NOTES
+          DiaCraft $TAG for Linux, Windows and macOS.
+
+          - Linux: diacraft-$TAG-linux-x86_64.tar.gz
+          - Windows: diacraft-$TAG-windows-x86_64.zip
+          - macOS (Apple silicon and Intel): diacraft-$TAG-macos-universal.zip
+
+          Check a download against SHA256SUMS. These downloads are not signed yet: the README in each one says how to open them.
+
+          Each download holds the licences of DiaCraft (LICENSE-MIT, LICENSE-APACHE), NOTICE, ATTRIBUTION.md and THIRD-PARTY-LICENSES.txt, the licences of the libraries it is built from.
+          NOTES
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$REPO" --draft --verify-tag --title "DiaCraft $TAG" --notes-file notes.md ${flags[@]+"${flags[@]}"}
+
+  linux:
+    name: Linux (x86_64)
+    needs: [plan, draft]
+    # Built on the oldest Ubuntu image GitHub offers, so that the program runs on any Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12).
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      NAME: ${{ needs.plan.outputs.name }}
+      DIACRAFT_BUILD_GIT: ${{ needs.plan.outputs.name }}
+      DIACRAFT_BUILD_YEAR: ${{ needs.plan.outputs.year }}
+      DIACRAFT_REPOSITORY: ${{ github.repository }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux build dependencies
+        env:
+          PACKAGES: >-
+            pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
+            libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev
+        run: |
+          set -euo pipefail
+          set -f
+          sudo apt-get update -o Acquire::Retries=3
+          # shellcheck disable=SC2086 # the list is split into package names on purpose
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -- $PACKAGES
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      # The licence texts of the libraries are in every download (THIRD-PARTY-LICENSES.txt, made by `cargo xtask licenses`). This stops a release whose file is not what
+      # the lock says: a crate with no licence text, a licence outside deny.toml's list, or a list that was not made again after a dependency changed. It reads the
+      # sources of every platform's crates, which cargo fetches here; the file is the same for all three downloads.
+      - name: Check the third-party licences
+        run: cargo xtask licenses --check
+
+      - name: Build the app and the command line
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu -p diacraft -p diacraft-cli
+
+      # The tag a run by hand on a branch makes up is not the version in Cargo.toml: only a release is held to it.
+      - name: Smoke test the programs
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          bash packaging/smoke.sh target/x86_64-unknown-linux-gnu/release $expected
+
+      - name: Make the download
+        run: bash packaging/package.sh linux "$NAME" dist target/x86_64-unknown-linux-gnu/release
+
+      - name: Smoke test what is in the download
+        run: |
+          set -euo pipefail
+          mkdir unpacked
+          tar -xzf "dist/diacraft-$NAME-linux-x86_64.tar.gz" -C unpacked
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          # The licence files are in the download, each there and not empty.
+          SMOKE_PACKAGE_DIR="unpacked/diacraft-$NAME-linux-x86_64" bash packaging/smoke.sh "unpacked/diacraft-$NAME-linux-x86_64" $expected
+          # What the install script does, into a folder of its own.
+          PREFIX="$PWD/prefix" "unpacked/diacraft-$NAME-linux-x86_64/install.sh"
+          "$PWD/prefix/bin/diacraft-cli" --version
+          grep -q "^Exec=\"$PWD/prefix/bin/diacraft\" " "$PWD/prefix/share/applications/app.diacraft.desktop"
+
+      - name: Upload to the draft release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh release upload "$NAME" "dist/diacraft-$NAME-linux-x86_64.tar.gz" --repo "$REPO" --clobber
+
+  windows:
+    name: Windows (x86_64)
+    needs: [plan, draft]
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      NAME: ${{ needs.plan.outputs.name }}
+      DIACRAFT_BUILD_GIT: ${{ needs.plan.outputs.name }}
+      DIACRAFT_BUILD_YEAR: ${{ needs.plan.outputs.year }}
+      DIACRAFT_REPOSITORY: ${{ github.repository }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+      # The print library's build script (winprint) builds a TLS stack for the host, and that includes aws-lc-sys, whose assembly on Windows needs NASM. The runner
+      # image has NASM; if it ever does not, this makes the crate use the objects it ships already assembled.
+      AWS_LC_SYS_PREBUILT_NASM: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      # --target keeps the flags of .cargo/config.toml (static C runtime, 8 MiB main stack) off the build scripts, which Cargo builds for the host.
+      - name: Build the app and the command line
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc -p diacraft -p diacraft-cli
+
+      # ---- Signing hook (the owner fills this in: docs/releasing.md, "Signing"). Secrets to add to the repository:
+      #   WINDOWS_CERTIFICATE            the code-signing certificate as a .pfx file, in base64
+      #   WINDOWS_CERTIFICATE_PASSWORD   its password
+      # Sign the two programs here, before they are smoked and packaged:
+      #
+      # - name: Sign the programs
+      #   env:
+      #     WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      #     WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      #   shell: pwsh
+      #   run: |
+      #     $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+      #     []::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+      #     $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+      #     foreach ($exe in "target\x86_64-pc-windows-msvc\release\diacraft.exe", "target\x86_64-pc-windows-msvc\release\diacraft-cli.exe") {
+      #       & $signtool sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $exe
+      #       if ($LASTEXITCODE -ne 0) { throw "signtool failed on $exe" }
+      #     }
+      #     Remove-Item $pfx
+      # ---- end of the signing hook
+
+      - name: Smoke test the programs
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          bash packaging/smoke.sh target/x86_64-pc-windows-msvc/release $expected
+
+      - name: Make the download
+        run: bash packaging/package.sh windows "$NAME" dist target/x86_64-pc-windows-msvc/release
+
+      # Unpacked by PowerShell, which the runner has; and tested by the bash step after it (a `bash` typed in a PowerShell step can be the one of WSL).
+      - name: Unpack the download
+        shell: pwsh
+        run: Expand-Archive -Path "dist/diacraft-$env:NAME-windows-x86_64.zip" -DestinationPath unpacked
+
+      - name: Smoke test what is in the download
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          SMOKE_PACKAGE_DIR="unpacked/diacraft-$NAME-windows-x86_64" bash packaging/smoke.sh "unpacked/diacraft-$NAME-windows-x86_64" $expected
+
+      - name: Upload to the draft release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh release upload "$NAME" "dist/diacraft-$NAME-windows-x86_64.zip" --repo "$REPO" --clobber
+
+  macos:
+    name: macOS (universal)
+    needs: [plan, draft]
+    # Apple silicon. The Intel half is built on the same machine (a cross build, for the Intel Macs) and joined with the Apple silicon half into one program.
+    runs-on: macos-15
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      NAME: ${{ needs.plan.outputs.name }}
+      DIACRAFT_BUILD_GIT: ${{ needs.plan.outputs.name }}
+      DIACRAFT_BUILD_YEAR: ${{ needs.plan.outputs.year }}
+      DIACRAFT_REPOSITORY: ${{ github.repository }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+      # The oldest macOS the download runs on: the Rust code and the C allocator are both built for it (the Info.plist says the same).
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update --target aarch64-apple-darwin --target x86_64-apple-darwin
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      - name: Build the app and the command line for both architectures
+        run: cargo build --release --locked --target aarch64-apple-darwin --target x86_64-apple-darwin -p diacraft -p diacraft-cli
+
+      - name: Smoke test the programs
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          # The Apple silicon half runs here. The Intel half runs only where Rosetta is installed; its absence is not a failure.
+          bash packaging/smoke.sh target/aarch64-apple-darwin/release $expected
+          arch -x86_64 target/x86_64-apple-darwin/release/diacraft-cli --version ||
+            echo "::warning::the Intel half did not run here (is Rosetta installed?)"
+
+      # ---- Signing and notarisation hook (the owner fills this in: docs/releasing.md, "Signing"). Secrets to add to the repository:
+      #   MACOS_CERTIFICATE            the "Developer ID Application" certificate and its key as a .p12 file, in base64
+      #   MACOS_CERTIFICATE_PASSWORD   its password
+      #   MACOS_SIGN_IDENTITY          the certificate's name, as in: Developer ID Application: Your Name (TEAMID)
+      #   APPLE_ID, APPLE_TEAM_ID      the Apple ID that notarises, and its team
+      #   APPLE_APP_PASSWORD           an app-specific password of that Apple ID
+      # 1. Import the certificate into a keychain of its own, before "Make the download":
+      #
+      # - name: Import the signing certificate
+      #   env:
+      #     MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      #     MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      #   run: |
+      #     set -euo pipefail
+      #     keychain="$RUNNER_TEMP/signing.keychain-db"
+      #     password=$(uuidgen)
+      #     echo "$MACOS_CERTIFICATE" | base64 --decode >"$RUNNER_TEMP/signing.p12"
+      #     security create-keychain -p "$password" "$keychain"
+      #     security set-keychain-settings -lut 21600 "$keychain"
+      #     security unlock-keychain -p "$password" "$keychain"
+      #     security import "$RUNNER_TEMP/signing.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+      #     security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain"
+      #     security list-keychains -d user -s "$keychain" login.keychain-db
+      #     rm "$RUNNER_TEMP/signing.p12"
+      #
+      # 2. Give packaging/package.sh the identity: add this line to the `env:` of "Make the download" (the script then signs the CLI, the app's program and
+      #    the app with the hardened runtime and a timestamp, where it signs ad hoc without it):
+      #      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      # 3. Notarise the archive it makes, right after "Make the download". Stapling the ticket into the app needs the app on its own, so a stapled
+      #    download is a second archive made after this step: leave it out for the first signed release (the Mac checks the ticket online).
+      #
+      # - name: Notarise the download
+      #   env:
+      #     APPLE_ID: ${{ secrets.APPLE_ID }}
+      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      #   run: |
+      #     set -euo pipefail
+      #     xcrun notarytool submit "dist/diacraft-$NAME-macos-universal.zip" \
+      #       --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+      # ---- end of the signing hook
+
+      - name: Make the download
+        run: bash packaging/package.sh macos "$NAME" dist target/aarch64-apple-darwin/release target/x86_64-apple-darwin/release
+
+      - name: Check what is in the download
+        run: |
+          set -euo pipefail
+          ditto -x -k "dist/diacraft-$NAME-macos-universal.zip" unpacked
+          dir="unpacked/diacraft-$NAME-macos-universal"
+          app="$dir/DiaCraft.app"
+          # Both architectures in both programs.
+          for program in "$app/Contents/MacOS/DiaCraft" "$dir/diacraft-cli"; do
+            archs=$(lipo -archs "$program")
+            echo "$program: $archs"
+            case $archs in
+            *arm64*x86_64* | *x86_64*arm64*) ;;
+            *) echo "::error::$program holds '$archs', not both architectures"; exit 1 ;;
+            esac
+          done
+          plutil -lint "$app/Contents/Info.plist"
+          test -f "$app/Contents/Resources/DiaCraft.icns"
+          # The licence files are beside the app and inside it, each there and not empty.
+          bash packaging/smoke.sh --licences "$dir"
+          bash packaging/smoke.sh --licences "$app/Contents/Resources"
+          # The signature (ad hoc, or the identity) is whole.
+          codesign --verify --strict --verbose=2 "$app"
+          codesign --verify --strict --verbose=2 "$dir/diacraft-cli"
+          # The programs of the download start.
+          "$dir/diacraft-cli" --version
+          "$app/Contents/MacOS/DiaCraft" --version
+
+      - name: Upload to the draft release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh release upload "$NAME" "dist/diacraft-$NAME-macos-universal.zip" --repo "$REPO" --clobber
+
+  # The website and the web app, two sites. Built with trunk, `wasm-bindgen` and binaryen's `wasm-opt`: the release archives of each, checked against the
+  # SHA-256 written here, as ci.yml does for its tools. To move a version, change the version and its checksum together; `wasm-bindgen` must be the version of the
+  # `wasm-bindgen` crate in Cargo.lock (a test in xtask holds the two together), and binaryen the version Trunk.toml names. The two folders `cargo xtask site --web` makes
+  # are the pages (site-dist) and the app (app-dist), and the command has checked both: each file of the app is under the 25 MiB Cloudflare Pages allows (and under the budget below it),
+  # nothing is inline, each folder has the headers of its own site (the app's policy is the app's alone), and no memory is shared.
+  site:
+    name: Website and web app
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      NAME: ${{ needs.plan.outputs.name }}
+      DIACRAFT_BUILD_GIT: ${{ needs.plan.outputs.name }}
+      DIACRAFT_BUILD_YEAR: ${{ needs.plan.outputs.year }}
+      TRUNK_VERSION: 0.22.2
+      TRUNK_SHA256: 26fca8a9952e46cd7d8b8b9a2e2c1786c090fc14b8e10b6678ab4d0f9f1a385f
+      WASM_BINDGEN_VERSION: 0.2.130
+      WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+      BINARYEN_VERSION: version_133
+      BINARYEN_SHA256: 2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update --target wasm32-unknown-unknown
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      - name: Install trunk, wasm-bindgen and wasm-opt
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/tools/bin"
+          downloads="$RUNNER_TEMP/tools/downloads"
+          mkdir -p "$bin" "$downloads"
+          fetch() { # fetch <url> <sha256> <file>
+            curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+              --retry 5 --retry-all-errors --output "$3" "$1"
+            echo "$2  $3" | sha256sum --check --strict -
+          }
+          trunk="trunk-x86_64-unknown-linux-gnu.tar.gz"
+          fetch "https://github.com/trunk-rs/trunk/releases/download/v$TRUNK_VERSION/$trunk" "$TRUNK_SHA256" "$downloads/$trunk"
+          tar -xzf "$downloads/$trunk" -C "$bin" trunk
+          bindgen="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          fetch "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$bindgen.tar.gz" "$WASM_BINDGEN_SHA256" "$downloads/$bindgen.tar.gz"
+          tar -xzf "$downloads/$bindgen.tar.gz" -C "$bin" --strip-components=1 "$bindgen/wasm-bindgen"
+          binaryen="binaryen-$BINARYEN_VERSION-x86_64-linux"
+          fetch "https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/$binaryen.tar.gz" "$BINARYEN_SHA256" "$downloads/$binaryen.tar.gz"
+          tar -xzf "$downloads/$binaryen.tar.gz" -C "$bin" --strip-components=2 "binaryen-$BINARYEN_VERSION/bin/wasm-opt"
+          echo "$bin" >> "$GITHUB_PATH"
+          # The version each tool reports is the one asked for: trunk uses a program of the PATH only at exactly the version it expects.
+          reported=$("$bin/trunk" --version)
+          [ "$reported" = "trunk $TRUNK_VERSION" ] || { echo "::error::trunk reports: $reported"; exit 1; }
+          reported=$("$bin/wasm-bindgen" --version)
+          [ "$reported" = "wasm-bindgen $WASM_BINDGEN_VERSION" ] || { echo "::error::wasm-bindgen reports: $reported"; exit 1; }
+          reported=$("$bin/wasm-opt" --version)
+          case $reported in "wasm-opt version "*"($BINARYEN_VERSION)") ;; *) echo "::error::wasm-opt reports: $reported"; exit 1 ;; esac
+
+      - name: Check the pages
+        run: cargo xtask site
+
+      # The pages copied into site-dist (their links to the app are the address in site/site.json), trunk build --release --locked in apps/diacraft-web, the app made into app-dist (the app
+      # at its root, with its own _headers), and the checks of what is there.
+      - name: Build the web app and make the two sites
+        run: cargo xtask site --web --out site-dist --app-out app-dist
+
+      - name: Keep the pages as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diacraft-site-${{ needs.plan.outputs.name }}
+          path: site-dist
+          if-no-files-found: error
+
+      - name: Keep the web app as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diacraft-app-${{ needs.plan.outputs.name }}
+          path: app-dist
+          if-no-files-found: error
+
+      # ---- Deploy hook (the owner fills this in: docs/website.md, "Deploy to Cloudflare Pages"). Secrets to add to the repository:
+      #   CLOUDFLARE_API_TOKEN    an API token that may edit Cloudflare Pages on the account
+      #   CLOUDFLARE_ACCOUNT_ID   the account's id (on the Workers & Pages overview page)
+      # Make two Pages projects once, each as a Direct Upload project with no Git connection (in the dashboard, or `npx wrangler pages project create diacraft-site` and
+      # `npx wrangler pages project create diacraft-app`): the pages get diacraft.dev as their custom domain and the app diacraft.app. Change the two names below to the projects'
+      # names, and add `permissions: deployments: write` only if a deployment status is wanted. To deploy only a release and not a run by hand on a branch, keep the condition:
+      #
+      # - name: Deploy the pages to Cloudflare Pages
+      #   if: needs.plan.outputs.publish == 'true'
+      #   env:
+      #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #   run: npx --yes wrangler@4 pages deploy site-dist --project-name diacraft-site --branch main
+      #
+      # - name: Deploy the web app to Cloudflare Pages
+      #   if: needs.plan.outputs.publish == 'true'
+      #   env:
+      #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #   run: npx --yes wrangler@4 pages deploy app-dist --project-name diacraft-app --branch main
+      # ---- end of the deploy hook
+
+  # SHA256SUMS over every download, uploaded last, once all three are there.
+  checksums:
+    name: SHA256SUMS
+    needs: [plan, linux, windows, macos]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      NAME: ${{ needs.plan.outputs.name }}
+    steps:
+      - name: Download the three, write the sums and upload them
+        run: |
+          set -euo pipefail
+          mkdir downloads
+          gh release download "$NAME" --repo "$REPO" --pattern 'diacraft-*' --dir downloads
+          expected="diacraft-$NAME-linux-x86_64.tar.gz diacraft-$NAME-macos-universal.zip diacraft-$NAME-windows-x86_64.zip"
+          # Exactly these three: a missing or an extra file is a mistake to see before anyone downloads.
+          found=$(cd downloads && ls | sort | tr '\n' ' ' | sed 's/ $//')
+          if [ "$found" != "$expected" ]; then
+            echo "::error::the release holds '$found', expected '$expected'"
+            exit 1
+          fi
+          (cd downloads && sha256sum diacraft-* >SHA256SUMS)
+          cat downloads/SHA256SUMS
+          gh release upload "$NAME" downloads/SHA256SUMS --repo "$REPO" --clobber
+          {
+            echo "### DiaCraft $NAME is ready as a draft"
+            echo
+            echo "Read the notes and the files, then press Publish on the release page. The files:"
+            echo
+            echo '```'
+            cat downloads/SHA256SUMS
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

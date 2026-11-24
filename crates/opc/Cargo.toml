@@ -1,0 +1,31 @@
+[package]
+name = "diacraft-opc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft OPC: a bounded, safe reader for the zip-based Open Packaging Conventions package every .vsdx is"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Counts of the work the reader does (`work`), for the tests that hold a cost to a count and not to a time. Never part of the app.
+test-support = []
+
+# Standalone (layer 0): one workspace crate and no other, the container crate that an intra-layer chain orders before this one
+# (`["container", "opc"]` in xtask/src/layers.rs). Every dependency builds for wasm32.
+[dependencies]
+# The ZIP archive (read in its `zipdir.rs` and `zipread.rs`, with no ZIP library; written in its `zipwrite.rs`) and the bounded XML tree.
+# What is left here is OPC: part names, the content types stream and relationships.
+diacraft-container = { workspace = true }
+
+[dev-dependencies]
+# This crate's own tests read the counts of its work, so they turn its `test-support` feature on, whichever package is tested.
+diacraft-opc = { workspace = true, features = ["test-support"] }
+proptest = { workspace = true }
+# The tests' own ZIP writer (`tests/it/zipbuild.rs`) deflates and checksums the hostile archives it builds by hand: the versions the
+# container crate uses.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.5"

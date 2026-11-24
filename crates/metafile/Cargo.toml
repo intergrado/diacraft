@@ -1,0 +1,22 @@
+[package]
+name = "diacraft-metafile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft metafiles: EMF, EMF+ and WMF pictures read to a display list of paths, bitmaps and text runs, with every length and count checked"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Counts of the work the reader does (`work`), for the tests that hold a cost to a count and not to a time. Never part of the app.
+test-support = []
+
+# Standalone (layer 0): no workspace crate at all, and no dependency: the readers are written over byte slices and build for wasm32.
+
+[dev-dependencies]
+# This crate's own tests read the counts of its work, so they turn its `test-support` feature on, whichever package is tested.
+diacraft-metafile = { workspace = true, features = ["test-support"] }
+proptest = { workspace = true }

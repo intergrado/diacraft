@@ -1,0 +1,28 @@
+[package]
+name = "diacraft-fonts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft fonts: the font database (system, optional craft-fonts and bundled faces), stand-ins for names that are missing, metrics, outlines and shaping"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Builds small TrueType fonts in code (`synth`), for the tests of this crate and of the crates above it. Never part of the app.
+test-support = []
+
+[dependencies]
+kurbo = { workspace = true }
+skrifa = { workspace = true }
+harfrust = { workspace = true }
+log = { workspace = true }
+# The bundled last-resort faces, Hack and Ubuntu Light, taken by name (the icon font in the same crate is never referenced: NOTICE).
+epaint_default_fonts = { workspace = true }
+
+[dev-dependencies]
+# This crate's own tests build faces in code, so they turn its `test-support` feature on, whichever package is tested.
+diacraft-fonts = { workspace = true, features = ["test-support"] }
+proptest = { workspace = true }

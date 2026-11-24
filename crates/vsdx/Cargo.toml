@@ -1,0 +1,38 @@
+[package]
+name = "diacraft-vsdx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft VSDX: reads a drawing package (.vsdx and its kin) into the ShapeSheet document model, and writes one back"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Counts of the work the writer does (`work`), for the tests that hold a cost to a count and not to a time. Never part of the app.
+test-support = []
+
+[dependencies]
+diacraft-color = { workspace = true }
+diacraft-container = { workspace = true }
+diacraft-doc = { workspace = true }
+diacraft-formula = { workspace = true }
+diacraft-opc = { workspace = true }
+diacraft-sheetxml = { workspace = true }
+# The text of a time in a property part: all date conversion goes through jiff (AGENTS.md).
+jiff = { workspace = true }
+
+[dev-dependencies]
+# This crate's own tests read the counts of its work, so they turn its `test-support` feature on, whichever package is tested.
+diacraft-vsdx = { workspace = true, features = ["test-support"] }
+# The testkit depends on the engine, which depends on this crate; Cargo allows that cycle for a dev-dependency, and the tests that use
+# it are all integration tests (`tests/it`), which link this crate once.
+diacraft-testkit = { workspace = true }
+proptest = { workspace = true }
+# The counting allocator of the test binary (`tests/it/main.rs`): `memory_counted` counts what a read keeps.
+stats_alloc = { workspace = true }
+# The test archives of `tests/it/canon.rs` are written by hand, with the layouts (extra fields, descriptors, dates, a comment) that no writer of ours makes.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.5"

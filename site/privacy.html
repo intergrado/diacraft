@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy · DiaCraft</title>
+  <meta name="description" content="Learn when DiaCraft uses the network and what this website requests." />
+  <link rel="canonical" href="https://diacraft.dev/privacy" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DiaCraft" />
+  <meta property="og:title" content="Privacy · DiaCraft" />
+  <meta property="og:description" content="Learn when DiaCraft uses the network and what this website requests." />
+  <meta property="og:url" content="https://diacraft.dev/privacy" />
+  <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
+  <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0c" />
+  <link rel="icon" href="/assets/icon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="preload" href="/assets/hashed/besley-roman.f57f2cfa6c84.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast mast-ruled">
+    <div class="wrap mast-inner">
+      <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
+      <nav class="links" aria-label="Main navigation">
+        <a href="/#features">Features</a>
+        <a href="/#guides">Guides</a>
+        <a href="/changelog.html">Changelog</a>
+        <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+  </header>
+  <main id="main">
+    <header class="page-head">
+      <div class="wrap page-head-inner">
+        <div class="page-title">
+          <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Privacy</span></p>
+          <h1>Privacy</h1>
+          <p class="lead">You can draw, edit and save on your own computer without an account or an internet connection. DiaCraft sends no usage telemetry.</p>
+        </div>
+        <div class="title-block">
+          <dl class="spec">
+            <div><dt>Account</dt><dd><b>None</b> needed</dd></div>
+            <div><dt>Telemetry</dt><dd><b>None</b> sent</dd></div>
+            <div><dt>This site</dt><dd><b>No</b> cookies, no analytics</dd></div>
+          </dl>
+        </div>
+      </div>
+    </header>
+    <div class="wrap doc">
+      <article class="prose">
+        <section id="desktop">
+          <h2>When the desktop app connects</h2>
+          <ul>
+            <li><strong>Automation.</strong> Enabling the desktop control port lets programs on your machine operate the open drawing. The MCP command can use that port or an address you supply. In headless mode it talks to its client through standard input and output. If you use an AI client, its own settings govern what it sends to its provider.</li>
+            <li><strong>Printing.</strong> When you send a job to a printer, DiaCraft hands it to your system’s print service. Your printer setup determines whether the job goes over a network.</li>
+            <li><strong>Licence links.</strong> Clicking a licence name on the splash or About screen opens the licence publisher’s page in your browser. The Third-party licences link there opens no page: it shows a list that is built into the program.</li>
+          </ul>
+        </section>
+        <section id="browser">
+          <h2>When you use DiaCraft in your browser</h2>
+          <ul>
+            <li><strong>Loading.</strong> The browser version is a site of its own, beside this one. Its page and the editor’s files come from that address, and nothing is loaded from another one. The editor comes as a few large files, which your browser may keep for later visits.</li>
+            <li><strong>After it has loaded.</strong> The editor makes no network request but for two files of its own, which come from that same address the first time they are shown: the picture on the File view’s Home page and the list of licences. It sends no drawing, no usage data and no error report, and the page’s content security policy allows connections to that address only. It stores nothing in cookies, local storage or other browser storage, so closing or reloading the tab discards the drawing.</li>
+            <li><strong>Files.</strong> A file you open or drop on the page is read by the editor on your computer, in your browser’s memory, and goes nowhere else. A file you save, export or print to PDF is made on your computer and handed to your browser as a download, or written to the file you chose. Nothing is uploaded, and the editor keeps no copy after you close the tab.</li>
+            <li><strong>Licence links.</strong> As in the desktop app, clicking a licence name on the splash or About screen opens the licence publisher’s page in a new tab. The Third-party licences link opens no page.</li>
+          </ul>
+        </section>
+        <section id="this-site">
+          <h2>What happens when you visit this site</h2>
+          <p>Cloudflare Pages serves the pages, images and styles, and, from its own address, the browser version. Neither site sets cookies, stores tracking identifiers in your browser or runs analytics.</p>
+          <p>The only third-party request a page makes on load is an optional check of GitHub’s API for the latest release version and download links, which only the home page makes. The request contains no drawings or filenames from your computer. With scripts disabled, the release link still works. Following a download or repository link takes you to GitHub.</p>
+        </section>
+      </article>
+      <aside class="rail">
+        <nav class="toc" aria-label="On this page">
+          <p class="label">On this page</p>
+          <ol>
+            <li><a href="#desktop"><span>When the desktop app connects</span></a></li>
+            <li><a href="#browser"><span>When you use DiaCraft in your browser</span></a></li>
+            <li><a href="#this-site"><span>What happens when you visit this site</span></a></li>
+          </ol>
+        </nav>
+      </aside>
+    </div>
+    <nav class="pager" aria-label="More">
+      <div class="wrap">
+        <a href="/browser.html"><span class="label">About the browser version</span><b>DiaCraft in your <span class="nowrap">browser <span class="arrow" aria-hidden="true"></span></span></b></a>
+        <a href="/#download"><span class="label">Or install it</span><b><span class="nowrap">Downloads <span class="arrow" aria-hidden="true"></span></span></b></a>
+      </div>
+    </nav>
+    <section class="closing closing-slim" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <div class="closing-copy">
+          <h2 id="closing-title">Get <em>DiaCraft.</em></h2>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a class="btn btn-ghost" href="/guides/getting-started.html">Follow the first guide <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="closing-note">Linux · Windows · macOS · Browser</p>
+        </div>
+        <img class="closing-art" src="/assets/hashed/octopus.79b55756b738.webp" alt="An engraved octopus holds a process rectangle and a decision diamond, joined by a connector." width="720" height="720" loading="lazy" />
+      </div>
+    </section>
+  </main>
+  <footer class="mast">
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+    <div class="wrap foot-inner foot-block">
+      <div class="foot-brand">
+        <a class="brand" href="/"><img src="/assets/icon-64.png" alt="" width="64" height="64" loading="lazy" />DiaCraft</a>
+        <p>Diagramming software for Linux, Windows, macOS and the browser. Free and open source, under the MIT or Apache 2.0 licence.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Guides</p><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
+        <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
+      </nav>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+    </div>
+  </footer>
+</body>
+</html>

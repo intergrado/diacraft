@@ -1,0 +1,899 @@
+/*
+  DiaCraft website: one stylesheet, no build step.
+
+  1. Fonts          4. Layout          7. Home page sections
+  2. Tokens         5. Masthead        8. Footer
+  3. Base           6. Components      9. Article pages   10. Motion (the widths come before it)
+
+  Typefaces (both under the SIL Open Font License 1.1; the licence texts are in docs/licenses/fonts/ of the source repository):
+  Besley, Copyright 2020 The Besley Project Authors; Martian Mono, Copyright 2021 The Martian Mono Project Authors.
+  The files are subsets: Latin letters, a narrower range of weights, one width of the monospace face, no other change.
+*/
+
+/* 1. Fonts */
+@font-face {
+  font-family: "Besley";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/assets/hashed/besley-roman.f57f2cfa6c84.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Besley";
+  font-style: italic;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/assets/hashed/besley-italic.e10b142c51a0.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Martian Mono";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/assets/hashed/martian-mono.175ce61449c8.woff2") format("woff2");
+}
+
+/* 2. Tokens */
+:root {
+  color-scheme: light dark;
+
+  /* The identity: ink, paper and DiaCraft teal, as the app and its splash use them. */
+  --brand-ink: #0b0b0c;
+  --brand-paper: #efe9dc;
+  --brand-teal: #007a8c;
+  /* The teal of the octopus artwork's own background, so that a band can run into the picture. */
+  --art-teal: #007c8d;
+
+  --font-serif: "Besley", Georgia, "Times New Roman", serif;
+  --font-mono: "Martian Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+
+  --text-xs: .72rem;
+  --text-s: .875rem;
+  --text-m: 1.0625rem;
+  --text-l: clamp(1.15rem, .4vw + 1.05rem, 1.3rem);
+  --text-xl: clamp(1.45rem, 1vw + 1.2rem, 1.9rem);
+  --text-2xl: clamp(2rem, 2.6vw + 1.3rem, 3.15rem);
+  --text-3xl: clamp(2.45rem, 4.1vw + 1.35rem, 4.3rem);
+  --text-4xl: clamp(2.7rem, 5.6vw + 1.3rem, 5.6rem);
+
+  --space-1: .25rem;
+  --space-2: .5rem;
+  --space-3: .75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+  --band: clamp(4.5rem, 7.5vw, 7.5rem);
+  --gutter: clamp(1rem, 4.4vw, 4rem);
+  --measure: 36rem;
+  /* The longest line of a page that is read from top to bottom. */
+  --measure-read: 40rem;
+  /* The space between the two columns of a section. Every section that is seven parts and five uses it, so that their second columns share one edge. */
+  --split-gap: clamp(2rem, 6vw, 6rem);
+
+  --radius-s: .25rem;
+  --radius-m: .5rem;
+  --stroke: 1.5px;
+  --wire-width: 2px;
+  /* The page's grid is the editor's: a quarter of an inch, with a heavier line every five. The ruler's inch is six rems. */
+  --grid-step: 1.5rem;
+  --inch: 6rem;
+
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --paper: var(--brand-paper);
+    --paper-raised: #f8f4eb;
+    --paper-sunk: #e6dfd0;
+    --sheet: #fffefb;
+    --ink: var(--brand-ink);
+    --ink-body: #2a2b2e;
+    --ink-muted: #55524b;
+    --line: rgb(11 11 12 / .15);
+    --line-strong: rgb(11 11 12 / .78);
+    --grid: rgb(11 11 12 / .05);
+    --grid-major: rgb(11 11 12 / .085);
+
+    --teal: #006070;
+    --teal-fill: var(--brand-teal);
+    --teal-fill-hover: #00606f;
+    --on-teal: #fff;
+    --teal-wash: #d9e7e2;
+    --wire: var(--brand-teal);
+
+    --signal: #c2410c;
+    --signal-ink: #a3320e;
+    --on-signal: #fff;
+
+    --slab: var(--brand-ink);
+    --slab-raised: #17191b;
+    --on-slab: var(--brand-paper);
+    --on-slab-muted: #b5afa2;
+    --slab-line: rgb(239 233 220 / .2);
+    --slab-teal: #4cc4d2;
+
+    --shadow: 0 1px 1px rgb(11 11 12 / .06), 0 8px 18px -6px rgb(11 11 12 / .16), 0 28px 48px -24px rgb(11 11 12 / .3);
+    --shadow-sheet: 0 0 0 1px rgb(11 11 12 / .1), 0 2px 3px rgb(11 11 12 / .06), 0 16px 28px -16px rgb(11 11 12 / .32);
+    --shadow-plate: 0 0 0 1px rgb(11 11 12 / .28), 0 2px 4px rgb(11 11 12 / .08), 0 24px 40px -18px rgb(11 11 12 / .32), 0 60px 90px -50px rgb(11 11 12 / .45);
+  }
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: var(--brand-ink);
+    --paper-raised: #151718;
+    --paper-sunk: #050506;
+    --sheet: #ece6d9;
+    --ink: var(--brand-paper);
+    --ink-body: #d6d0c3;
+    --ink-muted: #a39d90;
+    --line: rgb(239 233 220 / .17);
+    --line-strong: rgb(239 233 220 / .62);
+    --grid: rgb(239 233 220 / .045);
+    --grid-major: rgb(239 233 220 / .08);
+
+    --teal: #4cc4d2;
+    --teal-fill: #3fc1d0;
+    --teal-fill-hover: #6fd4e0;
+    --on-teal: #04181b;
+    --teal-wash: #0c2529;
+    --wire: #2fb0c0;
+
+    --signal: #ff8559;
+    --signal-ink: #ff8559;
+    --on-signal: #1d0b04;
+
+    --slab: #151718;
+    --slab-raised: #1d2022;
+    --on-slab: var(--brand-paper);
+    --on-slab-muted: #a39d90;
+    --slab-line: rgb(239 233 220 / .17);
+    --slab-teal: #4cc4d2;
+
+    --shadow: 0 0 0 1px rgb(239 233 220 / .06), 0 18px 40px -18px rgb(0 0 0 / .9);
+    --shadow-sheet: 0 0 0 1px rgb(0 0 0 / .5), 0 18px 30px -16px rgb(0 0 0 / .9);
+    --shadow-plate: 0 0 0 1px rgb(239 233 220 / .2), 0 30px 60px -24px rgb(0 0 0 / .95);
+  }
+}
+
+/* 3. Base */
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--paper); scroll-padding-top: 1.5rem; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink-body);
+  font: 400 var(--text-m)/1.62 var(--font-serif);
+  font-feature-settings: "kern", "liga", "onum";
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p, dl, dd, figure, ul, ol { margin: 0; }
+h1, h2, h3 { color: var(--ink); font-family: var(--font-serif); font-feature-settings: "kern", "liga"; text-wrap: balance; }
+h1 { font-size: var(--text-3xl); font-weight: 500; line-height: 1.02; letter-spacing: -.028em; }
+h2 { font-size: var(--text-2xl); font-weight: 500; line-height: 1.07; letter-spacing: -.022em; }
+h3 { font-size: 1.22rem; font-weight: 600; line-height: 1.25; letter-spacing: -.012em; }
+p { text-wrap: pretty; }
+em { font-style: italic; }
+h2 em { color: var(--teal); font-weight: 500; }
+strong { font-weight: 650; color: var(--ink); }
+a { color: var(--teal); text-decoration-thickness: .06em; text-underline-offset: .2em; }
+a:hover { text-decoration-thickness: .12em; }
+:focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; border-radius: 2px; }
+img { display: block; max-width: 100%; height: auto; }
+code, pre, kbd { font-family: var(--font-mono); font-feature-settings: "kern", "calt" 0; }
+/* A word of code stays on one line: a break after the hyphens of an option reads as two words. A table's cell and a block of code wrap as they need. */
+code { font-size: .82em; font-weight: 500; white-space: nowrap; }
+td code, .code-long { white-space: normal; overflow-wrap: anywhere; }
+kbd { font-size: .78em; padding: .1em .4em; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: var(--radius-s); }
+figcaption { margin-top: .65rem; color: var(--ink-muted); font-size: var(--text-s); line-height: 1.55; }
+::selection { background: var(--teal-fill); color: var(--on-teal); }
+
+/* 4. Layout */
+.wrap { width: min(84rem, calc(100% - 2 * var(--gutter))); margin-inline: auto; }
+.skip { position: absolute; inset: .5rem auto auto .5rem; z-index: 20; padding: .65rem 1rem; background: var(--paper-raised); border: var(--stroke) solid var(--ink); border-radius: var(--radius-s); font: 500 var(--text-s)/1 var(--font-mono); }
+.skip:not(:focus) { clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
+.nowrap { white-space: nowrap; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.band { padding-block: var(--band); border-top: 1px solid var(--line); }
+.section-head { display: grid; gap: var(--space-4); margin-bottom: clamp(2rem, 4vw, 3.5rem); }
+.section-head p { max-width: var(--measure); color: var(--ink-muted); }
+.section-head .label { color: var(--teal); }
+.section-head > div > h2 { margin-top: var(--space-4); }
+/* A heading with its paragraph beside it, both sitting on one line at the bottom. */
+.head-split { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--space-5) var(--split-gap); align-items: end; }
+.head-split > p { padding-bottom: .35rem; }
+
+/* 5. Masthead */
+.mast-inner, .links, .brand, .actions { display: flex; align-items: center; }
+header.mast { position: relative; background: var(--paper); }
+/* A ruler under the masthead, as the editor has one over its page. It is a real one: an inch is six rems (96 CSS pixels), with a tick every eighth, and its zero is the left
+   edge of the page's content, as the editor's ruler starts at the left edge of the sheet. The ticks are drawn from a point a whole number of inches to the left of that edge,
+   so that they fall on it at any width. */
+/* On a wide screen the masthead stays while the page moves under it, as the editor's ruler stays over a sheet that is scrolled. */
+@media (min-width: 60rem) and (min-height: 40rem) {
+  html:has(.mast-ruled) { scroll-padding-top: 6.75rem; --sticky-top: 7rem; }
+  header.mast-ruled { position: sticky; top: 0; z-index: 10; }
+  .mast-ruled .mast-inner { min-height: 4rem; }
+}
+.ruler { overflow: hidden; height: 1.2rem; border-block: 1px solid var(--line); background: var(--paper-raised); }
+.ruler .wrap { position: relative; display: flex; height: 100%; }
+.ruler .wrap::before {
+  content: "";
+  position: absolute;
+  inset: 0 -100vw 0 calc(var(--inch) * -40);
+  background:
+    repeating-linear-gradient(90deg, var(--line-strong) 0 1px, transparent 1px var(--inch)) 0 100% / 100% 100% no-repeat,
+    repeating-linear-gradient(90deg, var(--line-strong) 0 1px, transparent 1px calc(var(--inch) / 2)) 0 100% / 100% 50% no-repeat,
+    repeating-linear-gradient(90deg, var(--line-strong) 0 1px, transparent 1px calc(var(--inch) / 8)) 0 100% / 100% 26% no-repeat;
+  opacity: .55;
+}
+.ruler span { flex: none; width: var(--inch); padding-left: .3rem; color: var(--ink-muted); font: 500 .56rem/1.05rem var(--font-mono); }
+.mast-inner { min-height: 4.5rem; justify-content: space-between; gap: 1rem 2rem; }
+.brand { gap: .6rem; color: var(--ink); font: 650 1.5rem/1 var(--font-serif); letter-spacing: -.03em; text-decoration: none; }
+.brand img { width: 2.15rem; height: 2.15rem; border-radius: .45rem; box-shadow: 0 0 0 1px var(--line); }
+.links { gap: clamp(1rem, 2.6vw, 2.4rem); }
+.links a { display: inline-flex; align-items: center; min-height: 2.75rem; color: var(--ink); font: 500 var(--text-xs)/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; text-decoration: none; }
+.links a:hover, .links a[aria-current="page"] { color: var(--teal); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: .55em; }
+.links .nav-download { min-height: 2.4rem; padding: 0 .95rem; border: var(--stroke) solid var(--ink); border-radius: var(--radius-s); transition: background-color .15s, color .15s; }
+.links .nav-download:hover { background: var(--ink); color: var(--paper); text-decoration: none; }
+
+/* 6. Components */
+
+/* A label: small capitals in the monospace face, for what a drawing would letter by hand. */
+.label { color: var(--teal); font: 500 var(--text-xs)/1.5 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+/* A label that hangs off a short connector with a glue point at its start. */
+.label-wire { display: flex; align-items: center; gap: .7rem; }
+.label-wire::before {
+  content: "";
+  flex: none;
+  width: 2.4rem;
+  height: .5rem;
+  background:
+    radial-gradient(circle at .25rem 50%, var(--wire) 0 .22rem, transparent .25rem),
+    linear-gradient(var(--wire), var(--wire)) .25rem 50% / calc(100% - .25rem) var(--wire-width) no-repeat;
+}
+
+/* An arrow drawn as a connector's end: a line and a filled head. */
+.arrow { display: inline-block; flex: none; position: relative; width: 1.05em; height: .62em; margin-left: .55em; vertical-align: .04em; transition: translate .2s var(--ease); }
+.arrow::before { content: ""; position: absolute; inset: 50% .3em auto 0; height: max(1.5px, .09em); translate: 0 -50%; background: currentColor; }
+.arrow::after { content: ""; position: absolute; inset: 0 0 0 auto; width: .5em; background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.arrow-down { rotate: 90deg; }
+.arrow-out { rotate: -45deg; }
+a:hover > .arrow, a:hover > * > .arrow { translate: .22em 0; }
+a:hover > .arrow-down { translate: 0 .18em; }
+a:hover > .arrow-out { translate: .14em -.14em; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: .6rem 1.2rem;
+  border: var(--stroke) solid var(--teal-fill);
+  border-radius: var(--radius-s);
+  background: var(--teal-fill);
+  color: var(--on-teal);
+  font: 600 1rem/1.2 var(--font-serif);
+  letter-spacing: -.005em;
+  text-decoration: none;
+  transition: background-color .15s, border-color .15s, color .15s, translate .1s;
+}
+.btn:hover { background: var(--teal-fill-hover); border-color: var(--teal-fill-hover); }
+.btn:active { translate: 0 1px; }
+.btn-ghost { background: transparent; border-color: var(--ink); color: var(--ink); }
+.btn-ghost:hover { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.text-link { display: inline-block; padding-block: .4rem; font-weight: 600; text-decoration: none; }
+.text-link:hover { text-decoration: underline; }
+.actions { flex-wrap: wrap; gap: .75rem; }
+
+/* A numbered pin, on a plate and beside the text that explains it. */
+.pin { display: inline-grid; place-items: center; flex: none; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--signal); color: var(--on-signal); font: 600 .72rem/1 var(--font-mono); }
+
+/* A file's name, or a file type, as a shape of the drawing: a box with an ink outline. */
+.node, .sheet-tab {
+  position: relative;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: .3rem .55rem;
+  padding: .5rem .8rem;
+  border: var(--stroke) solid var(--ink);
+  border-radius: var(--radius-s);
+  background: var(--paper-raised);
+  color: var(--ink);
+  font: 600 var(--text-s)/1.2 var(--font-mono);
+}
+
+/* A terminal: the command line is part of the product. */
+.term { margin: 0; padding: 1.1rem 1.2rem 1.25rem; overflow-x: auto; color: var(--on-slab); font: 400 .78rem/1.9 var(--font-mono); }
+.term code { display: block; font-size: 1em; font-weight: 400; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A file keeps its lines: it scrolls sideways where a transcript wraps. */
+.term-keep code { white-space: pre; overflow-wrap: normal; }
+.term b { color: var(--slab-teal); font-weight: 500; }
+.term i { color: var(--on-slab-muted); font-style: normal; user-select: none; }
+.term .out { color: var(--on-slab-muted); }
+
+/* 7. Home page sections */
+
+/* Hero: the page is the drawing area, the editor a selected shape, the file types glued to it. */
+.hero { position: relative; isolation: isolate; overflow: hidden; }
+/* The grid starts a whole number of heavy lines to the left of the content's edge, so that a heavy line runs down that edge at any width. */
+.hero-grid::before, .get > .wrap::before, .page-head-inner::before {
+  content: "";
+  position: absolute;
+  inset: 0 -100vw 0 calc(var(--grid-step) * -150);
+  z-index: -2;
+  background:
+    linear-gradient(var(--grid-major) 0 1px, transparent 1px) 0 0 / calc(var(--grid-step) * 5) calc(var(--grid-step) * 5),
+    linear-gradient(90deg, var(--grid-major) 0 1px, transparent 1px) 0 0 / calc(var(--grid-step) * 5) calc(var(--grid-step) * 5),
+    linear-gradient(var(--grid) 0 1px, transparent 1px) 0 0 / var(--grid-step) var(--grid-step),
+    linear-gradient(90deg, var(--grid) 0 1px, transparent 1px) 0 0 / var(--grid-step) var(--grid-step);
+}
+/* The paper comes back over the grid behind the words. */
+.hero::before, .page-head::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(100deg, var(--paper) 8%, transparent 62%); opacity: .9; }
+.hero-grid { position: relative; display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 12fr); align-items: center; gap: clamp(2rem, 4.5vw, 4.5rem); padding-block: clamp(2.25rem, 3.6vw, 3.5rem) clamp(3rem, 6vw, 5.5rem); }
+.hero-copy > * + * { margin-top: 1.35rem; }
+.hero h1 { font-size: clamp(2.3rem, 3.1vw + .85rem, 3.9rem); }
+.hero h1 em { display: block; color: var(--teal); font-weight: 500; }
+.lede { max-width: 35rem; font-size: clamp(1.1rem, .3vw + 1rem, 1.22rem); line-height: 1.55; }
+.hero .actions { margin-top: 1.75rem; }
+.hero-note { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1.1rem; color: var(--ink-muted); font: 400 var(--text-xs)/1.6 var(--font-mono); letter-spacing: .04em; }
+
+.flow { display: grid; min-width: 0; }
+.flow ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.flow-in { grid-template-columns: repeat(3, 1fr); justify-items: center; }
+.flow-out { grid-template-columns: repeat(2, 1fr); justify-items: center; }
+.node .label { flex-basis: 100%; text-align: center; color: var(--ink-muted); font-size: .64rem; letter-spacing: .1em; }
+.node code { font-size: 1em; font-weight: 600; }
+/* A connection point where a wire meets a node. */
+.node::after { content: ""; position: absolute; left: 50%; width: .5rem; height: .5rem; translate: -50% 0; border-radius: 50%; background: var(--wire); box-shadow: 0 0 0 2px var(--paper); }
+.flow-in .node::after { top: calc(100% - .25rem + var(--stroke) / 2); }
+.flow-out .node::after { bottom: calc(100% - .25rem + var(--stroke) / 2); }
+
+.wire { position: relative; height: 2.9rem; color: var(--wire); }
+.wire::before, .wire::after { content: ""; position: absolute; }
+.wire i { position: absolute; bottom: .4rem; width: .7rem; height: .6rem; translate: -50% 0; background: currentColor; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+/* Three types run down to one line and into the top of the window. */
+.wire-in::before { inset: 0 calc(100% / 6) auto; height: 52%; border: var(--wire-width) solid currentColor; border-top: 0; border-radius: 0 0 .65rem .65rem; }
+.wire-in::after { inset: 0 auto .9rem calc(50% - var(--wire-width) / 2); width: var(--wire-width); background: currentColor; }
+.wire-in i { left: 50%; }
+/* One line leaves the bottom of the window and branches to the two things it writes. */
+.wire-out::before { inset: 46% 25% .75rem; border: var(--wire-width) solid currentColor; border-bottom: 0; border-radius: .65rem .65rem 0 0; }
+.wire-out::after { inset: 0 auto 54% calc(50% - var(--wire-width) / 2); width: var(--wire-width); background: currentColor; }
+.wire-out i { bottom: .25rem; }
+.wire-out i:first-child { left: 25%; }
+.wire-out i:last-child { left: 75%; }
+
+/* The editor's picture, selected as the editor selects a shape: an outline and eight handles. */
+.window { position: relative; z-index: 1; margin: .45rem; border-radius: var(--radius-m); box-shadow: var(--shadow); }
+.window picture, .window img { display: block; width: 100%; height: auto; border-radius: inherit; }
+.window::after {
+  --handle: radial-gradient(circle closest-side, var(--paper-raised) 0 54%, var(--wire) 58% 94%, transparent 100%);
+  --edge: linear-gradient(var(--wire), var(--wire));
+  content: "";
+  position: absolute;
+  inset: -.85rem;
+  pointer-events: none;
+  background:
+    var(--handle) 0 0 / .8rem .8rem, var(--handle) 50% 0 / .8rem .8rem, var(--handle) 100% 0 / .8rem .8rem,
+    var(--handle) 0 50% / .8rem .8rem, var(--handle) 100% 50% / .8rem .8rem,
+    var(--handle) 0 100% / .8rem .8rem, var(--handle) 50% 100% / .8rem .8rem, var(--handle) 100% 100% / .8rem .8rem,
+    var(--edge) 50% calc(.4rem - var(--wire-width) / 2) / calc(100% - .8rem) var(--wire-width),
+    var(--edge) 50% calc(100% - .4rem + var(--wire-width) / 2) / calc(100% - .8rem) var(--wire-width),
+    var(--edge) calc(.4rem - var(--wire-width) / 2) 50% / var(--wire-width) calc(100% - .8rem),
+    var(--edge) calc(100% - .4rem + var(--wire-width) / 2) 50% / var(--wire-width) calc(100% - .8rem);
+  background-repeat: no-repeat;
+}
+
+/* Formats: one drawing on three sheets, each cut from a different file */
+.formats { overflow: hidden; background: var(--teal-wash); border-top-color: transparent; }
+/* The sheets take eight parts of twelve, and the section's heading keeps to the same two columns. */
+.convert, .formats .head-split { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); column-gap: clamp(2rem, 4.5vw, 4.5rem); }
+.convert { align-items: start; row-gap: clamp(2rem, 4vw, 2.75rem); }
+.sheets { --sheet-gap: clamp(.4rem, 1vw, .9rem); display: grid; grid-template-columns: 528fr 480fr 528fr; gap: var(--sheet-gap); margin: 0; padding: 0; list-style: none; }
+.sheet { display: grid; grid-template-rows: auto 1fr; gap: .8rem; min-width: 0; }
+.sheet-head { display: flex; align-items: center; min-width: 0; }
+.sheet-tab { flex: none; padding: .42rem .7rem; font-size: clamp(.6rem, 1vw, .8rem); overflow-wrap: normal; }
+/* The connector from one file to the next: a connection point, a line with what made the file written on it, and an arrowhead. */
+.sheet-via { position: relative; flex: 1; align-self: stretch; min-width: 1rem; margin-right: calc(var(--sheet-gap) * -1); color: var(--wire); }
+.sheet-via::before { content: ""; position: absolute; inset: calc(50% - var(--wire-width) / 2) .45rem auto 0; height: var(--wire-width); background: currentColor; }
+.sheet-via::after { content: ""; position: absolute; inset: calc(50% - .35rem) 0 auto auto; width: .6rem; height: .7rem; background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.sheet-via span { position: absolute; left: 50%; top: 50%; translate: -55% -50%; padding: 0 .5rem; background: var(--teal-wash); color: var(--teal); font: 500 .64rem/1.4 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; white-space: nowrap; }
+.sheet-paper { width: 100%; height: auto; border-radius: 2px; background: var(--sheet); box-shadow: var(--shadow-sheet); transition: transform .25s var(--ease); }
+/* A sheet that is pointed at is lifted (with `transform`: the scroll's animation holds `translate` and `rotate`). */
+.sheet:hover .sheet-paper { transform: translateY(-.3rem); }
+.triptych figcaption { max-width: 46rem; margin-top: 1.4rem; color: var(--ink-muted); }
+.ledger { display: grid; justify-items: start; }
+.format-list { justify-self: stretch; border-top: var(--stroke) solid var(--ink); }
+.format-list > div { padding: 1rem 0 1.1rem; border-bottom: 1px solid var(--line); }
+.format-list dt { margin-bottom: .3rem; color: var(--ink); font: 500 var(--text-xs)/1.7 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.format-list dd { color: var(--ink-body); font-size: 1rem; line-height: 1.55; }
+.format-list code { color: var(--ink); }
+.format-note { margin-block: var(--space-4) var(--space-2); color: var(--ink-muted); font-size: var(--text-s); }
+
+/* The editor: a plate with numbered pins, on a desk */
+.editor { background-color: var(--paper-sunk); background-image: radial-gradient(var(--grid-major) 1px, transparent 1.5px); background-size: var(--grid-step) var(--grid-step); }
+.plate { position: relative; min-width: 0; }
+.plate-stage { position: relative; container-type: inline-size; border-radius: var(--radius-m); box-shadow: var(--shadow-plate); }
+.plate-stage picture, .plate-stage img { display: block; width: 100%; height: auto; border-radius: inherit; }
+.plate .pin { position: absolute; translate: -50% -50%; width: clamp(1.2rem, 2.2cqw, 1.75rem); height: clamp(1.2rem, 2.2cqw, 1.75rem); font-size: clamp(.6rem, 1cqw, .78rem); box-shadow: 0 0 0 3px var(--paper-raised), 0 4px 10px rgb(0 0 0 / .35); transition: scale .2s var(--ease); }
+.pin-1 { left: 9.7%; top: 20.2%; }
+.pin-2 { left: 83.6%; top: 42.7%; }
+.pin-3 { left: 19.3%; top: 17.4%; }
+.pin-4 { left: 73%; top: 82.3%; }
+.plate-hint { display: none; margin-top: 1rem; }
+/* A note that is pointed at makes its pin on the plate larger. */
+.editor:has(.feature:nth-child(1):hover) .pin-1, .editor:has(.feature:nth-child(2):hover) .pin-2, .editor:has(.feature:nth-child(3):hover) .pin-3, .editor:has(.feature:nth-child(4):hover) .pin-4 { scale: 1.4; }
+.legend { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.5rem clamp(1.25rem, 2.4vw, 2.25rem); margin: clamp(2.25rem, 4vw, 3.5rem) 0 0; padding: 0; list-style: none; }
+.feature { padding-top: 1.1rem; border-top: var(--stroke) solid var(--ink); }
+.feature h3 { display: flex; align-items: center; gap: .65rem; margin-bottom: .55rem; font-size: 1.15rem; }
+.feature p, .extra p { color: var(--ink-muted); font-size: .97rem; line-height: 1.55; }
+.extras { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem clamp(1.25rem, 2.4vw, 2.25rem); margin: clamp(1.75rem, 3vw, 2.5rem) 0 0; padding: clamp(1.5rem, 3vw, 2.25rem) 0 0; border-top: 1px solid var(--line); list-style: none; }
+.extra { display: grid; grid-template-columns: 6.25rem minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+.extra h3 { margin-bottom: .4rem; font-size: 1.15rem; }
+.extra .text-link { margin-top: .2rem; font-size: .97rem; }
+/* Three shapes drawn in the stylesheet: a rectangle, an ellipse and a closed freeform. */
+.doodle { position: relative; height: 4.2rem; }
+.doodle i { position: absolute; display: block; border: var(--stroke) solid var(--ink); background: var(--paper-raised); }
+.doodle i:nth-child(1) { inset: .1rem auto auto 0; width: 3.3rem; height: 2.2rem; }
+.doodle i:nth-child(2) { inset: 1.2rem auto auto 1.9rem; width: 2.6rem; height: 2.6rem; border-radius: 50%; }
+.doodle i:nth-child(3) { inset: auto auto .1rem 3.25rem; width: 2.9rem; height: 2.15rem; border-color: var(--wire); border-radius: 62% 38% 55% 45% / 42% 60% 40% 58%; background: var(--teal-wash); }
+/* Two of the freeform's vertices, as the editor marks them. */
+.doodle:not(.doodle-tab)::before, .doodle:not(.doodle-tab)::after { content: ""; position: absolute; z-index: 1; width: .5rem; height: .5rem; border: var(--stroke) solid var(--wire); background: var(--paper-raised); }
+.doodle:not(.doodle-tab)::before { inset: auto auto 1.75rem 4.15rem; }
+.doodle:not(.doodle-tab)::after { inset: auto auto .55rem 5.85rem; }
+/* A browser tab holding a page. */
+.doodle-tab i:nth-child(1) { inset: .2rem auto auto 0; width: 2.4rem; height: .95rem; border-bottom: 0; border-color: var(--wire); border-radius: .35rem .35rem 0 0; background: var(--teal-wash); }
+.doodle-tab i:nth-child(2) { inset: .2rem auto auto 2.3rem; width: 1.9rem; height: .95rem; border-bottom: 0; border-radius: .35rem .35rem 0 0; }
+.doodle-tab::after { content: ""; position: absolute; inset: 1.1rem auto auto 0; width: 6.2rem; height: 2.7rem; border: var(--stroke) solid var(--ink); border-radius: 0 .35rem .35rem .35rem; background: linear-gradient(var(--wire), var(--wire)) .6rem .7rem / 2.6rem var(--wire-width) no-repeat, linear-gradient(var(--line-strong), var(--line-strong)) .6rem 1.3rem / 4.4rem 1px no-repeat, linear-gradient(var(--line-strong), var(--line-strong)) .6rem 1.8rem / 3.2rem 1px no-repeat, var(--paper-raised); }
+
+/* Automation: a terminal and a settings file, as two windows */
+.consoles { display: grid; grid-template: repeat(4, auto) / minmax(0, 7fr) minmax(0, 5fr); gap: 0 var(--split-gap); align-items: start; }
+/* Each column lies on the four rows of the grid, so that the two windows are one height and the two headings one line. */
+.console-col { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: subgrid; grid-row: span 4; justify-items: start; }
+.console { justify-self: stretch; align-self: stretch; display: flex; flex-direction: column; border-radius: var(--radius-m); background: var(--slab); box-shadow: inset 0 0 0 1px var(--slab-line), var(--shadow); }
+.console-bar { display: flex; align-items: center; gap: .7rem; margin: 0; padding: .7rem 1.2rem; border-bottom: 1px solid var(--slab-line); color: var(--on-slab-muted); font: 500 .68rem/1.4 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+/* A prompt in the bar: a chevron and a cursor. */
+.console-bar::before { content: ""; width: .5rem; height: .5rem; border: solid var(--slab-teal); border-width: var(--wire-width) var(--wire-width) 0 0; rotate: 45deg; }
+.console-col h3 { margin-top: 1.6rem; }
+.console-col > p { max-width: var(--measure); margin-top: .5rem; color: var(--ink-muted); }
+.console-col .text-link { margin-top: .5rem; }
+
+/* Privacy: a slab of ink */
+.slab { background: var(--slab); color: var(--on-slab); border-top-color: transparent; }
+.slab-top { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 2.5rem var(--split-gap); align-items: end; }
+.slab h2 { margin-top: var(--space-5); color: var(--on-slab); font-size: var(--text-3xl); line-height: 1.02; letter-spacing: -.028em; }
+.slab h2 em { display: block; color: var(--slab-teal); }
+.slab .label { color: var(--slab-teal); }
+.slab p { color: var(--on-slab-muted); }
+.slab a { color: var(--slab-teal); }
+.slab :focus-visible { outline-color: var(--slab-teal); }
+/* Three facts, lettered as the rows of a table. */
+.slab-facts { margin: 0 0 .6rem; padding: 0; border-top: 1px solid var(--slab-line); list-style: none; }
+.slab-facts li { display: grid; grid-template-columns: 8.75rem minmax(0, 1fr); gap: 1rem; align-items: baseline; padding: .95rem 0 1.05rem; border-bottom: 1px solid var(--slab-line); color: var(--on-slab-muted); font: 500 var(--text-xs)/1.5 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.slab-facts b { color: var(--on-slab); font: 500 clamp(1.7rem, 2.4vw + .6rem, 2.5rem)/1 var(--font-serif); letter-spacing: -.025em; text-transform: none; }
+.slab-text { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--space-4) var(--split-gap); justify-items: start; margin-top: clamp(2.5rem, 5vw, 4rem); }
+.slab-text p { max-width: var(--measure); }
+
+/* Downloads: one sheet, a column for each platform, lying on the drawing area the page began with */
+.get { --pad: calc(var(--grid-step) * 5); position: relative; isolation: isolate; overflow: hidden; padding-block: var(--pad); scroll-margin-top: calc(var(--grid-step) - var(--pad)); }
+.get > .wrap { position: relative; }
+/* The band's own space is five steps of the grid, so that the sheet's top edge lies on a heavy line as its left edge does. */
+.get > .wrap::before { inset-block: calc(var(--pad) * -1); }
+.get-sheet { --cell-pad: clamp(1.25rem, 2.5vw, 2.5rem); border: 1px solid var(--line); border-top: var(--stroke) solid var(--ink); border-radius: 0 0 var(--radius-m) var(--radius-m); background: var(--paper-raised); box-shadow: var(--shadow-sheet); }
+/* The note stands over the third platform's column, on that column's own edge. */
+.get-head { display: grid; grid-template-columns: auto minmax(0, 1fr) calc(100% / 3 - var(--cell-pad) * 4 / 3); gap: 1.25rem clamp(1.25rem, 2.5vw, 2rem); align-items: center; padding: clamp(1.5rem, 3vw, 2.5rem) var(--cell-pad); }
+.app-icon { width: clamp(4.25rem, 8vw, 6.5rem); height: auto; border-radius: 22%; box-shadow: 0 0 0 1px var(--line), 0 10px 22px -10px rgb(0 0 0 / .45); }
+.get-title h2 { margin-top: var(--space-3); }
+.get-note { display: grid; justify-items: start; gap: var(--space-4); }
+.get-note p { color: var(--ink-muted); font-size: 1rem; line-height: 1.55; }
+/* The state of the release, as a status bar would say it. The script writes the version here when there is one. */
+.get-note .release-state { display: inline-flex; align-items: center; gap: .55rem; padding: .3rem .75rem .3rem .65rem; border: 1px solid var(--line); border-radius: 99rem; background: var(--paper); color: var(--ink); font: 500 var(--text-xs)/1.6 var(--font-mono); letter-spacing: .04em; }
+.release-state::before { content: ""; flex: none; width: .5rem; height: .5rem; border-radius: 50%; background: var(--signal); }
+.platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.platform { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 1.25rem; padding: clamp(1.25rem, 2.5vw, 2rem) var(--cell-pad) clamp(1.5rem, 2.5vw, 2.25rem); transition: background-color .2s; }
+.platform + .platform { border-left: 1px solid var(--line); }
+.platform:hover { background: var(--sheet); }
+/* A cell that is pointed at shows its four connection points, as a shape does in the editor. */
+.platform::after {
+  --glue: radial-gradient(circle closest-side, var(--wire) 0 62%, var(--paper-raised) 66% 92%, transparent 100%);
+  content: "";
+  position: absolute;
+  inset: -.4rem;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--glue) 50% 0 / .8rem .8rem, var(--glue) 100% 50% / .8rem .8rem, var(--glue) 50% 100% / .8rem .8rem, var(--glue) 0 50% / .8rem .8rem;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity .2s;
+}
+.platform:hover::after { opacity: 1; }
+.platform h3 { font-size: clamp(1.6rem, 2vw + .9rem, 2.1rem); font-weight: 500; letter-spacing: -.025em; }
+.spec { flex: 1; display: grid; align-content: start; align-self: stretch; }
+.spec > div { display: grid; grid-template-columns: var(--spec-label, 4.4rem) minmax(0, 1fr); gap: .75rem; align-items: baseline; padding: .6rem 0; border-top: 1px solid var(--line); }
+.spec dt { color: var(--ink-muted); font: 500 .66rem/1.7 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+.spec dd { color: var(--ink-body); font-size: .97rem; line-height: 1.5; }
+.platform-browser { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem 2.5rem; padding: clamp(1.25rem, 2.5vw, 1.75rem) var(--cell-pad); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-m) var(--radius-m); background: var(--teal-wash); }
+.platform-browser h3 { font-size: 1.3rem; }
+.platform-browser p { max-width: 46rem; margin-top: .3rem; color: var(--ink-body); font-size: .97rem; line-height: 1.55; }
+.platform-browser .btn { flex: none; }
+
+/* Guides: five stops on one connector */
+.route { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0 clamp(1rem, 2vw, 2rem); padding-top: 1.1rem; counter-reset: stop; }
+.route::before { content: ""; position: absolute; inset: calc(.55rem - var(--wire-width) / 2) .5rem auto 0; height: var(--wire-width); background: var(--wire); transform-origin: 0 50%; }
+.route::after { content: ""; position: absolute; inset: .15rem 0 auto auto; width: .7rem; height: .8rem; background: var(--wire); clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.stop { position: relative; display: flex; flex-direction: column; gap: .55rem; padding: 2.1rem 0 0; color: var(--ink-body); text-decoration: none; counter-increment: stop; }
+/* A stop is a connection point on the line; the one pointed at is selected. */
+.stop::before { content: ""; position: absolute; inset: -1.1rem auto auto 0; z-index: 1; width: 1.1rem; height: 1.1rem; border: var(--wire-width) solid var(--wire); border-radius: 50%; background: var(--paper); transition: background-color .15s, scale .2s var(--ease); }
+.stop::after { content: counter(stop, decimal-leading-zero); position: absolute; inset: .55rem auto auto 0; color: var(--ink-muted); font: 500 var(--text-xs)/1 var(--font-mono); letter-spacing: .06em; }
+.stop-name { min-height: 2.5em; color: var(--ink); font-size: var(--text-l); font-weight: 500; line-height: 1.25; letter-spacing: -.012em; text-wrap: balance; transition: color .15s; }
+.stop-text { font-size: .95rem; line-height: 1.55; color: var(--ink-muted); }
+.stop-go { margin-top: auto; padding-top: .4rem; color: var(--teal); font: 500 var(--text-xs)/1.5 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+.stop:hover .stop-name, .stop:focus-visible .stop-name { color: var(--teal); }
+.stop:hover::before, .stop:focus-visible::before { background: var(--wire); scale: 1.2; }
+.stop:focus-visible { outline-offset: .6rem; }
+
+/* Questions, and the project */
+.last { background: var(--paper-raised); }
+.duo { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--split-gap); align-items: start; }
+.faq .section-head { margin-bottom: var(--space-6); }
+.faq details { border-bottom: 1px solid var(--line); }
+.faq details:first-of-type { border-top: var(--stroke) solid var(--ink); }
+.faq summary { display: flex; align-items: baseline; justify-content: space-between; gap: 1.5rem; padding: 1.05rem 0; cursor: pointer; color: var(--ink); font-size: var(--text-l); font-weight: 500; line-height: 1.3; list-style: none; transition: color .15s; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; flex: none; color: var(--teal); font: 500 1.2rem/1 var(--font-mono); transition: rotate .2s var(--ease); }
+.faq details[open] summary::after { rotate: 45deg; }
+.faq summary:hover { color: var(--teal); }
+.faq details p { max-width: 42rem; padding: 0 0 1.35rem; }
+/* The project's note, pinned beside the questions. */
+.community { position: relative; padding: clamp(1.5rem, 3vw, 2.25rem); border: 1px solid var(--line); border-top: var(--stroke) solid var(--ink); border-radius: 0 0 var(--radius-m) var(--radius-m); background: var(--paper); }
+.community h2 { margin-block: var(--space-4) var(--space-5); font-size: var(--text-xl); letter-spacing: -.015em; }
+.community p:not(.label) { font-size: 1rem; line-height: 1.6; }
+.community p + p { margin-top: var(--space-4); }
+
+/* Closing: the band runs into the octopus's own teal */
+.closing { position: relative; overflow: hidden; padding: 0; border: 0; background: var(--art-teal); color: #fff; }
+.closing-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 31rem); align-items: center; gap: 2rem; }
+.closing-copy { padding-block: clamp(4rem, 8vw, 7rem); }
+.closing h2 { color: #fff; font-size: var(--text-4xl); line-height: 1; letter-spacing: -.03em; }
+.closing h2 em { display: block; color: var(--brand-paper); }
+.closing .actions { margin-top: var(--space-6); }
+.closing .btn { background: var(--brand-paper); border-color: var(--brand-paper); color: var(--brand-ink); }
+.closing .btn:hover { background: #fff; border-color: #fff; }
+.closing .btn-ghost { background: transparent; border-color: #fff; color: #fff; }
+.closing .btn-ghost:hover { background: #fff; border-color: #fff; color: var(--brand-ink); }
+.closing :focus-visible { outline-color: #fff; }
+.closing-note { margin-top: var(--space-5); color: #fff; font: 400 var(--text-xs)/1.6 var(--font-mono); letter-spacing: .04em; }
+.closing-art { align-self: end; width: 100%; -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 96%, transparent), linear-gradient(transparent, #000 6%); -webkit-mask-composite: source-in; mask-image: linear-gradient(90deg, transparent, #000 6%, #000 96%, transparent), linear-gradient(transparent, #000 6%); mask-composite: intersect; }
+
+/* 8. Footer: the sheet's title block */
+footer.mast { border-top: var(--stroke) solid var(--ink); background: var(--paper); }
+/* The ruler again, under the last band, so that the page ends as it began. */
+footer .ruler { border-top: 0; }
+.foot-inner { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1.25rem 2.5rem; padding-block: 2rem 2.5rem; }
+.foot-inner .brand { font-size: 1.3rem; }
+.foot-inner nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .25rem 1.75rem; }
+.foot-inner nav a { padding-block: .5rem; color: var(--ink); font: 500 var(--text-xs)/1.4 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; text-decoration: none; }
+.foot-inner nav a:hover { color: var(--teal); text-decoration: underline; text-underline-offset: .5em; }
+.foot-inner .legal { grid-column: 1 / -1; margin: 0; padding: 1.25rem max(0px, calc(100% - 90ch)) 0 0; border-top: 1px solid var(--line); color: var(--ink-muted); font-size: .8rem; line-height: 1.6; }
+/* The home page's footer: the name and what it is, then three lists. */
+.foot-block { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: start; gap: 2.5rem var(--split-gap); padding-block: clamp(2.5rem, 5vw, 4rem) 2.5rem; }
+.foot-brand .brand { font-size: 1.6rem; }
+.foot-brand p { max-width: 26rem; margin-top: var(--space-4); color: var(--ink-muted); font-size: .95rem; line-height: 1.6; }
+.foot-block nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); justify-content: stretch; gap: 2rem 1.5rem; }
+.foot-block nav div { display: grid; justify-items: start; align-content: start; }
+.foot-block nav .label { margin-bottom: .6rem; color: var(--ink-muted); }
+.foot-block nav a { padding-block: .32rem; font: 500 .95rem/1.4 var(--font-serif); letter-spacing: 0; text-transform: none; }
+
+/* 9. Article pages: the guides, the pages about the browser version, privacy and the changes, and the page that is not found.
+   A page has a head (its title on the drawing area, as the home page's first screen is), a body of two columns (the text, and a rail with the list of its sections)
+   and a row of the pages that follow. */
+
+/* The head */
+.page-head { position: relative; isolation: isolate; overflow: hidden; border-bottom: 1px solid var(--line); }
+.page-head-inner { position: relative; display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 2.5rem var(--split-gap); align-items: end; padding-block: clamp(2.75rem, 5vw, 4.75rem) clamp(2.5rem, 4.5vw, 4rem); }
+.page-title > * + * { margin-top: 1.35rem; }
+.page-head h1 { font-size: clamp(2.3rem, 3.1vw + .85rem, 3.9rem); }
+.page-head h1 em { color: var(--teal); font-weight: 500; }
+.lead { max-width: 38rem; font-size: clamp(1.1rem, .3vw + 1rem, 1.22rem); line-height: 1.55; }
+.page-title > .sub { max-width: 38rem; color: var(--ink-muted); }
+.page-head .actions { margin-top: 1.75rem; }
+/* Where the page is: a label whose first part leads back. */
+.crumb a { color: inherit; text-decoration: none; }
+.crumb a:hover { text-decoration: underline; text-underline-offset: .35em; }
+.crumb i { color: var(--ink-muted); font-style: normal; }
+.crumb span { color: var(--ink-muted); }
+
+/* The guides' route again, upright, with the guide on view filled in. */
+.head-route ol { position: relative; margin: 0; padding: 0; list-style: none; counter-reset: stop; }
+.head-route ol::before { content: ""; position: absolute; inset: 1rem auto 1rem calc(.55rem - var(--wire-width) / 2); width: var(--wire-width); background: var(--wire); }
+.head-route li { counter-increment: stop; }
+.head-route a { position: relative; display: grid; grid-template-columns: 1.1rem 1.9rem minmax(0, 1fr); gap: .65rem; align-items: baseline; padding-block: .42rem; color: var(--ink-muted); line-height: 1.35; text-decoration: none; transition: color .15s; }
+.head-route a::before { content: ""; align-self: center; width: 1.1rem; height: 1.1rem; border: var(--wire-width) solid var(--wire); border-radius: 50%; background: var(--paper); transition: background-color .15s; }
+.head-route a::after { content: counter(stop, decimal-leading-zero); order: 1; font: 500 var(--text-xs)/1 var(--font-mono); letter-spacing: .06em; }
+.head-route a span { order: 2; }
+.head-route a:hover { color: var(--teal); }
+.head-route a:hover::before, .head-route a[aria-current="page"]::before { background: var(--wire); }
+.head-route a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+
+/* A title block, as the corner of a drawing sheet has one: a few labelled rows. */
+.title-block { --spec-label: 5.6rem; border: 1px solid var(--line); border-top: var(--stroke) solid var(--ink); border-radius: 0 0 var(--radius-m) var(--radius-m); background: var(--paper-raised); box-shadow: var(--shadow-sheet); }
+.title-block .spec { padding: .35rem 1.4rem .45rem; }
+.title-block .spec > div:first-child { border-top: 0; }
+.title-block .spec b { color: var(--ink); font: 500 1.5rem/1.15 var(--font-serif); letter-spacing: -.02em; }
+
+/* A browser's frame, drawn here, round a capture of the page that holds the editor. */
+.frame { border: var(--stroke) solid var(--ink); border-radius: var(--radius-m); background: var(--paper-raised); box-shadow: var(--shadow); }
+.frame-bar { display: flex; align-items: flex-end; gap: .5rem; padding: .5rem .6rem 0; border-bottom: var(--stroke) solid var(--ink); }
+.frame-tab { display: inline-flex; align-items: center; gap: .45rem; margin-bottom: calc(var(--stroke) * -1); padding: .38rem .8rem .42rem .6rem; border: var(--stroke) solid var(--ink); border-bottom-color: var(--paper); border-radius: .4rem .4rem 0 0; background: var(--paper); color: var(--ink); font: 500 .68rem/1.3 var(--font-mono); letter-spacing: .02em; }
+.frame-tab img { width: .95rem; height: .95rem; border-radius: 22%; }
+.frame-address { display: flex; align-items: center; gap: .5rem; padding: .4rem .7rem; border-bottom: 1px solid var(--line); background: var(--paper); color: var(--ink-muted); font: 400 .68rem/1.4 var(--font-mono); }
+.frame-address::before { content: ""; flex: none; width: .45rem; height: .45rem; border-radius: 50%; background: var(--wire); }
+.frame > img { display: block; width: 100%; height: auto; border-radius: 0 0 calc(var(--radius-m) - var(--stroke)) calc(var(--radius-m) - var(--stroke)); }
+.frame-fig figcaption { margin-top: .9rem; }
+
+/* The body */
+.doc { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 2.5rem var(--split-gap); align-items: start; padding-block: clamp(2.75rem, 5vw, 4.5rem) var(--band); }
+.rail { position: sticky; top: var(--sticky-top, 1.5rem); display: grid; gap: 1.75rem; }
+.toc ol { margin: .7rem 0 0; padding: 0; border-top: var(--stroke) solid var(--ink); list-style: none; counter-reset: toc; }
+.toc li { counter-increment: toc; border-bottom: 1px solid var(--line); }
+.toc a { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) auto; column-gap: .6rem; align-items: baseline; padding-block: .62rem; color: var(--ink); font-size: 1rem; line-height: 1.35; text-decoration: none; transition: color .15s; }
+.toc a::before { content: counter(toc, decimal-leading-zero); color: var(--ink-muted); font: 500 var(--text-xs)/1 var(--font-mono); letter-spacing: .06em; }
+/* A connection point at the end of each row, filled while its section is on the screen (where the browser can tie that to the scroll: "Motion"). */
+.toc a::after { content: ""; align-self: center; width: .6rem; height: .6rem; border: var(--stroke) solid var(--wire); border-radius: 50%; }
+.toc a:hover { color: var(--teal); }
+.toc a:hover::after { background: var(--wire); }
+.rail-note { color: var(--ink-muted); font-size: .95rem; line-height: 1.55; }
+
+/* The text */
+.prose { min-width: 0; font-size: 1.125rem; line-height: 1.68; counter-reset: sec; }
+.prose > section { counter-increment: sec; }
+.prose > section + section { margin-top: clamp(2.5rem, 4.5vw, 3.75rem); padding-top: clamp(2.5rem, 4.5vw, 3.75rem); border-top: 1px solid var(--line); }
+.prose h2 { margin-bottom: 1.1rem; font-size: var(--text-xl); letter-spacing: -.015em; line-height: 1.15; }
+.prose > section > h2::before { content: counter(sec, decimal-leading-zero); display: block; margin-bottom: .7rem; color: var(--teal); font: 500 var(--text-xs)/1 var(--font-mono); letter-spacing: .09em; }
+.prose h3 { margin: 1.75rem 0 .5rem; }
+.prose p, .prose ul, .prose ol { max-width: var(--measure-read); }
+.prose p + p, .prose p + ul, .prose p + ol, .prose ul + p, .prose ol + p, .prose .table-scroll + p, .prose figure + p { margin-top: 1.1rem; }
+.prose ul, .prose ol { margin: 0; padding: 0; list-style: none; }
+.prose li { position: relative; }
+.prose li + li { margin-top: .8rem; }
+/* A list's mark is a connection point. */
+.prose ul > li { padding-left: 1.6rem; }
+.prose ul > li::before { content: ""; position: absolute; inset: .62em auto auto .15rem; width: .5rem; height: .5rem; border-radius: 50%; background: var(--wire); }
+/* Steps: numbered points on one connector. */
+.prose ol { counter-reset: step; }
+.prose ol > li { counter-increment: step; padding: .1rem 0 .1rem 3.1rem; }
+.prose ol > li + li { margin-top: 1.25rem; }
+.prose ol > li::before { content: counter(step); position: absolute; inset: 0 auto auto 0; z-index: 1; display: grid; place-items: center; width: 2rem; height: 2rem; border: var(--wire-width) solid var(--wire); border-radius: 50%; background: var(--paper); color: var(--ink); font: 600 .78rem/1 var(--font-mono); }
+.prose ol > li:not(:last-child)::after { content: ""; position: absolute; inset: 2rem auto -1.25rem calc(1rem - var(--wire-width) / 2); width: var(--wire-width); background: var(--wire); }
+.prose a { text-decoration-thickness: .06em; }
+.prose code { color: var(--ink); }
+.prose .console, .prose .shot, .prose .sheet-fig, .prose .table-scroll, .prose .note, .prose .ask { margin-block: 1.75rem; }
+.prose .console .term { font-size: .8rem; }
+.prose .term code { color: inherit; }
+.prose > section > :last-child { margin-bottom: 0; }
+.prose figcaption:not(.console-bar) { max-width: var(--measure-read); margin-top: 1rem; }
+/* A capture of the editor: the whole window on a wide screen, and on a narrow one the part with the drawing, at a size its words can be read at. */
+.shot picture, .shot img { display: block; width: 100%; height: auto; border-radius: var(--radius-m); }
+.shot img { box-shadow: var(--shadow-plate); }
+/* One sheet of a drawing, on its paper. */
+.sheet-fig .sheet-paper { max-width: 34rem; }
+
+/* A table: lettered heads, hairline rows. */
+.table-scroll { overflow-x: auto; }
+.prose table { width: 100%; border-collapse: collapse; font-size: 1rem; line-height: 1.5; }
+.prose thead th { padding: 0 1.25rem .6rem 0; border-bottom: var(--stroke) solid var(--ink); color: var(--ink); font: 500 var(--text-xs)/1.5 var(--font-mono); letter-spacing: .08em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+.prose tbody th, .prose td { padding: .85rem 1.25rem .9rem 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.prose tbody th { color: var(--ink); font-weight: 600; }
+.prose tr > :last-child { padding-right: 0; }
+
+/* A note to keep in mind, and a request to hand to an agent. */
+.note, .ask { position: relative; max-width: var(--measure-read); padding: 1.1rem 1.3rem 1.2rem; border: 1px solid var(--line); border-left: .25rem solid var(--signal); border-radius: 0 var(--radius-m) var(--radius-m) 0; background: var(--paper-raised); }
+.ask { margin-inline: 0; border-left-color: var(--wire); }
+.note .label, .ask .label { margin-bottom: .45rem; color: var(--ink-muted); }
+.note p:not(.label), .ask p:not(.label) { font-size: 1.0625rem; line-height: 1.6; }
+
+/* What follows: the next page, and the way back. */
+.pager { border-top: 1px solid var(--line); background: var(--paper-raised); }
+.pager .wrap { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 0 var(--split-gap); }
+.pager a { display: grid; align-content: center; gap: .55rem; padding-block: clamp(2rem, 4vw, 3rem); color: var(--ink); text-decoration: none; }
+.pager .label { color: var(--teal); }
+.pager b { font: 500 var(--text-xl)/1.2 var(--font-serif); letter-spacing: -.015em; transition: color .15s; }
+.pager a + a b { font-size: var(--text-l); }
+.pager a:hover b { color: var(--teal); }
+
+/* The closing band, at the height of a page that is not the home page. */
+.closing.closing-slim .closing-inner { grid-template-columns: minmax(0, 1fr) minmax(0, 17rem); }
+.closing.closing-slim .closing-copy { padding-block: clamp(2.5rem, 5vw, 3.75rem); }
+.closing.closing-slim h2 { font-size: var(--text-2xl); }
+.closing.closing-slim h2 em { display: inline; }
+.closing.closing-slim .actions { margin-top: var(--space-5); }
+.closing.closing-slim .closing-art { align-self: end; height: 15.5rem; object-fit: cover; object-position: 50% 0; }
+
+/* The page that is not found: a connector whose end is glued to nothing. */
+.unglued { display: flex; align-items: center; padding-bottom: .5rem; }
+.unglued .node { flex: none; padding: .7rem 1.05rem; font-size: 1rem; }
+.unglued .node::after { content: none; }
+.unglued-wire { position: relative; flex: 1; min-width: 3rem; height: var(--wire-width); margin-right: 1.4rem; background: var(--wire); }
+.unglued-wire::before { content: ""; position: absolute; inset: 50% auto auto -.3rem; width: .6rem; height: .6rem; translate: 0 -50%; border-radius: 50%; background: var(--wire); box-shadow: 0 0 0 2px var(--paper); }
+.unglued-wire::after { content: ""; position: absolute; inset: 50% -.55rem auto auto; width: .9rem; height: .9rem; translate: 0 -50%; border: var(--wire-width) solid var(--signal); border-radius: 50%; background: var(--paper); }
+.unglued .node-missing { border-style: dashed; border-color: var(--line-strong); background: none; color: var(--ink-muted); }
+.lost-way { padding-block: clamp(2.75rem, 5vw, 4.5rem) var(--band); }
+.lost-way h2 { margin-bottom: clamp(2rem, 4vw, 3rem); }
+.route-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* Widths */
+@media (max-width: 68rem) {
+  .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 3rem; }
+  .flow { width: 100%; max-width: 50rem; justify-self: center; }
+  .convert { grid-template-columns: minmax(0, 1fr); }
+  .formats .head-split { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--split-gap); }
+  .format-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: clamp(1.25rem, 2.4vw, 2.25rem); }
+  .legend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .consoles { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 2.5rem; }
+  .console-col { grid-template-rows: none; grid-row: auto; }
+  .get { --pad: calc(var(--grid-step) * 3); }
+  .get-head { grid-template-columns: auto minmax(0, 1fr); }
+  .get-note { grid-column: 1 / -1; }
+  .route { grid-template-columns: minmax(0, 1fr); gap: 1.75rem; padding: 0 0 0 2.6rem; }
+  .route::before { inset: .3rem auto 1rem calc(.55rem - var(--wire-width) / 2); width: var(--wire-width); height: auto; transform-origin: 50% 0; }
+  .route::after { inset: auto auto 0 .15rem; width: .8rem; height: .7rem; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+  .stop { display: grid; grid-template: auto auto 1fr / minmax(0, 5fr) minmax(0, 7fr); gap: .35rem 1.5rem; padding: 0; }
+  .stop::before { inset: 0 auto auto -2.6rem; }
+  .stop::after { position: static; grid-area: 1 / 1 / 2 / -1; padding-block: .2rem; }
+  .stop-name { grid-area: 2 / 1; min-height: 0; }
+  .stop-go { grid-area: 3 / 1; align-self: start; margin: 0; }
+  .stop-text { grid-area: 2 / 2 / 4 / 3; }
+  .closing-inner { grid-template-columns: minmax(0, 1fr) minmax(0, 20rem); }
+  .closing h2 { font-size: clamp(2.3rem, 5.4vw, 3.6rem); }
+  .page-head-inner { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .head-route { display: none; }
+  .title-block { max-width: 30rem; }
+  .frame-fig { max-width: 46rem; }
+  .doc { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: static; order: -1; }
+}
+@media (max-width: 52rem) {
+  .head-split, .formats .head-split { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .extras { grid-template-columns: minmax(0, 1fr); }
+  .slab-top, .slab-text { grid-template-columns: minmax(0, 1fr); }
+  .platforms { grid-template-columns: minmax(0, 1fr); }
+  .platform { display: grid; grid-template: auto 1fr / 11rem minmax(0, 1fr); gap: 1rem 1.5rem; align-items: start; justify-items: start; }
+  .platform + .platform { border-left: 0; border-top: 1px solid var(--line); }
+  .platform .spec { grid-area: 1 / 2 / 3 / 3; justify-self: stretch; }
+  .platform .spec > div:first-child { border-top: 0; padding-top: .35rem; }
+  .platform-browser { flex-direction: column; align-items: flex-start; }
+  .duo { grid-template-columns: minmax(0, 1fr); gap: 3rem; }
+  .pager .wrap { grid-template-columns: minmax(0, 1fr); }
+  .pager a + a { padding-top: 0; }
+  .pager a:first-child { padding-bottom: 1.5rem; }
+  .foot-block { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 46rem) {
+  /* On a narrow screen the plate keeps a size its words can be read at and scrolls sideways, from edge to edge of the screen. It starts at its right end, on the drawing. */
+  .plate-scroll { direction: rtl; margin: -1rem calc(var(--gutter) * -1) -1.75rem; padding: 1rem var(--gutter) 1.75rem; overflow-x: auto; }
+  .plate-stage { direction: ltr; min-width: 44rem; box-shadow: 0 0 0 1px var(--line-strong), 0 12px 18px -12px rgb(0 0 0 / .5); }
+  .plate-hint { display: block; }
+}
+@media (max-width: 40rem) {
+  .mast-inner { flex-wrap: wrap; gap: 0 .8rem; min-height: 0; padding: .8rem 0 .25rem; }
+  .mast-inner .brand { font-size: 1.35rem; }
+  .mast-inner .brand img { width: 1.9rem; height: 1.9rem; }
+  .links { width: 100%; gap: 0; justify-content: space-between; }
+  .links a { font-size: .66rem; letter-spacing: .05em; }
+  .links .nav-download { min-height: 2.75rem; padding: 0; border: 0; color: var(--teal); }
+  .links .nav-download:hover { background: none; color: var(--teal); text-decoration: underline; }
+  .hero-grid { gap: 2.5rem; padding-top: 2.25rem; }
+  .hero .actions { flex-direction: column; align-items: stretch; }
+  .node { padding: .45rem .55rem; font-size: .74rem; }
+  .wire { height: 2.7rem; }
+  .term .more { display: none; }
+  .slab h2 { font-size: clamp(1.9rem, 9vw, 2.45rem); }
+  .closing h2 { font-size: clamp(2.3rem, 11vw, 3.2rem); }
+  .platform-browser .btn { align-self: stretch; padding-inline: .7rem; font-size: .95rem; }
+  .sheet { gap: .55rem; }
+  .sheet-tab { padding: .3rem .4rem; font-size: .56rem; font-weight: 500; letter-spacing: -.02em; }
+  .sheet-via span { display: none; }
+  .format-list { display: block; }
+  .legend { grid-template-columns: minmax(0, 1fr); }
+  .extra { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+  .get-head { grid-template-columns: minmax(0, 1fr); }
+  .platform { display: flex; }
+  .platform .spec > div:first-child { border-top: 1px solid var(--line); padding-top: .6rem; }
+  .stop { grid-template: auto / minmax(0, 1fr); }
+  .stop-name { grid-area: 2 / 1; }
+  .stop-text { grid-area: 3 / 1; }
+  .stop-go { grid-area: 4 / 1; }
+  .closing-inner { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .closing-copy { padding-block: var(--space-7) var(--space-5); }
+  .closing .actions { flex-direction: column; align-items: stretch; }
+  .closing-art { justify-self: center; max-width: 24rem; }
+  .closing.closing-slim .closing-inner { grid-template-columns: minmax(0, 1fr); }
+  .closing.closing-slim .closing-copy { padding-block: 2.5rem; }
+  .closing.closing-slim .closing-art { display: none; }
+  .shot picture, .shot img { border-radius: var(--radius-s); }
+  .shot img { box-shadow: 0 0 0 1px var(--line-strong), 0 12px 18px -12px rgb(0 0 0 / .5); }
+  .prose { font-size: 1.0625rem; }
+  .prose table { font-size: .94rem; }
+  .prose thead th { white-space: normal; }
+  .prose thead th, .prose tbody th, .prose td { padding-right: .8rem; }
+  .unglued .node { padding: .5rem .7rem; font-size: var(--text-s); }
+  .prose ol > li { padding-left: 2.75rem; }
+  .unglued-wire { min-width: 1.5rem; }
+  .foot-inner { grid-template-columns: minmax(0, 1fr); }
+  .foot-inner nav { justify-content: flex-start; }
+  .foot-block nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 10. Motion. On load: the copy settles, then the wires draw themselves through the editor. Down the page, where the browser can tie an animation to the scroll:
+   the three sheets come together as they enter the view, and the line of the guides draws itself through its stops. Without that, and for a reader who asks
+   for less motion, everything is in its finished place from the start. */
+@keyframes rise { from { opacity: 0; translate: 0 .8rem; } }
+@keyframes draw-down { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes pop { from { opacity: 0; scale: .9; } }
+@keyframes select { from { opacity: 0; scale: 1.02; } }
+@keyframes sheet-in { from { translate: var(--from-x, 0) var(--from-y, 0); rotate: var(--from-turn, 0deg); } }
+@keyframes line-in { from { scale: 0 1; } }
+@keyframes line-down { from { scale: 1 0; } }
+@keyframes arrive { 0%, 92% { opacity: 0; } }
+@keyframes on-screen { 0%, 100% { background-color: transparent; } 1%, 99% { background-color: var(--wire); } }
+@keyframes row-on-screen { 0%, 100% { color: var(--ink); } 1%, 99% { color: var(--teal); } }
+/* The list of a page's sections marks the section that is being read: each section is a timeline of its own, seen through a band a third of the way down the screen, and
+   its row in the list takes the teal, and the point at the end of the row is filled, while the section crosses that band. Nothing moves, so this is for every reader whose browser can do it. */
+@supports (animation-timeline: view()) and (timeline-scope: --a) {
+  .doc { timeline-scope: --sec-1, --sec-2, --sec-3, --sec-4, --sec-5, --sec-6, --sec-7, --sec-8; }
+  .prose > section { view-timeline-inset: 30% 66%; }
+  .prose > section:nth-of-type(1) { view-timeline-name: --sec-1; }
+  .prose > section:nth-of-type(2) { view-timeline-name: --sec-2; }
+  .prose > section:nth-of-type(3) { view-timeline-name: --sec-3; }
+  .prose > section:nth-of-type(4) { view-timeline-name: --sec-4; }
+  .prose > section:nth-of-type(5) { view-timeline-name: --sec-5; }
+  .prose > section:nth-of-type(6) { view-timeline-name: --sec-6; }
+  .prose > section:nth-of-type(7) { view-timeline-name: --sec-7; }
+  .prose > section:nth-of-type(8) { view-timeline-name: --sec-8; }
+  .toc li:nth-child(1) { --section: --sec-1; }
+  .toc li:nth-child(2) { --section: --sec-2; }
+  .toc li:nth-child(3) { --section: --sec-3; }
+  .toc li:nth-child(4) { --section: --sec-4; }
+  .toc li:nth-child(5) { --section: --sec-5; }
+  .toc li:nth-child(6) { --section: --sec-6; }
+  .toc li:nth-child(7) { --section: --sec-7; }
+  .toc li:nth-child(8) { --section: --sec-8; }
+  .toc a { animation: row-on-screen linear both; animation-timeline: var(--section); animation-range: cover 0% cover 100%; }
+  .toc a::after { animation: on-screen linear both; animation-timeline: var(--section); animation-range: cover 0% cover 100%; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero-copy > * { animation: rise .7s var(--ease) both; }
+  .hero-copy > :nth-child(2) { animation-delay: .06s; }
+  .hero-copy > :nth-child(3) { animation-delay: .12s; }
+  .hero-copy > :nth-child(4) { animation-delay: .18s; }
+  .hero-copy > :nth-child(5) { animation-delay: .24s; }
+  .flow-in .node { animation: pop .4s var(--ease) both; }
+  .flow-in li:nth-child(1) .node { animation-delay: .25s; }
+  .flow-in li:nth-child(2) .node { animation-delay: .33s; }
+  .flow-in li:nth-child(3) .node { animation-delay: .41s; }
+  .wire-in { animation: draw-down .55s cubic-bezier(.6, 0, .3, 1) .6s both; }
+  .window::after { animation: select .45s var(--ease) 1.1s both; }
+  .wire-out { animation: draw-down .55s cubic-bezier(.6, 0, .3, 1) 1.4s both; }
+  .flow-out .node { animation: pop .4s var(--ease) 1.9s both; }
+  .flow-out li:nth-child(2) .node { animation-delay: 2s; }
+  html { scroll-behavior: smooth; }
+  @supports (animation-timeline: view()) {
+    .sheets .sheet-paper { animation: sheet-in linear both; animation-timeline: view(); animation-range: entry 5% cover 36%; }
+    .sheet:nth-child(1) .sheet-paper { --from-x: -1.6rem; --from-y: 1.4rem; --from-turn: -2.4deg; }
+    .sheet:nth-child(2) .sheet-paper { --from-y: -1.1rem; --from-turn: .8deg; }
+    .sheet:nth-child(3) .sheet-paper { --from-x: 1.6rem; --from-y: 1.9rem; --from-turn: 2.6deg; }
+    .route::before { animation: line-in linear both; animation-timeline: view(); animation-range: entry 10% cover 38%; }
+    .route::after { animation: arrive linear both; animation-timeline: view(); animation-range: entry 10% cover 38%; }
+  }
+}
+@media (prefers-reduced-motion: no-preference) and (max-width: 68rem) {
+  @supports (animation-timeline: view()) {
+    .sheet:nth-child(1) .sheet-paper { --from-x: -.5rem; --from-y: .9rem; }
+    .sheet:nth-child(3) .sheet-paper { --from-x: .5rem; --from-y: 1.2rem; }
+    .route::before { animation-name: line-down; animation-range: entry 10% cover 60%; }
+    .route::after { animation-range: entry 10% cover 60%; }
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "diacraft-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft MCP server: JSON-RPC 2.0 over stdio, driving a headless session or a running app"
+publish = false
+
+[lints]
+workspace = true
+
+# No egui, eframe, winit or rfd: this crate is below the window and outside it (`cargo xtask layers`).
+[dependencies]
+diacraft-engine = { workspace = true }
+log = { workspace = true }
+# No `unbounded_depth` feature, anywhere: it provides the method that turns serde_json's recursion limit (128
+# levels) off, and that limit is what stops a deeply nested message from overflowing the stack. Nothing calls
+# that method; the xtask test `serde_json_keeps_its_recursion_limit` watches the feature.
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+diacraft-testkit = { workspace = true }
+proptest = { workspace = true }

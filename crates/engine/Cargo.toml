@@ -1,0 +1,71 @@
+[package]
+name = "diacraft-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft engine: sessions, undo, the command registry and the panic guard"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+diacraft-calc = { workspace = true }
+diacraft-geom = { workspace = true }
+# Re-Layout Page: the placement of a diagram's shapes by its connectors, as a graph layout (`draw/relayout`).
+diacraft-layout = { workspace = true }
+diacraft-color = { workspace = true }
+diacraft-doc = { workspace = true }
+# The formulas of a shape glued to a guide are read as trees, to tell which cells a pin reads (`snap/hold.rs`).
+diacraft-formula = { workspace = true }
+# `file.export`: the page drawn by the renderer's own walk, written as PNG, SVG or PDF.
+diacraft-fonts = { workspace = true }
+diacraft-pdf = { workspace = true }
+diacraft-render = { workspace = true }
+diacraft-svg = { workspace = true }
+diacraft-units = { workspace = true }
+diacraft-vsdx = { workspace = true }
+# `.odg` files: `file.open` reads one and `file.save` splices an edit into its bytes.
+diacraft-odg = { workspace = true }
+# `.diacraft`, DiaCraft's own format: `file.open` reads one and `file.save` writes one, through `nativefile`.
+diacraft-native = { workspace = true }
+# What the model holds, counted (`model_guard`): an edit that would make a drawing hold more than an open takes is refused in words.
+diacraft-sheetxml = { workspace = true }
+# The object snaps (`snap/osnap.rs`) work on kurbo paths, which the geometry crate builds a shape's rows into.
+kurbo = { workspace = true }
+# Crash-safe replacement of a file: a temporary file beside the target, then a rename (shared with the other craft apps).
+craft-atomic = { workspace = true }
+# Path operations on kurbo paths: Union, Fragment, Intersect and Subtract work on the areas the shapes' paths fill.
+craft-pathops = { workspace = true }
+# Snapping on kurbo types: the targets of a page, the query, the marks. `snap/adapter.rs` is the engine's side of it.
+craft-snap = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# The time of a save, which also works in the browser (`SystemTime` of std panics there).
+web-time = { workspace = true }
+# The central directory of a package that a read refused for memory was made of, to know how much of it is XML (`cmd/file.rs`, `judged_alone`); the limits a part's tree is held to
+# (`nativefile`: what a pass that fingerprints the model holds); and, in the tests, the archive writer the `.odg` and `.diacraft` tests build their packages with.
+diacraft-container = { workspace = true }
+
+# `O_NONBLOCK`, so that a path swapped for a pipe between the check and the open does not block the reader (`file.rs`).
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+# The counts of the work the model and the recalculation do (`work` in each), which the tests of what a command costs read: a count does not move
+# with the load on the machine, as a time does.
+diacraft-calc = { workspace = true, features = ["test-support"] }
+diacraft-doc = { workspace = true, features = ["test-support"] }
+# Faces of known letter widths, for the test of the faces commits measure in (`measure.rs`), and the tests that say which face a run is drawn in
+# (`tests/it/face_query.rs`): no face of the machine is relied on.
+diacraft-fonts = { workspace = true, features = ["test-support"] }
+# The testkit depends on this crate; Cargo allows that cycle for a dev-dependency.
+diacraft-opc = { workspace = true }
+diacraft-testkit = { workspace = true }
+# The thumbnail an `.odg` save renders is decoded to see what it shows (`tests/it/odg_file.rs`).
+png = { workspace = true }
+# The random chains of saves of `tests/it/resave_sweep.rs`.
+proptest = { workspace = true }

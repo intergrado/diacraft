@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Convert drawings from the command line · DiaCraft</title>
+  <meta name="description" content="Convert a drawing or export a page without opening the desktop app." />
+  <link rel="canonical" href="https://diacraft.dev/guides/command-line" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DiaCraft" />
+  <meta property="og:title" content="Convert drawings from the command line · DiaCraft" />
+  <meta property="og:description" content="Convert a drawing or export a page without opening the desktop app." />
+  <meta property="og:url" content="https://diacraft.dev/guides/command-line" />
+  <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
+  <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0c" />
+  <link rel="icon" href="/assets/icon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="preload" href="/assets/hashed/besley-roman.f57f2cfa6c84.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast mast-ruled">
+    <div class="wrap mast-inner">
+      <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
+      <nav class="links" aria-label="Main navigation">
+        <a href="/#features">Features</a>
+        <a href="/#guides">Guides</a>
+        <a href="/changelog.html">Changelog</a>
+        <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+  </header>
+  <main id="main">
+    <header class="page-head">
+      <div class="wrap page-head-inner">
+        <div class="page-title">
+          <p class="label label-wire crumb"><a href="/#guides">Guides</a><i aria-hidden="true">/</i><span>4 of 5</span></p>
+          <h1>Convert drawings <em>from the command line</em></h1>
+          <p class="lead">Use <code>diacraft-cli convert</code> to write an editable drawing, or <code>diacraft-cli export</code> to make a picture of one page. Both work without opening a window.</p>
+        </div>
+        <nav class="head-route" aria-label="Drawing guides">
+          <ol>
+            <li><a href="/guides/getting-started.html"><span>Draw your first diagram</span></a></li>
+            <li><a href="/guides/file-formats.html"><span>Open and save drawing files</span></a></li>
+            <li><a href="/guides/native-format.html"><span>Work with .diacraft files</span></a></li>
+            <li><a href="/guides/command-line.html" aria-current="page"><span>Convert drawings from the command line</span></a></li>
+            <li><a href="/guides/agents.html"><span>Draw with an AI agent</span></a></li>
+          </ol>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap doc">
+      <article class="prose">
+        <section id="editable-copy">
+          <h2>Make an editable copy</h2>
+          <p>With <code>diacraft-cli</code> on your path, open a terminal in the directory containing your drawing. These examples use a file named <code>review.vsdx</code>. The destination extension selects the format, and the output path must differ from the input.</p>
+          <figure class="console">
+            <figcaption class="console-bar">Terminal</figcaption>
+            <pre class="term"><code><i>$ </i><b>diacraft-cli</b> convert review.vsdx <span class="nowrap">--out</span> review.diacraft
+<i>$ </i><b>diacraft-cli</b> convert review.diacraft <span class="nowrap">--out</span> handoff.odg</code></pre>
+          </figure>
+          <p>The first command makes a native working copy. The second reads that copy and writes an OpenDocument drawing. Check the result after each command. A drawing conversion uses the same format rules as Save As in the window.</p>
+        </section>
+        <section id="export-a-page">
+          <h2>Export a page for sharing</h2>
+          <figure class="console">
+            <figcaption class="console-bar">Terminal</figcaption>
+            <pre class="term"><code><i>$ </i><b>diacraft-cli</b> export review.diacraft <span class="nowrap">--out</span> review.png <span class="nowrap">--dpi</span> 144
+<span class="out">{"bytes":63748,<wbr />"format":"png",<wbr />"height":1224,<wbr />"out":"review.png",<wbr />"page":{"id":1,<wbr />"name":"Page-1"},<wbr />"skipped":[],<wbr />"width":1584}</span>
+<i>$ </i><b>diacraft-cli</b> export review.diacraft <span class="nowrap">--out</span> review.svg <span class="nowrap">--page</span> 1
+<span class="out">{"bytes":16595,<wbr />"format":"svg",<wbr />"height":816,<wbr />"out":"review.svg",<wbr />"page":{"id":1,<wbr />"name":"Page-1"},<wbr />"skipped":[],<wbr />"width":1056}</span></code></pre>
+          </figure>
+          <p>Page numbers start at 1, and the first page is the default. Use <code>--dpi</code> to control the size of a PNG. Choose an output name ending in <code>.svg</code> or <code>.pdf</code> for vector output.</p>
+        </section>
+        <section id="read-the-result">
+          <h2>Read the result</h2>
+          <p>A successful command prints a JSON object. For a conversion, check <code>warning_count</code> and <code>warnings</code>. For an export, <code>skipped</code> lists features that were omitted or approximated. This is what the two conversions above printed for the drawing on the home page.</p>
+          <figure class="console">
+            <figcaption class="console-bar">Terminal</figcaption>
+            <pre class="term"><code><i>$ </i><b>diacraft-cli</b> convert review.vsdx <span class="nowrap">--out</span> review.diacraft
+<span class="out">{"bytes":21777,<wbr />"carried":{"classes":[],<wbr />"document_level":false,<wbr />"macros":false,<wbr />"objects":false,<wbr />"signatures_stale":0},<wbr />"checked":{"as_values":false,<wbr />"classes":[],<wbr />"done":true,<wbr />"reason":null},<wbr />"copied":0,<wbr />"format":"diacraft",<wbr />"in":"vsdx",<wbr />"macros_dropped":0,<wbr />"out":"review.diacraft",<wbr />"parts":null,<wbr />"variant":"diacraft",<wbr />"warning_count":0,<wbr />"warnings":[]}</span>
+<i>$ </i><b>diacraft-cli</b> convert review.diacraft <span class="nowrap">--out</span> handoff.odg
+<span class="out">{"bytes":13125,<wbr />"carried":{"classes":["window settings",<wbr />"unknown parts",<wbr />"page data",<wbr />"document data"],<wbr />"document_level":true,<wbr />"macros":false,<wbr />"objects":false,<wbr />"signatures_stale":0},<wbr />"checked":{"as_values":true,<wbr />"classes":[{"class":"fonts",<wbr />"count":1,<wbr />"words":"1 font is missing"},{"class":"line-ends",<wbr />"count":6,<wbr />"words":"6 line ends differ"},{"class":"style-content",<wbr />"count":21,<wbr />"words":"21 items differ"}],<wbr />"done":true,<wbr />"reason":null},<wbr />"copied":null,<wbr />"format":"odg",<wbr />"in":"diacraft",<wbr />"macros_dropped":0,<wbr />"out":"handoff.odg",<wbr />"parts":null,<wbr />"variant":"odg",<wbr />"warning_count":5,<wbr />"warnings":["other",<wbr />"other",<wbr />"other",<wbr />"other",<wbr />"other"]}</span></code></pre>
+          </figure>
+          <p>Exit status <code>1</code> means the operation failed. Status <code>2</code> means the command line needs correcting. Read standard error for the reason.</p>
+          <div class="table-scroll" tabindex="0" role="group" aria-label="Exit statuses">
+            <table>
+              <thead>
+                <tr><th scope="col">Status</th><th scope="col">What it means</th><th scope="col">Standard error, for example</th></tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row"><code>0</code></th><td>The command did what was asked and printed its JSON object.</td><td>Nothing</td></tr>
+                <tr><th scope="row"><code>1</code></th><td>The operation failed.</td><td><code>cannot read the drawing: there is no such file</code></td></tr>
+                <tr><th scope="row"><code>2</code></th><td>The command line needs correcting. Nothing ran.</td><td><code>--out must end in .png, .svg or .pdf: that says what to write</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </article>
+      <aside class="rail">
+        <nav class="toc" aria-label="On this page">
+          <p class="label">On this page</p>
+          <ol>
+            <li><a href="#editable-copy"><span>Make an editable copy</span></a></li>
+            <li><a href="#export-a-page"><span>Export a page for sharing</span></a></li>
+            <li><a href="#read-the-result"><span>Read the result</span></a></li>
+          </ol>
+        </nav>
+      </aside>
+    </div>
+    <nav class="pager" aria-label="More guides">
+      <div class="wrap">
+        <a href="/guides/agents.html"><span class="label">Next guide · 5 of 5</span><b>Draw with an AI <span class="nowrap">agent <span class="arrow" aria-hidden="true"></span></span></b></a>
+        <a href="/#guides"><span class="label">Overview</span><b>All <span class="nowrap">guides <span class="arrow" aria-hidden="true"></span></span></b></a>
+      </div>
+    </nav>
+    <section class="closing closing-slim" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <div class="closing-copy">
+          <h2 id="closing-title">Get <em>DiaCraft.</em></h2>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="closing-note">Linux · Windows · macOS · Browser</p>
+        </div>
+        <img class="closing-art" src="/assets/hashed/octopus.79b55756b738.webp" alt="An engraved octopus holds a process rectangle and a decision diamond, joined by a connector." width="720" height="720" loading="lazy" />
+      </div>
+    </section>
+  </main>
+  <footer class="mast">
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+    <div class="wrap foot-inner foot-block">
+      <div class="foot-brand">
+        <a class="brand" href="/"><img src="/assets/icon-64.png" alt="" width="64" height="64" loading="lazy" />DiaCraft</a>
+        <p>Diagramming software for Linux, Windows, macOS and the browser. Free and open source, under the MIT or Apache 2.0 licence.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Guides</p><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
+        <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
+      </nav>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+    </div>
+  </footer>
+</body>
+</html>

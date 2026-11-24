@@ -1,0 +1,23 @@
+[package]
+name = "diacraft-svg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft SVG export: a page of a document written as SVG (paths, gradients, clips, pictures, and text as text where the face allows)"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+diacraft-color = { workspace = true }
+diacraft-doc = { workspace = true }
+diacraft-render = { workspace = true }
+kurbo = { workspace = true }
+
+[dev-dependencies]
+diacraft-testkit = { workspace = true }
+png = { workspace = true }
+# Reads the SVG back in the tests: its strict XML parser, which knows nothing of the writer.
+diacraft-opc = { workspace = true }

@@ -1,0 +1,56 @@
+[package]
+name = "diacraft-vsdx-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly: neither is in the workspace's Cargo.lock, which the `fuzz check` step of the gate starts each crate from, so a release of either
+# could turn the gate red with no change here. `arbitrary` is libfuzzer-sys's own dependency, named so that it is pinned too. Move both together, in
+# every fuzz crate (a test in xtask checks that they agree).
+libfuzzer-sys = "=0.4.13"
+arbitrary = "=1.5.0"
+# The reader and the writer, with the counts of the work the judge of the carrier does (`diacraft_vsdx::work`, behind `test-support`), which `vsdx_carry` holds to its budget.
+diacraft-vsdx = { path = "..", features = ["test-support"] }
+diacraft-opc = { path = "../../opc" }
+diacraft-doc = { path = "../../doc" }
+diacraft-sheetxml = { path = "../../sheetxml" }
+# The archives of `src/package.rs`, which is the package builder of `crates/testkit` (the seeds are the packages the tests of this crate build): the same two crates it writes them with.
+# The testkit itself is not a dependency, since it brings the engine.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.5"
+
+# A workspace of its own: cargo-fuzz needs nightly and sanitizer flags, so this crate stays out of DiaCraft's workspace and its lockfile
+# (`xtask/src/stats.rs` skips a nested `fuzz` folder).
+[workspace]
+
+# The seeds, the properties and the plan of `vsdx_carry` that the three targets share.
+[lib]
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vsdx_read"
+path = "fuzz_targets/vsdx_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vsdx_carry"
+path = "fuzz_targets/vsdx_carry.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vsdx_roundtrip"
+path = "fuzz_targets/vsdx_roundtrip.rs"
+test = false
+doc = false
+bench = false

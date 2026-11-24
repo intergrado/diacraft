@@ -1,0 +1,80 @@
+DiaCraft
+Copyright (c) 2026 the DiaCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+Trademarks
+
+Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.
+
+Original branding artwork
+
+assets/branding/diacraft-icon-master.png and assets/branding/diacraft-cover.png are original
+AI-assisted artwork generated for DiaCraft on 2026-11-11 using the built-in image tool.
+They are offered under the project's MIT OR Apache-2.0
+terms, to the extent rights apply. The prompts, design references and output limits are in
+docs/branding.md. No sibling drawing, third-party logo or font file is included in these assets.
+
+assets/branding/diacraft-icon-256.png is a mechanical size export of the same original icon,
+used by the native window and browser favicon under the same terms.
+
+assets/branding/diacraft-splash.png is a mechanical size export of the original cover (half its
+size, 256 colours), used as the background of the splash popup and About DiaCraft under the same terms.
+
+Third-party material
+
+This repository commits no third-party icons or images, and two third-party typefaces, which only the website uses:
+Besley (Copyright 2020 The Besley Project Authors, https://github.com/indestructible-type/Besley) and Martian Mono
+(Copyright 2021 The Martian Mono Project Authors, https://github.com/evilmartians/mono), both under the SIL Open Font
+License, Version 1.1. They are subset WOFF2 files in site/assets/hashed/, and the licence texts are in docs/licenses/fonts/
+(Besley-OFL.txt and MartianMono-OFL.txt). The programs bundle neither. Bundled material is listed here as it
+is added, and the per-file list (author, source, license) is in ATTRIBUTION.md.
+
+The Rust crates the programs are built from, on each platform, and their licences are in THIRD-PARTY-LICENSES.txt, which `cargo xtask licenses`
+makes from Cargo.lock and the crates' own files. It carries each crate's licence and NOTICE text, so that the notices travel with the programs;
+it is in every download, and the window shows it (File, About, Third-party licences).
+
+Fonts inside the egui crate. The desktop app (apps/diacraft) and the web build (apps/diacraft-web, which runs
+the same window) each compile two typefaces into the binary, taken by name from the `epaint_default_fonts`
+crate (from the egui fork pinned in Cargo.toml). Neither is in this repository, and DiaCraft does not modify
+them:
+
+- Hack Regular. Copyright 2018 Source Foundry Authors, MIT License. It derives from DejaVu (public
+  domain) and Bitstream Vera Sans Mono (Copyright 2003 Bitstream Inc., Bitstream Vera License, with the
+  Reserved Font Names "Bitstream" and "Vera"). https://github.com/source-foundry/Hack
+- Ubuntu Light, from the Ubuntu Font Family. Copyright 2011 Canonical Ltd., Ubuntu Font Licence 1.0.
+  https://design.ubuntu.com/font
+
+The `diacraft-fonts` crate (`crates/fonts/src/db.rs`) takes the same two typefaces from the same crate, by the same names, as the
+last-resort faces of the font database that draws a drawing's text: Ubuntu Light for proportional text and Hack for monospace font
+names. They are the same bytes the window carries, so a binary holds each once.
+
+The same crate holds three more typefaces, none of which DiaCraft compiles in; they are listed below the
+check that keeps them out. egui registers the first of them, `egui-icons`, together with Hack and Ubuntu Light
+whenever its `default_fonts` feature is on, and compiles its bytes in whether or not the app installs it, so
+DiaCraft leaves that feature off. `cargo xtask ci` fails if Cargo.lock lists `epaint_default_fonts` as a
+dependency of `epaint`, which is where the feature shows for every member and every target (xtask/tests/it/
+workspace.rs); a second test in crates/ui-egui/tests/it/fonts.rs checks only the build it runs on. When the project began,
+the whole file of each of the five typefaces in the crate was searched for in the debug desktop binary and in
+the release web build: Hack Regular and Ubuntu Light were found, and none of the three below.
+
+- egui-icons: a 3.5 kB subset of emoji-icon-font (MIT License, Copyright (c) 2014 John Slegers,
+  https://github.com/jslegers/emoji-icon-font) with five private-use glyphs: the Android, Windows, GitHub
+  and Apple logos and the word `git`. DiaCraft shows none of them. If the feature is ever turned on again, the
+  bytes are back in the binary, and this notice must say so; the installed font definitions would still not
+  list the icon font (src/fonts.rs).
+- Noto Emoji (SIL Open Font License 1.1) and the full emoji-icon-font (MIT), which egui's
+  `monochrome_emoji_fonts` feature compiles in. That feature is off.
+
+`deny.toml` allows `OFL-1.1` and `Ubuntu-font-1.0` because the crate declares its licence as
+"(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0", an AND, whatever is compiled out of it.
+
+mimalloc. The desktop app (apps/diacraft) and the command line (apps/diacraft-cli) use mimalloc as their global allocator, through
+the `mimalloc` and `libmimalloc-sys` crates (Copyright 2019 Octavian Oncescu, MIT License; https://github.com/purpleprotocol/mimalloc_rust),
+which compile Microsoft's mimalloc, a C library (Copyright (c) 2018-2025 Microsoft Corporation, Daan Leijen, MIT License;
+https://github.com/microsoft/mimalloc), into those two binaries with the `cc` crate. DiaCraft does not modify it. The web build does not
+include it (the crates are target dependencies of the two apps, behind `cfg(not(target_arch = "wasm32"))`).
+
+Portions are copied or adapted from the storytold craft apps (MIT OR Apache-2.0, Copyright (c) 2026
+ArtCraft Team and the respective app's contributors). The list of copied files is in docs/provenance.md.
+

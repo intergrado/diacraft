@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Draw with an AI agent · DiaCraft</title>
+  <meta name="description" content="Connect an MCP client to a new session or your open drawing." />
+  <link rel="canonical" href="https://diacraft.dev/guides/agents" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DiaCraft" />
+  <meta property="og:title" content="Draw with an AI agent · DiaCraft" />
+  <meta property="og:description" content="Connect an MCP client to a new session or your open drawing." />
+  <meta property="og:url" content="https://diacraft.dev/guides/agents" />
+  <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
+  <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0c" />
+  <link rel="icon" href="/assets/icon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="preload" href="/assets/hashed/besley-roman.f57f2cfa6c84.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast mast-ruled">
+    <div class="wrap mast-inner">
+      <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
+      <nav class="links" aria-label="Main navigation">
+        <a href="/#features">Features</a>
+        <a href="/#guides">Guides</a>
+        <a href="/changelog.html">Changelog</a>
+        <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+  </header>
+  <main id="main">
+    <header class="page-head">
+      <div class="wrap page-head-inner">
+        <div class="page-title">
+          <p class="label label-wire crumb"><a href="/#guides">Guides</a><i aria-hidden="true">/</i><span>5 of 5</span></p>
+          <h1>Draw with <em>an AI agent</em></h1>
+          <p class="lead">An agent can create a diagram in its own session or edit the drawing you see on screen. Connect an MCP client to <code>diacraft-cli</code> to give it access to DiaCraft’s drawing commands.</p>
+        </div>
+        <nav class="head-route" aria-label="Drawing guides">
+          <ol>
+            <li><a href="/guides/getting-started.html"><span>Draw your first diagram</span></a></li>
+            <li><a href="/guides/file-formats.html"><span>Open and save drawing files</span></a></li>
+            <li><a href="/guides/native-format.html"><span>Work with .diacraft files</span></a></li>
+            <li><a href="/guides/command-line.html"><span>Convert drawings from the command line</span></a></li>
+            <li><a href="/guides/agents.html" aria-current="page"><span>Draw with an AI agent</span></a></li>
+          </ol>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap doc">
+      <article class="prose">
+        <section id="headless">
+          <h2>Start a drawing in a headless session</h2>
+          <p>In your client’s Model Context Protocol (MCP) settings, add a server that communicates over standard input and output. Set its command to <code>diacraft-cli</code> and its two arguments to <code>mcp</code> and <code>--headless</code>. Use the full path to the executable if your client cannot find it. For clients with an <code>mcpServers</code> configuration, the entry looks like this.</p>
+          <figure class="console">
+            <figcaption class="console-bar">MCP client settings</figcaption>
+            <pre class="term term-keep"><code>{
+  <b>"mcpServers"</b>: {
+    <b>"diacraft"</b>: {
+      <b>"command"</b>: "diacraft-cli",
+      <b>"args"</b>: ["mcp", "--headless"]
+    }
+  }
+}</code></pre>
+          </figure>
+          <p>Give the agent a destination you can find again. For example, replace the path in this request with an unused filename in an existing folder.</p>
+          <blockquote class="ask">
+            <p class="label">A request for the agent</p>
+            <p>Create a blank drawing. Put two rectangles labelled Draft and Review side by side, connect Draft to Review, and save the drawing as <code>/path/to/review.diacraft</code>.</p>
+          </blockquote>
+          <figure class="sheet-fig">
+            <img class="sheet-paper" src="/assets/hashed/sheet-two-steps.ed3181e3ed31.webp" alt="Two rectangles side by side, labelled Draft and Review, joined by a straight connector with an arrowhead at Review." width="960" height="286" loading="lazy" />
+            <figcaption>The drawing that request describes. This one was made with the commands an agent runs through <code>command_run</code> (<code>file.new</code>, <code>shape.drop</code>, <code>shape.set_text</code> and <code>connector.add</code>), and the picture is the part of the page with the shapes, from <code>diacraft-cli export</code>.</figcaption>
+          </figure>
+          <p>The agent can use <code>command_list</code> to find commands and their parameters, and <code>command_run</code> to run them. A headless session ends with the server, so have the agent save the file before you close the client.</p>
+        </section>
+        <section id="visible-window">
+          <h2>Work in the visible window</h2>
+          <p>Launch DiaCraft with its local control port enabled.</p>
+          <figure class="console">
+            <figcaption class="console-bar">Terminal</figcaption>
+            <pre class="term term-keep"><code><i>$ </i><b>diacraft</b> <span class="nowrap">--control</span> 7997</code></pre>
+          </figure>
+          <p>In the client configuration, replace the argument list with this one and restart the MCP server.</p>
+          <figure class="console">
+            <figcaption class="console-bar">MCP client settings</figcaption>
+            <pre class="term"><code><b>"args"</b>: ["mcp", <span class="nowrap">"--connect",</span> <span class="nowrap">"127.0.0.1:7997"]</span></code></pre>
+          </figure>
+          <p>Ask the agent to use <code>doc_inspect</code> to identify the open drawing before editing. Changes now appear in that window.</p>
+          <div class="note">
+            <p class="label">Keep in mind</p>
+            <p>The local control port has no password, so run the app in this mode only while using it.</p>
+          </div>
+        </section>
+      </article>
+      <aside class="rail">
+        <nav class="toc" aria-label="On this page">
+          <p class="label">On this page</p>
+          <ol>
+            <li><a href="#headless"><span>Start a drawing in a headless session</span></a></li>
+            <li><a href="#visible-window"><span>Work in the visible window</span></a></li>
+          </ol>
+        </nav>
+      </aside>
+    </div>
+    <nav class="pager" aria-label="More guides">
+      <div class="wrap">
+        <a href="/#download"><span class="label">You have read all five</span><b>Download <span class="nowrap">DiaCraft <span class="arrow" aria-hidden="true"></span></span></b></a>
+        <a href="/#guides"><span class="label">Overview</span><b>All <span class="nowrap">guides <span class="arrow" aria-hidden="true"></span></span></b></a>
+      </div>
+    </nav>
+    <section class="closing closing-slim" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <div class="closing-copy">
+          <h2 id="closing-title">Get <em>DiaCraft.</em></h2>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="closing-note">Linux · Windows · macOS · Browser</p>
+        </div>
+        <img class="closing-art" src="/assets/hashed/octopus.79b55756b738.webp" alt="An engraved octopus holds a process rectangle and a decision diamond, joined by a connector." width="720" height="720" loading="lazy" />
+      </div>
+    </section>
+  </main>
+  <footer class="mast">
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+    <div class="wrap foot-inner foot-block">
+      <div class="foot-brand">
+        <a class="brand" href="/"><img src="/assets/icon-64.png" alt="" width="64" height="64" loading="lazy" />DiaCraft</a>
+        <p>Diagramming software for Linux, Windows, macOS and the browser. Free and open source, under the MIT or Apache 2.0 licence.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Guides</p><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
+        <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
+      </nav>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+    </div>
+  </footer>
+</body>
+</html>

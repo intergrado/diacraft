@@ -1,0 +1,27 @@
+[package]
+name = "diacraft-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft PDF export: a page of a document written as a vector PDF (craft-pdf, Krilla), with text as text in embedded font subsets where the face allows"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+diacraft-color = { workspace = true }
+diacraft-doc = { workspace = true }
+diacraft-render = { workspace = true }
+craft-pdf = { workspace = true, features = ["write"] }
+kurbo = { workspace = true }
+# The time a print may take in all (`print.rs`); `std`'s clock panics in the browser.
+web-time = { workspace = true }
+
+[dev-dependencies]
+diacraft-fonts = { workspace = true, features = ["test-support"] }
+diacraft-testkit = { workspace = true }
+png = { workspace = true }
+# Reads the PDF back in the tests, with the shared reader and interpreter (patched in the root manifest): it knows nothing of the writer.
+craft-pdf = { workspace = true, features = ["write", "interpret"] }

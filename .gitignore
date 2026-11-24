@@ -1,0 +1,9 @@
+*~
+/target
+/target-*/
+/dist
+/site-dist
+/log
+.DS_Store
+# A craft-fonts checkout for CRAFT_FONTS_DIR
+/craft-fonts

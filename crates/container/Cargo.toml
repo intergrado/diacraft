@@ -1,0 +1,31 @@
+[package]
+name = "diacraft-container"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft container: a bounded, safe ZIP reader and writer and a bounded XML tree, shared by the VSDX and OpenDocument packages"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# The content check's alignment hash can be cut to a few bits (`canon::test_support`), so that tests make every comparison a collision and prove
+# that the hash never decides what is the same. Never part of the app.
+test-support = []
+
+# Standalone (layer 0): no workspace crate at all. Every dependency here is pure Rust and builds for wasm32.
+[dependencies]
+# Inflate and deflate. `rust_backend` is `miniz_oxide`, which has no `unsafe` of its own and no C. The ZIP container itself is read in
+# `src/zipdir.rs` and written in `src/zipwrite.rs`: there is no ZIP library.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+# The checksum of each entry, compared with the one the archive states, and written with each entry.
+crc32fast = "1.5"
+# XML pull parser. It expands nothing and fetches nothing; every limit and every refusal is this crate's own.
+quick-xml = "0.42"
+
+[dev-dependencies]
+# This crate's own tests cut the hash of the content check, so they turn its `test-support` feature on, whichever package is tested.
+diacraft-container = { workspace = true, features = ["test-support"] }
+proptest = { workspace = true }

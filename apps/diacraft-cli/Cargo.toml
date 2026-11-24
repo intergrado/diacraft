@@ -1,0 +1,47 @@
+[package]
+name = "diacraft-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft command line: an MCP server on stdio, and headless runs of commands"
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "diacraft-cli"
+path = "src/main.rs"
+
+[dependencies]
+craft-atomic = { workspace = true }
+diacraft-calc = { workspace = true }
+diacraft-color = { workspace = true }
+diacraft-container = { workspace = true }
+diacraft-doc = { workspace = true }
+diacraft-engine = { workspace = true }
+diacraft-fonts = { workspace = true }
+diacraft-formula = { workspace = true }
+diacraft-mcp = { workspace = true }
+diacraft-odg = { workspace = true }
+diacraft-opc = { workspace = true }
+diacraft-pdf = { workspace = true }
+diacraft-render = { workspace = true }
+diacraft-svg = { workspace = true }
+diacraft-vsdx = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+
+# The build script (`build.rs`, the desktop app's `build_info.rs`) says which git release and which year the build is, for `app.version`. The year of
+# `SOURCE_DATE_EPOCH` is read in UTC by jiff: all date conversion goes through it (AGENTS.md).
+[build-dependencies]
+jiff = { workspace = true }
+
+# The global allocator (`main.rs`): mimalloc, a C library, for every target but the browser's.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mimalloc = { workspace = true }
+
+[dev-dependencies]
+diacraft-testkit = { workspace = true }
+proptest = { workspace = true }

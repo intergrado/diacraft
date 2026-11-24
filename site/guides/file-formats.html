@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Open and save drawing files · DiaCraft</title>
+  <meta name="description" content="Work with VSDX and OpenDocument files." />
+  <link rel="canonical" href="https://diacraft.dev/guides/file-formats" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DiaCraft" />
+  <meta property="og:title" content="Open and save drawing files · DiaCraft" />
+  <meta property="og:description" content="Work with VSDX and OpenDocument files." />
+  <meta property="og:url" content="https://diacraft.dev/guides/file-formats" />
+  <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
+  <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0c" />
+  <link rel="icon" href="/assets/icon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="preload" href="/assets/hashed/besley-roman.f57f2cfa6c84.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast mast-ruled">
+    <div class="wrap mast-inner">
+      <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
+      <nav class="links" aria-label="Main navigation">
+        <a href="/#features">Features</a>
+        <a href="/#guides">Guides</a>
+        <a href="/changelog.html">Changelog</a>
+        <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+  </header>
+  <main id="main">
+    <header class="page-head">
+      <div class="wrap page-head-inner">
+        <div class="page-title">
+          <p class="label label-wire crumb"><a href="/#guides">Guides</a><i aria-hidden="true">/</i><span>2 of 5</span></p>
+          <h1>Open and save <em>drawing files</em></h1>
+          <p class="lead">Have a drawing to revise? Use File → Open, make your changes, then choose Save to keep using its current format. Templates and flat drawings have different save rules.</p>
+        </div>
+        <nav class="head-route" aria-label="Drawing guides">
+          <ol>
+            <li><a href="/guides/getting-started.html"><span>Draw your first diagram</span></a></li>
+            <li><a href="/guides/file-formats.html" aria-current="page"><span>Open and save drawing files</span></a></li>
+            <li><a href="/guides/native-format.html"><span>Work with .diacraft files</span></a></li>
+            <li><a href="/guides/command-line.html"><span>Convert drawings from the command line</span></a></li>
+            <li><a href="/guides/agents.html"><span>Draw with an AI agent</span></a></li>
+          </ol>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap doc">
+      <article class="prose">
+        <section id="vsdx">
+          <h2>Visio drawings, stencils and templates</h2>
+          <ul>
+            <li><strong>Drawings</strong> use <code>.vsdx</code> or <code>.vsdm</code>. Use Save As with a new name if you want a separate working copy.</li>
+            <li><strong>Stencils</strong> use <code>.vssx</code> or <code>.vssm</code>. To use their shapes in a drawing, open the stencil from the Shapes window and drag a shape onto the page.</li>
+            <li><strong>Templates</strong> use <code>.vstx</code> or <code>.vstm</code>. Opening a template starts an untitled drawing. Its first save asks for a name of its own.</li>
+          </ul>
+          <p>The formats ending in <code>m</code> can carry a macro project. DiaCraft preserves the project as file data and never runs it. If you choose a VSDX type that cannot carry macros, Save As asks whether to leave them out. Cancel to keep the project.</p>
+        </section>
+        <section id="opendocument">
+          <h2>OpenDocument drawings</h2>
+          <p>Open an <code>.odg</code> to edit a packaged drawing. Open an <code>.otg</code> to start a new drawing from a template. If an edit cannot be written to the requested format, DiaCraft explains why and leaves the existing file intact.</p>
+          <p>A <code>.fodg</code> holds its drawing in a single XML file. Save writes edits back to that file. Save As writes the drawing as another type and leaves the <code>.fodg</code> as it was; no Save As writes a <code>.fodg</code>.</p>
+        </section>
+        <section id="another-format">
+          <h2>Choose another format</h2>
+          <p>Choose <strong>File → Save As</strong> and pick a type. Select <code>.diacraft</code> to keep editing in DiaCraft’s native format, or save a VSDX drawing as an OpenDocument drawing and an OpenDocument drawing as a VSDX type. Where the new type cannot hold part of a drawing, the save tells you what, in words. To share a finished page, use <strong>File → Export</strong> for PNG, SVG or PDF.</p>
+          <div class="table-scroll" tabindex="0" role="group" aria-label="What each drawing can be saved as">
+            <table>
+              <thead>
+                <tr><th scope="col">The drawing came from</th><th scope="col">Save writes</th><th scope="col">Save As can write</th></tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">A VSDX drawing, <code>.vsdx</code> or <code>.vsdm</code></th><td>The same file</td><td>Any of the six VSDX types, a <code>.diacraft</code> file, <code>.odg</code> or <code>.otg</code></td></tr>
+                <tr><th scope="row">An OpenDocument drawing, <code>.odg</code></th><td>The same file</td><td><code>.odg</code>, <code>.otg</code>, a <code>.diacraft</code> file or a VSDX type</td></tr>
+                <tr><th scope="row">A flat OpenDocument drawing, <code>.fodg</code></th><td>The same flat file</td><td>A <code>.diacraft</code> file, <code>.odg</code>, <code>.otg</code> or a VSDX type</td></tr>
+                <tr><th scope="row">A DiaCraft drawing, <code>.diacraft</code></th><td>The same file</td><td>The three <code>.diacraft</code> kinds, the six VSDX types, <code>.odg</code> or <code>.otg</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>A stencil is never saved as an OpenDocument file. <a href="/guides/command-line.html">Convert a drawing from the command line</a></p>
+        </section>
+      </article>
+      <aside class="rail">
+        <nav class="toc" aria-label="On this page">
+          <p class="label">On this page</p>
+          <ol>
+            <li><a href="#vsdx"><span>VSDX drawings, stencils and templates</span></a></li>
+            <li><a href="#opendocument"><span>OpenDocument drawings</span></a></li>
+            <li><a href="#another-format"><span>Choose another format</span></a></li>
+          </ol>
+        </nav>
+      </aside>
+    </div>
+    <nav class="pager" aria-label="More guides">
+      <div class="wrap">
+        <a href="/guides/native-format.html"><span class="label">Next guide · 3 of 5</span><b>Work with .diacraft <span class="nowrap">files <span class="arrow" aria-hidden="true"></span></span></b></a>
+        <a href="/#guides"><span class="label">Overview</span><b>All <span class="nowrap">guides <span class="arrow" aria-hidden="true"></span></span></b></a>
+      </div>
+    </nav>
+    <section class="closing closing-slim" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <div class="closing-copy">
+          <h2 id="closing-title">Get <em>DiaCraft.</em></h2>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="closing-note">Linux · Windows · macOS · Browser</p>
+        </div>
+        <img class="closing-art" src="/assets/hashed/octopus.79b55756b738.webp" alt="An engraved octopus holds a process rectangle and a decision diamond, joined by a connector." width="720" height="720" loading="lazy" />
+      </div>
+    </section>
+  </main>
+  <footer class="mast">
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+    <div class="wrap foot-inner foot-block">
+      <div class="foot-brand">
+        <a class="brand" href="/"><img src="/assets/icon-64.png" alt="" width="64" height="64" loading="lazy" />DiaCraft</a>
+        <p>Diagramming software for Linux, Windows, macOS and the browser. Free and open source, under the MIT or Apache 2.0 licence.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Guides</p><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
+        <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
+      </nav>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+    </div>
+  </footer>
+</body>
+</html>

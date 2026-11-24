@@ -1,0 +1,91 @@
+# cargo-deny policy. Run with `cargo xtask deny`; part of `cargo xtask ci`.
+# Code dependencies follow the same rule as assets (AGENTS.md): permissive licences only. GPL, AGPL and
+# LGPL are denied by omission from the allow list: they are never linked. MPL-2.0 is allowed for
+# unmodified dependencies only, and each one needs a NOTICE entry (AGENTS.md, the rule on licences).
+# The gate runs `licenses`, `bans`, `sources` and `advisories` (the RustSec database; `cargo xtask deny` says what it does when the
+# database cannot be fetched). A crate with a vulnerability fails it. An unmaintained or unsound crate fails it too, until an `ignore`
+# entry below says, with the day it was read, why it stays and what blocks its removal.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every unmaintained or unsound crate fails the gate, direct or not: the defaults let a transitive unsound one pass as a note.
+unmaintained = "all"
+unsound = "all"
+# `cargo deny` reports an ignore that no crate in the lock needs any more (`unused-ignored-advisory`, a warning): delete that entry.
+# Each reason names the day it was read (2026-11-21; the RustSec database of 2026-11-19) and what blocks the removal.
+ignore = [
+    # The three zbus crates reach us through `eframe` -> `egui-winit` -> `accesskit_winit` 0.34 -> `accesskit_unix` 0.24.1 -> `atspi` 0.29 and `zbus` 5.19
+    # (Linux screen-reader support). The three were merged into `zbus` 6.0, and `accesskit_unix` (0.24.1, the newest) still asks `zbus ^5.19`.
+    { id = "RUSTSEC-2026-0370", reason = "2026-11-21: `zvariant` 5.15, merged into zbus 6.0; reached through egui's accessibility (accesskit_unix 0.24.1 asks zbus ^5.19). Drop when accesskit_unix moves to zbus 6." },
+    { id = "RUSTSEC-2026-0371", reason = "2026-11-21: `zbus_names` 4.3, merged into zbus 6.0; reached through egui's accessibility (accesskit_unix 0.24.1 asks zbus ^5.19). Drop when accesskit_unix moves to zbus 6." },
+    { id = "RUSTSEC-2026-0372", reason = "2026-11-21: `zvariant_derive` 5.15, merged into zbus 6.0; reached through egui's accessibility (accesskit_unix 0.24.1 asks zbus ^5.19). Drop when accesskit_unix moves to zbus 6." },
+    # `proc-macro-error` 1.0.4 is Windows only: `craft-print` -> `winprint` -> `fmt-derive` 0.1.2 (the newest, unchanged since 2024-05) -> `fmt-derive-proc`.
+    { id = "RUSTSEC-2024-0370", reason = "2026-11-21: `proc-macro-error` 1.0.4, Windows only, through craft-print's winprint -> fmt-derive 0.1.2 (the newest). Drop when the winprint fork drops fmt-derive." },
+    # `chrono` 0.4.45 has no replacement version ("all versions affected"; its maintainer is winding it down). DiaCraft's own code uses jiff. What is left reaches the lock
+    # only through the build dependencies of `winprint` (Windows, `craft-print`'s printing): `sigstore-verify`, `sigstore-trust-root`, `-tsa` and `-types` use it, for the PDFium
+    # download that runs only with winprint's `pdfium` feature, which `craft-print` leaves off. A build dependency is in no DiaCraft binary. The blocker is the one of
+    # `webpki-root-certs` (below): winprint's build dependencies are not optional.
+    { id = "RUSTSEC-2026-0543", reason = "2026-11-21: `chrono` 0.4.45, unmaintained, no patched version; DiaCraft's own code uses jiff, and what is left is a build dependency of winprint (Windows, through sigstore). Drop when the winprint fork makes those build-dependencies optional." },
+]
+
+[licenses]
+confidence-threshold = 0.9
+# The list is the policy, not an inventory of what is used today: do not warn about licences no dependency has.
+unused-allowed-license = "allow"
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",
+    # The font licences of egui's bundled interface fonts: `epaint_default_fonts` states the licence of
+    # the crate as "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0", an AND, so each part must be on
+    # this list. The fonts ship inside the egui crate and this repository commits none (NOTICE lists them).
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+unused-allowed-source = "allow"
+# Shared UI components, pinned to an immutable revision in Cargo.toml, and the reviewed egui 0.37 and
+# winit fork revisions (immutable pins, in `[patch.crates-io]`). Cargo.toml and Cargo.lock write the fork
+# URLs with `.git` and this list without it; cargo-deny compares them without the suffix (checked with
+# a real run: dropping the egui line makes `cargo deny check sources` fail).
+allow-git = [
+    "https://github.com/storytold/craft-libs",
+    # `craft-pathops` (the shape operations) and the `linesweeper` it sweeps with (vendored there, MIT OR Apache-2.0) come from the one-bit fork, at one
+    # immutable revision pinned in Cargo.toml (the `craft-pathops` line and the `linesweeper` patch), until storytold/craft-libs#677 merges. Then both move to
+    # storytold/craft-libs and this entry goes. `craft-snap` (the snapping) comes from the same fork, on its `craft-snap` branch pinned by full revision in
+    # Cargo.toml; it moves to storytold/craft-libs when the crate's pull request merges, and the entry goes when both have.
+    "https://github.com/one-bit/craft-libs",
+    # `craft-print` (the system's printing) pins storytold's winprint fork, which holds its Windows spooler calls, to immutable revisions
+    # of its own (BSD-3-Clause, MIT OR Apache-2.0).
+    "https://github.com/storytold/winprint.rs",
+    "https://github.com/storytold/egui",
+    "https://github.com/storytold/winit",
+]
+
+# winprint (`craft-print`'s Windows spooler) lists `reqwest` as a build-dependency for a PDFium download that only runs with its `pdfium`
+# feature, which `craft-print` leaves off. The certificate bundle `reqwest` brings is CDLA-Permissive-2.0 data (a permissive licence for data,
+# the kind AGENTS.md allows), compiled into winprint's Windows build script and into no DiaCraft binary. One crate, one licence: nothing else is
+# allowed CDLA-Permissive-2.0. Remove when winprint makes those build-dependencies optional.
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]

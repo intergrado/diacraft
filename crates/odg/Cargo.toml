@@ -1,0 +1,37 @@
+[package]
+name = "diacraft-odg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft OpenDocument Drawing: the .odg package (mimetype, manifest, parts), its reader into the ShapeSheet model, and an element-level comparison of two packages"
+publish = false
+
+[lints]
+workspace = true
+
+# Layer 3, a file format. It reads the package through the container (layer 0, standalone), which reads and writes the ZIP archive and the
+# XML trees, and builds the document model (layer 1), parsing the formulas its reader writes with the formula crate (layer 0). Every
+# dependency builds for wasm32.
+[dependencies]
+diacraft-container = { workspace = true }
+diacraft-doc = { workspace = true }
+diacraft-formula = { workspace = true }
+# The ShapeSheet XML codec (layer 2): DiaCraft's cells in a drawing are carried by the code that carries them in the other format.
+diacraft-sheetxml = { workspace = true }
+# The preset shapes (`read/preset/`, ported from DeckCraft) are built as kurbo paths.
+kurbo = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+# The tests of a save count the sections the model's own lookups scanned (`diacraft_doc::work`), so they turn the model's `test-support` feature on.
+diacraft-doc = { workspace = true, features = ["test-support"] }
+# The tests' own ZIP writer (`tests/it/zipbuild.rs`) builds what no honest writer makes (a `mimetype` with an extra field, a stored entry
+# that is encrypted): the versions the container crate uses.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.5"
+# The files that a build made before the id moved to `diacraft.app` wrote (`tests/it/old_namespace.rs`, APPID). The testkit depends on the engine, which depends on this crate; Cargo allows
+# that cycle for a dev-dependency, and the tests that use it are integration tests (`tests/it`), which link this crate once.
+diacraft-testkit = { workspace = true }
+# The counting allocator of the test binary (`tests/it/main.rs`): `memory_counted` counts what a read keeps.
+stats_alloc = { workspace = true }

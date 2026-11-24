@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DiaCraft — Open, edit and convert Visio and OpenDocument drawings</title>
+  <meta name="description" content="A free, open-source diagram editor. Open, edit and convert Visio and OpenDocument drawings on Linux, Windows, macOS or in your browser." />
+  <link rel="canonical" href="https://diacraft.dev/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DiaCraft" />
+  <meta property="og:title" content="DiaCraft — Open, edit and convert Visio and OpenDocument drawings" />
+  <meta property="og:description" content="A free, open-source diagram editor. Open, edit and convert Visio and OpenDocument drawings on Linux, Windows, macOS or in your browser." />
+  <meta property="og:url" content="https://diacraft.dev/" />
+  <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
+  <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0c" />
+  <link rel="icon" href="/assets/icon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="preload" href="/assets/hashed/besley-roman.f57f2cfa6c84.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script defer="defer" src="/download.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast mast-ruled">
+    <div class="wrap mast-inner">
+      <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
+      <nav class="links" aria-label="Main navigation">
+        <a href="/#features">Features</a>
+        <a href="/#guides">Guides</a>
+        <a href="/changelog.html">Changelog</a>
+        <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+  </header>
+  <main id="main">
+    <section class="hero" aria-labelledby="promise">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="label label-wire">Free, open-source diagram editor</p>
+          <h1 id="promise">Open, edit and convert <em>Visio and OpenDocument drawings.</em></h1>
+          <p class="lede">Bring the files you already have. DiaCraft saves each drawing back as the type it came in, or converts it to another, in the window or from the command line. OpenDocument is the format of LibreOffice Draw and OpenOffice.</p>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="hero-note"><span>Linux · Windows · macOS · Browser</span><a class="text-link" href="/guides/getting-started.html">Getting started <span class="arrow" aria-hidden="true"></span></a></p>
+        </div>
+        <figure class="flow">
+          <ul class="flow-in" aria-label="DiaCraft opens">
+            <li><span class="node"><code>.vsdx</code></span></li>
+            <li><span class="node"><code>.odg</code></span></li>
+            <li><span class="node"><code>.diacraft</code></span></li>
+          </ul>
+          <div class="wire wire-in" aria-hidden="true"><i></i></div>
+          <div class="window">
+            <picture>
+              <source media="(prefers-color-scheme: dark)" srcset="/assets/hashed/swimlanes-dark.96c0a5dbdd75.webp" />
+              <img src="/assets/hashed/swimlanes-light.af7021da0198.webp" alt="The DiaCraft window with a cross-functional flowchart. Three swimlanes, Author, Reviewer and Publisher, hold six shapes joined by connectors, and one shape is selected." width="1656" height="1035" fetchpriority="high" />
+            </picture>
+          </div>
+          <div class="wire wire-out" aria-hidden="true"><i></i><i></i></div>
+          <ul class="flow-out" aria-label="DiaCraft writes">
+            <li><span class="node"><span class="label">Save as</span><code>.diacraft</code><code>.vsdx</code><code>.odg</code></span></li>
+            <li><span class="node"><span class="label">Export a page</span><code>PNG</code><code>SVG</code><code>PDF</code></span></li>
+          </ul>
+          <figcaption class="visually-hidden">Drawings of three kinds go into the editor. It saves a drawing as one of the three, or exports a page as a picture or a PDF.</figcaption>
+        </figure>
+      </div>
+    </section>
+    <section class="band formats" id="formats" aria-labelledby="formats-title">
+      <div class="wrap">
+        <div class="section-head head-split">
+          <div>
+            <p class="label label-wire">Formats</p>
+            <h2 id="formats-title">One drawing, <em>three files.</em></h2>
+          </div>
+          <p>Save keeps a drawing in the format it arrived in. Save As writes it as another type, and <code>diacraft-cli convert</code> does the same from a terminal.</p>
+        </div>
+        <div class="convert">
+          <figure class="triptych">
+            <ol class="sheets">
+              <li class="sheet">
+                <p class="sheet-head"><code class="sheet-tab">review.diacraft</code><span class="sheet-via" aria-hidden="true"><span>Save As</span></span></p>
+                <img class="sheet-paper" src="/assets/hashed/sheet-diacraft.8f91a45025a4.webp" alt="The Draft column of a cross-functional flowchart, from the .diacraft file: the lanes Author, Reviewer and Publisher, and a Start shape." width="528" height="1011" loading="lazy" />
+              </li>
+              <li class="sheet">
+                <p class="sheet-head"><code class="sheet-tab">review.vsdx</code><span class="sheet-via" aria-hidden="true"><span>convert</span></span></p>
+                <img class="sheet-paper" src="/assets/hashed/sheet-vsdx.7ac2440b1f51.webp" alt="The Review column, from the .vsdx file: Draw the flow, the decision Clear? and Export a PDF, joined by connectors that run on from the first sheet." width="480" height="1011" loading="lazy" />
+              </li>
+              <li class="sheet">
+                <p class="sheet-head"><code class="sheet-tab">review.odg</code></p>
+                <img class="sheet-paper" src="/assets/hashed/sheet-odg.9ecf47ac76cb.webp" alt="The Release column, from the .odg file: Mark changes and Share, with the connectors that reach them from the second sheet." width="528" height="1011" loading="lazy" />
+              </li>
+            </ol>
+            <figcaption>The drawing in the window above, saved as three files: Save As wrote the <code>.vsdx</code>, and <code>diacraft-cli convert</code> made the <code>.odg</code> from it. DiaCraft draws the same picture from each, so every sheet here is cut from a different file.</figcaption>
+          </figure>
+          <div class="ledger">
+            <dl class="format-list">
+              <div><dt>Open &amp; save</dt><dd>Visio drawings, stencils and templates (<code>.vsdx</code>, <code>.vsdm</code>, <code>.vssx</code>, <code>.vssm</code>, <code>.vstx</code>, <code>.vstm</code>), OpenDocument (<code>.odg</code>, <code>.otg</code>), and native <code>.diacraft</code> files.</dd></div>
+              <div><dt>Convert</dt><dd>Save a drawing of one family as a type of another. Where the new type cannot hold part of a drawing, the save tells you what, in words.</dd></div>
+              <div><dt>Export a page</dt><dd>Choose PNG for a raster image, SVG for scalable artwork, or PDF for sharing.</dd></div>
+              <div><dt>Print</dt><dd>Preview the sheets, choose the pages you need, then send the drawing to your system printer.</dd></div>
+            </dl>
+            <p class="format-note">The older binary and XML drawing types (<code>.vsd</code>, <code>.vdx</code>) are not supported.</p>
+            <a class="text-link" href="/guides/file-formats.html">File format guide <span class="arrow" aria-hidden="true"></span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="band editor" id="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <div class="section-head head-split">
+          <div>
+            <p class="label label-wire">The editor</p>
+            <h2 id="features-title">Inside <em>the editor</em></h2>
+          </div>
+          <p>A flowchart on a sheet whose frame and title block belong to a background page. The numbers mark what the notes below describe.</p>
+        </div>
+        <figure class="plate">
+          <div class="plate-scroll" tabindex="0" role="group" aria-label="Screenshot of the editor, with numbered pins">
+            <div class="plate-stage">
+              <picture>
+                <source media="(prefers-color-scheme: dark)" srcset="/assets/hashed/review-process-dark.0977a4c22845.webp" />
+                <img src="/assets/hashed/review-process-light.45a344b21a4d.webp" alt="The DiaCraft window with the Design tab open. A flowchart of eight shapes sits on a sheet with a frame and a title block, one connector is selected, and the Shapes window lists the Basic Flowchart stencil." width="1656" height="1035" loading="lazy" />
+              </picture>
+              <span class="pin pin-1" aria-hidden="true">1</span>
+              <span class="pin pin-2" aria-hidden="true">2</span>
+              <span class="pin pin-3" aria-hidden="true">3</span>
+              <span class="pin pin-4" aria-hidden="true">4</span>
+            </div>
+          </div>
+          <figcaption class="plate-hint">Scroll the picture sideways to see the whole window.</figcaption>
+        </figure>
+        <ol class="legend">
+          <li class="feature"><h3><span class="pin" aria-hidden="true">1</span>Start with a stencil</h3><p>Drag shapes from seven built-in stencils, including Basic Flowchart and Gane-Sarson. Open a stencil file to add your own choices.</p></li>
+          <li class="feature"><h3><span class="pin" aria-hidden="true">2</span>Route a connector</h3><p>Use AutoConnect to join a neighbour. Drag a handle on a right-angle connector to move a leg around a label.</p></li>
+          <li class="feature"><h3><span class="pin" aria-hidden="true">3</span>Change the colour scheme</h3><p>Choose a theme from the Design tab, then try its variants to change the colours across a page.</p></li>
+          <li class="feature"><h3><span class="pin" aria-hidden="true">4</span>Reuse a background</h3><p>Give a background page a title block or frame. Assign it to the pages that need it and edit it in one place.</p></li>
+        </ol>
+        <ul class="extras">
+          <li class="extra">
+            <div class="doodle" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div><h3>Draw a custom shape</h3><p>Draw rectangles, ellipses and arcs, or sketch a freeform path and close it to make a filled shape.</p></div>
+          </li>
+          <li class="extra">
+            <div class="doodle doodle-tab" aria-hidden="true"><i></i><i></i></div>
+            <div><h3>Runs in your browser</h3><p>Nothing to install: a current desktop browser runs the editor in a tab and keeps your drawing on your computer.</p><a class="text-link" href="/browser.html">What it needs and what it <span class="nowrap">keeps <span class="arrow" aria-hidden="true"></span></span></a></div>
+          </li>
+        </ul>
+      </div>
+    </section>
+    <section class="band automate" id="automate" aria-labelledby="automate-title">
+      <div class="wrap">
+        <div class="section-head head-split">
+          <div>
+            <p class="label label-wire">Automation</p>
+            <h2 id="automate-title">Automate <em>drawing tasks.</em></h2>
+          </div>
+          <p>Convert files from the command line or connect an AI agent through the MCP server to inspect and edit a drawing.</p>
+        </div>
+        <div class="consoles">
+          <div class="console-col">
+            <figure class="console">
+              <figcaption class="console-bar">Terminal</figcaption>
+              <pre class="term"><code><i>$ </i><b>diacraft-cli</b> convert review.vsdx <span class="nowrap">--out</span> review.odg
+<span class="out">{"bytes":13125,"carried":{"classes":["window settings", …</span>
+<i>$ </i><b>diacraft-cli</b> export review.odg <span class="nowrap">--out</span> review.png <span class="nowrap">--dpi</span> 144
+<span class="out">{"bytes":63748,"format":"png","height":1224,"out":"review.png","page":{"id":1,"name":"Page-1"},"skipped":[],"width":1584}</span><span class="more">
+<i>$ </i><b>diacraft-cli</b> export review.odg <span class="nowrap">--out</span> review.pdf
+<span class="out">{"bytes":21518,"format":"pdf","height":612,"out":"review.pdf","page":{"id":1,"name":"Page-1"},"skipped":[{"count":3,"first":"shape 10: a blurred shadow drawn hard-edged","kind":"ShadowApproximate"}],"width":792}</span></span></code></pre>
+            </figure>
+            <h3>From the command line</h3>
+            <p>Write an editable drawing with <code>convert</code>, or a picture of one page with <code>export</code>. Both work without opening a window, and each prints a line of JSON that says what it wrote.</p>
+            <a class="text-link" href="/guides/command-line.html">Command-line guide <span class="arrow" aria-hidden="true"></span></a>
+          </div>
+          <div class="console-col">
+            <figure class="console">
+              <figcaption class="console-bar">MCP client settings</figcaption>
+              <pre class="term term-keep"><code>{
+  <b>"mcpServers"</b>: {
+    <b>"diacraft"</b>: {
+      <b>"command"</b>: "diacraft-cli",
+      <b>"args"</b>: ["mcp", "--headless"]
+    }
+  }
+}</code></pre>
+            </figure>
+            <h3>With an AI agent</h3>
+            <p>An agent can create a diagram in its own session or edit the drawing you see on screen. It finds the drawing commands with <code>command_list</code> and runs them with <code>command_run</code>.</p>
+            <a class="text-link" href="/guides/agents.html">Agent guide <span class="arrow" aria-hidden="true"></span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="band slab" id="privacy" aria-labelledby="privacy-title">
+      <div class="wrap">
+        <div class="slab-top">
+          <div>
+            <p class="label label-wire">Privacy</p>
+            <h2 id="privacy-title">Your drawings stay <em>on your desk.</em></h2>
+          </div>
+          <ul class="slab-facts">
+            <li><b>No</b> account</li>
+            <li><b>No</b> telemetry</li>
+            <li><b>Offline</b> draw, save, export</li>
+          </ul>
+        </div>
+        <div class="slab-text">
+          <p>Draw, save and export offline. DiaCraft needs no account and collects no telemetry. If a file is damaged or exceeds a reader’s safety limits, the app explains why it cannot open it.</p>
+          <p>The optional control port listens on your own computer. An MCP client can use a connection you specify. Your print service handles printer jobs, and licence links open in your browser.</p>
+          <a class="text-link" href="/privacy.html">Privacy details <span class="arrow" aria-hidden="true"></span></a>
+        </div>
+      </div>
+    </section>
+    <section class="band get" id="download" aria-labelledby="download-title">
+      <div class="wrap">
+        <div class="get-sheet">
+          <div class="get-head">
+            <img class="app-icon" src="/assets/icon-192.png" alt="" width="192" height="192" loading="lazy" />
+            <div class="get-title">
+              <p class="label label-wire">Get it</p>
+              <h2 id="download-title">Download DiaCraft</h2>
+            </div>
+            <div class="get-note">
+              <p>Each download holds the app and the command line tool. The release page lists every version, with a SHA256SUMS file to check them. <a href="/changelog.html">Read the changelog</a>.</p>
+              <p class="release-state" data-release-version="">0.2 is in development.</p>
+            </div>
+          </div>
+          <div class="platforms">
+            <div class="platform">
+              <h3>Linux</h3>
+              <dl class="spec">
+                <div><dt>Needs</dt><dd>A 64-bit Linux with glibc 2.35 or newer.</dd></div>
+                <div><dt>File</dt><dd><code>.tar.gz</code></dd></div>
+                <div><dt>Install</dt><dd>Unpack the archive and run the app from its folder, or run install.sh to add it to your application menu.</dd></div>
+              </dl>
+              <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-platform="linux" data-asset="diacraft-{tag}-linux-x86_64.tar.gz" class="btn" aria-label="Download DiaCraft for Linux">Download <span class="arrow arrow-out" aria-hidden="true"></span></a>
+            </div>
+            <div class="platform">
+              <h3>Windows</h3>
+              <dl class="spec">
+                <div><dt>Needs</dt><dd>64-bit Windows 10 or 11.</dd></div>
+                <div><dt>File</dt><dd><code>.zip</code></dd></div>
+                <div><dt>Install</dt><dd>Unpack the zip and double-click diacraft.exe. The download is not signed yet, so Windows may ask you to confirm the first time.</dd></div>
+              </dl>
+              <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-platform="windows" data-asset="diacraft-{tag}-windows-x86_64.zip" class="btn" aria-label="Download DiaCraft for Windows">Download <span class="arrow arrow-out" aria-hidden="true"></span></a>
+            </div>
+            <div class="platform">
+              <h3>macOS</h3>
+              <dl class="spec">
+                <div><dt>Needs</dt><dd>macOS 11 or newer, on Apple silicon and Intel Macs.</dd></div>
+                <div><dt>File</dt><dd><code>.zip</code></dd></div>
+                <div><dt>Install</dt><dd>Open the zip and drag DiaCraft.app to Applications. The download is not signed yet, so macOS asks you to confirm the first time.</dd></div>
+              </dl>
+              <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-platform="macos" data-asset="diacraft-{tag}-macos-universal.zip" class="btn" aria-label="Download DiaCraft for macOS">Download <span class="arrow arrow-out" aria-hidden="true"></span></a>
+            </div>
+          </div>
+          <div class="platform-browser">
+            <div><h3>In your browser</h3><p>Nothing to install. A current desktop browser runs the editor in a tab and keeps your drawing on your computer. It opens, saves and exports your files, with a few limits the desktop app does not have.</p></div>
+            <a data-app="" href="https://diacraft.app/" class="btn btn-ghost" aria-label="Open DiaCraft in your browser">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="band guides" id="guides" aria-labelledby="guides-title">
+      <div class="wrap">
+        <div class="section-head head-split">
+          <div>
+            <p class="label label-wire">Learn</p>
+            <h2 id="guides-title">Five guides, <em>one route.</em></h2>
+          </div>
+          <p>From your first flowchart to a conversion you can repeat from a terminal.</p>
+        </div>
+        <nav class="route" aria-label="Drawing guides">
+          <a class="stop" href="/guides/getting-started.html"><span class="stop-name">Draw your first diagram</span><span class="stop-text">Make a two-step review process: label each step, join the steps, then move one to see how the connector follows.</span><span class="stop-go">Start here <span class="arrow" aria-hidden="true"></span></span></a>
+          <a class="stop" href="/guides/file-formats.html"><span class="stop-name">Open and save drawing files</span><span class="stop-text">Open a drawing, make your changes, then choose Save to keep using its current format.</span><span class="stop-go">Read <span class="arrow" aria-hidden="true"></span></span></a>
+          <a class="stop" href="/guides/native-format.html"><span class="stop-name">Work with .diacraft files</span><span class="stop-text">A new drawing defaults to .diacraft the first time you save. Reopen it to edit its pages, shapes, labels and connections.</span><span class="stop-go">Read <span class="arrow" aria-hidden="true"></span></span></a>
+          <a class="stop" href="/guides/command-line.html"><span class="stop-name">Convert drawings from the command line</span><span class="stop-text">Write an editable drawing, or make a picture of one page, without opening a window.</span><span class="stop-go">Read <span class="arrow" aria-hidden="true"></span></span></a>
+          <a class="stop" href="/guides/agents.html"><span class="stop-name">Draw with an AI agent</span><span class="stop-text">Connect an MCP client, and an agent can create a diagram or edit the drawing you see on screen.</span><span class="stop-go">Read <span class="arrow" aria-hidden="true"></span></span></a>
+        </nav>
+      </div>
+    </section>
+    <div class="band last">
+      <div class="wrap duo">
+        <section class="faq" id="faq" aria-labelledby="faq-title">
+          <div class="section-head">
+            <p class="label label-wire">FAQ</p>
+            <h2 id="faq-title">Questions</h2>
+          </div>
+          <details open="open"><summary>What should I save a new drawing as?</summary><p>Use the default <code>.diacraft</code> format to keep an editable drawing. When you open an existing <code>.vsdx</code> or <code>.odg</code>, Save writes back to that format. <a href="/guides/native-format.html">Explore the native format</a>.</p></details>
+          <details><summary>Can I export just one page?</summary><p>Yes. Export a page from the window, or choose it by number with <code>diacraft-cli export</code>. <a href="/guides/command-line.html">See command-line examples</a>.</p></details>
+          <details><summary>Can I try DiaCraft without installing it?</summary><p>Yes. <a data-app="" href="https://diacraft.app/">Open DiaCraft in your browser</a> to draw in a tab. It opens and saves <code>.diacraft</code>, <code>.vsdx</code> and <code>.odg</code> files on your computer and exports PNG, SVG and PDF, and it sends nothing anywhere. Very large drawings, your own fonts and printing are for the desktop app. <a href="/browser.html">What the browser version needs and what it keeps</a></p></details>
+          <details><summary>Does DiaCraft run macros in a drawing?</summary><p>No. A macro-enabled package can carry its macro project when saved in a macro-enabled type. DiaCraft never executes that project.</p></details>
+        </section>
+        <section class="community" id="contribute" aria-labelledby="community-title">
+          <p class="label label-wire">Open source</p>
+          <h2 id="community-title">Help shape DiaCraft.</h2>
+          <p>If a connector takes an unexpected turn or a drawing opens differently than you expected, <a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">open an issue</a>. Include the file type, your platform and the steps that led to the result.</p>
+          <p><a data-repo="" href="https://github.com/intergrado/diacraft">Browse the source</a> to contribute a fix. The code is available under your choice of the <a data-repo="/blob/HEAD/LICENSE-MIT" href="https://github.com/intergrado/diacraft/blob/HEAD/LICENSE-MIT">MIT</a> or <a data-repo="/blob/HEAD/LICENSE-APACHE" href="https://github.com/intergrado/diacraft/blob/HEAD/LICENSE-APACHE">Apache 2.0</a> licence. Credits are in <a data-repo="/blob/HEAD/NOTICE" href="https://github.com/intergrado/diacraft/blob/HEAD/NOTICE">NOTICE</a>, and the licences of the libraries DiaCraft is built from are in <a data-repo="/blob/HEAD/THIRD-PARTY-LICENSES.txt" href="https://github.com/intergrado/diacraft/blob/HEAD/THIRD-PARTY-LICENSES.txt">THIRD-PARTY-LICENSES.txt</a>, which every download carries too.</p>
+        </section>
+      </div>
+    </div>
+    <section class="closing" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <div class="closing-copy">
+          <h2 id="closing-title">Draw your <em>first flowchart.</em></h2>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a class="btn btn-ghost" href="/guides/getting-started.html">Follow the guide <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="closing-note">Linux · Windows · macOS · Browser</p>
+        </div>
+        <img class="closing-art" src="/assets/hashed/octopus.79b55756b738.webp" alt="An engraved octopus holds a process rectangle and a decision diamond, joined by a connector." width="720" height="720" loading="lazy" />
+      </div>
+    </section>
+  </main>
+  <footer class="mast">
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+    <div class="wrap foot-inner foot-block">
+      <div class="foot-brand">
+        <a class="brand" href="/"><img src="/assets/icon-64.png" alt="" width="64" height="64" loading="lazy" />DiaCraft</a>
+        <p>Diagramming software for Linux, Windows, macOS and the browser. Free and open source, under the MIT or Apache 2.0 licence.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Guides</p><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
+        <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
+      </nav>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+    </div>
+  </footer>
+</body>
+</html>

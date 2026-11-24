@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#202020">
+  <meta name="theme-color" content="#efefef" media="(prefers-color-scheme: light)">
+  <title>DiaCraft</title>
+  <!-- trunk builds the `diacraft-web` binary and adds the script that starts it (`cargo xtask site --web` replaces that script with the loader: loader.js). Nothing here is fetched from
+       another site: no script, style or font by URL, and nothing inline (no style element, no script, no style
+       attribute), so the page runs under the website's content security policy for the app (`script-src 'self'
+       'wasm-unsafe-eval'`, `style-src 'self'`). The colours are in page.css and are the theme tokens'
+       (crates/ui-egui/src/theme.rs, the canvas and the status text), kept in step by a test. -->
+  <link data-trunk rel="icon" href="../../assets/branding/diacraft-icon-256.png" type="image/png" />
+  <!-- The web app manifest: what lets a browser open the app in a window of its own, where the keys a tab keeps (Ctrl+N, Ctrl+W) go to the page. Its name is not `manifest.json`, which is
+       the module's list of parts. Trunk copies the manifest and the two icons it names beside the page, as they are. The app needs no service worker: Chrome and Edge install a page
+       with a manifest, a name, the two icons and a start page. -->
+  <link data-trunk rel="copy-file" href="diacraft.webmanifest" />
+  <link data-trunk rel="copy-file" href="../../site/assets/icon-192.png" />
+  <link data-trunk rel="copy-file" href="../../site/assets/icon-512.png" />
+  <link rel="manifest" href="diacraft.webmanifest" />
+  <link data-trunk rel="css" href="page.css" />
+  <link data-trunk rel="rust" data-bin="diacraft-web" data-cargo-profile-release="web" data-wasm-opt="z" />
+</head>
+<body>
+  <canvas id="diacraft_canvas"></canvas>
+  <!-- What the loader (loader.js, which `cargo xtask site --web` makes the page's start script) keeps up to date while the program comes: the words, and the bytes that have arrived
+       out of the bytes there are. The program takes the whole element away when it has drawn its first frame, and puts its own words in it when it cannot start. The button
+       shows only when something went wrong. -->
+  <div id="diacraft_loading" role="status">
+    <p id="diacraft_status">Loading DiaCraft&hellip;</p>
+    <progress id="diacraft_progress" max="1" value="0" aria-labelledby="diacraft_status"></progress>
+    <button id="diacraft_again" type="button" hidden>Try again</button>
+  </div>
+</body>
+</html>

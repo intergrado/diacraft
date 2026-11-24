@@ -1,0 +1,20 @@
+[alias]
+xtask = "run --package xtask --"
+
+# Windows. Pass `--target x86_64-pc-windows-msvc` when you build: then these flags reach the program's own binaries
+# only, and the build scripts and procedural macros that Cargo builds for the host are left alone. Linux and macOS builds read none of this.
+#
+# * `crt-static` links the C runtime into the programs, so a Windows without the Visual C++ runtime installed still starts them. The C
+#   allocator (mimalloc) is built the same way: the `cc` crate follows this feature.
+# * A Windows program's main thread has a 1 MiB stack, where Linux and macOS give it 8 MiB, and the engine's recursion limits were
+#   checked on the larger stacks (a test thread has 2 MiB). The programs ask the linker for 8 MiB, so they never have less than where
+#   they were tested.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/STACK:8388608"]
+
+# WebAssembly. A WebAssembly program's stack is 1 MiB unless the link says more, and the engine's recursion limits (the depth of nested groups, of XML and of a formula) were checked on stacks of
+# 2 MiB and more (a test thread has 2 MiB, the main thread of Linux and macOS 8 MiB), so the web build asks for 8 MiB, as the Windows programs above do: it never has less than where the limits were tested.
+# The files made of the deepest legal depths open in a browser at the default size too (measured), so this is the margin and not a repair. The stack is part of the module's first memory: a
+# page that is not used does not touch it, and the size of the file is no more.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=8388608"]

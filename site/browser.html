@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DiaCraft in your browser · DiaCraft</title>
+  <meta name="description" content="Open DiaCraft in a web browser with nothing to install. What stays on your computer, which browsers it needs and what only the desktop app can do." />
+  <link rel="canonical" href="https://diacraft.dev/browser" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="DiaCraft" />
+  <meta property="og:title" content="DiaCraft in your browser · DiaCraft" />
+  <meta property="og:description" content="Open DiaCraft in a web browser with nothing to install. What stays on your computer, which browsers it needs and what only the desktop app can do." />
+  <meta property="og:url" content="https://diacraft.dev/browser" />
+  <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
+  <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0b0c" />
+  <link rel="icon" href="/assets/icon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="preload" href="/assets/hashed/besley-roman.f57f2cfa6c84.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast mast-ruled">
+    <div class="wrap mast-inner">
+      <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
+      <nav class="links" aria-label="Main navigation">
+        <a href="/#features">Features</a>
+        <a href="/#guides">Guides</a>
+        <a href="/changelog.html">Changelog</a>
+        <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+  </header>
+  <main id="main">
+    <header class="page-head">
+      <div class="wrap page-head-inner">
+        <div class="page-title">
+          <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Browser version</span></p>
+          <h1>DiaCraft <em>in your browser</em></h1>
+          <p class="lead">Try the drawing editor in a browser tab, with nothing to install. It is the same editor window as the desktop app, in a smaller version. It opens, saves and exports files on your computer, and the list below says what it cannot do.</p>
+          <p class="sub">The first visit loads the whole editor, several megabytes, and your browser keeps it for the next visit. The editor needs JavaScript and WebAssembly, and it is built for a mouse and keyboard on a laptop or desktop screen.</p>
+          <div class="actions"><a data-app="" href="https://diacraft.app/" class="btn" aria-label="Open DiaCraft in your browser">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a><a class="text-link" href="/#download">Download the desktop app <span class="arrow" aria-hidden="true"></span></a></div>
+        </div>
+        <figure class="frame-fig">
+          <div class="frame">
+            <div class="frame-bar" aria-hidden="true"><span class="frame-tab"><img src="/assets/icon-32.png" alt="" width="32" height="32" />DiaCraft</span></div>
+            <div class="frame-address" aria-hidden="true" data-app-host="">diacraft.app</div>
+            <img src="/assets/hashed/browser-tab.cdf8ed2c09aa.webp" alt="The DiaCraft editor filling a browser page: the ribbon, the Shapes window with Basic Shapes, and a cross-functional flowchart of six shapes with one selected." width="1440" height="900" fetchpriority="high" />
+          </div>
+          <figcaption>The editor in a tab, with the home page’s drawing dropped on it. The picture is a capture of the page in Chrome; the frame round it is drawn here.</figcaption>
+        </figure>
+      </div>
+    </header>
+    <div class="wrap doc">
+      <article class="prose">
+        <section id="on-your-computer">
+          <h2>What stays on your computer</h2>
+          <p>Everything you draw stays in the page, in your browser’s memory. Once the editor has loaded it makes no network request but for two files of its own, which come from the same address as the editor the first time they are shown: the picture on the File view’s Home page and the list of licences. It sends no drawing, no usage data and no error report. It stores nothing in cookies, local storage or any other browser storage, and it asks for no account. A file you open is read by the page on your computer and goes nowhere else, and a file you save or export is made on your computer and handed to your browser. Close or reload the tab and the drawing in it is gone, so save what you want to keep: while the drawing has changes that are not saved, your browser asks before it closes or reloads the tab, in words of its own.</p>
+          <p>The browser version is a site of its own, beside this one. Its page and its files come from that address, and nothing is loaded from another one. <a href="/privacy.html">Privacy details</a></p>
+        </section>
+        <section id="what-you-can-do">
+          <h2>What you can do</h2>
+          <p>Start a drawing with File → New, drop shapes from the seven built-in stencils, join them with connectors, type labels, and change fonts, colours and lines. Add pages, change the theme, set up the page and use undo and redo. These are the controls of the desktop window, drawn by the same program.</p>
+          <p><strong>Open</strong> a drawing with File → Open or Ctrl+O, or drop a file on the page: <code>.diacraft</code> files, Visio drawings, stencils and templates (<code>.vsdx</code>, <code>.vsdm</code>, <code>.vssx</code>, <code>.vssm</code>, <code>.vstx</code>, <code>.vstm</code>), <code>.odg</code>, <code>.otg</code> and <code>.fodg</code> files, and stencil files from More Shapes → Open Stencil. <strong>Save</strong> writes the file in the type you choose, <code>.diacraft</code>, <code>.vsdx</code> or <code>.odg</code> among others. Where your browser lets a page write to a file you choose, Save writes to that file; in every other browser it downloads the file under the name you give it, and the card that asks for the name says so. <strong>Export</strong> writes the page as PNG, SVG or PDF, and Print saves the PDF that a printer would be given, which you print from your PDF viewer.</p>
+        </section>
+        <section id="own-window">
+          <h2>In a window of its own</h2>
+          <p>A browser tab keeps some keys for the browser and never gives them to the page: Ctrl+N opens another browser window, Ctrl+T a new tab and Ctrl+W closes the tab (Command instead of Ctrl on a Mac). DiaCraft can open in a window of its own, with no tabs and no address bar, and there those keys go to the editor first: Ctrl+N starts a new drawing, and Ctrl+W closes the window after it asks about changes that are not saved. Keys such as Ctrl+R, Ctrl+H and Ctrl+U, which the browser also acts on when a page gets them in a tab, belong to the editor in every window of this version.</p>
+          <p>In Chrome and Edge, the File view’s Home page has a button, <strong>Open in its own window</strong>, which shows the browser’s own install prompt; installing puts a shortcut for DiaCraft on your computer, and the editor stores nothing in your browser. In Safari, choose File, then Add to Dock. Firefox has no windows of their own for web apps on Linux or macOS. You can also stay in the tab and use <strong>View, Full Screen</strong>: in Chrome and Edge it gives the editor the keys the browser keeps, until you hold Esc.</p>
+        </section>
+        <section id="limits">
+          <h2>What the desktop app does and this version does not</h2>
+          <ul>
+            <li><strong>Files.</strong> The page reads a file into your browser’s memory, which is smaller than your computer’s, so a very large drawing does not open: DiaCraft says so in words and leaves the drawing you have open as it was. Twenty thousand shapes opened in testing and forty thousand did not. A browser that cannot write to a file you choose saves by download, so each Save makes a new download and your browser may rename a file that is already in the downloads folder.</li>
+            <li><strong>Export and print.</strong> There is no printer: Print saves a PDF, and you print that file from your PDF viewer. PNG, SVG and PDF export work as in the desktop app, and the page’s fonts are the two built into the editor.</li>
+            <li><strong>Fonts.</strong> The editor has the two typefaces built into it and cannot see the fonts installed on your computer. A drawing set in another font looks different from the same drawing on the desktop.</li>
+            <li><strong>Automation.</strong> The control port, the command line tool and the MCP server for AI agents need a program on your computer, which a tab is not.</li>
+            <li><strong>Speed.</strong> The editor runs on one thread, so a very large drawing is slower here than in the desktop app.</li>
+          </ul>
+          <p>The desktop app has all of these and opens larger drawings. <a href="/#download">Download it for Linux, Windows or macOS</a>.</p>
+        </section>
+        <section id="browsers">
+          <h2>Which browsers work</h2>
+          <p>DiaCraft draws with WebGPU where your browser offers it, and with WebGL 2 where it does not, so it needs a recent desktop browser with WebAssembly and one of the two. It has been run in current releases of Chrome and Firefox on Linux. Other recent desktop browsers, such as Edge and Safari, should work and have not been tried. Phones and tablets have not been tried. If your browser cannot start the editor, the page says so.</p>
+        </section>
+        <section id="libraries">
+          <h2>The libraries inside it</h2>
+          <p>The licences of the libraries that the web version is built from are listed in <a data-repo="/blob/HEAD/THIRD-PARTY-LICENSES-WEB.txt" href="https://github.com/intergrado/diacraft/blob/HEAD/THIRD-PARTY-LICENSES-WEB.txt">THIRD-PARTY-LICENSES-WEB.txt</a>. The editor shows the same list under File, About, Third-party licences. The desktop downloads carry a list of their own.</p>
+        </section>
+      </article>
+      <aside class="rail">
+        <nav class="toc" aria-label="On this page">
+          <p class="label">On this page</p>
+          <ol>
+            <li><a href="#on-your-computer"><span>What stays on your computer</span></a></li>
+            <li><a href="#what-you-can-do"><span>What you can do</span></a></li>
+            <li><a href="#own-window"><span>In a window of its own</span></a></li>
+            <li><a href="#limits"><span>What the desktop app does and this version does not</span></a></li>
+            <li><a href="#browsers"><span>Which browsers work</span></a></li>
+            <li><a href="#libraries"><span>The libraries inside it</span></a></li>
+          </ol>
+        </nav>
+      </aside>
+    </div>
+    <nav class="pager" aria-label="More">
+      <div class="wrap">
+        <a href="/guides/getting-started.html"><span class="label">Start here</span><b>Draw your first <span class="nowrap">diagram <span class="arrow" aria-hidden="true"></span></span></b></a>
+        <a href="/#download"><span class="label">Or install it</span><b><span class="nowrap">Downloads <span class="arrow" aria-hidden="true"></span></span></b></a>
+      </div>
+    </nav>
+    <section class="closing closing-slim" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <div class="closing-copy">
+          <h2 id="closing-title">Get <em>DiaCraft.</em></h2>
+          <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
+          <p class="closing-note">Linux · Windows · macOS · Browser</p>
+        </div>
+        <img class="closing-art" src="/assets/hashed/octopus.79b55756b738.webp" alt="An engraved octopus holds a process rectangle and a decision diamond, joined by a connector." width="720" height="720" loading="lazy" />
+      </div>
+    </section>
+  </main>
+  <footer class="mast">
+    <div class="ruler" aria-hidden="true"><div class="wrap"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div></div>
+    <div class="wrap foot-inner foot-block">
+      <div class="foot-brand">
+        <a class="brand" href="/"><img src="/assets/icon-64.png" alt="" width="64" height="64" loading="lazy" />DiaCraft</a>
+        <p>Diagramming software for Linux, Windows, macOS and the browser. Free and open source, under the MIT or Apache 2.0 licence.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Guides</p><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
+        <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
+      </nav>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+    </div>
+  </footer>
+</body>
+</html>

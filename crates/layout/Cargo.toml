@@ -1,0 +1,16 @@
+[package]
+name = "diacraft-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft graph layout: a diagram's shapes and connectors placed as a flowchart, a hierarchy, a compact tree, a radial tree or a circle, within a budget"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest = { workspace = true }

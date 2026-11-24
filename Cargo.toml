@@ -1,0 +1,192 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+# Every crate is a default member; later tasks add each app they create. `apps/diacraft-web` is left out on
+# purpose: a plain `cargo build` then needs no wasm tools (a test in xtask fails if it is added). `cargo xtask ci`
+# always runs on the whole workspace, and its `wasm` step checks the web app for the browser.
+default-members = ["crates/*", "apps/diacraft", "apps/diacraft-cli", "xtask"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/intergrado/diacraft"
+
+[workspace.dependencies]
+# internal: one `diacraft-<short> = { path = "crates/<short>" }` line per crate, added with the crate
+# (every crate must also be registered in xtask/src/layers.rs TABLE)
+diacraft-calc = { path = "crates/calc" }
+diacraft-color = { path = "crates/color" }
+diacraft-container = { path = "crates/container" }
+diacraft-doc = { path = "crates/doc" }
+diacraft-engine = { path = "crates/engine" }
+diacraft-fonts = { path = "crates/fonts" }
+diacraft-formula = { path = "crates/formula" }
+diacraft-geom = { path = "crates/geom" }
+diacraft-layout = { path = "crates/layout" }
+diacraft-mcp = { path = "crates/mcp" }
+diacraft-metafile = { path = "crates/metafile" }
+diacraft-native = { path = "crates/native" }
+diacraft-odg = { path = "crates/odg" }
+diacraft-opc = { path = "crates/opc" }
+diacraft-pdf = { path = "crates/pdf" }
+diacraft-render = { path = "crates/render" }
+diacraft-sheetxml = { path = "crates/sheetxml" }
+diacraft-svg = { path = "crates/svg" }
+diacraft-testkit = { path = "crates/testkit" }
+diacraft-text = { path = "crates/text" }
+diacraft-ui-egui = { path = "crates/ui-egui" }
+diacraft-units = { path = "crates/units" }
+diacraft-vsdx = { path = "crates/vsdx" }
+
+# craft-libs, pinned to an immutable revision. No craft-update: it forces another app's id.
+craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+craft-print = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+craft-window = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a", features = ["egui"] }
+# craft-pathops (path operations on kurbo paths: the shape operations of the engine), from the one-bit fork pinned by full revision until
+# its pull request (storytold/craft-libs#677) merges; then this line moves to storytold/craft-libs at the merged revision and `deny.toml` drops the fork.
+craft-pathops = { git = "https://github.com/one-bit/craft-libs", rev = "533839399341547b29ababfb8ef030298b133914" }
+# craft-snap (snapping and smart guides on kurbo types: the engine's snapping), from the same one-bit fork on its `craft-snap` branch, pinned by full
+# revision until the crate's pull request to storytold/craft-libs merges; then this line moves to storytold/craft-libs at the merged revision. Its only
+# dependency is kurbo (one version here), so it needs no patch line.
+craft-snap = { git = "https://github.com/one-bit/craft-libs", rev = "70d5863acf50d8a22963323815b4737e6ca272ac" }
+
+# foundation
+thiserror = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+log = "0.4"
+# `O_NONBLOCK` for opening a file that may have been swapped for a pipe (crates/engine/src/file.rs). Already in the lock through the UI stack.
+libc = "0.2"
+# The global allocator of the desktop app and the command line, and of nothing else (owner 2026-11-21): Microsoft's mimalloc (MIT), the one C library
+# in the build, compiled by the `cc` crate. Both apps take it behind `cfg(not(target_arch = "wasm32"))`, so the web build never compiles it and keeps Rust's default allocator.
+mimalloc = { version = "0.1", default-features = false }
+# All date/time conversion goes through jiff (AGENTS.md). Only its civil types are used (no time zone, so no zone database and no system clock): they hold the years
+# -9999 to 9999, and a crate that needs more shifts by whole 400-year cycles (the log timestamp, `apps/diacraft/src/logging.rs`).
+jiff = { version = "1", default-features = false, features = ["std"] }
+proptest = "1"
+# A counting allocator (MIT), the global allocator of `crates/sheetxml`'s test binary and of nothing else: the model's memory tests count the bytes
+# and the allocations a decode keeps, which the resident size of the process does not show. It passes every call on to the system's allocator. A dev-dependency only.
+stats_alloc = "0.1"
+# CPU rasteriser (0.3): without the `text` (glifo), `png` and `multithreading` features. The renderer draws glyph
+# outlines as paths, so it needs none of them; the web build has no threads. `std` and `u8_pipeline` are still the names in 0.3.
+vello_cpu = { version = "0.3", default-features = false, features = ["std", "u8_pipeline"] }
+# The filter types (a Gaussian blur for shadows) that `vello_cpu` 0.3 does not re-export.
+vello_common = { version = "0.3", default-features = false }
+# Curves and paths. The version `vello_cpu` 0.3 uses (through vello_common and peniko), so geom's paths and the renderer's share types.
+kurbo = "0.13"
+# Fonts and text layout. skrifa 0.50 and harfrust 0.16 are the newest pair that share one `read-fonts` (0.47). They do NOT
+# match egui's `epaint`, which stays on skrifa 0.44 and harfrust 0.12 (its fontique pins `read-fonts` 0.41), nor krilla's PDF writer (skrifa
+# 0.42), so the build holds several font stacks: ours reads and shapes the faces the layout measures, egui's draws the interface. No font type passes between them (only
+# crates/fonts names skrifa and harfrust, and its public API holds none of their types; the bundled faces cross as `&'static [u8]`).
+# `unicode-bidi` 0.3.18 and `unicode-segmentation` 1.13 are the versions `epaint` resolves too; `unicode-linebreak` is ours alone.
+skrifa = "0.50"
+harfrust = "0.16"
+unicode-bidi = "0.3"
+unicode-linebreak = "0.1"
+unicode-segmentation = "1"
+
+# ui (layer 6 only; `cargo xtask layers` enforces it)
+egui = "0.37"
+eframe = { version = "0.37", default-features = false }
+egui_kittest = "0.37"
+rfd = "0.18"
+# The window layer, named only where eframe does not reach: the desktop app's macOS event loop (Quit asks the window to close). The fork in
+# `[patch.crates-io]` below is the one eframe uses.
+winit = { version = "0.30", default-features = false }
+# The two typefaces of egui's bundled set, taken by name so that the icon font in the same crate is never
+# referenced (and so never compiled into the binary): see NOTICE and crates/ui-egui/src/fonts.rs.
+epaint_default_fonts = "0.37"
+# PNG files: the control channel's window screenshots, and the pictures the renderer decodes.
+png = "0.18"
+# Blocks on wgpu's futures where the desktop app needs an answer at once (the graphics probe), as eframe does.
+pollster = "1.0"
+# JPEG pictures: the version the lock already holds through `image`'s TIFF reader (MIT, Apache-2.0 or Zlib).
+zune-core = "0.5"
+zune-jpeg = "0.5"
+# `Instant` that also works in the browser, where std's panics: the control channel's time limits.
+web-time = "1"
+# The browser shell of apps/diacraft-web (wasm32 only, so no native build compiles them). All four are in the
+# lock already, through eframe's web runner.
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+
+# xtask's tests read Cargo.lock as TOML. Already in the lock through egui_kittest, with these features only.
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+# Kani proof harnesses (`cargo kani`) sit behind `cfg(kani)`; ordinary builds never see them.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
+[workspace.lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "warn"
+# DiaCraft never crashes: shipped code returns `Result` or `Option` instead of panicking (AGENTS.md, Never
+# crash). Tests may unwrap (clippy.toml).
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+
+# Workspace crates keep line tables, so panics and backtraces name file and line; dependencies carry no
+# debug info. Full debug info would make the dev target dir several times larger.
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# The web build: `apps/diacraft-web/index.html` asks trunk for it (`data-cargo-profile-release`). It is the release profile built for size, because
+# the website serves the app as one WebAssembly file and Cloudflare Pages refuses a file over 25 MiB: the default release profile gives a file of 25.6 MiB, this
+# one with `wasm-opt -Oz` 19.7 MiB (docs/website.md, "The web app", has the steps and their sizes). A WebAssembly program aborts on a panic whatever this says;
+# `abort` only leaves out the unwinding code.
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+# The egui family and winit come from the suite's reviewed forks, at the revisions every craft app pins
+# (immutable). Only the crates the workspace uses are patched: a patch nothing uses is recorded in Cargo.lock
+# as unused and warned about on every cargo command (the `the_lockfile_has_no_unused_patch` test). Add a line
+# here with the first crate that depends on one more of them.
+[patch.crates-io]
+# The PDF writer (`craft-pdf`'s `write` feature) needs the suite's patched Krilla, at the revision `craft-pdf` is pinned to (its README: writer
+# consumers patch `krilla`). The patch is used only by `diacraft-pdf`. The `hayro-*` lines are the reader's, which `diacraft-pdf`'s tests use
+# to read back the PDF it wrote (`craft-pdf`'s `interpret` feature, a dev-dependency only): its README has reader consumers patch these.
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
+# The sweep line behind `craft-pathops`, vendored in the fork the crate is pinned to (MIT OR Apache-2.0): the crate's README has an app that depends
+# on it by git add this entry. It moves with the `craft-pathops` line in `[workspace.dependencies]`.
+linesweeper = { git = "https://github.com/one-bit/craft-libs", rev = "533839399341547b29ababfb8ef030298b133914" }
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

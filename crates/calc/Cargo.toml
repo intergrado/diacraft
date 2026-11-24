@@ -1,0 +1,49 @@
+[package]
+name = "diacraft-calc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft recalculation: an evaluator of ShapeSheet formulas over the document model, and an oracle that scores it against saved values"
+publish = false
+
+[lints]
+workspace = true
+
+# Kani (`cargo kani`, `docs/development.md` Proofs). Kani's default `--nan-check` fails a harness at any operation that produces a NaN (`inf - inf`,
+# `0 * inf`), even where the code turns it into `#NUM!` the next line, and the proofs of `ops.rs` are about that: what comes out when an operand
+# is infinite. `--no-overflow-checks` is the only flag that switches it off, and what it drops is that NaN check: Kani still checks integer add and shift
+# overflow and division by zero (measured on 0.68.0), so the harnesses assert what they mean to hold. These flags apply to a run pointed at this
+# manifest (`cargo kani --manifest-path`), not to `-p` from the workspace root.
+[package.metadata.kani.flags]
+no-overflow-checks = true
+
+[features]
+# Counts of the recalculation the commits make (`work`), for the tests that hold what an edit costs to a count and not to a time. Never part of
+# the app.
+test-support = []
+
+[dependencies]
+diacraft-color = { workspace = true }
+diacraft-doc = { workspace = true }
+diacraft-fonts = { workspace = true }
+diacraft-formula = { workspace = true }
+diacraft-geom = { workspace = true }
+diacraft-text = { workspace = true }
+diacraft-units = { workspace = true }
+jiff = { workspace = true }
+
+[dev-dependencies]
+# This crate's own tests may read the counts of its work, so they turn its `test-support` feature on, whichever package is tested.
+diacraft-calc = { workspace = true, features = ["test-support"] }
+# The document model's counts of the sections it looked at (a flood of `Tabs` markers is held to one look), the synthetic faces the text vectors
+# need (a letter exactly one em wide), and the text crate's counts of its work.
+diacraft-doc = { workspace = true, features = ["test-support"] }
+diacraft-fonts = { workspace = true, features = ["test-support"] }
+diacraft-text = { workspace = true, features = ["test-support"] }
+# The testkit depends on the engine, which will depend on this crate: Cargo allows that cycle for a dev-dependency (the doc crate's
+# own tests do the same).
+diacraft-testkit = { workspace = true }
+
+# The properties that hold the walks and the dependency index to the answers of the ones they replaced.
+proptest = { workspace = true }

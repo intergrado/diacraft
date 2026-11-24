@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      # egui and winit are patched to pinned forks, so this group must move together.
+      egui-stack:
+        patterns: ["egui*", "eframe", "epaint*", "ecolor", "emath", "winit", "wgpu*", "naga", "accesskit*"]
+      cargo-patch:
+        update-types: ["patch"]
+        patterns: ["*"]
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci(deps)"

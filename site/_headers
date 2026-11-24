@@ -1,0 +1,12 @@
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src https://api.github.com; img-src 'self'; style-src 'self'; font-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# The pages of the website, for a Cloudflare Pages project of their own. The web app is a site of its own with its own file, `apps/diacraft-web/_headers`, and nothing of it is here: this policy
+# allows no WebAssembly and connects to GitHub's API only (the release lookup of the home page). A rule for a path of the app is refused by `cargo xtask site`.
+# What is named by the hash of its own bytes is kept for a year, and nothing else is: `cargo xtask site` reads this file as Pages applies it against every file of the folder, and refuses a
+# file that is kept and is not named by its own hash, a file that is named by its own hash and is not kept, and a page with no policy. The pages, `styles.css` and `download.js` are asked about on every visit.
+/assets/hashed/*
+  Cache-Control: public, max-age=31536000, immutable

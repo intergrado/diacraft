@@ -1,0 +1,33 @@
+[package]
+name = "diacraft-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft renderer: a page of a document to premultiplied RGBA pixels (vello_cpu backend), with a budget per frame and a report of what was left out"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+diacraft-calc = { workspace = true }
+diacraft-color = { workspace = true }
+# The count of the threads of a frame and how many the address space has room for (`diacraft_container::par`, `spare`): the ones a save and an open take.
+diacraft-container = { workspace = true }
+diacraft-doc = { workspace = true }
+diacraft-fonts = { workspace = true }
+diacraft-geom = { workspace = true }
+diacraft-metafile = { workspace = true }
+diacraft-text = { workspace = true }
+kurbo = { workspace = true }
+png = { workspace = true }
+vello_common = { workspace = true }
+vello_cpu = { workspace = true }
+web-time = { workspace = true }
+zune-core = { workspace = true }
+zune-jpeg = { workspace = true }
+
+[dev-dependencies]
+diacraft-fonts = { workspace = true, features = ["test-support"] }
+diacraft-testkit = { workspace = true }

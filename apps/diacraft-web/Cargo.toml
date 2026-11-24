@@ -1,0 +1,83 @@
+[package]
+name = "diacraft-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft in the browser (eframe web runner, WebGPU with WebGL2 as the fallback)"
+publish = false
+
+[lints]
+workspace = true
+
+# What does not touch the page (its element ids, its messages, the window it runs) is a library, so the integration
+# tests can reach it on the desktop; `main.rs` only starts the browser shell. Named apart from the binary so the two
+# never share an output name.
+[lib]
+name = "diacraft_browser"
+path = "src/lib.rs"
+
+[[bin]]
+name = "diacraft-web"
+path = "src/main.rs"
+
+[dependencies]
+diacraft-engine = { workspace = true }
+# The window is the desktop's: the same `DiacraftApp`, its fonts (src/fonts.rs there, `default_fonts` off) and its
+# theme. This app adds no font and no colour of its own.
+diacraft-ui-egui = { workspace = true }
+log = { workspace = true }
+# The manifest of the files the module does not carry (`assets.rs`) is JSON; the library is in the module already, through the window.
+serde_json = { workspace = true }
+
+# The build script (`build.rs`) says which git release and which year the build is, for the splash popup.
+[build-dependencies]
+jiff = { workspace = true }
+
+# Compiled for the browser only, so a native build (which `cargo xtask ci` makes of every member) needs none of it.
+# `eframe` here has no default features (the workspace line says so), and above all not `default_fonts`: it would
+# register an icon font with other vendors' logos (NOTICE; a test in xtask reads Cargo.lock). `wgpu` is the renderer
+# the web runner needs: WebGPU where the browser has it, WebGL2 where not.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+eframe = { workspace = true, features = ["wgpu"] }
+egui = { workspace = true }
+js-sys = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+# The asset fetch is `Response` and its body, `ReadableStream`, read in pieces (the response comes from `Window::fetch_with_str` of the page's own folder). The file features are `Blob` and `File` (a chosen file, read in pieces and made into a download), `FileList`, `DataTransfer` and `DragEvent` (a file dropped on the page), `HtmlInputElement`
+# (the file chooser of a browser with no File System Access API), `HtmlAnchorElement` and `Url` (a download), and `Event` for the listeners. The keys are `KeyboardEvent`, and the browser's name in its user agent `Navigator`. The question before the page is left is `BeforeUnloadEvent`. No feature here sends anything anywhere.
+web-sys = { workspace = true, features = [
+    "BeforeUnloadEvent",
+    "Blob",
+    "BlobPropertyBag",
+    "DataTransfer",
+    "Document",
+    "DragEvent",
+    "Element",
+    "Event",
+    "File",
+    "FileList",
+    "HtmlAnchorElement",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "KeyboardEvent",
+    "Navigator",
+    "ReadableStream",
+    "Response",
+    "Url",
+    "Window",
+] }
+
+[dev-dependencies]
+egui = { workspace = true }
+# As in diacraft-ui-egui: `egui_kittest`'s `eframe` feature drives an `eframe::App` frame by frame, and eframe
+# builds that only with a renderer. The harness itself renders nothing.
+eframe = { workspace = true, features = ["wgpu"] }
+egui_kittest = { workspace = true, features = ["eframe"] }
+# Trunk.toml and Cargo.toml are read as TOML by the tests.
+toml = { workspace = true }
+# The deepest legal files and the largest drawings, built in code, for the tests that open them as the browser does (`tests/it/deep_files.rs`).
+diacraft-testkit = { workspace = true }
+diacraft-container = { workspace = true }
+diacraft-formula = { workspace = true }

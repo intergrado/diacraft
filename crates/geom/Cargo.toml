@@ -1,0 +1,18 @@
+[package]
+name = "diacraft-geom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft geometry: the rows of a ShapeSheet Geometry section built into paths on kurbo"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+kurbo = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

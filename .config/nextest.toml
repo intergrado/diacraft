@@ -1,0 +1,292 @@
+# Minimum cargo-nextest for this repository: GHSA-vc25-qg58-w57c is fixed in 0.9.150 and CI
+# installs exactly that version, so an older nextest refuses to run (exit 92 REQUIRED_VERSION_NOT_MET).
+nextest-version = "0.9.150"
+
+# A test that waits for ever (a socket that is never answered, a child process that never ends) must fail, not hold the
+# gate until someone notices: a test running longer than 30 seconds is reported as slow, and killed and failed after
+# four periods, 120 seconds. Nearly every test takes under a second, and the four that take a minute have a limit of their own
+# at the end of this file; raise a test's limit only if it really needs longer, with a comment saying why.
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# The tests that hold a lot of memory at once. nextest runs one process for each test, as many at a time as there are CPUs, and
+# the gate is run in places with less memory than a workstation (a runner of a few gigabytes, an agent's scope of 20 GB): 32 of the
+# tests below running together reached 20 GB, and the kernel stopped the run (the memory tests of `diacraft-odg`, `diacraft-opc` and
+# the engine, which start a child under `ulimit -v 3000000` or build a drawing of 350,000 shapes, and the cost tests of the readers,
+# which build a page of a million shapes). So the tests that peak at 500 MB or more, run alone, share two places: the others still run
+# at the full width. The list is by what the tests do, measured: the peak resident memory of each test of the workspace run in a process
+# of its own (`/usr/bin/time`), the 56 of 6,203 that came to 500 MB or more, the most 2.9 GB (the group's two together are under
+# 6 GB). A test that is new and builds a gigabyte, or starts a child under `ulimit -v`, goes into the list: say what it does in the commit.
+# Add fourteen: the children of `memory_price.rs` that read a file of 250 MB of UTF-16, of chains of nested elements or of a gigabyte of XML (1.1 to 2.4 GB of
+# address space each), and the children of the engine's `vsdx_memory.rs`, the window's `file_open` and the command line's `roundtrip` that hold a drawing of 80,000 shapes (1.7 GB) beside a second read.
+# The content check's child-process tests (`canon_memory`) peak, one at a time, at 585 MB (a part at its item budget against
+# one past it, which is listed below), 305 MB (a part past the budget refused before its partner is read: under 500 MB, so not listed, since the
+# budget of 2 million items replaced the parser's 6 million that made it peak at 0.9 GB), 228 MB (a paragraph of 32 MiB) and 11 MB (an attribute
+# and a depth past their limits): only the first is in the group.
+# Adds three: the children of `model_hostile.rs` (the VSDX model writer under `ulimit -v 3000000`: three parts of 256 MiB made of noise and refused in words, six of 40 MiB written, and a drawing of 76,000 shapes
+# over three pages with parts held, 2.79 GB of address space).
+# Adds three: a part of 256 MiB and one byte (the 512 MiB it and its copy take, in the process), and the children of `carry.rs` under `ulimit -v 3000000`: three carried parts of 256 MiB of
+# noise refused in words (they are made in the child: 0.8 GB, 1.5 GB at the copy), and four of 32 MiB written and read back; the part of 64 MiB and 16 bytes of `diacraft_part` (the cap of the solution part).
+# Adds two: the children of `objects.rs` under `ulimit -v 3000000`: an object of 256 MiB and one byte (made of noise in the child, 0.6 GB, refused in words by the carrier) and one of exactly 256 MiB
+# written as an embedding by two writers (1.15 GB of address space).
+# Add the engine's children of `vsdx_held_parts` (two parts of 256 MiB saved twice, and one: up to 2.6 GB) and of `vsdx_embedded_peak` (three embedded objects
+# of 240 MiB, and two of 256 MiB beside 20,000 shapes, each saved twice under `ulimit -v 3000000`: 1.8 and 1.7 GB in the child, and the parent makes a file of up to 760 MB first).
+# Adds two of the four children of `docfile_memory` of `diacraft-odg`, each started under `ulimit -v 3000000`: a document file of 3.9 million `shape`
+# elements (698 MB) and 60,000 masters of 60 shapes, refused at the reader's items (979 MB). The other two peak at 245 MB (a master of 300,000 shapes saved) and 226 MB (masters of
+# 1.2 million cells, refused before a tree is made), and are not listed.
+# Adds four more children to it: a document file of 3.9 million `master` elements (515 MB: listed, since a loaded machine puts it past 500), and masters of 100 MB of
+# kept text each refused by the gate (211 MB), and a master of 400,000 shapes read with and without its own declaration of the namespace (207 MB each): the last three are not listed.
+# The flat path's (`canon_memory` of `diacraft-odg`) peak at 486 MB (100 MB of inline picture text refused before it is decoded: listed,
+# since a loaded machine puts it past 500), 329 MB (a paragraph of 30 MiB on each side), 314 MB, 278 MB, 276 MB, 100 MB and 90 MB, and the cost tests of
+# `canon_scale` at 285 MB and under: none of the others is listed.
+# The engine's `.diacraft` children (`native_memory`) peak, one at a time, at 884 MB (a file of 340 MB open alone), 708 MB (the same beside a hold of 1.9 GB), 421 MB (two sessions: listed, since a loaded
+# machine puts it past 500), 258 MB (a save beside a hold of 2.3 GB: not listed), 877 MB (a drawing of 30,000 shapes edited everywhere and saved, and a file of 150 MB read beside it) and a template of
+# 340 MB refused beside a hold of 1.9 GB (a few hundred MB: the template is made in the child, and listed with the others that make a file of that size).
+# The engine's `read_room` children write files of 900 MB and read one at a time: they peak at about 1 GB (the second, one file's), and the first at a few hundred MB.
+# Adds four: the children of `model_memory` of `diacraft-odg` (the `.odg` model writer under `ulimit -v 3000000`): four parts of 200 MiB of noise refused before a byte is made (1.0 GB), three of 190 MiB
+# refused by the plan's gate (0.8 GB), two of 200 MiB written (1.4 GB) and two of 100 MiB written (0.7 GB); the fifth, a settings tree of a million nodes refused by the bound (119 MB), is not listed.
+# Adds two: the children of `carry_cost` of `diacraft-odg` (the `.odg` carrier under `ulimit -v 3000000`): three carried parts of 256 MiB of noise refused by the save's memory gate (1.1 GB of address space)
+# and three of 180 MiB refused by the carrier's own cap of 512 MiB (0.83 GB); the child that writes and reads back four of 32 MiB (0.39 GB) is not listed.
+# Adds four: the cost tests of `canon_free_names_scale` of `diacraft-odg` (the content check of two drawings of 100,000 automatic styles each, in the test's own process: 0.50 to 0.59 GB).
+# Adds one: the child of `pictures` under `ulimit -v 3000000` that inserts eight pictures of 60 MiB, each made, read and put in a drawing that holds 480 MiB of them, and is refused at the ninth (0.7 GB).
+# Adds one: `swimlane_cells` writes a drawing of 100,000 containers, each naming the next as its list, opens it, asks it for its swimlanes and moves one (1.3 GB, measured on beast).
+[test-groups.memory-heavy]
+max-threads = 2
+
+[[profile.default.overrides]]
+filter = '''
+      test(=canon_memory::a_part_at_the_item_limit_against_one_past_it_is_refused_in_words_and_does_not_abort) |
+      test(=canon_memory::inline_data_past_what_one_side_may_inline_is_refused_before_it_is_decoded) |
+      test(=clipboard_limits::an_ungroup_takes_apart_no_more_members_than_the_cap_counted_over_every_group_named) |
+      test(=flat::odg_package_a_tree_of_4000001_items_is_xml_too_complex) |
+      test(=fodg_memory::the_pictures_of_a_conversion_are_capped_over_both_parts_at_200000) |
+      test(=fodg_memory::a_package_of_a_100_mb_picture_saved_as_a_fodg_ends_as_a_save_or_a_limit_and_does_not_abort) |
+      test(=fodg_memory::a_save_of_300000_rectangles_in_a_fodg_still_saves_under_the_address_limit) |
+      test(=fodg_memory::a_save_of_a_fodg_of_one_150_mb_picture_ends_as_a_save_or_a_limit_and_does_not_abort) |
+      test(=fodg_memory::a_save_of_a_fodg_of_one_150_mb_picture_past_the_gate_never_aborts_where_memory_runs_out) |
+      test(=group_frame::a_member_nested_180_deep_and_a_thousand_sibling_groups_with_glued_connectors_end_as_a_move_or_a_refusal_in_words_under_ulimit_v) |
+      test(=history_bytes::seven_hundred_range_edits_of_a_text_of_a_hundred_thousand_adjacent_parts_end_within_the_budget_of_the_history_under_ulimit_v) |
+      test(=group_frame::forty_moves_of_a_member_of_a_group_of_5000_end_within_the_budget_of_the_history_under_ulimit_v) |
+      test(=group_frame::a_group_with_a_hundred_thousand_rows_of_its_own_is_left_and_said_under_ulimit_v) |
+      test(=group_frame::three_thousand_chains_of_three_groups_moved_at_once_are_refitted_by_the_allowance_and_the_rest_said_under_ulimit_v) |
+      test(=group_frame::five_thousand_connectors_glued_to_a_refitted_group_are_routed_by_the_most_and_the_rest_said_under_ulimit_v) |
+      test(=group_geometry::a_drop_whose_members_hold_more_geometry_than_the_cap_lists_them_without_a_copy_and_is_not_refused) |
+      test(=hostile::a_path_bracket_built_from_many_records_and_never_painted_is_charged_for_its_points) |
+      test(=mcp::a_16_mib_line_costs_what_parsing_it_costs_and_no_more) |
+      test(=memory::a_tree_over_the_item_limit_is_refused_early_and_costs_less_than_one_within_it) |
+      test(=memory::the_largest_xml_tree_the_limits_allow_is_built_within_a_measured_bound) |
+      test(=memory::the_package_cap_is_one_gib_four_parts_of_the_part_limit_read_and_a_fifth_is_refused) |
+      test(=memory_price::a_file_of_a_gigabyte_of_pictures_is_read_with_the_pictures_the_pool_can_hold_and_the_rest_left_out_under_the_address_limit) |
+      test(=memory_price::large_embeddings_open_or_refuse_in_a_child_under_ulimit) |
+      test(=model_memory::parts_past_what_a_save_may_hold_are_refused_in_words_before_anything_is_made_and_do_not_abort) |
+      test(=model_memory::parts_the_splices_own_gate_refuses_are_refused_by_the_plans_before_anything_is_made) |
+      test(=model_memory::two_parts_of_200mb_are_written_under_the_address_limit) |
+      test(=model_memory::two_parts_of_100mb_are_written_under_the_address_limit) |
+      test(=carry_cost::carried_parts_too_large_to_hold_are_refused_in_words_and_not_an_abort) |
+      test(=carry_cost::carried_entries_past_the_files_cap_are_refused_in_words_and_not_an_abort) |
+      test(=held_hostile::one_part_at_the_cap_of_a_part_is_copied_once) |
+      test(=carry::a_carried_part_one_byte_over_the_cap_is_refused_in_words) |
+      test(=diacraft_part::data_the_reader_did_not_read_is_left_as_it_is_and_the_save_says_so) |
+      test(=carry::carried_parts_too_large_to_write_are_refused_in_words_and_not_an_abort) |
+      test(=carry::carried_parts_that_fit_are_written_and_read_back_under_the_address_limit) |
+      test(=carry::items_that_copy_a_shared_sheet_are_refused_in_words_by_a_child_under_the_address_limit_and_do_not_abort) |
+      test(=carry::items_that_copy_a_shared_text_are_refused_in_words_by_a_child_under_the_address_limit_and_do_not_abort) |
+      test(=objects::an_object_one_byte_over_the_part_cap_is_refused_in_words_and_not_an_abort) |
+      test(=objects::an_object_of_exactly_the_part_cap_is_written_as_an_embedding_under_the_address_limit) |
+      test(=model_hostile::held_parts_too_large_to_write_and_read_back_are_refused_in_words_and_not_an_abort) |
+      test(=model_hostile::held_parts_that_fit_are_written_and_read_back_under_the_address_limit) |
+      test(=model_hostile::a_drawing_of_seventy_six_thousand_shapes_with_held_parts_is_written_under_the_address_limit) |
+      test(=vsdx_held_parts::two_held_parts_of_256_mib_are_opened_edited_and_saved_twice_under_the_address_limit) |
+      test(=vsdx_held_parts::a_saved_drawing_holds_its_parts_once) |
+      test(=vsdx_embedded_peak::three_embedded_objects_of_240_mib_are_saved_twice_under_the_address_limit) |
+      test(=vsdx_embedded_peak::two_embedded_objects_of_256_mib_beside_20000_shapes_are_saved_twice_under_the_address_limit_and_do_not_abort) |
+      test(=memory_price::a_gigabyte_of_xml_in_parts_the_pool_cannot_hold_the_tree_of_is_refused_before_the_first_is_parsed_under_the_address_limit) |
+      test(=memory_price::a_page_of_utf16_text_of_250_megabytes_is_read_under_the_address_limit) |
+      test(=memory_price::seven_pages_of_unknown_elements_and_a_page_of_chains_of_nested_elements_are_refused_in_words_under_the_address_limit) |
+      test(=memory_price::three_and_a_half_million_empty_cells_and_a_page_of_utf16_text_of_250_megabytes_are_refused_in_words_under_the_address_limit) |
+      test(=memory_price::two_and_a_half_million_empty_cells_and_a_page_of_utf16_text_of_250_megabytes_are_read_or_refused_in_words_under_the_address_limit) |
+      test(=memory_price::the_price_of_a_million_unknown_elements_is_not_under_what_they_add) |
+      test(=vsdx_memory::a_drawing_read_beside_a_stencil_of_80000_shapes_is_refused_in_words_that_say_what_is_held_and_does_not_abort) |
+      test(=vsdx_memory::a_file_read_in_a_session_of_its_own_beside_the_drawing_of_another_is_refused_in_words_and_does_not_abort) |
+      test(=vsdx_memory::a_second_file_read_beside_a_drawing_of_80000_shapes_is_refused_in_words_that_say_what_is_held_and_does_not_abort) |
+      test(=vsdx_memory::a_stencil_read_beside_a_drawing_of_80000_shapes_is_refused_in_words_that_say_what_is_held_and_does_not_abort) |
+      test(=vsdx_memory::a_stencil_read_in_a_session_of_its_own_beside_the_drawing_of_another_is_refused_in_words_and_does_not_abort) |
+      test(=vsdx_memory::a_stencil_the_window_reads_again_for_its_tiles_beside_the_one_it_holds_is_refused_in_words_and_does_not_abort) |
+      test(=vsdx_memory::two_files_read_at_the_same_moment_are_one_read_and_one_refusal_in_words_and_neither_aborts) |
+      test(=vsdx_memory::a_file_whose_last_page_shows_big_pictures_is_not_enough_memory_beside_a_drawing_and_opens_alone) |
+      test(=vsdx_memory::a_stencil_is_read_beside_a_drawing_of_80000_shapes_that_is_being_read_and_neither_aborts) |
+      test(=vsdx_memory::a_file_too_big_on_its_own_is_told_so_beside_a_drawing_and_one_that_would_fit_alone_is_told_there_is_not_enough_memory_beside_it) |
+      test(=file_open::tests::a_file_the_open_thread_reads_beside_the_drawing_of_80000_shapes_the_window_holds_is_refused_in_words_and_the_drawing_stays_open) |
+      test(=file_open::tests::a_file_opened_while_a_cancelled_read_still_parses_is_read_or_refused_in_words_and_does_not_abort) |
+      test(=file_open::tests::a_small_file_opened_after_a_cancelled_read_of_80000_shapes_waits_for_it_and_is_opened) |
+      test(=stencil_files::a_stencil_past_the_room_beside_a_read_is_read_for_its_tiles_once_and_not_in_every_frame) |
+      test(=roundtrip::a_round_trip_of_a_drawing_of_80000_shapes_holds_the_model_it_read_and_is_refused_in_words_where_the_second_read_would_not_fit_and_does_not_abort) |
+      test(=convert::a_drawing_of_80000_shapes_is_converted_or_refused_in_words_and_does_not_abort) |
+      test(=memory_price::a_hundred_thousand_shapes_of_a_diagram_are_refused_in_words_under_the_address_limit) |
+      test(=memory_price::every_budget_at_once_ends_as_a_read_or_a_refusal_in_words_under_the_address_limit) |
+      test(=memory_price::nine_hundred_values_of_a_mebibyte_in_six_pages_are_refused_as_xml_or_memory_under_the_address_limit) |
+      test(=memory_price::the_most_empty_cells_a_document_may_keep_in_four_parts_are_refused_in_words_under_the_address_limit) |
+      test(=memory_price::the_most_items_a_document_may_keep_in_four_parts_of_five_million_are_refused_in_words_under_the_address_limit) |
+      test(=memory_price::the_most_items_one_part_may_hold_all_kept_as_unknown_elements_are_read_under_the_address_limit) |
+      test(=memory_price::the_price_of_a_document_part_that_keeps_three_million_unknown_elements_is_not_under_what_it_adds) |
+      test(=memory_price::the_price_of_a_million_empty_cells_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_a_million_empty_rows_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_a_million_empty_shapes_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_cells_that_hold_text_and_markup_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_cells_that_keep_attributes_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_cells_with_a_value_a_unit_and_a_formula_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_connects_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_formulas_that_are_one_long_string_each_is_not_under_what_they_add) |
+      test(=memory_price::nine_hundred_and_sixty_formulas_of_a_string_of_a_million_characters_are_read_or_refused_in_words_under_the_address_limit) |
+      test(=memory_price::the_price_of_sections_of_distinct_names_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_text_in_many_parts_is_not_under_what_it_adds) |
+      test(=memory_price::the_price_of_two_hundred_thousand_pictures_shown_and_not_there_is_not_under_what_they_add) |
+      test(=memory_price::the_price_of_twenty_thousand_shapes_of_a_diagram_is_not_under_what_they_add) |
+      test(=memory_price::the_worst_a_package_of_a_gigabyte_of_xml_costs_is_refused_in_words_under_the_address_limit) |
+      test(=metafile::a_million_items_are_read_and_drawn_inside_the_frames_time_and_the_picture_says_so) |
+      test(=model_amplify::a_big_model_that_shares_nothing_is_refused_in_words_before_any_part_is_made_and_does_not_run_out_of_address_space) |
+      test(=model_amplify::a_file_of_one_sheet_on_nine_hundred_shapes_that_says_it_once_is_opened_as_what_it_holds_and_saved_as_what_it_holds) |
+      test(=model_amplify::the_same_sheet_written_in_full_on_every_shape_is_shared_at_the_open_and_saved_as_what_is_held) |
+      test(=model_amplify::the_most_shared_drawing_edited_everywhere_is_saved_as_what_it_holds_and_the_open_of_it_shares_what_is_equal) |
+      test(=model_capacity_review::twelve_thousand_shapes_that_share_a_long_value_are_saved_as_what_the_model_holds_and_none_aborts) |
+      test(=model_capacity_review::four_hundred_shapes_that_hold_a_long_value_each_are_saved_and_read_back) |
+      test(=model_capacity_review::a_part_of_long_values_is_refused_at_the_byte_that_passes_its_cap_while_it_is_made) |
+      test(=model_capacity_review::long_values_that_the_model_holds_within_what_a_save_holds_are_still_refused_at_the_byte_that_passes_a_part) |
+      test(=model_capacity_review::long_values_that_the_model_holds_past_what_a_save_holds_are_counted_before_any_tree_is_made) |
+      test(=model_capacity_review::a_page_that_the_first_pass_takes_and_an_open_refuses_for_the_pool_of_the_model_is_refused_at_save) |
+      test(=read_room::a_file_of_900_mb_beside_a_read_that_holds_the_budget_is_refused_from_its_size_and_never_loaded) |
+      test(=read_room::two_opens_of_files_of_900_mb_at_the_same_moment_load_one_file_at_a_time_and_do_not_abort) |
+      test(=native_memory::a_diacraft_file_of_340_mb_opens_alone_under_the_address_limit) |
+      test(=native_memory::the_same_file_beside_what_the_process_holds_is_refused_for_memory_in_words_and_opens_once_it_is_given_back) |
+      test(=native_memory::two_sessions_each_with_a_drawing_share_one_budget_and_a_file_beside_them_is_refused_for_memory_in_words) |
+      test(=native_memory::a_vsdx_edited_everywhere_and_saved_keeps_the_document_it_was_read_as_counted_and_a_second_file_beside_it_never_aborts) |
+      test(=native_memory::a_template_started_from_a_diacraft_file_takes_its_room_beside_what_the_process_holds_and_is_refused_in_words) |
+      test(=model_guard::an_edit_loop_that_unshares_every_shape_of_the_most_shared_drawing_is_refused_in_words_before_it_passes_what_an_open_takes) |
+      test(=model_guard::the_count_of_an_edit_is_of_the_drawing_it_starts_from_and_an_undo_and_a_redo_give_the_guard_no_stale_count) |
+      test(=model_guard::the_save_of_the_most_shared_drawing_as_a_vsdx_is_refused_in_words_by_the_writer_and_does_not_run_out_of_address_space) |
+      test(=model_guard::the_edit_of_shapes_that_were_unshared_to_a_gigabyte_is_counted_with_the_history_and_the_steps_make_room) |
+      test(=model_guard::a_select_all_and_a_nudge_of_a_hundred_thousand_shapes_keeps_the_steps_that_fit_and_does_not_run_out_of_address_space) |
+      test(=model_guard::four_hundred_edits_that_each_put_eight_mebibytes_in_a_cell_are_counted_by_their_characters_and_do_not_run_out_of_address_space) |
+      test(=model_guard::the_save_as_a_vsdx_of_one_shape_of_a_thousand_rows_in_ten_thousand_places_is_refused_in_words_while_its_parts_are_made) |
+      test(=model_guard::the_save_as_a_vsdx_of_the_most_shared_drawing_of_nine_hundred_shapes_is_refused_in_words_while_its_parts_are_made) |
+      test(=model_guard::the_save_as_a_vsdx_of_one_shape_that_keeps_a_large_tree_of_unknown_xml_in_ten_thousand_places_is_refused_in_words_before_the_kept_trees_are_made) |
+      test(=model_guard::two_sessions_with_a_drawing_each_are_held_to_one_figure_and_the_second_is_refused_in_words_and_neither_runs_out_of_address_space) |
+      test(=vsdx_save_peak::a_vsdx_of_sixty_nine_thousand_shapes_is_saved_as_a_vsdx_under_the_address_limit) |
+      test(=vsdx_save_peak::a_vsdx_of_eighty_thousand_shapes_is_refused_in_words_at_the_save_and_does_not_run_out_of_address_space) |
+      test(=model_capacity_review::a_part_within_the_limits_of_1_0_and_past_the_opens_own_is_refused_in_words_that_name_the_opens_limit) |
+      test(=model_pools::every_pool_at_its_limit_at_once_beside_a_file_of_the_most_an_open_reads_ends_in_a_decode_or_a_refusal_and_not_an_abort_under_an_address_limit) |
+      test(=model_scopes::a_root_of_millions_of_prefixes_and_a_part_of_shapes_are_refused_in_words_and_do_not_abort_under_an_address_limit) |
+      test(=model_scopes::nested_shapes_that_each_declare_the_most_prefixes_are_all_open_at_once_and_do_not_abort_under_an_address_limit) |
+      test(=model_scopes::shapes_that_each_declare_the_most_prefixes_are_refused_in_words_by_the_model_pool_and_do_not_abort_under_an_address_limit) |
+      test(=model_save::a_drawing_that_spends_the_pool_of_the_models_bytes_before_the_items_is_refused_at_save_as_an_open_refuses_it) |
+      test(=model_save::the_part_of_the_review_is_refused_at_save_at_the_container_limit_and_not_written) |
+      test(=model_save::two_pages_of_50000_shapes_are_saved_a_part_at_a_time_and_the_open_takes_them) |
+      test(=model_save::a_drawing_of_more_shapes_than_a_pool_can_hold_unshared_is_refused_at_save_in_words_before_a_part_is_made) |
+      test(=model_units::definitions_of_all_families_are_read_up_to_six_times_the_per_family_cap_and_no_more) |
+      test(=model_vectors::a_page_past_the_xml_readers_item_cap_is_refused_when_written_and_not_written_unreadable) |
+      test(=odg_hold::a_save_after_four_rounds_of_formatting_eight_groups_of_20000_ends_as_a_save_or_a_refusal_and_does_not_abort) |
+      test(=odg_hold::a_save_after_six_edits_of_every_member_of_a_group_of_175000_ends_as_a_save_or_a_refusal_and_does_not_abort) |
+      test(=odg_hold::a_save_an_undo_a_small_edit_and_four_more_writes_of_a_group_of_175000_ends_as_a_save_or_a_refusal_and_does_not_abort) |
+      test(=odg_hold::rectangles_added_after_a_save_of_35000_are_saved_too_and_the_first_are_given_again_and_not_flattened_again) |
+      test(=odg_memory::a_save_after_every_shape_of_350000_was_edited_three_times_ends_as_a_save_or_a_refusal_in_words_and_does_not_abort) |
+      test(=odg_memory::a_save_of_the_file_with_100_big_attributes_through_the_engine_saves) |
+      test(=odg_memory::a_save_of_the_file_with_250_big_attributes_through_the_engine_is_refused_in_words_and_does_not_abort) |
+      test(=odg_memory::a_save_with_150000_new_shapes_is_refused_by_the_flattening_in_words_and_does_not_abort) |
+      test(=odg_memory::a_save_with_50000_new_shapes_flattened_ends_as_a_save_or_a_refusal_and_does_not_abort) |
+      test(=odg_memory::a_save_with_50000_new_shapes_flattened_on_31_threads_ends_as_a_save_or_a_refusal_and_does_not_abort) |
+      test(=odg_memory::an_edit_and_a_save_of_300000_rectangles_through_the_engine_ends_as_a_save_or_a_refusal_and_does_not_abort) |
+      test(=odgfile::tests::a_long_outline_is_refused_by_its_rows_and_many_of_them_by_the_budget) |
+      test(=open::a_large_file_is_read_while_the_window_goes_on) |
+      test(=oracle::tests::score::the_report_of_a_large_file_costs_a_pass_over_it_and_no_more) |
+      test(=panes_cost::size_and_position_and_pan_and_zoom_do_bounded_work_on_a_page_of_detailed_shapes) |
+      test(=docfile_memory::a_document_file_of_3900000_shapes_is_refused_as_a_limit_and_does_not_abort) |
+      test(=docfile_memory::masters_that_pass_the_readers_items_are_refused_as_a_limit_and_do_not_abort) |
+      test(=docfile_memory::a_document_file_of_3900000_masters_reads_in_the_memory_of_its_tree_and_no_more) |
+      test(=picture_memory::a_new_picture_of_the_most_a_part_may_hold_is_saved_under_the_address_limit) |
+      test(=picture_memory::four_new_pictures_of_250_mb_are_refused_as_a_limit_and_do_not_abort_under_the_address_limit) |
+      test(=write_picture_names::ten_thousand_copies_of_one_64_kib_picture_are_saved_as_one_entry) |
+      test(=picture_memory::a_new_picture_of_the_most_a_part_may_hold_is_saved_under_the_address_limit_when_a_template_is_saved_as_a_drawing) |
+      test(=picture_memory::three_new_pictures_of_250_mb_are_saved_under_the_address_limit) |
+      test(=pictures::the_progress_card_can_be_cancelled_with_its_button_or_escape) |
+      test(=read_costs::a_picture_part_named_by_ten_thousand_frames_is_one_copy_charged_once) |
+      test(=read_costs::a_shape_s_layer_is_one_lookup_whatever_the_number_of_layers) |
+      test(=read_costs::master_pages_are_one_lookup_a_page_and_charged) |
+      test(=read_costs::more_layers_than_a_section_holds_rows_are_refused_before_any_is_built) |
+      test(=read_costs::more_rows_of_text_than_a_section_holds_are_too_complex) |
+      test(=read_costs_b::a_group_of_a_million_shapes_is_refused_by_a_cap_in_bounded_time) |
+      test(=read_costs_b::a_million_glue_points_on_one_shape_are_refused_before_their_rows_are_made) |
+      test(=read_costs_b::many_connectors_glued_to_one_glue_point_are_one_lookup_each) |
+      test(=read_costs_b::many_shapes_of_the_costliest_presets_are_ended_by_the_item_cap_in_bounded_time) |
+      test(=read_hostile::path_commands_past_a_page_s_budget_are_too_complex) |
+      test(=read_formula_costs::more_handles_than_a_section_holds_rows_are_refused_as_too_complex_before_the_rest_are_read) |
+      test(=read_shapes::a_shape_of_more_fields_than_a_section_holds_rows_is_too_complex) |
+      test(=rows::effective_rows_and_a_resolve_over_a_section_of_320_000_stay_near_linear) |
+      test(=shapeops_hostile::a_fragment_of_ten_thousand_regions_is_made_in_bounded_time_and_undone_in_one_step) |
+      test(=shapeops_hostile::the_charge_for_a_look_is_exact_at_the_most_a_command_writes) |
+      test(=templates::a_template_file_given_to_file_new_is_read_while_the_window_goes_on) |
+      test(=text_measure::formats_are_read_once_for_a_row_and_a_flood_of_rows_is_refused) |
+      test(=timing::a_million_cells_with_no_value_cost_a_bounded_number_of_bytes_each) |
+      test(=timing::a_million_rows_with_no_cell_cost_a_bounded_number_of_bytes_each) |
+      test(=timing::a_page_of_a_million_shapes_and_one_more_is_refused_before_it_is_built) |
+      test(=timing::a_thousand_geometry_sections_of_a_hundred_rows) |
+      test(=timing::half_a_million_connect_rows) |
+      test(=timing::half_a_million_shapes_that_name_a_master_and_a_style_that_are_not_there) |
+      test(=timing::seven_hundred_thousand_cells_across_seven_hundred_shapes_a_part_near_the_xml_cap) |
+      test(=timing::the_formula_budget_bounds_what_a_file_of_formulas_costs) |
+      test(=write_cost_b::a_retext_of_320000_paragraphs_with_spans_takes_a_few_times_the_read_of_the_file) |
+      test(=write_memory::a_model_grown_by_1_2_gb_of_row_names_after_the_read_is_refused_before_the_file_is_read_again_and_does_not_abort) |
+      test(=write_memory::a_model_grown_by_2_gb_of_cell_text_after_the_read_is_refused_before_the_file_is_read_again_and_does_not_abort) |
+      test(=write_memory::a_save_of_300000_rectangles_still_saves_under_the_limit) |
+      test(=write_memory::a_save_of_the_every_budget_file_is_refused_with_a_class_under_the_limit_and_does_not_abort) |
+      test(=write_memory::a_save_of_the_file_with_100_big_attributes_is_made_or_refused_with_a_class) |
+      test(=write_memory::a_save_of_the_file_with_250_big_attributes_is_refused_with_a_class_and_does_not_abort) |
+      test(=write_memory::a_save_of_the_file_with_250_big_attributes_past_the_gate_never_aborts_where_memory_runs_out) |
+      test(=write_memory::a_save_with_the_index_nothing_read_is_refused_before_the_file_is_read) |
+      test(=write_zero_memory::a_retext_of_a_paragraph_of_1300000_bookmarks_ends_as_a_save_or_a_limit_and_does_not_abort) |
+      test(=write_zero_memory::a_retext_that_takes_out_600000_paragraphs_that_each_hold_a_bookmark_ends_as_a_save_or_a_limit_and_does_not_abort) |
+      test(=write_zero_memory::a_retext_that_changes_fifty_thousand_fields_ends_as_a_save_or_a_limit_with_one_note_and_does_not_abort) |
+      test(=pictures::pictures_up_to_the_drawings_budget_are_inserted_and_the_next_is_refused_in_words_under_the_address_limit) |
+      test(=canon_free_names_scale::a_hundred_thousand_automatic_styles_under_other_names_are_the_same_and_the_rule_adds_a_pass) |
+      test(=canon_free_names_scale::a_hundred_thousand_names_for_one_style_are_the_same_and_the_rule_adds_a_pass) |
+      test(=canon_free_names_scale::a_hundred_thousand_different_styles_with_no_match_are_compared_as_they_were_and_the_rule_adds_a_pass) |
+      test(=canon_free_names_scale::the_work_grows_with_the_styles_and_no_faster) |
+      test(=swimlane_cells::a_file_of_a_hundred_thousand_containers_each_naming_the_next_as_its_list_opens_is_asked_about_and_moves)
+'''
+test-group = "memory-heavy"
+
+# The package's own memory tests (`crates/native/tests/it/memory.rs`): each runs a child process under `ulimit -v 3000000` that holds a model, a package and the
+# pictures of a drawing at once (measured on beast, 2026-11-21: 1,084 MB for two pictures of 150 MiB written and read again, 482 MB for a part of 120 MB, 210 MB for the
+# two that are refused for the memory that is left, 8 MB for the records and 7 MB for the file over the cap). Every one of the six is in the group, so that two run at once at the most.
+[[profile.default.overrides]]
+filter = '''
+      package(diacraft-native) & test(/^memory::/)
+'''
+test-group = "memory-heavy"
+
+# The four tests that take more than 30 seconds on their own. Measured in the workspace's test profile, the gate's: one at a time at a machine
+# load of 29 to 35 on 36 cores (alone), and in the whole workspace run at the gate's width inside a scope of 800% CPU (at the gate):
+#   alone, at the gate, in seconds
+#   66, 70  odg_hold four rounds of formatting eight groups of 20,000 (a child under `ulimit -v 3000000`: 6.6 s to open the file, 32 `shape.format` commands of
+#           1.9 s each, 0.9 s for the save that is refused for memory; one thread)
+#   62, 67  odg_hold 45,000 rectangles added after a save (55,000 shapes in two saves, in the test's own process)
+#   54, 50  write_memory 250 big attributes past the gate (two children, a file of 189 MB, at 2.6 and at 3.0 GB of address space)
+#   37, 38  odg_memory an edit and a save of 350,000 rectangles (a child under `ulimit -v 3000000`)
+# A fifth, is listed with them: write_groups_cost, 60,000 new groups of one member saved, takes 22 to 26 s alone, which a loaded machine takes past the 30 s
+# of the default period (measured alone only; it is not one of the four above, and has no gate figure of its own). A sixth: odg_untouched_routes's chains
+# of edits, saved and undone, took 65 s alone on a machine at a load of 17 to 49 (2026-11-22), and in the whole run on an Intel Mac of 2019 at 12 threads it
+# ran past the 120 seconds and failed; alone there it took 66 s.
+# Gates of many agents run together on one machine, and at a load of 66 the first of them ran past the 120 seconds above and failed a gate that had nothing wrong.
+# The first was tried at a smaller size: without its 175,000 loose rectangles it ends in the same refusal (more than 2,766 MiB of memory a save may hold) with a
+# third less CPU time (38 s against 58 s), which leaves the other three as slow as they are, and the loose rectangles are part of the input the review named; so
+# its input stays, and the other three were not shrunk. Each of the four is reported as slow every 60 seconds and killed and failed after ten of them, 600 seconds,
+# nine times what the slowest takes alone, and a test that waits for ever is still ended. The tests do not assert time; this decides only how long the gate waits.
+[[profile.default.overrides]]
+filter = '''
+      test(=odg_hold::a_save_after_four_rounds_of_formatting_eight_groups_of_20000_ends_as_a_save_or_a_refusal_and_does_not_abort) |
+      test(=odg_hold::rectangles_added_after_a_save_of_35000_are_saved_too_and_the_first_are_given_again_and_not_flattened_again) |
+      test(=odg_memory::an_edit_and_a_save_of_300000_rectangles_through_the_engine_ends_as_a_save_or_a_refusal_and_does_not_abort) |
+      test(=write_memory::a_save_of_the_file_with_250_big_attributes_past_the_gate_never_aborts_where_memory_runs_out) |
+      test(=write_groups_cost::the_members_of_new_groups_are_gathered_once_for_each_and_sixty_thousand_groups_of_one_member_are_saved) |
+      test(=odg_untouched_routes::w1_over_chains_of_edits_saves_and_undos_no_route_of_the_file_parts_from_the_model_in_silence)
+'''
+slow-timeout = { period = "60s", terminate-after = 10 }

@@ -1,0 +1,205 @@
+# The gate of DiaCraft: `cargo xtask ci` on Linux, and the app and the command line built and smoke tested on Windows and macOS. The
+# gate job runs the gate itself, with no third-party action but checkout and the cargo cache, each pinned by commit.
+
+name: CI
+
+# Quality gates for every push to main and every pull request (`cargo xtask ci`).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a PR branch cancels its older run; every push to main runs to the end.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # What the shared gate sets. The CARGO_* and RUST* variables are part of the dependency cache's
+    # key, so they are set here, before the cache step.
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      CARGO_NET_RETRY: 10
+      RUST_BACKTRACE: 1
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      # The Rust release the gate runs on; a rust-toolchain.toml with a channel, if the repository
+      # gets one, wins. Keep it at the release the developers run (docs/development.md).
+      RUST_VERSION: 1.100.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # A debug build of the workspace is large: drop the image's unused toolchains, in the
+      # background, before the build needs the space.
+      - name: Free disk space
+        run: |
+          nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL </dev/null >/dev/null 2>&1 &
+
+      # The gate builds without craft-fonts: everything must build and test without them.
+      - name: Install Linux build dependencies
+        env:
+          PACKAGES: >-
+            pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
+            libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev mesa-vulkan-drivers
+            libgl1-mesa-dev
+        run: |
+          set -euo pipefail
+          set -f
+          # Skips the manual-page index that apt would rebuild; nothing here reads it.
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -o Acquire::Retries=3
+          # shellcheck disable=SC2086 # the list is split into package names on purpose
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 -- $PACKAGES
+
+      - name: Install Rust
+        run: |
+          set -euo pipefail
+          toolchain=$RUST_VERSION
+          if [ -f rust-toolchain.toml ]; then
+            # The value of its `channel = "..."` line, when it has one.
+            channel=$(awk -F"[\"']" '/^[[:space:]]*channel[[:space:]]*=/ { print $2; exit }' rust-toolchain.toml)
+            toolchain=${channel:-$toolchain}
+          fi
+          # clippy and rustfmt for the lint steps, wasm32 for the `wasm` step.
+          rustup toolchain install "$toolchain" --profile minimal --no-self-update \
+            --component clippy --component rustfmt --target wasm32-unknown-unknown
+          rustup default "$toolchain"
+          rustc --version
+
+      # The release archives of the two tools, each checked against the SHA-256 written here (the
+      # value its project's release also publishes), and no third-party install action. To move a
+      # version, change the version and its checksum together.
+      - name: Install cargo-nextest and cargo-deny
+        env:
+          NEXTEST_VERSION: 0.9.150
+          NEXTEST_SHA256: b0959bc64232974224cf9fb22c915845398c0e8668fa7831eb5b43fb1eef781f
+          DENY_VERSION: 0.20.2
+          DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/tools/bin"
+          downloads="$RUNNER_TEMP/tools/downloads"
+          mkdir -p "$bin" "$downloads"
+          fetch() { # fetch <url> <sha256> <file>
+            curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+              --retry 5 --retry-all-errors --output "$3" "$1"
+            echo "$2  $3" | sha256sum --check --strict -
+          }
+          nextest="cargo-nextest-$NEXTEST_VERSION-x86_64-unknown-linux-gnu.tar.gz"
+          fetch "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/$nextest" \
+            "$NEXTEST_SHA256" "$downloads/$nextest"
+          tar -xzf "$downloads/$nextest" -C "$bin" cargo-nextest
+          deny="cargo-deny-$DENY_VERSION-x86_64-unknown-linux-musl"
+          fetch "https://github.com/EmbarkStudios/cargo-deny/releases/download/$DENY_VERSION/$deny.tar.gz" \
+            "$DENY_SHA256" "$downloads/$deny.tar.gz"
+          tar -xzf "$downloads/$deny.tar.gz" -C "$bin" --strip-components=1 "$deny/cargo-deny"
+          echo "$bin" >> "$GITHUB_PATH"
+          # The version each tool reports is the one asked for.
+          reported=$("$bin/cargo-nextest" nextest --version)
+          case $reported in "cargo-nextest $NEXTEST_VERSION "*) ;; *) echo "::error::cargo-nextest reports: $reported"; exit 1 ;; esac
+          reported=$("$bin/cargo-deny" --version)
+          case $reported in "cargo-deny $DENY_VERSION") ;; *) echo "::error::cargo-deny reports: $reported"; exit 1 ;; esac
+
+      # Restores in every run; saves only on pushes to the default branch and manual runs of it, and
+      # never from a failed job (an entry saved before the test build lacks the test profile's
+      # dependencies, and an entry whose key exists is never replaced).
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch }}
+          cache-on-failure: false
+
+      - name: Gate
+        run: cargo xtask ci
+
+      # A gate that changed Cargo.lock ran against a lockfile that is not the one in the repository.
+      - name: Lockfile unchanged
+        run: git diff --exit-code -- Cargo.lock
+
+  # The other two platforms the release ships for: the same two programs built in release and run once, on every push and pull request, so
+  # that a change that breaks them is found when it is made and not when a release is cut. These are not the gate (the tests run on Linux): each builds the
+  # app and the command line, runs packaging/smoke.sh on them (versions, and a drawing saved, converted to .diacraft and back, and drawn as PNG, SVG and
+  # PDF, with no window) and makes the download package the release would make (packaging/package.sh). No third-party actions: only checkout.
+  windows:
+    name: Windows build and smoke test
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      CARGO_NET_RETRY: 10
+      RUST_BACKTRACE: 1
+      # The same release as the gate's, and the release workflow's: move all three together.
+      RUST_VERSION: 1.100.0
+      # The print library's build script (winprint) builds a TLS stack for the host, and that includes aws-lc-sys, whose assembly on Windows needs NASM. The runner
+      # image has NASM; if it ever does not, this makes the crate use the objects it ships already assembled.
+      AWS_LC_SYS_PREBUILT_NASM: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      # --target keeps the flags of .cargo/config.toml (static C runtime, 8 MiB main stack) off the build scripts, which Cargo builds for the host.
+      - name: Build the app and the command line
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc -p diacraft -p diacraft-cli
+
+      - name: Smoke test
+        run: bash packaging/smoke.sh target/x86_64-pc-windows-msvc/release
+
+      - name: Make the download package
+        run: bash packaging/package.sh windows ci dist target/x86_64-pc-windows-msvc/release
+
+  macos:
+    name: macOS build and smoke test
+    runs-on: macos-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      CARGO_NET_RETRY: 10
+      RUST_BACKTRACE: 1
+      RUST_VERSION: 1.100.0
+      # The oldest macOS the release runs on: the Rust code and the C allocator are both built for it.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      # No --target: the machine's own architecture (the release builds both and joins them).
+      - name: Build the app and the command line
+        run: cargo build --release --locked -p diacraft -p diacraft-cli
+
+      - name: Smoke test
+        run: bash packaging/smoke.sh target/release
+
+      - name: Make the download package
+        run: bash packaging/package.sh macos ci dist target/release
