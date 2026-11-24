@@ -130,6 +130,11 @@ jobs:
   # that a change that breaks them is found when it is made and not when a release is cut. These are not the gate (the tests run on Linux): each builds the
   # app and the command line, runs packaging/smoke.sh on them (versions, and a drawing saved, converted to .diacraft and back, and drawn as PNG, SVG and
   # PDF, with no window) and makes the download package the release would make (packaging/package.sh). No third-party actions: only checkout.
+  #
+  # The ARM64 builds (Linux on ubuntu-22.04-arm, Windows on windows-11-arm) are left to the release workflow, which a run by hand rehearses (Actions, Release, Run
+  # workflow). They are the same Rust code on a second CPU, so a change that breaks them breaks the x86_64 build first, almost always. What is ARM's own is the
+  # link, the build of the C allocator and the runner, and that does not change with most commits: two more cold release builds on every push would be a high
+  # price for it. The release workflow builds and smoke tests both on their own CPUs before a tag is pushed, which is when a break there matters.
   windows:
     name: Windows build and smoke test
     runs-on: windows-latest
@@ -147,6 +152,9 @@ jobs:
       # The print library's build script (winprint) builds a TLS stack for the host, and that includes aws-lc-sys, whose assembly on Windows needs NASM. The runner
       # image has NASM; if it ever does not, this makes the crate use the objects it ships already assembled.
       AWS_LC_SYS_PREBUILT_NASM: "1"
+      # The release's installer is made with WiX: the same version and checksum as release.yml's (a test holds them equal).
+      WIX_VERSION: 5.0.2
+      WIX_SHA256: f30ef0c74e2a986126539c5780be93ac24e8136eaf723b1937b26272703ae173
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -167,6 +175,39 @@ jobs:
 
       - name: Make the download package
         run: bash packaging/package.sh windows ci dist target/x86_64-pc-windows-msvc/release
+
+      # WiX 5 (MS-RL; WiX 6 and later come under another licence) as a .NET tool, which the runner image's .NET SDK installs. The package is downloaded from nuget.org
+      # and checked against the SHA-256 written here (its own SHA-512 is what nuget.org lists), and installed from a folder that holds that one file and a nuget.config
+      # that names no other source, so that nothing else is fetched. To move a version, change the version and its checksum here and in ci.yml together (a test holds them equal).
+      - name: Install WiX
+        run: |
+          set -euo pipefail
+          tools="$(cygpath -u "$RUNNER_TEMP")/tools"
+          source_dir="$tools/wix-source"
+          mkdir -p "$source_dir"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 5 --retry-all-errors \
+            --output "$source_dir/wix.$WIX_VERSION.nupkg" "https://api.nuget.org/v3-flatcontainer/wix/$WIX_VERSION/wix.$WIX_VERSION.nupkg"
+          echo "$WIX_SHA256  $source_dir/wix.$WIX_VERSION.nupkg" | sha256sum --check --strict -
+          cat >"$source_dir/nuget.config" <<NUGET
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="pinned" value="$(cygpath -w "$source_dir")" />
+            </packageSources>
+          </configuration>
+          NUGET
+          dotnet tool install wix --version "$WIX_VERSION" --tool-path "$(cygpath -w "$tools/wix")" --configfile "$(cygpath -w "$source_dir/nuget.config")"
+          cygpath -w "$tools/wix" >>"$GITHUB_PATH"
+          reported=$("$tools/wix/wix.exe" --version)
+          case $reported in "$WIX_VERSION"+*) ;; *) echo "::error::wix reports: $reported"; exit 1 ;; esac
+
+      # The installer the release would make, installed, run and removed (packaging/windows/check-msi.sh): a change to it is found when it is made.
+      - name: Make the installer and try it
+        run: |
+          set -euo pipefail
+          bash packaging/windows/make-msi.sh ci dist target/x86_64-pc-windows-msvc/release
+          bash packaging/windows/check-msi.sh dist/diacraft-ci-windows-x86_64.msi
 
   macos:
     name: macOS build and smoke test
@@ -203,3 +244,23 @@ jobs:
 
       - name: Make the download package
         run: bash packaging/package.sh macos ci dist target/release
+
+      # The disk image the release would make (it is in dist with the zip), attached read only and with no window, looked at, run from, and detached.
+      - name: Try the disk image
+        run: |
+          set -euo pipefail
+          mount="$RUNNER_TEMP/diacraft-image"
+          mkdir -p "$mount"
+          trap 'hdiutil detach "$mount" -force >/dev/null 2>&1 || true' EXIT
+          hdiutil attach -nobrowse -readonly -noverify -mountpoint "$mount" dist/diacraft-ci-macos-*.dmg
+          test -d "$mount/DiaCraft.app"
+          [ "$(readlink "$mount/Applications")" = /Applications ]
+          bash packaging/smoke.sh --licences "$mount"
+          codesign --verify --strict "$mount/DiaCraft.app"
+          "$mount/diacraft-cli" --version
+          "$mount/DiaCraft.app/Contents/MacOS/DiaCraft" --version
+          for _ in 1 2 3; do
+            hdiutil detach "$mount" && break
+            sleep 3
+          done
+          if [ -e "$mount/DiaCraft.app" ]; then echo "::error::the disk image is still attached"; exit 1; fi

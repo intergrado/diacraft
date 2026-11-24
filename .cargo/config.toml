@@ -1,7 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
 
-# Windows. Pass `--target x86_64-pc-windows-msvc` when you build: then these flags reach the program's own binaries
+# Windows. Pass `--target x86_64-pc-windows-msvc` (or `aarch64-pc-windows-msvc`, below) when you build: then these flags reach the program's own binaries
 # only, and the build scripts and procedural macros that Cargo builds for the host are left alone. Linux and macOS builds read none of this.
 #
 # * `crt-static` links the C runtime into the programs, so a Windows without the Visual C++ runtime installed still starts them. The C
@@ -10,6 +10,10 @@ xtask = "run --package xtask --"
 #   checked on the larger stacks (a test thread has 2 MiB). The programs ask the linker for 8 MiB, so they never have less than where
 #   they were tested.
 [target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/STACK:8388608"]
+
+# The same for Windows on ARM: the release workflow builds it on an ARM runner, with `--target aarch64-pc-windows-msvc`.
+[target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/STACK:8388608"]
 
 # WebAssembly. A WebAssembly program's stack is 1 MiB unless the link says more, and the engine's recursion limits (the depth of nested groups, of XML and of a formula) were checked on stacks of

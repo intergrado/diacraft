@@ -193,5 +193,8 @@ winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457
 # setting the file's extension on each system. The XDG portal part is the open upstream pull request PolyMeilex/rfd#341 (by itsF4LCON, a cherry-pick that keeps its
 # author); the macOS and Windows parts are the fork's branches `macos-save-format-extension` and `windows-save-format-extension`, each offered upstream as a pull request of its own.
 # Without them the Save dialog returns the name it was given, with the old extension, once another format is chosen (Linux, and Windows where the dialog does not swap it), or the
-# macOS panel refuses that name. Pinned by full revision; the line goes, and the dependency returns to crates.io, when the next rfd release holds the three changes.
-rfd = { git = "https://github.com/one-bit/rfd", rev = "2cc1e3e87579ba1bc4912d24dde7099aa5751d77" }
+# macOS panel refuses that name. The macOS part also gives the panel no types for a format whose system type prefers another extension (a type an installed application declares, or
+# the system's own for `jpg`), because the panel would change the extension of the name it returns to that one. The panel can still return another extension with the extension shown,
+# so the fork uses the name field's extension then, and asks whether to replace a file that has that name. Pinned by full revision; the line goes, and the dependency returns to
+# crates.io, when the next rfd release holds the changes.
+rfd = { git = "https://github.com/one-bit/rfd", rev = "8a7a7551ad0beabadb5c1c65facbeab99bd919da" }

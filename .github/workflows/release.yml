@@ -1,13 +1,18 @@
 # DiaCraft's own release workflow (AGENTS.md, "CI workflows": the shared release workflow needs org secrets and runners).
 #
-# A pushed tag `vMAJOR.MINOR.PATCH` (or with a `-suffix`, a pre-release) builds DiaCraft in release for Linux, Windows and macOS and
+# A pushed tag `vMAJOR.MINOR.PATCH` (or with a `-suffix`, a pre-release) builds DiaCraft in release for Linux and Windows (x86_64 and ARM64) and macOS and
 # uploads these files to a DRAFT GitHub release of that tag, with a SHA256SUMS file that covers them all:
 #
-#   diacraft-<tag>-linux-x86_64.tar.gz     diacraft-<tag>-windows-x86_64.zip     diacraft-<tag>-macos-universal.zip
+#   diacraft-<tag>-linux-x86_64.tar.gz     diacraft-<tag>-linux-arm64.tar.gz
+#   diacraft-<tag>-linux-x86_64.deb        diacraft-<tag>-linux-arm64.deb
+#   diacraft-<tag>-linux-x86_64.AppImage   diacraft-<tag>-linux-arm64.AppImage
+#   diacraft-<tag>-windows-x86_64.zip      diacraft-<tag>-windows-arm64.zip
+#   diacraft-<tag>-windows-x86_64.msi      diacraft-<tag>-windows-arm64.msi
+#   diacraft-<tag>-macos-universal.dmg     diacraft-<tag>-macos-universal.zip
 #
 # The release stays a draft: the owner reads the notes and the files, then presses Publish. Running the workflow by hand (workflow_dispatch) on a
-# branch builds and tests the three downloads but uploads nothing; run on a tag, it does what the tag's push does. Every program is smoke tested
-# (packaging/smoke.sh) before anything is uploaded. How to cut a release, and what the owner fills in: docs/releasing.md.
+# branch builds and tests every download but uploads nothing to a release; run on a tag, it does what the tag's push does. Every program is smoke tested
+# (packaging/smoke.sh) before anything is uploaded, on a runner of its own CPU. How to cut a release, and what the owner fills in: docs/releasing.md.
 #
 # The programs are unsigned. The signing and notarisation steps are written below as comments, with the secrets they read, for the owner to switch on.
 # No third-party actions: only GitHub's own `checkout` and `upload-artifact`. The GitHub CLI (`gh`) on every runner uploads the files.
@@ -96,7 +101,7 @@ jobs:
           } >>"$GITHUB_OUTPUT"
           echo "Building $tag (upload: $publish)"
 
-  # The draft release the files go to. Made once, before the builds, so that three jobs do not race to make it. Nothing to do when nothing is uploaded.
+  # The draft release the files go to. Made once, before the builds, so that the jobs that upload do not race to make it. Nothing to do when nothing is uploaded.
   draft:
     name: Draft release
     needs: plan
@@ -123,9 +128,11 @@ jobs:
           cat >notes.md <<NOTES
           DiaCraft $TAG for Linux, Windows and macOS.
 
-          - Linux: diacraft-$TAG-linux-x86_64.tar.gz
-          - Windows: diacraft-$TAG-windows-x86_64.zip
-          - macOS (Apple silicon and Intel): diacraft-$TAG-macos-universal.zip
+          - Linux, Intel or AMD (x86_64): diacraft-$TAG-linux-x86_64.AppImage, diacraft-$TAG-linux-x86_64.deb and diacraft-$TAG-linux-x86_64.tar.gz
+          - Linux, ARM (arm64): diacraft-$TAG-linux-arm64.AppImage, diacraft-$TAG-linux-arm64.deb and diacraft-$TAG-linux-arm64.tar.gz
+          - Windows, Intel or AMD (x64): diacraft-$TAG-windows-x86_64.msi and diacraft-$TAG-windows-x86_64.zip
+          - Windows, ARM (ARM64): diacraft-$TAG-windows-arm64.msi and diacraft-$TAG-windows-arm64.zip
+          - macOS (Apple silicon and Intel): diacraft-$TAG-macos-universal.dmg and diacraft-$TAG-macos-universal.zip
 
           Check a download against SHA256SUMS. These downloads are not signed yet: the README in each one says how to open them.
 
@@ -135,30 +142,61 @@ jobs:
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
           gh release create "$TAG" --repo "$REPO" --draft --verify-tag --title "DiaCraft $TAG" --notes-file notes.md ${flags[@]+"${flags[@]}"}
 
+  # Linux, for each CPU. Each build runs on a runner of its own CPU (nothing is cross compiled), so the smoke test runs the programs that were built.
   linux:
-    name: Linux (x86_64)
+    name: Linux (${{ matrix.arch }})
     needs: [plan, draft]
-    # Built on the oldest Ubuntu image GitHub offers, so that the program runs on any Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12).
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: write
+    # One CPU failing does not stop the other: a run that has something wrong shows everything that is wrong at once.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Built on the oldest Ubuntu image GitHub offers for the CPU, so that the program runs on any Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12), on
+          # both CPUs alike (owner, 2026-11-24).
+          - arch: x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            appimage_arch: x86_64
+            appimagetool_sha256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+            appimage_runtime_sha256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            appimage_arch: aarch64
+            appimagetool_sha256: f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
+            appimage_runtime_sha256: 00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
     env:
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
       NAME: ${{ needs.plan.outputs.name }}
       DIACRAFT_BUILD_GIT: ${{ needs.plan.outputs.name }}
       DIACRAFT_BUILD_YEAR: ${{ needs.plan.outputs.year }}
       DIACRAFT_REPOSITORY: ${{ github.repository }}
       PUBLISH: ${{ needs.plan.outputs.publish }}
+      # The AppImage is made with `appimagetool` and a runtime (the small program at the start of the file that mounts the rest): one release of each, downloaded below and
+      # checked against the SHA-256 of that CPU's file, which is in the matrix (the value the project's release also publishes). To move a version, change the version and
+      # both checksums of each CPU together. The runtime is a dated release (type2-runtime's `continuous` is rewritten from day to day), and it is given to appimagetool,
+      # which would otherwise fetch the newest one itself.
+      APPIMAGETOOL_VERSION: 1.9.1
+      APPIMAGE_RUNTIME_VERSION: "20251108"
+      APPIMAGE_ARCH: ${{ matrix.appimage_arch }}
+      APPIMAGETOOL_SHA256: ${{ matrix.appimagetool_sha256 }}
+      APPIMAGE_RUNTIME_SHA256: ${{ matrix.appimage_runtime_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # The package names are the same on the ARM image. `file` is for appimagetool, which stops when it is missing (the runner images have it; this makes sure).
       - name: Install Linux build dependencies
         env:
           PACKAGES: >-
             pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
-            libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev
+            libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev file
         run: |
           set -euo pipefail
           set -f
@@ -174,62 +212,162 @@ jobs:
 
       # The licence texts of the libraries are in every download (THIRD-PARTY-LICENSES.txt, made by `cargo xtask licenses`). This stops a release whose file is not what
       # the lock says: a crate with no licence text, a licence outside deny.toml's list, or a list that was not made again after a dependency changed. It reads the
-      # sources of every platform's crates, which cargo fetches here; the file is the same for all three downloads.
+      # sources of every platform's crates, which cargo fetches here; the file is the same for all the downloads, so one job checks it.
       - name: Check the third-party licences
+        if: matrix.arch == 'x86_64'
         run: cargo xtask licenses --check
 
       - name: Build the app and the command line
-        run: cargo build --release --locked --target x86_64-unknown-linux-gnu -p diacraft -p diacraft-cli
+        run: cargo build --release --locked --target "$TARGET" -p diacraft -p diacraft-cli
 
       # The tag a run by hand on a branch makes up is not the version in Cargo.toml: only a release is held to it.
       - name: Smoke test the programs
         run: |
           set -euo pipefail
           if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
-          bash packaging/smoke.sh target/x86_64-unknown-linux-gnu/release $expected
+          bash packaging/smoke.sh "target/$TARGET/release" $expected
 
       - name: Make the download
-        run: bash packaging/package.sh linux "$NAME" dist target/x86_64-unknown-linux-gnu/release
+        run: bash packaging/package.sh linux "$NAME" dist "target/$TARGET/release"
 
       - name: Smoke test what is in the download
         run: |
           set -euo pipefail
           mkdir unpacked
-          tar -xzf "dist/diacraft-$NAME-linux-x86_64.tar.gz" -C unpacked
+          tar -xzf "dist/diacraft-$NAME-linux-$ARCH.tar.gz" -C unpacked
           if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
           # The licence files are in the download, each there and not empty.
-          SMOKE_PACKAGE_DIR="unpacked/diacraft-$NAME-linux-x86_64" bash packaging/smoke.sh "unpacked/diacraft-$NAME-linux-x86_64" $expected
+          SMOKE_PACKAGE_DIR="unpacked/diacraft-$NAME-linux-$ARCH" bash packaging/smoke.sh "unpacked/diacraft-$NAME-linux-$ARCH" $expected
           # What the install script does, into a folder of its own.
-          PREFIX="$PWD/prefix" "unpacked/diacraft-$NAME-linux-x86_64/install.sh"
+          PREFIX="$PWD/prefix" "unpacked/diacraft-$NAME-linux-$ARCH/install.sh"
           "$PWD/prefix/bin/diacraft-cli" --version
           grep -q "^Exec=\"$PWD/prefix/bin/diacraft\" " "$PWD/prefix/share/applications/app.diacraft.desktop"
+
+      # The .deb for Debian, Ubuntu and what is built on them (packaging/linux/make-deb.sh). dpkg-deb is on the runner.
+      - name: Make the .deb
+        run: bash packaging/linux/make-deb.sh "$NAME" dist "target/$TARGET/release"
+
+      # What a person does with it: installs it with apt, runs the programs, and removes it. The runner has no display, so what is run is the command line and the
+      # window program's --version (packaging/smoke.sh); Recommends are left out, since those are drivers and portals no run here uses. The programs are tried where
+      # the package put them, with the licence files it put beside them.
+      - name: Smoke test the .deb
+        run: |
+          set -euo pipefail
+          deb="$PWD/dist/diacraft-$NAME-linux-$ARCH.deb"
+          dpkg-deb --info "$deb"
+          # The package's architecture is the runner's: an amd64 package on the x86_64 runner, an arm64 one on the ARM runner.
+          [ "$(dpkg-deb --field "$deb" Architecture)" = "$(dpkg --print-architecture)" ]
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 "$deb"
+          dpkg -L diacraft
+          test -x /usr/bin/diacraft && test -x /usr/bin/diacraft-cli
+          test -f /usr/share/applications/app.diacraft.desktop && test -f /usr/share/icons/hicolor/256x256/apps/app.diacraft.png
+          # Every library the programs link is there, which the package's dependencies bring.
+          for program in /usr/bin/diacraft /usr/bin/diacraft-cli; do
+            if ldd "$program" | grep 'not found'; then echo "::error::$program links a library the package's dependencies do not bring"; exit 1; fi
+          done
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          SMOKE_PACKAGE_DIR=/usr/share/doc/diacraft bash packaging/smoke.sh /usr/bin $expected
+          sudo apt-get remove -y diacraft
+          if dpkg -s diacraft >/dev/null 2>&1 || [ -e /usr/bin/diacraft ] || [ -e /usr/share/applications/app.diacraft.desktop ] || [ -e /usr/share/doc/diacraft ]; then
+            echo "::error::the package left files behind when it was removed"
+            exit 1
+          fi
+
+      # The two files, each checked against its SHA-256 (the AppImage tool is itself an AppImage, so it is run with --appimage-extract-and-run: the runner has no FUSE).
+      - name: Install appimagetool
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/tools"
+          mkdir -p "$tools"
+          fetch() { # fetch <url> <sha256> <file>
+            curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+              --retry 5 --retry-all-errors --output "$3" "$1"
+            echo "$2  $3" | sha256sum --check --strict -
+          }
+          fetch "https://github.com/AppImage/appimagetool/releases/download/$APPIMAGETOOL_VERSION/appimagetool-$APPIMAGE_ARCH.AppImage" \
+            "$APPIMAGETOOL_SHA256" "$tools/appimagetool"
+          fetch "https://github.com/AppImage/type2-runtime/releases/download/$APPIMAGE_RUNTIME_VERSION/runtime-$APPIMAGE_ARCH" \
+            "$APPIMAGE_RUNTIME_SHA256" "$tools/runtime"
+          chmod +x "$tools/appimagetool"
+          echo "APPIMAGETOOL=$tools/appimagetool" >>"$GITHUB_ENV"
+          echo "APPIMAGE_RUNTIME=$tools/runtime" >>"$GITHUB_ENV"
+
+      - name: Make the AppImage
+        run: bash packaging/linux/make-appimage.sh "$NAME" dist "target/$TARGET/release"
+
+      # The runner has no FUSE, so the file is run with --appimage-extract-and-run, which unpacks it to a folder of its own and runs it there: what the file does on a
+      # machine without FUSE. Both programs run (the command line through --cli), and what the file holds, unpacked, gets the same smoke test as the other downloads.
+      - name: Smoke test the AppImage
+        run: |
+          set -euo pipefail
+          appimage="$PWD/dist/diacraft-$NAME-linux-$ARCH.AppImage"
+          [ -x "$appimage" ]
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          "$appimage" --appimage-extract-and-run --version
+          cli=$("$appimage" --appimage-extract-and-run --cli --version)
+          echo "$cli"
+          case $cli in "diacraft-cli "[0-9]*) ;; *) echo "::error::the AppImage's --cli says '$cli'"; exit 1 ;; esac
+          if [ -n "$expected" ] && [ "$cli" != "diacraft-cli ${expected#v}" ]; then echo "::error::the AppImage's --cli says '$cli', the tag is $expected"; exit 1; fi
+          mkdir unpacked-appimage
+          (cd unpacked-appimage && "$appimage" --appimage-extract >/dev/null)
+          root="$PWD/unpacked-appimage/squashfs-root"
+          test -x "$root/AppRun" && test -f "$root/app.diacraft.desktop" && test -f "$root/app.diacraft.png"
+          SMOKE_PACKAGE_DIR="$root/usr/share/doc/diacraft" bash packaging/smoke.sh "$root/usr/bin" $expected
+
+      # Every package of the run is kept for a week, so that a run by hand can be downloaded and tried before a tag is pushed. Nothing goes to a release without a tag.
+      - name: Keep the packages as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diacraft-${{ needs.plan.outputs.name }}-linux-${{ matrix.arch }}
+          path: dist
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Upload to the draft release
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: gh release upload "$NAME" "dist/diacraft-$NAME-linux-x86_64.tar.gz" --repo "$REPO" --clobber
+        run: |
+          gh release upload "$NAME" "dist/diacraft-$NAME-linux-$ARCH.tar.gz" "dist/diacraft-$NAME-linux-$ARCH.deb" "dist/diacraft-$NAME-linux-$ARCH.AppImage" \
+            --repo "$REPO" --clobber
 
+  # Windows, for each CPU, each built on a runner of its own CPU.
   windows:
-    name: Windows (x86_64)
+    name: Windows (${{ matrix.arch }})
     needs: [plan, draft]
-    runs-on: windows-2025
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
     defaults:
       run:
         shell: bash
     env:
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
       NAME: ${{ needs.plan.outputs.name }}
       DIACRAFT_BUILD_GIT: ${{ needs.plan.outputs.name }}
       DIACRAFT_BUILD_YEAR: ${{ needs.plan.outputs.year }}
       DIACRAFT_REPOSITORY: ${{ github.repository }}
       PUBLISH: ${{ needs.plan.outputs.publish }}
       # The print library's build script (winprint) builds a TLS stack for the host, and that includes aws-lc-sys, whose assembly on Windows needs NASM. The runner
-      # image has NASM; if it ever does not, this makes the crate use the objects it ships already assembled.
+      # image has NASM; if it ever does not, this makes the crate use the objects it ships already assembled. (On the ARM runner the crate compiles its assembly with
+      # clang-cl instead, which the image has, with Visual Studio's Clang component: the variable does nothing there.)
       AWS_LC_SYS_PREBUILT_NASM: "1"
+      # The installer is made with WiX (below): one version, and the SHA-256 of its package.
+      WIX_VERSION: 5.0.2
+      WIX_SHA256: f30ef0c74e2a986126539c5780be93ac24e8136eaf723b1937b26272703ae173
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -241,14 +379,15 @@ jobs:
           rustup default "$RUST_VERSION"
           rustc --version
 
-      # --target keeps the flags of .cargo/config.toml (static C runtime, 8 MiB main stack) off the build scripts, which Cargo builds for the host.
+      # --target keeps the flags of .cargo/config.toml (static C runtime, 8 MiB main stack) off the build scripts, which Cargo builds for the host. On the ARM
+      # runner the host is the target too, and the flags are still only the programs'. mimalloc's C code is built there by the ARM64 C++ compiler of Visual Studio.
       - name: Build the app and the command line
-        run: cargo build --release --locked --target x86_64-pc-windows-msvc -p diacraft -p diacraft-cli
+        run: cargo build --release --locked --target "$TARGET" -p diacraft -p diacraft-cli
 
       # ---- Signing hook (the owner fills this in: docs/releasing.md, "Signing"). Secrets to add to the repository:
       #   WINDOWS_CERTIFICATE            the code-signing certificate as a .pfx file, in base64
       #   WINDOWS_CERTIFICATE_PASSWORD   its password
-      # Sign the two programs here, before they are smoked and packaged:
+      # Sign the two programs here, before they are smoked and packaged (the x64 signtool runs on the ARM runner too, under emulation, and signs programs of both CPUs):
       #
       # - name: Sign the programs
       #   env:
@@ -259,7 +398,7 @@ jobs:
       #     $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
       #     []::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
       #     $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
-      #     foreach ($exe in "target\x86_64-pc-windows-msvc\release\diacraft.exe", "target\x86_64-pc-windows-msvc\release\diacraft-cli.exe") {
+      #     foreach ($exe in "target\$env:TARGET\release\diacraft.exe", "target\$env:TARGET\release\diacraft-cli.exe") {
       #       & $signtool sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $exe
       #       if ($LASTEXITCODE -ne 0) { throw "signtool failed on $exe" }
       #     }
@@ -270,28 +409,91 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
-          bash packaging/smoke.sh target/x86_64-pc-windows-msvc/release $expected
+          bash packaging/smoke.sh "target/$TARGET/release" $expected
 
       - name: Make the download
-        run: bash packaging/package.sh windows "$NAME" dist target/x86_64-pc-windows-msvc/release
+        run: bash packaging/package.sh windows "$NAME" dist "target/$TARGET/release"
 
       # Unpacked by PowerShell, which the runner has; and tested by the bash step after it (a `bash` typed in a PowerShell step can be the one of WSL).
       - name: Unpack the download
         shell: pwsh
-        run: Expand-Archive -Path "dist/diacraft-$env:NAME-windows-x86_64.zip" -DestinationPath unpacked
+        run: Expand-Archive -Path "dist/diacraft-$env:NAME-windows-$env:ARCH.zip" -DestinationPath unpacked
 
       - name: Smoke test what is in the download
         run: |
           set -euo pipefail
           if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
-          SMOKE_PACKAGE_DIR="unpacked/diacraft-$NAME-windows-x86_64" bash packaging/smoke.sh "unpacked/diacraft-$NAME-windows-x86_64" $expected
+          SMOKE_PACKAGE_DIR="unpacked/diacraft-$NAME-windows-$ARCH" bash packaging/smoke.sh "unpacked/diacraft-$NAME-windows-$ARCH" $expected
+
+      # WiX 5 (MS-RL; WiX 6 and later come under another licence) as a .NET tool, which the runner image's .NET SDK installs. The package is downloaded from nuget.org
+      # and checked against the SHA-256 written here (its own SHA-512 is what nuget.org lists), and installed from a folder that holds that one file and a nuget.config
+      # that names no other source, so that nothing else is fetched. To move a version, change the version and its checksum here and in ci.yml together (a test holds them equal).
+      - name: Install WiX
+        run: |
+          set -euo pipefail
+          tools="$(cygpath -u "$RUNNER_TEMP")/tools"
+          source_dir="$tools/wix-source"
+          mkdir -p "$source_dir"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 5 --retry-all-errors \
+            --output "$source_dir/wix.$WIX_VERSION.nupkg" "https://api.nuget.org/v3-flatcontainer/wix/$WIX_VERSION/wix.$WIX_VERSION.nupkg"
+          echo "$WIX_SHA256  $source_dir/wix.$WIX_VERSION.nupkg" | sha256sum --check --strict -
+          cat >"$source_dir/nuget.config" <<NUGET
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="pinned" value="$(cygpath -w "$source_dir")" />
+            </packageSources>
+          </configuration>
+          NUGET
+          dotnet tool install wix --version "$WIX_VERSION" --tool-path "$(cygpath -w "$tools/wix")" --configfile "$(cygpath -w "$source_dir/nuget.config")"
+          cygpath -w "$tools/wix" >>"$GITHUB_PATH"
+          reported=$("$tools/wix/wix.exe" --version)
+          case $reported in "$WIX_VERSION"+*) ;; *) echo "::error::wix reports: $reported"; exit 1 ;; esac
+
+      - name: Make the .msi
+        run: bash packaging/windows/make-msi.sh "$NAME" dist "target/$TARGET/release"
+
+      # ---- Signing hook for the installer (the owner fills this in, with the secrets of the hook above). Sign the .msi here, before it is installed and smoke tested; a
+      # signed installer is what Windows shows a publisher's name for. It runs the same signtool, with a description:
+      #
+      # - name: Sign the installer
+      #   env:
+      #     WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      #     WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      #   shell: pwsh
+      #   run: |
+      #     $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+      #     []::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+      #     $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+      #     & $signtool sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /d "DiaCraft" "dist\diacraft-$env:NAME-windows-$env:ARCH.msi"
+      #     if ($LASTEXITCODE -ne 0) { throw "signtool failed on the installer" }
+      #     Remove-Item $pfx
+      # ---- end of the signing hook for the installer
+
+      # What a person does with it: installs it (`msiexec /i ... /qn`, for the user, with no administrator rights asked), runs the programs where it put them, looks at the
+      # Start menu shortcut, the PATH and the Open with entries, removes it, and looks at what it left (packaging/windows/check-msi.sh).
+      - name: Smoke test the .msi
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          bash packaging/windows/check-msi.sh "dist/diacraft-$NAME-windows-$ARCH.msi" $expected
+
+      # Every package of the run is kept for a week, so that a run by hand can be downloaded and tried before a tag is pushed. Nothing goes to a release without a tag.
+      - name: Keep the packages as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diacraft-${{ needs.plan.outputs.name }}-windows-${{ matrix.arch }}
+          path: dist
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Upload to the draft release
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: gh release upload "$NAME" "dist/diacraft-$NAME-windows-x86_64.zip" --repo "$REPO" --clobber
+        run: gh release upload "$NAME" "dist/diacraft-$NAME-windows-$ARCH.msi" "dist/diacraft-$NAME-windows-$ARCH.zip" --repo "$REPO" --clobber
 
   macos:
     name: macOS (universal)
@@ -363,56 +565,86 @@ jobs:
       # 2. Give packaging/package.sh the identity: add this line to the `env:` of "Make the download" (the script then signs the CLI, the app's program and
       #    the app with the hardened runtime and a timestamp, where it signs ad hoc without it):
       #      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-      # 3. Notarise the archive it makes, right after "Make the download". Stapling the ticket into the app needs the app on its own, so a stapled
-      #    download is a second archive made after this step: leave it out for the first signed release (the Mac checks the ticket online).
+      #    The script also signs the disk image with the identity, which is what a disk image is notarised and stapled as.
+      # 3. Notarise the disk image, right after "Make the download", and staple the ticket to it, so that a person who opens it with no network gets no question. The
+      #    zip has no place for a ticket, and the app in it is notarised with the image's (the ticket is for the app's own signature): the Mac checks it online.
       #
-      # - name: Notarise the download
+      # - name: Notarise the disk image
       #   env:
       #     APPLE_ID: ${{ secrets.APPLE_ID }}
       #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
       #   run: |
       #     set -euo pipefail
-      #     xcrun notarytool submit "dist/diacraft-$NAME-macos-universal.zip" \
+      #     xcrun notarytool submit "dist/diacraft-$NAME-macos-universal.dmg" \
       #       --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+      #     xcrun stapler staple "dist/diacraft-$NAME-macos-universal.dmg"
       # ---- end of the signing hook
 
       - name: Make the download
         run: bash packaging/package.sh macos "$NAME" dist target/aarch64-apple-darwin/release target/x86_64-apple-darwin/release
 
-      - name: Check what is in the download
+      # The folder of a download is checked twice, as the zip unpacks it and as the disk image mounts it. The image is attached read only and with no window (-nobrowse),
+      # looked at, run from, and detached; it is detached again, whatever happens, when the step ends.
+      - name: Check what is in the downloads
         run: |
           set -euo pipefail
+          check_folder() { # check_folder DIR
+            dir=$1
+            app="$dir/DiaCraft.app"
+            # Both architectures in both programs.
+            for program in "$app/Contents/MacOS/DiaCraft" "$dir/diacraft-cli"; do
+              archs=$(lipo -archs "$program")
+              echo "$program: $archs"
+              case $archs in
+              *arm64*x86_64* | *x86_64*arm64*) ;;
+              *) echo "::error::$program holds '$archs', not both architectures"; exit 1 ;;
+              esac
+            done
+            plutil -lint "$app/Contents/Info.plist"
+            test -f "$app/Contents/Resources/DiaCraft.icns"
+            # The licence files are beside the app and inside it, each there and not empty.
+            bash packaging/smoke.sh --licences "$dir"
+            bash packaging/smoke.sh --licences "$app/Contents/Resources"
+            # The signature (ad hoc, or the identity) is whole.
+            codesign --verify --strict --verbose=2 "$app"
+            codesign --verify --strict --verbose=2 "$dir/diacraft-cli"
+            # The programs of the download start.
+            "$dir/diacraft-cli" --version
+            "$app/Contents/MacOS/DiaCraft" --version
+          }
           ditto -x -k "dist/diacraft-$NAME-macos-universal.zip" unpacked
-          dir="unpacked/diacraft-$NAME-macos-universal"
-          app="$dir/DiaCraft.app"
-          # Both architectures in both programs.
-          for program in "$app/Contents/MacOS/DiaCraft" "$dir/diacraft-cli"; do
-            archs=$(lipo -archs "$program")
-            echo "$program: $archs"
-            case $archs in
-            *arm64*x86_64* | *x86_64*arm64*) ;;
-            *) echo "::error::$program holds '$archs', not both architectures"; exit 1 ;;
-            esac
+          check_folder "unpacked/diacraft-$NAME-macos-universal"
+
+          mount="$RUNNER_TEMP/diacraft-image"
+          mkdir -p "$mount"
+          trap 'hdiutil detach "$mount" -force >/dev/null 2>&1 || true' EXIT
+          hdiutil attach -nobrowse -readonly -noverify -mountpoint "$mount" "dist/diacraft-$NAME-macos-universal.dmg"
+          check_folder "$mount"
+          # The link that the app is dragged onto, and the README.
+          [ "$(readlink "$mount/Applications")" = /Applications ]
+          test -s "$mount/README.txt"
+          for _ in 1 2 3; do
+            hdiutil detach "$mount" && break
+            sleep 3
           done
-          plutil -lint "$app/Contents/Info.plist"
-          test -f "$app/Contents/Resources/DiaCraft.icns"
-          # The licence files are beside the app and inside it, each there and not empty.
-          bash packaging/smoke.sh --licences "$dir"
-          bash packaging/smoke.sh --licences "$app/Contents/Resources"
-          # The signature (ad hoc, or the identity) is whole.
-          codesign --verify --strict --verbose=2 "$app"
-          codesign --verify --strict --verbose=2 "$dir/diacraft-cli"
-          # The programs of the download start.
-          "$dir/diacraft-cli" --version
-          "$app/Contents/MacOS/DiaCraft" --version
+          if [ -e "$mount/DiaCraft.app" ]; then echo "::error::the disk image is still attached"; exit 1; fi
+
+      # Every package of the run is kept for a week, so that a run by hand can be downloaded and tried before a tag is pushed. Nothing goes to a release without a tag.
+      - name: Keep the packages as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diacraft-${{ needs.plan.outputs.name }}-macos-universal
+          path: dist
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Upload to the draft release
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: gh release upload "$NAME" "dist/diacraft-$NAME-macos-universal.zip" --repo "$REPO" --clobber
+        run: gh release upload "$NAME" "dist/diacraft-$NAME-macos-universal.dmg" "dist/diacraft-$NAME-macos-universal.zip" --repo "$REPO" --clobber
 
   # The website and the web app, two sites. Built with trunk, `wasm-bindgen` and binaryen's `wasm-opt`: the release archives of each, checked against the
   # SHA-256 written here, as ci.yml does for its tools. To move a version, change the version and its checksum together; `wasm-bindgen` must be the version of the
@@ -520,7 +752,7 @@ jobs:
       #   run: npx --yes wrangler@4 pages deploy app-dist --project-name diacraft-app --branch main
       # ---- end of the deploy hook
 
-  # SHA256SUMS over every download, uploaded last, once all three are there.
+  # SHA256SUMS over every download, uploaded last, once all of them are there.
   checksums:
     name: SHA256SUMS
     needs: [plan, linux, windows, macos]
@@ -534,13 +766,20 @@ jobs:
       REPO: ${{ github.repository }}
       NAME: ${{ needs.plan.outputs.name }}
     steps:
-      - name: Download the three, write the sums and upload them
+      - name: Download them all, write the sums and upload them
         run: |
           set -euo pipefail
           mkdir downloads
           gh release download "$NAME" --repo "$REPO" --pattern 'diacraft-*' --dir downloads
-          expected="diacraft-$NAME-linux-x86_64.tar.gz diacraft-$NAME-macos-universal.zip diacraft-$NAME-windows-x86_64.zip"
-          # Exactly these three: a missing or an extra file is a mistake to see before anyone downloads.
+          # Exactly these files, which the jobs above each upload, and the site's buttons name (site/site.json): a missing or an extra file is a mistake to see before
+          # anyone downloads. Both lists are sorted the same way here, so the order is no concern.
+          expected=$(printf '%s\n' \
+            "diacraft-$NAME-linux-x86_64.tar.gz" "diacraft-$NAME-linux-arm64.tar.gz" \
+            "diacraft-$NAME-linux-x86_64.deb" "diacraft-$NAME-linux-arm64.deb" \
+            "diacraft-$NAME-linux-x86_64.AppImage" "diacraft-$NAME-linux-arm64.AppImage" \
+            "diacraft-$NAME-windows-x86_64.zip" "diacraft-$NAME-windows-arm64.zip" \
+            "diacraft-$NAME-windows-x86_64.msi" "diacraft-$NAME-windows-arm64.msi" \
+            "diacraft-$NAME-macos-universal.dmg" "diacraft-$NAME-macos-universal.zip" | sort | tr '\n' ' ' | sed 's/ $//')
           found=$(cd downloads && ls | sort | tr '\n' ' ' | sed 's/ $//')
           if [ "$found" != "$expected" ]; then
             echo "::error::the release holds '$found', expected '$expected'"

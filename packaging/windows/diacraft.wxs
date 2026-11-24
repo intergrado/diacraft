@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows installer of DiaCraft, for WiX 5 (packaging/windows/make-msi.sh runs `wix build` on it, once for x64 and once for ARM64).
+
+  What it does:
+  * installs for the person who runs it, and needs no administrator rights, into %LocalAppData%\Programs\DiaCraft: both programs and the licence files;
+  * puts a shortcut to DiaCraft in the Start menu;
+  * adds that folder to the person's own PATH, so that diacraft-cli runs from any terminal;
+  * makes DiaCraft a choice in "Open with" for .diacraft, .vsdx and .odg files, and never the program a file opens with by itself: the registrations below are an
+    entry in each type's OpenWithProgids and the programs' own keys, and none writes the (Default) value of a type, which is where Windows keeps the program a double-click
+    uses. A person who wants DiaCraft to open a type picks it in "Open with" and says "always".
+  * replaces an earlier version: the upgrade code below is the product's identity and never changes (a test holds it), and one installer per CPU shares it, so that the
+    installer of the other CPU replaces this one as well.
+
+  The command line passes these preprocessor variables (-d NAME=value): Version (MAJOR.MINOR.PATCH), BinDir (the folder of diacraft.exe and diacraft-cli.exe), RepoRoot
+  (the licence files), IconFile (an .ico of the application's icon), and, if wanted, HomePage (the address the Programs and Features list links to).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="DiaCraft"
+    Manufacturer="DiaCraft contributors"
+    Version="$(Version)"
+    UpgradeCode="5A247B9C-9E5F-42F2-9805-78832461BCC7"
+    Scope="perUser"
+    Language="1033">
+
+    <SummaryInformation Description="DiaCraft, a diagram editor" />
+
+    <!-- A later version replaces this one; the same version replaces it too (the installer of the other CPU, or a rebuild of this release); an earlier one is refused. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of DiaCraft is already installed." AllowSameVersionUpgrades="yes" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Windows Installer tells a package that it is Windows 8.1 (VersionNT 603, build 9600) on Windows 10 and 11 too, so this cannot be stricter than refusing what
+         is older than 8.1; the READMEs and the site say Windows 10 or 11. -->
+    <Launch Condition="Installed OR (VersionNT &gt;= 603)" Message="DiaCraft needs Windows 10 or newer." />
+
+    <Icon Id="DiaCraft.ico" SourceFile="$(IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="DiaCraft.ico" />
+    <?ifdef HomePage ?>
+    <Property Id="ARPURLINFOABOUT" Value="$(HomePage)" />
+    <?endif?>
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="LocalProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="DiaCraft" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="DiaCraft" Level="1">
+      <ComponentGroupRef Id="Programs" />
+      <ComponentGroupRef Id="StartMenu" />
+      <ComponentGroupRef Id="CommandLinePath" />
+      <ComponentGroupRef Id="OpenWith" />
+    </Feature>
+
+    <!-- A file in a person's own folders cannot be a component's key (ICE38), so each component's key is a value of its own under the person's registry. A component
+         that holds files and a registry key cannot have a GUID made from its contents, so the two that hold files have fixed ones, which never change (like the upgrade code). -->
+    <ComponentGroup Id="Programs" Directory="INSTALLFOLDER">
+      <Component Id="ProgramFiles" Guid="AABADF4E-018B-4698-9CAA-F329DF21E6BE">
+        <File Id="DiacraftExe" Source="$(BinDir)\diacraft.exe" />
+        <File Id="DiacraftCliExe" Source="$(BinDir)\diacraft-cli.exe" />
+        <RegistryValue Root="HKCU" Key="Software\DiaCraft\Setup" Name="Programs" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="LicenceFiles" Guid="0B02B2FA-644F-48E8-87F3-C67FF33ACB23">
+        <File Id="LicenseMit" Source="$(RepoRoot)\LICENSE-MIT" />
+        <File Id="LicenseApache" Source="$(RepoRoot)\LICENSE-APACHE" />
+        <File Id="Notice" Source="$(RepoRoot)\NOTICE" />
+        <File Id="Attribution" Source="$(RepoRoot)\ATTRIBUTION.md" />
+        <File Id="ThirdPartyLicenses" Source="$(RepoRoot)\THIRD-PARTY-LICENSES.txt" />
+        <RegistryValue Root="HKCU" Key="Software\DiaCraft\Setup" Name="Licences" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="StartMenu" Directory="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="StartMenuDiaCraft" Name="DiaCraft" Description="Create and edit diagrams" Target="[INSTALLFOLDER]diacraft.exe" WorkingDirectory="INSTALLFOLDER" Icon="DiaCraft.ico" />
+        <RegistryValue Root="HKCU" Key="Software\DiaCraft\Setup" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- The person's own PATH (System="no"), at its end, and taken out again when DiaCraft is removed. -->
+    <ComponentGroup Id="CommandLinePath" Directory="INSTALLFOLDER">
+      <Component Id="PathEntry">
+        <Environment Id="DiaCraftPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="no" Permanent="no" />
+        <RegistryValue Root="HKCU" Key="Software\DiaCraft\Setup" Name="Path" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!--
+      "Open with": a ProgID for each type (the program, and the command that opens a file with it), and the type's OpenWithProgids naming it. Never a (Default) value on a
+      type's own key: that is the program a double-click opens, and it stays whatever it is. The Applications key gives the program the name DiaCraft in the list, as it
+      has no version resource of its own to take one from.
+    -->
+    <ComponentGroup Id="OpenWith" Directory="INSTALLFOLDER">
+      <Component Id="OpenWithDiacraft">
+        <RegistryValue Root="HKCU" Key="Software\Classes\.diacraft\OpenWithProgids" Name="DiaCraft.diacraft" Type="string" Value="" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\DiaCraft.diacraft" Type="string" Value="DiaCraft drawing" KeyPath="yes" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\DiaCraft.diacraft\shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]diacraft.exe&quot; &quot;%1&quot;" />
+      </Component>
+      <Component Id="OpenWithVsdx">
+        <RegistryValue Root="HKCU" Key="Software\Classes\.vsdx\OpenWithProgids" Name="DiaCraft.vsdx" Type="string" Value="" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\DiaCraft.vsdx" Type="string" Value="VSDX drawing" KeyPath="yes" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\DiaCraft.vsdx\shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]diacraft.exe&quot; &quot;%1&quot;" />
+      </Component>
+      <Component Id="OpenWithOdg">
+        <RegistryValue Root="HKCU" Key="Software\Classes\.odg\OpenWithProgids" Name="DiaCraft.odg" Type="string" Value="" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\DiaCraft.odg" Type="string" Value="OpenDocument drawing" KeyPath="yes" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\DiaCraft.odg\shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]diacraft.exe&quot; &quot;%1&quot;" />
+      </Component>
+      <Component Id="OpenWithProgram">
+        <RegistryValue Root="HKCU" Key="Software\Classes\Applications\diacraft.exe" Name="FriendlyAppName" Type="string" Value="DiaCraft" KeyPath="yes" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\Applications\diacraft.exe\shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]diacraft.exe&quot; &quot;%1&quot;" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\Applications\diacraft.exe\SupportedTypes" Name=".diacraft" Type="string" Value="" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\Applications\diacraft.exe\SupportedTypes" Name=".vsdx" Type="string" Value="" />
+        <RegistryValue Root="HKCU" Key="Software\Classes\Applications\diacraft.exe\SupportedTypes" Name=".odg" Type="string" Value="" />
+      </Component>
+    </ComponentGroup>
+  </Package>
+</Wix>

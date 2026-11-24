@@ -1,7 +1,7 @@
-// The page already links to the latest release. Upgrade each platform's links to the named download when the release has it.
+// The page already links to the latest release. Upgrade each download's link to the named file when the release has it.
 (async () => {
   try {
-    const links = [...document.querySelectorAll("a[data-platform][data-asset]")];
+    const links = [...document.querySelectorAll("a[data-download][data-asset]")];
     const first = links.find(link => link.dataset.asset);
     const canonical = document.querySelector('link[rel="canonical"]');
     if (!first || !canonical || new URL(canonical.href).hostname.endsWith(".invalid")) return;

@@ -2,7 +2,18 @@
   "domain": "https://diacraft.dev",
   "app_url": "https://diacraft.app",
   "repository": "intergrado/diacraft",
-  "linux_asset": "diacraft-{tag}-linux-x86_64.tar.gz",
-  "windows_asset": "diacraft-{tag}-windows-x86_64.zip",
-  "macos_asset": "diacraft-{tag}-macos-universal.zip"
+  "assets": {
+    "linux-x86_64-appimage": "diacraft-{tag}-linux-x86_64.AppImage",
+    "linux-x86_64-deb": "diacraft-{tag}-linux-x86_64.deb",
+    "linux-x86_64-targz": "diacraft-{tag}-linux-x86_64.tar.gz",
+    "linux-arm64-appimage": "diacraft-{tag}-linux-arm64.AppImage",
+    "linux-arm64-deb": "diacraft-{tag}-linux-arm64.deb",
+    "linux-arm64-targz": "diacraft-{tag}-linux-arm64.tar.gz",
+    "windows-x86_64-msi": "diacraft-{tag}-windows-x86_64.msi",
+    "windows-x86_64-zip": "diacraft-{tag}-windows-x86_64.zip",
+    "windows-arm64-msi": "diacraft-{tag}-windows-arm64.msi",
+    "windows-arm64-zip": "diacraft-{tag}-windows-arm64.zip",
+    "macos-universal-dmg": "diacraft-{tag}-macos-universal.dmg",
+    "macos-universal-zip": "diacraft-{tag}-macos-universal.zip"
+  }
 }

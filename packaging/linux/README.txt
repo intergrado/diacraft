@@ -1,4 +1,4 @@
-DiaCraft @NAME@ for Linux (64-bit)
+DiaCraft @NAME@ for Linux (@ARCH@: 64-bit @CPU@)
 
 DiaCraft is a free, open-source diagram editor. It opens and saves .diacraft, .vsdx and .odg drawings.
 This is an early release: expect rough edges, and keep copies of drawings that matter to you.
@@ -20,12 +20,14 @@ Run it without installing
   ./diacraft some.vsdx    opens a drawing
   ./diacraft-cli --help   lists what the command line does
 
+Other forms of this download, on the same release page: a .deb for Debian and Ubuntu (sudo apt install ./the-file.deb) and an AppImage (make it executable and run it).
+
 Install it
   ./install.sh            copies the programs to ~/.local/bin, the entry and the icon to ~/.local/share
   ./install.sh --uninstall
 
 What it needs
-  A 64-bit Linux with glibc 2.35 or newer (Ubuntu 22.04 and Debian 12 are new enough), and a desktop session
+  A 64-bit @CPU@ Linux with glibc @GLIBC@ or newer (@DISTROS@ are new enough), and a desktop session
   (Wayland or X11) with a Vulkan or OpenGL graphics driver. The window is drawn on the GPU through wgpu. The
   program loads the window system's libraries (libxkbcommon, libwayland-client or libX11) when it starts, so
   nothing is linked that a desktop does not already have; diacraft-cli needs no more than the C library.

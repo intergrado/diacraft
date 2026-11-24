@@ -808,10 +808,17 @@ fn settings(app_url: &str) -> super::settings::Settings {
         domain: "https://example.invalid".into(),
         app_url: app_url.into(),
         repository: "owner/drawing".into(),
-        linux_asset: "l".into(),
-        windows_asset: "w".into(),
-        macos_asset: "m".into(),
+        assets: super::settings::DOWNLOADS.iter().map(|id| ((*id).to_owned(), "a".to_owned())).collect(),
     }
+}
+
+/// A `site.json` for the fixtures: the draft's addresses, and one asset name for every download.
+fn site_json() -> String {
+    let assets: Vec<String> = super::settings::DOWNLOADS.iter().map(|id| format!(r#""{id}":"a""#)).collect();
+    format!(
+        r#"{{"domain":"https://example.invalid","app_url":"https://app.example.invalid","repository":"owner/drawing","assets":{{{}}}}}"#,
+        assets.join(",")
+    )
 }
 
 #[test]
@@ -868,7 +875,7 @@ fn the_pages_folder_is_the_site_as_it_is_and_a_previews_links_to_the_app_are_the
 #[test]
 fn the_two_folders_are_apart_and_a_run_makes_both() {
     let root = repo();
-    root.write("site/site.json", r#"{"domain":"https://example.invalid","app_url":"https://app.example.invalid","repository":"owner/drawing","linux_asset":"l","windows_asset":"w","macos_asset":"m"}"#);
+    root.write("site/site.json", site_json());
     let site = root.path().join("site");
     // The pages as `cargo xtask site --write` leaves them: the sitemap and the robots file are made.
     super::settings::apply(&site, &settings("https://app.example.invalid"), true).unwrap();
@@ -901,7 +908,7 @@ fn the_two_folders_are_apart_and_a_run_makes_both() {
 #[test]
 fn a_run_takes_the_previews_address_from_the_option_and_then_from_the_environment_and_refuses_one_that_is_not_for_a_preview() {
     let root = repo();
-    root.write("site/site.json", r#"{"domain":"https://example.invalid","app_url":"https://app.example.invalid","repository":"owner/drawing","linux_asset":"l","windows_asset":"w","macos_asset":"m"}"#);
+    root.write("site/site.json", site_json());
     let site = root.path().join("site");
     // The pages as `cargo xtask site --write` leaves them: the sitemap and the robots file are made.
     super::settings::apply(&site, &settings("https://app.example.invalid"), true).unwrap();

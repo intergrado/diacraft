@@ -10,13 +10,15 @@
 #   BIN_DIR   a folder holding the release binaries `diacraft` and `diacraft-cli` (with `.exe` on Windows). macOS takes one folder for each
 #             architecture and joins them into universal binaries with lipo; the other platforms take one.
 #
-# Writes (the last line printed is the archive's path):
+# Writes (the last line printed is the archive's path; macOS also writes a disk image, and prints its path before it):
 #   Linux    diacraft-NAME-linux-ARCH.tar.gz     a folder holding both programs, the launcher entry, the icon, an install script, the licences (LICENSE-MIT,
 #                                                LICENSE-APACHE), NOTICE, ATTRIBUTION.md, THIRD-PARTY-LICENSES.txt, a README
 #   Windows  diacraft-NAME-windows-ARCH.zip      a folder holding both .exe files, the same licence files, a README
 #   macOS    diacraft-NAME-macos-ARCH.zip        a folder holding DiaCraft.app (with its icon, and the licence files in its Resources), diacraft-cli, the licence
 #                                                files, a README
-#            ARCH is universal for two or more BIN_DIRs, else the architecture of the binary (arm64 or x86_64).
+#            diacraft-NAME-macos-ARCH.dmg        a disk image of that same folder, with a link to Applications beside the app
+#            ARCH is x86_64 or arm64, read from the header of the program (never from the machine the script runs on, which may be a cross build's).
+#            For macOS it is universal for two or more BIN_DIRs, else the architecture of the binary (arm64 or x86_64).
 #
 # Environment (all optional):
 #   DIACRAFT_REPOSITORY  owner/name of the GitHub repository, for the link in the README.
@@ -24,13 +26,13 @@
 #                        signed ad hoc, which is what an arm64 Mac needs to run them at all, and macOS still asks the person to confirm the first
 #                        opening (docs/releasing.md, "Signing").
 #
-# The script uses bash 3.2 syntax, because that is the bash of macOS.
+# The script uses bash 3.2 syntax, because that is the bash of macOS. What it shares with the installer scripts (the checks of a name, the licence files, the
+# architecture read from a program's header) is in packaging/common.sh.
 set -euo pipefail
 
-die() {
-    echo "package.sh: $*" >&2
-    exit 1
-}
+script=package.sh
+# shellcheck source=packaging/common.sh
+source "$(dirname "$0")/common.sh"
 
 [ $# -ge 4 ] || die "usage: package.sh PLATFORM NAME OUT_DIR BIN_DIR..."
 platform=$1
@@ -38,11 +40,8 @@ name=$2
 out=$3
 shift 3
 
-case $name in
-'' | *[!A-Za-z0-9._-]*) die "NAME must be letters, digits, '.', '_' and '-' only: '$name'" ;;
-esac
+check_name "$name"
 
-root=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
@@ -56,35 +55,18 @@ done
 stage=$(mktemp -d "${TMPDIR:-/tmp}/diacraft-package.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 
-# The README of the platform, with the release's name and the repository's address filled in.
-repo_url="the repository this download came from"
-if [ -n "${DIACRAFT_REPOSITORY:-}" ]; then
-    case $DIACRAFT_REPOSITORY in
-    *[!A-Za-z0-9._/-]*) die "DIACRAFT_REPOSITORY must be owner/name: '$DIACRAFT_REPOSITORY'" ;;
-    esac
-    repo_owner=${DIACRAFT_REPOSITORY%%/*}
-    repo_name=${DIACRAFT_REPOSITORY#*/}
-    if [ -z "$repo_owner" ] || [ "$repo_owner" = "$DIACRAFT_REPOSITORY" ] || [ -z "$repo_name" ]; then
-        die "DIACRAFT_REPOSITORY must be owner/name: '$DIACRAFT_REPOSITORY'"
-    fi
-    case $repo_name in
-    */*) die "DIACRAFT_REPOSITORY must be owner/name: '$DIACRAFT_REPOSITORY'" ;;
-    esac
-    repo_url="https://github.com/$DIACRAFT_REPOSITORY"
-fi
+# The README of the platform, with the release's name and the repository's address filled in, and what it says of the CPU its download is for: @ARCH@ (x86_64 or
+# arm64), @CPU@ (Intel or AMD, or ARM), and for Linux @GLIBC@ (the oldest C library the programs run on) and @DISTROS@ (distributions that have one that new). A platform
+# sets those once it has read the architecture of the programs.
+set_repo_url
+arch=""
+cpu=""
+glibc=""
+distros=""
 render_readme() { # render_readme SOURCE DEST
     [ -f "$1" ] || die "missing $1"
-    sed -e "s|@NAME@|$name|g" -e "s|@REPO_URL@|$repo_url|g" "$1" >"$2"
-}
-
-# The licences and the notices that go in every package: the two licences DiaCraft is offered under, the credits, the attributions of the art and the fonts, and the
-# licence texts of the third-party crates the programs are built from (made by `cargo xtask licenses`, kept in the repository, checked by `licenses --check`).
-LICENCE_FILES="LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md THIRD-PARTY-LICENSES.txt"
-add_licences() { # add_licences DIR
-    for f in $LICENCE_FILES; do
-        [ -s "$root/$f" ] || die "missing or empty $root/$f"
-        cp "$root/$f" "$1/$f"
-    done
+    sed -e "s|@NAME@|$name|g" -e "s|@REPO_URL@|$repo_url|g" -e "s|@ARCH@|$arch|g" -e "s|@CPU@|$cpu|g" -e "s|@GLIBC@|$glibc|g" \
+        -e "s|@DISTROS@|$distros|g" "$1" >"$2"
 }
 
 # The binary of a given name in the first folder; Windows programs end in .exe.
@@ -98,40 +80,14 @@ find_bin() { # find_bin NAME [DIR]
     printf '%s\n' "$p"
 }
 
-need() { # need FILE...: each is there and is not empty
-    for f in "$@"; do
-        [ -s "$f" ] || die "the package is missing $f, or it is empty"
-    done
-}
-need_licences() { # need_licences DIR
-    for f in $LICENCE_FILES; do
-        need "$1/$f"
-    done
-}
-
-# The version of the macOS bundle: the tag's (v0.2.0), and for a name that holds none (a test build's label, a rehearsal's dev-<commit>) the workspace's own, which is
-# the one source of DiaCraft's version (`cargo xtask version`) and which the release workflow holds equal to the tag.
-workspace_version() {
-    awk '/^\[/ { in_package = ($0 == "[workspace.package]") } in_package && /^version[ \t]*=/ { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); print v; exit }' "$root/Cargo.toml"
-}
-version=${name#v}
-version=${version%%-*}
-case $version in
-[0-9]*.[0-9]*.[0-9]*) ;;
-*)
-    version=$(workspace_version)
-    version=${version%%-*}
-    case $version in
-    [0-9]*.[0-9]*.[0-9]*) ;;
-    *) version=0.0.0 ;;
-    esac
-    ;;
-esac
+# The version of the macOS bundle: the tag's (v0.2.0), and for a name that holds none (a test build's label, a rehearsal's dev-<commit>) the workspace's own.
+set_version_from_name "$name"
 
 case $platform in
 linux)
     [ ${#bin_dirs[@]} -eq 1 ] || die "linux takes one BIN_DIR"
-    arch=$(uname -m)
+    arch=$(programs_arch linux "${bin_dirs[0]}")
+    linux_cpu_words "$arch"
     base="diacraft-$name-linux-$arch"
     dir=$stage/$base
     mkdir -p "$dir"
@@ -155,7 +111,11 @@ linux)
 
 windows)
     [ ${#bin_dirs[@]} -eq 1 ] || die "windows takes one BIN_DIR"
-    arch=x86_64
+    arch=$(programs_arch windows "${bin_dirs[0]}")
+    case $arch in
+    x86_64) cpu="Intel or AMD" ;;
+    *) cpu="ARM" ;;
+    esac
     base="diacraft-$name-windows-$arch"
     dir=$stage/$base
     mkdir -p "$dir"
@@ -252,6 +212,28 @@ macos)
     rm -f "$archive"
     # ditto keeps what a bundle needs (permissions, signatures, extended attributes) and puts the folder in the archive as its top level.
     ditto -c -k --keepParent "$dir" "$archive"
+
+    # The disk image: the same folder, with a link to Applications beside the app, so that the app is dragged onto it. ditto copies what a bundle needs
+    # (permissions, the signature, extended attributes). The image is a compressed (UDZO) HFS+ volume, which every macOS the app runs on mounts. A person who opens it sees
+    # the app, the link, the command line, the licences and the README, in the order Finder gives them: there is no background picture, which a Finder script would draw.
+    dmg=$out/$base.dmg
+    dmg_root=$stage/dmg-root
+    mkdir -p "$dmg_root"
+    ditto "$dir" "$dmg_root"
+    ln -s /Applications "$dmg_root/Applications"
+    rm -f "$dmg"
+    attempt=1
+    # hdiutil sometimes answers "Resource busy" on a runner that has just made another image: it is asked again, twice at most.
+    until hdiutil create -quiet -volname DiaCraft -fs HFS+ -format UDZO -srcfolder "$dmg_root" -ov "$dmg"; do
+        [ "$attempt" -lt 3 ] || die "hdiutil could not make the disk image"
+        attempt=$((attempt + 1))
+        sleep 5
+    done
+    if [ "$identity" != "-" ]; then
+        # A signed image is the one that can be notarised and stapled (docs/releasing.md, "Signing"): ad hoc, it has nothing to add to the signed app inside.
+        codesign --force --sign "$identity" --timestamp "$dmg"
+    fi
+    [ -s "$dmg" ] || die "the disk image was not written: $dmg"
     ;;
 
 *)
@@ -260,4 +242,8 @@ macos)
 esac
 
 [ -s "$archive" ] || die "the archive was not written: $archive"
+# macOS makes a disk image too, which is printed first: the last line is always the archive.
+if [ -n "${dmg:-}" ]; then
+    echo "$dmg"
+fi
 echo "$archive"

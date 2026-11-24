@@ -4271,7 +4271,7 @@ dependencies = [
 [[package]]
 name = "rfd"
 version = "0.18.0"
-source = "git+https://github.com/one-bit/rfd?rev=2cc1e3e87579ba1bc4912d24dde7099aa5751d77#2cc1e3e87579ba1bc4912d24dde7099aa5751d77"
+source = "git+https://github.com/one-bit/rfd?rev=8a7a7551ad0beabadb5c1c65facbeab99bd919da#8a7a7551ad0beabadb5c1c65facbeab99bd919da"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",

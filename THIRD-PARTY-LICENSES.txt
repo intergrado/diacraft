@@ -18,7 +18,9 @@ This file is made by `cargo xtask licenses` from Cargo.lock and the crates' own 
 --------------------------------------------------------------------------------
 
   Linux                  239 crates (diacraft 239, diacraft-cli 86), 9 licences, 123 texts
+  Linux (ARM64)          239 crates (diacraft 239, diacraft-cli 86), 9 licences, 123 texts
   Windows                186 crates (diacraft 186, diacraft-cli 85), 9 licences, 103 texts
+  Windows (ARM64)        186 crates (diacraft 186, diacraft-cli 85), 9 licences, 103 texts
   macOS (Apple silicon)  179 crates (diacraft 179, diacraft-cli 88), 9 licences, 102 texts
   macOS (Intel)          179 crates (diacraft 179, diacraft-cli 88), 9 licences, 102 texts
 
@@ -65,15 +67,15 @@ SOFTWARE.
 accesskit 0.25.2
     licence MIT OR Apache-2.0, used under MIT; text 20
     https://github.com/AccessKit/accesskit
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 accesskit_atspi_common 0.21.1
     licence MIT OR Apache-2.0, used under MIT; text 20
     https://github.com/AccessKit/accesskit
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 accesskit_consumer 0.39.2
     licence MIT OR Apache-2.0, used under MIT; text 20
     https://github.com/AccessKit/accesskit
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 accesskit_macos 0.27.2
     licence MIT OR Apache-2.0, used under MIT; text 20
     https://github.com/AccessKit/accesskit
@@ -81,103 +83,103 @@ accesskit_macos 0.27.2
 accesskit_unix 0.24.1
     licence MIT OR Apache-2.0, used under MIT; text 20
     https://github.com/AccessKit/accesskit
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 accesskit_windows 0.35.2
     licence MIT OR Apache-2.0, used under MIT; text 20
     https://github.com/AccessKit/accesskit
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 accesskit_winit 0.34.2
     licence Apache-2.0; text 1
     https://github.com/AccessKit/accesskit
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 adler2 2.0.1
     licence 0BSD OR MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/oyvindln/adler2
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 ahash 0.8.13
     licence MIT OR Apache-2.0, used under MIT; text 22
     https://github.com/tkaitchuck/ahash
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 allocator-api2 0.2.21
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/zakarumych/allocator-api2
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 arrayref 0.3.9
     licence BSD-2-Clause; text 6
     https://github.com/droundy/arrayref
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 arrayvec 0.7.8
     licence MIT OR Apache-2.0, used under MIT; text 23
     https://github.com/bluss/arrayvec
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 as-raw-xcb-connection 1.0.1
     licence MIT OR Apache-2.0, used under MIT; text 24
     https://github.com/psychon/as-raw-xcb-connection
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 ash 0.38.0+1.3.281
     licence MIT OR Apache-2.0, used under MIT; text 25
     https://github.com/ash-rs/ash
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 async-broadcast 0.7.2
     licence MIT OR Apache-2.0, used under MIT; text 26
     https://github.com/smol-rs/async-broadcast
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 async-channel 2.5.0
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/async-channel
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 async-executor 1.14.1
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/async-executor
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 async-io 2.6.0
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/async-io
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 async-lock 3.5.0
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/async-lock
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 async-process 2.5.0
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/async-process
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 async-signal 0.2.14
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/async-signal
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 async-task 4.7.1
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/async-task
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 atomic-waker 1.1.2
     licence Apache-2.0 OR MIT, used under MIT; text 21, 27
     https://github.com/smol-rs/atomic-waker
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 atspi 0.29.0
     licence Apache-2.0 OR MIT, used under MIT; text 28
     https://github.com/odilia-app/atspi
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 atspi-common 0.13.0
     licence Apache-2.0 OR MIT, used under MIT; text 28
     https://github.com/odilia-app/atspi
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 atspi-proxies 0.13.0
     licence Apache-2.0 OR MIT, used under MIT; text 28
     https://github.com/odilia-app/atspi
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 base64 0.22.1
     licence MIT OR Apache-2.0, used under MIT; text 29
     https://github.com/marshallpierce/rust-base64
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 bit-set 0.10.0
     licence Apache-2.0 OR MIT, used under MIT; text 30
     https://github.com/contain-rs/bit-set
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 bit-vec 0.9.1
     licence Apache-2.0 OR MIT, used under MIT; text 31
     https://github.com/contain-rs/bit-vec
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 bitflags 1.3.2
     licence MIT/Apache-2.0, used under MIT; text 32
     https://github.com/bitflags/bitflags
@@ -185,7 +187,7 @@ bitflags 1.3.2
 bitflags 2.13.2
     licence MIT OR Apache-2.0, used under MIT; text 32
     https://github.com/bitflags/bitflags
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 block2 0.5.1
     licence MIT; text 33
     https://github.com/madsmtm/objc2
@@ -197,47 +199,47 @@ block2 0.6.2
 blocking 1.7.0
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/blocking
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 bumpalo 3.20.4
     licence MIT OR Apache-2.0, used under MIT; text 35
     https://github.com/fitzgen/bumpalo
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 bytemuck 1.25.2
     licence Zlib OR Apache-2.0 OR MIT, used under MIT; text 36
     https://github.com/Lokathor/bytemuck
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 byteorder-lite 0.1.0
     licence Unlicense OR MIT, used under MIT; text 37
     https://github.com/image-rs/byteorder-lite
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 calloop 0.13.0
     licence MIT; text 38
     https://github.com/Smithay/calloop
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 calloop-wayland-source 0.3.0
     licence MIT; text 39
     https://github.com/smithay/calloop-wayland-source
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 cfg-if 1.0.5
     licence MIT OR Apache-2.0, used under MIT; text 40
     https://github.com/rust-lang/cfg-if
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 codespan-reporting 0.13.1
     licence Apache-2.0; text 2
     https://github.com/brendanzab/codespan
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 color 0.3.3
     licence Apache-2.0 OR MIT, used under MIT; text 41
     https://github.com/linebender/color
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 color_quant 1.1.0
     licence MIT; text 42
     https://github.com/image-rs/color_quant.git
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 concurrent-queue 2.5.0
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/concurrent-queue
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 core-foundation 0.9.4
     licence MIT OR Apache-2.0, used under MIT; text 43
     https://github.com/servo/core-foundation-rs
@@ -257,43 +259,43 @@ core-graphics-types 0.1.3
 craft-atomic 0.1.0
     licence MIT OR Apache-2.0, used under MIT; text 44
     https://github.com/storytold/craft-libs
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 craft-pathops 0.1.0
     licence MIT OR Apache-2.0, used under MIT; text 44
     https://github.com/storytold/craft-libs
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 craft-pdf 0.1.0
     licence MIT OR Apache-2.0, used under MIT; text 44
     https://github.com/storytold/craft-libs
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 craft-print 0.1.0
     licence MIT OR Apache-2.0, used under MIT; text 44
     https://github.com/storytold/craft-libs
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 craft-snap 0.1.0
     licence MIT OR Apache-2.0, used under MIT; text 44
     https://github.com/storytold/craft-libs
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 craft-window 0.1.0
     licence MIT OR Apache-2.0, used under MIT; text 44
     https://github.com/storytold/craft-libs
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 craft-winprint-gdi 0.1.0
     licence MIT OR Apache-2.0, used under MIT; text 7, 45
     https://github.com/storytold/winprint.rs
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 crc32fast 1.5.5
     licence MIT OR Apache-2.0, used under MIT; text 46
     https://github.com/srijs/rust-crc32fast
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 crossbeam-utils 0.8.23
     licence MIT OR Apache-2.0, used under MIT; text 47
     https://github.com/crossbeam-rs/crossbeam
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 cursor-icon 1.2.0
     licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 39
     https://github.com/rust-windowing/cursor-icon
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 dispatch 0.2.0
     licence MIT; text 48
     http://github.com/SSheldon/rust-dispatch
@@ -305,119 +307,119 @@ dispatch2 0.3.1
 dlib 0.5.3
     licence MIT; text 50
     https://github.com/elinorbgr/dlib
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 downcast-rs 1.2.1
     licence MIT/Apache-2.0, used under MIT; text 51
     https://github.com/marcianx/downcast-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 dpi 0.1.2
     licence Apache-2.0 AND MIT, used under Apache-2.0 and MIT; text 3, 52
     https://github.com/rust-windowing/winit
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 ecolor 0.37.0
     licence MIT OR Apache-2.0, used under MIT; text 53
     https://github.com/emilk/egui
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 eframe 0.37.0
     licence MIT OR Apache-2.0, used under MIT; text 53
     https://github.com/emilk/egui/tree/main/crates/eframe
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 egui 0.37.0
     licence MIT OR Apache-2.0, used under MIT; text 53
     https://github.com/emilk/egui
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 egui-wgpu 0.37.0
     licence MIT OR Apache-2.0, used under MIT; text 53
     https://github.com/emilk/egui/tree/main/crates/egui-wgpu
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 egui-winit 0.37.0
     licence MIT OR Apache-2.0, used under MIT; text 53
     https://github.com/emilk/egui/tree/main/crates/egui-winit
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 either 1.19.0
     licence MIT OR Apache-2.0, used under MIT; text 54
     https://github.com/rayon-rs/either
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 emath 0.37.0
     licence MIT OR Apache-2.0, used under MIT; text 53
     https://github.com/emilk/egui/tree/main/crates/emath
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 endi 1.1.1
     licence MIT; text 21
     https://github.com/zeenix/endi
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 enumflags2 0.7.12
     licence MIT OR Apache-2.0, used under MIT; text 55
     https://github.com/meithecatte/enumflags2
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 epaint 0.37.0
     licence MIT OR Apache-2.0, used under MIT; text 53
     https://github.com/emilk/egui/tree/main/crates/epaint
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 epaint_default_fonts 0.37.0
     licence (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0, used under MIT and OFL-1.1 and Ubuntu-font-1.0; text 53, 56, 139, 140
     https://github.com/emilk/egui/tree/main/crates/epaint_default_fonts
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 equivalent 1.0.3
     licence Apache-2.0 OR MIT, used under MIT; text 57
     https://github.com/indexmap-rs/equivalent
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 errno 0.3.15
     licence MIT OR Apache-2.0, used under MIT; text 58
     https://github.com/lambda-fairy/rust-errno
-    built into diacraft: Linux, macOS; diacraft-cli: macOS
+    built into diacraft: Linux, Linux (ARM64), macOS; diacraft-cli: macOS
 euclid 0.22.14
     licence MIT OR Apache-2.0, used under MIT; text 12, 43
     https://github.com/servo/euclid
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 event-listener 5.4.2
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/event-listener
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 event-listener-strategy 0.5.4
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/event-listener-strategy
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 fastrand 2.5.0
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/fastrand
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 fdeflate 0.3.7
     licence MIT OR Apache-2.0, used under MIT; text 41
     https://github.com/image-rs/fdeflate
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 fearless_simd 0.4.1
     licence Apache-2.0 OR MIT, used under MIT; text 59
     https://github.com/linebender/fearless_simd
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 fearless_simd 1.2.0
     licence Apache-2.0 OR MIT, used under MIT; text 59
     https://github.com/linebender/fearless_simd
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 flate2 1.1.11
     licence MIT OR Apache-2.0, used under MIT; text 60
     https://github.com/rust-lang/flate2-rs
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 float-cmp 0.9.0
     licence MIT; text 61
     https://github.com/mikedilger/float-cmp
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 fmt-derive 0.1.2
     licence MIT OR Apache-2.0, used under MIT; text 62
     https://github.com/danielschemmel/fmt-derive
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 foldhash 0.2.0
     licence Zlib; text 144
     https://github.com/orlp/foldhash
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 font-types 0.11.3
     licence MIT OR Apache-2.0, used under MIT; text 63
     https://github.com/googlefonts/fontations
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 font-types 0.12.7
     licence MIT OR Apache-2.0, used under MIT; text 64
     https://github.com/googlefonts/fontations
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 foreign-types 0.5.0
     licence MIT/Apache-2.0, used under MIT; text 65
     https://github.com/sfackler/foreign-types
@@ -429,202 +431,202 @@ foreign-types-shared 0.3.1
 futures-core 0.3.34
     licence MIT OR Apache-2.0, used under MIT; text 66
     https://github.com/rust-lang/futures-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 futures-io 0.3.34
     licence MIT OR Apache-2.0, used under MIT; text 66
     https://github.com/rust-lang/futures-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 futures-lite 2.6.1
     licence Apache-2.0 OR MIT, used under MIT; text 21, 27
     https://github.com/smol-rs/futures-lite
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 futures-task 0.3.34
     licence MIT OR Apache-2.0, used under MIT; text 66
     https://github.com/rust-lang/futures-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 futures-util 0.3.34
     licence MIT OR Apache-2.0, used under MIT; text 66
     https://github.com/rust-lang/futures-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 gethostname 1.1.0
     licence Apache-2.0; text 2
     https://codeberg.org/swsnr/gethostname.rs.git
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 getrandom 0.4.3
     licence MIT OR Apache-2.0, used under MIT; text 67
     https://github.com/rust-random/getrandom
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 gif 0.14.2
     licence MIT OR Apache-2.0, used under MIT; text 68
     https://github.com/image-rs/image-gif
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 glow 0.17.0
     licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 21
     https://github.com/grovesNL/glow
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 glutin_wgl_sys 0.6.1
     licence Apache-2.0; text 4
     https://github.com/rust-windowing/glutin
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 gpu-allocator 0.28.0
     licence MIT OR Apache-2.0, used under MIT; text 69
     https://github.com/Traverse-Research/gpu-allocator
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 guillotiere 0.7.0
     licence MIT/Apache-2.0, used under MIT; text 13, 70
     https://github.com/nical/guillotiere
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 half 2.7.1
     licence MIT OR Apache-2.0, used under MIT; text 41
     https://github.com/VoidStarKat/half-rs
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 harfrust 0.12.0
     licence MIT; text 71
     https://github.com/harfbuzz/harfrust
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 harfrust 0.16.1
     licence MIT; text 71
     https://github.com/harfbuzz/harfrust
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 hashbrown 0.16.1
     licence MIT OR Apache-2.0, used under MIT; text 72
     https://github.com/rust-lang/hashbrown
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 hashbrown 0.17.2
     licence MIT OR Apache-2.0, used under MIT; text 72
     https://github.com/rust-lang/hashbrown
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 hex 0.4.3
     licence MIT OR Apache-2.0, used under MIT; text 73
     https://github.com/KokaKiwi/rust-hex
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 image 0.25.10
     licence MIT OR Apache-2.0, used under MIT; text 41
     https://github.com/image-rs/image
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 image-webp 0.2.4
     licence MIT OR Apache-2.0, used under MIT; text 41
     https://github.com/image-rs/image-webp
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 imagesize 0.14.0
     licence MIT; text 74
     https://github.com/Roughsketch/imagesize
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 indexmap 2.14.2
     licence Apache-2.0 OR MIT, used under MIT; text 75
     https://github.com/indexmap-rs/indexmap
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 itertools 0.15.0
     licence MIT OR Apache-2.0, used under MIT; text 54
     https://github.com/rust-itertools/itertools
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 itoa 1.0.19
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/dtolnay/itoa
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 jiff 1.0.2
     licence Unlicense OR MIT, used under MIT; text 14, 37
     https://github.com/BurntSushi/jiff
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 jiff-core 1.0.1
     licence Unlicense OR MIT, used under MIT; text 14, 37
     https://github.com/BurntSushi/jiff
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 khronos-egl 6.0.0
     licence MIT/Apache-2.0, used under MIT; text 21
     https://github.com/timothee-haudebourg/khronos-egl
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 krilla 0.8.2
     licence MIT OR Apache-2.0, used under MIT; text 9, 44
     https://github.com/LaurenzV/krilla
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 kurbo 0.13.1
     licence Apache-2.0 OR MIT, used under MIT; text 59
     https://github.com/linebender/kurbo
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 libc 0.2.191
     licence MIT OR Apache-2.0, used under MIT; text 76
     https://github.com/rust-lang/libc
-    built into diacraft: Linux, Windows, macOS; diacraft-cli: Linux, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS; diacraft-cli: Linux, Linux (ARM64), macOS
 libloading 0.8.9
     licence ISC; text 11
     https://github.com/nagisa/rust_libloading/
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 libm 0.2.16
     licence MIT; text 77
     https://github.com/rust-lang/compiler-builtins
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 libmimalloc-sys 0.1.49
     licence MIT; text 78, 79
     https://github.com/purpleprotocol/mimalloc_rust/tree/master/libmimalloc-sys
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
     C code: it builds the mimalloc memory allocator, a C library, from the sources in the
     crate's c_src folder and links it into the program as the allocator (the desktop app and
     the command line, not the web build); the library's own licence is listed below.
 linebender_resource_handle 0.1.1
     licence Apache-2.0 OR MIT, used under MIT; text 41
     https://github.com/linebender/raw_resource_handle
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 linesweeper 0.5.0
     licence MIT OR Apache-2.0, used under MIT; text 44, 59
     https://github.com/jneem/linesweeper
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 linux-raw-sys 0.12.1
     licence Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, used under MIT; text 15, 21
     https://github.com/sunfishcode/linux-raw-sys
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 linux-raw-sys 0.4.15
     licence Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, used under MIT; text 15, 21
     https://github.com/sunfishcode/linux-raw-sys
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 lock_api 0.4.14
     licence MIT OR Apache-2.0, used under MIT; text 80
     https://github.com/Amanieu/parking_lot
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 log 0.4.35
     licence MIT OR Apache-2.0, used under MIT; text 32
     https://github.com/rust-lang/log
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 memchr 2.8.3
     licence Unlicense OR MIT, used under MIT; text 14, 37
     https://github.com/BurntSushi/memchr
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 memmap2 0.9.12
     licence MIT OR Apache-2.0, used under MIT; text 81
     https://github.com/RazrFalcon/memmap2-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 mimalloc 0.1.52
     licence MIT; text 78
     https://github.com/purpleprotocol/mimalloc_rust
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 miniz_oxide 0.8.9
     licence MIT OR Zlib OR Apache-2.0, used under MIT; text 82
     https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 miniz_oxide 0.9.1
     licence MIT OR Zlib OR Apache-2.0, used under MIT; text 82
     https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 moxcms 0.8.1
     licence BSD-3-Clause OR Apache-2.0, used under Apache-2.0; text 5
     https://github.com/awxkee/moxcms.git
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 naga 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 naga-types 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 nohash-hasher 0.2.0
     licence Apache-2.0 OR MIT, used under MIT; text 84
     https://github.com/paritytech/nohash-hasher
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 num-traits 0.2.19
     licence MIT OR Apache-2.0, used under MIT; text 32
     https://github.com/rust-num/num-traits
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 objc-sys 0.3.5
     licence MIT; text 34
     https://github.com/madsmtm/objc2
@@ -680,107 +682,107 @@ objc2-uniform-type-identifiers 0.3.2
 once_cell 1.21.4
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/matklad/once_cell
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 ordered-float 5.5.1
     licence MIT; text 92
     https://github.com/reem/rust-ordered-float
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 ordered-stream 0.2.0
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/danieldg/ordered-stream
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 parking 2.2.1
     licence Apache-2.0 OR MIT, used under MIT; text 16, 21
     https://github.com/smol-rs/parking
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 parking_lot 0.12.5
     licence MIT OR Apache-2.0, used under MIT; text 80
     https://github.com/Amanieu/parking_lot
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 parking_lot_core 0.9.12
     licence MIT OR Apache-2.0, used under MIT; text 80
     https://github.com/Amanieu/parking_lot
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 pdf-writer 0.15.0
     licence MIT OR Apache-2.0, used under MIT; text 41
     https://github.com/typst/pdf-writer
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 peniko 0.6.1
     licence Apache-2.0 OR MIT, used under MIT; text 59
     https://github.com/linebender/peniko
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 percent-encoding 2.3.2
     licence MIT OR Apache-2.0, used under MIT; text 93
     https://github.com/servo/rust-url/
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 phf 0.14.0
     licence MIT; text 94
     https://github.com/rust-phf/rust-phf
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 phf_shared 0.14.0
     licence MIT; text 94
     https://github.com/rust-phf/rust-phf
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 pin-project-lite 0.2.18
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/taiki-e/pin-project-lite
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 piper 0.2.5
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/smol-rs/piper
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 png 0.18.1
     licence MIT OR Apache-2.0, used under MIT; text 95
     https://github.com/image-rs/image-png
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 polling 3.11.0
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/smol-rs/polling
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 pollster 1.0.3
     licence MIT OR Apache-2.0, used under MIT; text 96
     https://github.com/zesterer/pollster
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 polycool 0.4.0
     licence MIT OR Apache-2.0, used under MIT; text 59
     https://github.com/linebender/kurbo
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 presser 0.3.1
     licence MIT OR Apache-2.0, used under MIT; text 97
     https://github.com/EmbarkStudios/presser
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 proc-macro2 1.0.107
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/dtolnay/proc-macro2
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 profiling 1.0.18
     licence MIT OR Apache-2.0, used under MIT; text 98
     https://github.com/aclysma/profiling
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 pxfm 0.1.30
     licence BSD-3-Clause OR Apache-2.0, used under Apache-2.0; text 5
     https://github.com/awxkee/pxfm
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 quick-error 2.0.1
     licence MIT/Apache-2.0, used under MIT; text 99
     http://github.com/tailhook/quick-error
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 quick-xml 0.42.0
     licence MIT; text 100
     https://github.com/tafia/quick-xml
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 quote 1.0.47
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/dtolnay/quote
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 range-alloc 0.1.5
     licence MIT OR Apache-2.0, used under MIT; text 101
     https://github.com/gfx-rs/range-alloc
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 raw-window-handle 0.6.2
     licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 102
     https://github.com/rust-windowing/raw-window-handle
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 raw-window-metal 1.1.0
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/rust-windowing/raw-window-metal
@@ -788,269 +790,269 @@ raw-window-metal 1.1.0
 read-fonts 0.39.2
     licence MIT OR Apache-2.0, used under MIT; text 63
     https://github.com/googlefonts/fontations
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 read-fonts 0.41.0
     licence MIT OR Apache-2.0, used under MIT; text 64
     https://github.com/googlefonts/fontations
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 read-fonts 0.47.0
     licence MIT OR Apache-2.0, used under MIT; text 64
     https://github.com/googlefonts/fontations
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 renderdoc-sys 1.1.0
     licence MIT OR Apache-2.0, used under MIT; text 103
     https://github.com/ebkalderon/renderdoc-rs
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 rfd 0.18.0
     licence MIT; text 104, 105
     https://github.com/PolyMeilex/rfd
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 roxmltree 0.21.2
     licence MIT OR Apache-2.0, used under MIT; text 106
     https://github.com/RazrFalcon/roxmltree
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 rustc-hash 1.1.0
     licence Apache-2.0/MIT, used under MIT; text 21
     https://github.com/rust-lang-nursery/rustc-hash
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 rustc-hash 2.1.3
     licence Apache-2.0 OR MIT, used under MIT; text 21
     https://github.com/rust-lang/rustc-hash
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 rustix 0.38.44
     licence Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, used under MIT; text 17, 21
     https://github.com/bytecodealliance/rustix
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 rustix 1.1.6
     licence Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT, used under MIT; text 17, 21
     https://github.com/bytecodealliance/rustix
-    built into diacraft: Linux, macOS; diacraft-cli: macOS
+    built into diacraft: Linux, Linux (ARM64), macOS; diacraft-cli: macOS
 ryu 1.0.23
     licence Apache-2.0 OR BSL-1.0, used under Apache-2.0; text 1
     https://github.com/dtolnay/ryu
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 scoped-tls 1.0.1
     licence MIT/Apache-2.0, used under MIT; text 40
     https://github.com/alexcrichton/scoped-tls
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 scopeguard 1.2.0
     licence MIT OR Apache-2.0, used under MIT; text 107
     https://github.com/bluss/scopeguard
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 self_cell 1.3.0
     licence Apache-2.0 OR GPL-2.0-only, used under Apache-2.0; text 2
     https://github.com/Voultapher/self_cell
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 serde 1.0.229
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/serde-rs/serde
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 serde_core 1.0.229
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/serde-rs/serde
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 serde_json 1.0.154
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/serde-rs/json
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 signal-hook-registry 1.4.8
     licence MIT OR Apache-2.0, used under MIT; text 108
     https://github.com/vorner/signal-hook
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 simd-adler32 0.3.10
     licence MIT; text 109
     https://github.com/mcountryman/simd-adler32
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 siphasher 1.0.4
     licence MIT OR Apache-2.0, used under MIT; text 18, 21
     https://github.com/jedisct1/rust-siphash
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 skrifa 0.42.1
     licence MIT OR Apache-2.0, used under MIT; text 63
     https://github.com/googlefonts/fontations
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 skrifa 0.44.0
     licence MIT OR Apache-2.0, used under MIT; text 64
     https://github.com/googlefonts/fontations
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 skrifa 0.50.0
     licence MIT OR Apache-2.0, used under MIT; text 64
     https://github.com/googlefonts/fontations
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 slab 0.4.12
     licence MIT; text 110
     https://github.com/tokio-rs/slab
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 smallvec 1.16.6
     licence MIT OR Apache-2.0, used under MIT; text 111
     https://github.com/smallvec/smallvec
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 smithay-client-toolkit 0.19.2
     licence MIT; text 38
     https://github.com/smithay/client-toolkit
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 smol_str 0.2.2
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/rust-analyzer/smol_str
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 spirv 0.4.0+sdk-1.4.341.0
     licence Apache-2.0; text 1
     https://github.com/gfx-rs/rspirv
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 stable_deref_trait 1.2.1
     licence MIT OR Apache-2.0, used under MIT; text 112
     https://github.com/storyyeller/stable_deref_trait
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 static_assertions 1.1.0
     licence MIT OR Apache-2.0, used under MIT; text 113
     https://github.com/nvzqz/static-assertions-rs
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 strict-num 0.1.1
     licence MIT; text 114
     https://github.com/RazrFalcon/strict-num
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 strum 0.28.0
     licence MIT; text 115
     https://github.com/Peternator7/strum
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 subsetter 0.2.6
     licence MIT OR Apache-2.0, used under MIT; text 41, 138
     https://github.com/typst/subsetter
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 syn 3.0.10
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/dtolnay/syn
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 tempfile 3.27.0
     licence MIT OR Apache-2.0, used under MIT; text 116
     https://github.com/Stebalien/tempfile
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 thiserror 1.0.69
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/dtolnay/thiserror
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 thiserror 2.0.21
     licence MIT OR Apache-2.0, used under MIT; text 21
     https://github.com/dtolnay/thiserror
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 tiny-skia-path 0.12.0
     licence BSD-3-Clause; text 8
     https://github.com/linebender/tiny-skia/tree/master/path
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 tracing 0.1.44
     licence MIT; text 117
     https://github.com/tokio-rs/tracing
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 tracing-core 0.1.36
     licence MIT; text 117, 118
     https://github.com/tokio-rs/tracing
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 type-map 0.5.1
     licence MIT/Apache-2.0, used under MIT; text 119
     https://github.com/kardeiz/type-map
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 unicode-bidi 0.3.18
     licence MIT OR Apache-2.0, used under MIT; text 19, 120
     https://github.com/servo/unicode-bidi
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 unicode-general-category 1.1.0
     licence Apache-2.0; text 3
     https://github.com/yeslogic/unicode-general-category
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 unicode-ident 1.0.27
     licence (MIT OR Apache-2.0) AND Unicode-3.0, used under MIT and Unicode-3.0; text 21, 141
     https://github.com/dtolnay/unicode-ident
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 unicode-linebreak 0.1.5
     licence Apache-2.0; text 2
     https://github.com/axelf4/unicode-linebreak
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 unicode-properties 0.1.5
     licence (MIT OR Apache-2.0) AND Unicode-3.0, used under MIT and Unicode-3.0; text 12, 120, 142
     https://github.com/unicode-rs/unicode-properties
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 unicode-segmentation 1.13.3
     licence MIT OR Apache-2.0, used under MIT; text 12, 120
     https://github.com/unicode-rs/unicode-segmentation
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 unicode-width 0.2.3
     licence MIT OR Apache-2.0, used under MIT; text 12, 120
     https://github.com/unicode-rs/unicode-width
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 uuid 1.29.3
     licence Apache-2.0 OR MIT, used under MIT; text 121
     https://github.com/uuid-rs/uuid
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 vello_common 0.2.0
     licence Apache-2.0 OR MIT, used under MIT; text 122
     https://github.com/linebender/vello
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 vello_common 0.4.0
     licence Apache-2.0 OR MIT, used under MIT; text 122
     https://github.com/linebender/vello
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 vello_cpu 0.2.0
     licence Apache-2.0 OR MIT, used under MIT; text 122
     https://github.com/linebender/vello
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 vello_cpu 0.4.0
     licence Apache-2.0 OR MIT, used under MIT; text 122
     https://github.com/linebender/vello
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 wayland-backend 0.3.17
     licence MIT; text 123
     https://github.com/smithay/wayland-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
     C code: it builds a small C file of its own (log_shim.c, under the crate's licence) when its
     `log` feature is on; the Wayland client library itself is the computer's, loaded at run
     time.
 wayland-client 0.31.15
     licence MIT; text 123
     https://github.com/smithay/wayland-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 wayland-csd-frame 0.3.0
     licence MIT; text 39
     https://github.com/rust-windowing/wayland-csd-frame
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 wayland-cursor 0.31.14
     licence MIT; text 123
     https://github.com/smithay/wayland-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 wayland-protocols 0.32.13
     licence MIT; text 123, 124
     https://github.com/smithay/wayland-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 wayland-protocols-plasma 0.3.12
     licence MIT; text 10, 123
     https://github.com/smithay/wayland-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
     plasma-wayland-protocols/COPYING.LIB: the text of the GNU Lesser General Public License. The
     crate's own licence is MIT, but the protocol description files that its macro turns into
     Rust code come from KDE's plasma-wayland-protocols, whose files say LGPL-2.1-or-later.
 wayland-protocols-wlr 0.3.12
     licence MIT; text 123
     https://github.com/smithay/wayland-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 wayland-sys 0.31.11
     licence MIT; text 123
     https://github.com/smithay/wayland-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 web-time 1.1.0
     licence MIT OR Apache-2.0, used under MIT; text 125
     https://github.com/daxpedda/web-time
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 weezl 0.1.12
     licence MIT OR Apache-2.0, used under MIT; text 126
     https://github.com/image-rs/weezl
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 wgpu 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 wgpu-core 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 wgpu-core-deps-apple 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
@@ -1058,67 +1060,71 @@ wgpu-core-deps-apple 30.0.2
 wgpu-core-deps-windows-linux-android 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
-    built into diacraft: Linux, Windows
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64)
 wgpu-hal 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 wgpu-naga-bridge 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 wgpu-types 30.0.2
     licence MIT OR Apache-2.0, used under MIT; text 83
     https://github.com/gfx-rs/wgpu
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 windows 0.62.2
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-collections 0.3.2
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-core 0.62.2
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-future 0.3.2
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-link 0.2.1
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-numerics 0.3.1
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-result 0.4.1
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-strings 0.5.1
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-sys 0.52.0
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-sys 0.61.2
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-targets 0.52.6
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 windows-threading 0.2.1
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
+windows_aarch64_msvc 0.52.6
+    licence MIT OR Apache-2.0, used under MIT; text 127
+    https://github.com/microsoft/windows-rs
+    built into diacraft: Windows (ARM64)
 windows_x86_64_msvc 0.52.6
     licence MIT OR Apache-2.0, used under MIT; text 127
     https://github.com/microsoft/windows-rs
@@ -1126,107 +1132,107 @@ windows_x86_64_msvc 0.52.6
 winit 0.30.13
     licence Apache-2.0; text 3
     https://github.com/rust-windowing/winit
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 winnow 1.0.5
     licence MIT; text 21
     https://github.com/winnow-rs/winnow
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 winprint 0.2.1
     licence BSD-3-Clause; text 1, 7, 45
     https://github.com/ArcticLampyrid/winprint.rs/
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 winsafe 0.0.29
     licence MIT; text 128
     https://github.com/rodrigocfd/winsafe
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 write-fonts 0.48.1
     licence MIT OR Apache-2.0, used under MIT; text 63
     https://github.com/googlefonts/fontations
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 x11-dl 2.21.0
     licence MIT; text 21
     https://github.com/AltF02/x11-rs.git
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 x11rb 0.13.2
     licence MIT OR Apache-2.0, used under MIT; text 129
     https://github.com/psychon/x11rb
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 x11rb-protocol 0.13.2
     licence MIT OR Apache-2.0, used under MIT; text 129
     https://github.com/psychon/x11rb
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 xcursor 0.3.11
     licence MIT; text 130
     https://github.com/esposm03/xcursor-rs
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 xkbcommon-dl 0.4.2
     licence MIT; text 131
     https://github.com/rust-windowing/xkbcommon-dl
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 xkeysym 0.2.1
     licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 132
     https://github.com/notgull/xkeysym
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 xml 1.4.0
     licence MIT; text 133
     https://github.com/kornelski/xml-rs
-    built into diacraft: Windows
+    built into diacraft: Windows, Windows (ARM64)
 xmp-writer 0.3.3
     licence MIT OR Apache-2.0, used under MIT; text 41
     https://github.com/typst/xmp-writer
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 yoke 0.8.4
     licence Unicode-3.0; text 143
     https://github.com/unicode-org/icu4x
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 zbus 5.19.0
     licence MIT; text 134
     https://github.com/z-galaxy/zbus/
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 zbus-lockstep 0.5.2
     licence MIT; text 21
     https://github.com/luukvanderduim/zbus-lockstep
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 zbus_names 4.3.5
     licence MIT; text 134
     https://github.com/z-galaxy/zbus/
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 zbus_xml 5.2.1
     licence MIT; text 134
     https://github.com/z-galaxy/zbus/
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 zcheapstr 1.4.0
     licence MIT; text 135
     https://github.com/z-galaxy/zcheapstr/
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 zerocopy 0.8.64
     licence BSD-2-Clause OR Apache-2.0 OR MIT, used under MIT; text 136
     https://github.com/google/zerocopy
-    built into diacraft: Linux, Windows, macOS
+    built into diacraft: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 zerofrom 0.1.8
     licence Unicode-3.0; text 143
     https://github.com/unicode-org/icu4x
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 zmij 1.0.23
     licence MIT; text 21
     https://github.com/dtolnay/zmij
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 zune-core 0.5.3
     licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 137
     https://github.com/etemesi254/zune-image
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 zune-jpeg 0.5.15
     licence MIT OR Apache-2.0 OR Zlib, used under MIT; text 137
     https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg
-    built into diacraft and diacraft-cli: Linux, Windows, macOS
+    built into diacraft and diacraft-cli: Linux, Linux (ARM64), Windows, Windows (ARM64), macOS
 zvariant 5.15.1
     licence MIT; text 134
     https://github.com/z-galaxy/zbus/
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 zvariant_utils 4.2.0
     licence MIT; text 21
     https://github.com/z-galaxy/zbus/
-    built into diacraft: Linux
+    built into diacraft: Linux, Linux (ARM64)
 
 --------------------------------------------------------------------------------
 4. The texts
@@ -6715,8 +6721,8 @@ From: license-mit
 Carried by: windows 0.62.2, windows-collections 0.3.2, windows-core 0.62.2, windows-future
     0.3.2, windows-link 0.2.1, windows-numerics 0.3.1, windows-result 0.4.1,
     windows-strings 0.5.1, windows-sys 0.52.0, windows-sys 0.61.2,
-    windows-targets 0.52.6, windows-threading 0.2.1, windows_x86_64_msvc
-    0.52.6
+    windows-targets 0.52.6, windows-threading 0.2.1, windows_aarch64_msvc
+    0.52.6, windows_x86_64_msvc 0.52.6
 
 MIT License
 

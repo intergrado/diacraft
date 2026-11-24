@@ -11,11 +11,14 @@ pub const WEB_PROGRAMS: &[&str] = &["diacraft-web"];
 /// The target of the web build.
 pub const WEB_TRIPLE: &str = "wasm32-unknown-unknown";
 
-/// The platforms the notices cover, as (target triple, name, programs built for it). The release workflow builds the first four as downloads
-/// (`.github/workflows/release.yml`), and its site job builds the web build into the site artifact.
+/// The platforms the notices cover, as (target triple, name, programs built for it). The release workflow builds the first six as downloads
+/// (`.github/workflows/release.yml`), and its site job builds the web build into the site artifact. The two ARM64 targets name the crates their builds
+/// link: the same as x86_64's, but for Windows' import libraries (`windows_aarch64_msvc` for `windows_x86_64_msvc`).
 pub const TARGETS: &[(&str, &str, &[&str])] = &[
     ("x86_64-unknown-linux-gnu", "Linux", PROGRAMS),
+    ("aarch64-unknown-linux-gnu", "Linux (ARM64)", PROGRAMS),
     ("x86_64-pc-windows-msvc", "Windows", PROGRAMS),
+    ("aarch64-pc-windows-msvc", "Windows (ARM64)", PROGRAMS),
     ("aarch64-apple-darwin", "macOS (Apple silicon)", PROGRAMS),
     ("x86_64-apple-darwin", "macOS (Intel)", PROGRAMS),
     (WEB_TRIPLE, "Web", WEB_PROGRAMS),
@@ -35,7 +38,14 @@ pub struct Output {
 pub const OUTPUTS: &[Output] = &[
     Output {
         file: "THIRD-PARTY-LICENSES.txt",
-        triples: &["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-apple-darwin"],
+        triples: &[
+            "x86_64-unknown-linux-gnu",
+            "aarch64-unknown-linux-gnu",
+            "x86_64-pc-windows-msvc",
+            "aarch64-pc-windows-msvc",
+            "aarch64-apple-darwin",
+            "x86_64-apple-darwin",
+        ],
         checks_lists: true,
     },
     Output { file: "THIRD-PARTY-LICENSES-WEB.txt", triples: &[WEB_TRIPLE], checks_lists: false },

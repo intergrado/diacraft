@@ -20,13 +20,13 @@ To try what exists: `cargo run --release -p diacraft`. The web build (`apps/diac
 
 ## Install
 
-From the first release (0.2), each version has one download for each of three systems on the project's GitHub releases page, with a `SHA256SUMS` file to check them against. Each holds the app (`diacraft`) and the command line tool (`diacraft-cli`), the licences (DiaCraft's own, and those of the libraries it is built from), and a `README.txt` that says how to start them. **The downloads are not signed in 0.2**, so Windows and macOS ask you to confirm the first time you open the app ([how](docs/releasing.md#opening-an-unsigned-download)).
+From the first release (0.2), each version has downloads for Linux, Windows and macOS on the project's GitHub releases page, with a `SHA256SUMS` file to check them against: an installer and an archive for each system, for Intel/AMD (x86_64) and for ARM64 where there is one. Each holds the app (`diacraft`) and the command line tool (`diacraft-cli`), the licences (DiaCraft's own, and those of the libraries it is built from), and an archive has a `README.txt` that says how to start them. **The downloads are not signed in 0.2**, so Windows and macOS ask you to confirm the first time you open the app ([how](docs/releasing.md#opening-an-unsigned-download)).
 
 | System | Download | Needs |
 |---|---|---|
-| Linux (x86_64) | `diacraft-<version>-linux-x86_64.tar.gz`: unpack it, run `./diacraft`, or run `./install.sh` to add it to your application menu | glibc 2.35 or newer (Ubuntu 22.04, Debian 12), Wayland or X11, a Vulkan or OpenGL driver |
-| Windows (x86_64) | `diacraft-<version>-windows-x86_64.zip`: unpack it and double-click `diacraft.exe` | Windows 10 or 11, a DirectX 12, Vulkan or OpenGL driver |
-| macOS (Apple silicon and Intel) | `diacraft-<version>-macos-universal.zip`: drag `DiaCraft.app` to Applications | macOS 11 or newer |
+| Linux, Intel/AMD (x86_64) and ARM64 | `diacraft-<version>-linux-<arch>.AppImage` (make it executable and run it), `.deb` (`sudo apt install ./file.deb` on Debian and Ubuntu) or `.tar.gz` (unpack it, run `./diacraft`, or run `./install.sh` to add it to your application menu); `<arch>` is `x86_64` or `arm64` | glibc 2.35 or newer on either CPU (Ubuntu 22.04, Debian 12), Wayland or X11, a Vulkan or OpenGL driver |
+| Windows, Intel/AMD (x64) and ARM64 | `diacraft-<version>-windows-<arch>.msi`: an installer for you alone, no administrator rights, with a Start menu shortcut, `diacraft-cli` on your `PATH` and DiaCraft in "Open with" for `.diacraft`, `.vsdx` and `.odg`; or `.zip`: unpack it and double-click `diacraft.exe` | Windows 10 or 11, a DirectX 12, Vulkan or OpenGL driver |
+| macOS (Apple silicon and Intel) | `diacraft-<version>-macos-universal.dmg`: drag `DiaCraft.app` onto Applications; or `.zip` | macOS 11 or newer |
 
 To build from source instead: `cargo build --release --locked -p diacraft -p diacraft-cli` (Rust 1.100.0 is what CI uses; on Linux the window-system and font development packages that `.github/workflows/ci.yml` lists). `diacraft-cli --version` and `diacraft --version` print the version. How a release is made and signed: [`docs/releasing.md`](docs/releasing.md).
 

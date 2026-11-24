@@ -233,29 +233,49 @@
             <div class="platform">
               <h3>Linux</h3>
               <dl class="spec">
-                <div><dt>Needs</dt><dd>A 64-bit Linux with glibc 2.35 or newer.</dd></div>
-                <div><dt>File</dt><dd><code>.tar.gz</code></dd></div>
-                <div><dt>Install</dt><dd>Unpack the archive and run the app from its folder, or run install.sh to add it to your application menu.</dd></div>
+                <div><dt>Needs</dt><dd>A 64-bit Linux desktop with glibc 2.35 or newer, on Intel/AMD or ARM64.</dd></div>
+                <div><dt>File</dt><dd><code>.AppImage</code>, <code>.deb</code> or <code>.tar.gz</code></dd></div>
+                <div><dt>Install</dt><dd>Make the AppImage executable and run it, or install the .deb on Debian and Ubuntu. The archive has an install.sh that adds DiaCraft to your application menu.</dd></div>
               </dl>
-              <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-platform="linux" data-asset="diacraft-{tag}-linux-x86_64.tar.gz" class="btn" aria-label="Download DiaCraft for Linux">Download <span class="arrow arrow-out" aria-hidden="true"></span></a>
+              <div class="get-main">
+                <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="linux-x86_64-appimage" data-asset="diacraft-{tag}-linux-x86_64.AppImage" class="btn" aria-label="Download DiaCraft for Linux, Intel/AMD (x64), as an AppImage">Download .AppImage <span class="arrow arrow-out" aria-hidden="true"></span></a>
+                <span class="get-cpu">Intel/AMD (x64)</span>
+              </div>
+              <dl class="cpus" aria-label="More Linux downloads">
+                <div><dt>Intel/AMD (x64)</dt><dd><a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="linux-x86_64-deb" data-asset="diacraft-{tag}-linux-x86_64.deb" aria-label="Download DiaCraft for Linux, Intel/AMD (x64), as a .deb package">.deb</a> <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="linux-x86_64-targz" data-asset="diacraft-{tag}-linux-x86_64.tar.gz" aria-label="Download DiaCraft for Linux, Intel/AMD (x64), as a .tar.gz archive">.tar.gz</a></dd></div>
+                <div><dt>ARM64</dt><dd><a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="linux-arm64-appimage" data-asset="diacraft-{tag}-linux-arm64.AppImage" aria-label="Download DiaCraft for Linux, ARM64, as an AppImage">.AppImage</a> <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="linux-arm64-deb" data-asset="diacraft-{tag}-linux-arm64.deb" aria-label="Download DiaCraft for Linux, ARM64, as a .deb package">.deb</a> <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="linux-arm64-targz" data-asset="diacraft-{tag}-linux-arm64.tar.gz" aria-label="Download DiaCraft for Linux, ARM64, as a .tar.gz archive">.tar.gz</a></dd></div>
+              </dl>
             </div>
             <div class="platform">
               <h3>Windows</h3>
               <dl class="spec">
-                <div><dt>Needs</dt><dd>64-bit Windows 10 or 11.</dd></div>
-                <div><dt>File</dt><dd><code>.zip</code></dd></div>
-                <div><dt>Install</dt><dd>Unpack the zip and double-click diacraft.exe. The download is not signed yet, so Windows may ask you to confirm the first time.</dd></div>
+                <div><dt>Needs</dt><dd>Windows 10 or 11, on Intel/AMD (x64) or ARM64.</dd></div>
+                <div><dt>File</dt><dd><code>.msi</code> installer, or <code>.zip</code></dd></div>
+                <div><dt>Install</dt><dd>Run the installer. It installs for you alone and needs no administrator rights. The download is not signed yet, so Windows may ask you to confirm the first time. Or unpack the zip and double-click diacraft.exe.</dd></div>
               </dl>
-              <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-platform="windows" data-asset="diacraft-{tag}-windows-x86_64.zip" class="btn" aria-label="Download DiaCraft for Windows">Download <span class="arrow arrow-out" aria-hidden="true"></span></a>
+              <div class="get-main">
+                <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="windows-x86_64-msi" data-asset="diacraft-{tag}-windows-x86_64.msi" class="btn" aria-label="Download DiaCraft for Windows, Intel/AMD (x64), as an installer">Download .msi <span class="arrow arrow-out" aria-hidden="true"></span></a>
+                <span class="get-cpu">Intel/AMD (x64)</span>
+              </div>
+              <dl class="cpus" aria-label="More Windows downloads">
+                <div><dt>Intel/AMD (x64)</dt><dd><a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="windows-x86_64-zip" data-asset="diacraft-{tag}-windows-x86_64.zip" aria-label="Download DiaCraft for Windows, Intel/AMD (x64), as a .zip archive">.zip</a></dd></div>
+                <div><dt>ARM64</dt><dd><a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="windows-arm64-msi" data-asset="diacraft-{tag}-windows-arm64.msi" aria-label="Download DiaCraft for Windows, ARM64, as an installer">.msi</a> <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="windows-arm64-zip" data-asset="diacraft-{tag}-windows-arm64.zip" aria-label="Download DiaCraft for Windows, ARM64, as a .zip archive">.zip</a></dd></div>
+              </dl>
             </div>
             <div class="platform">
               <h3>macOS</h3>
               <dl class="spec">
                 <div><dt>Needs</dt><dd>macOS 11 or newer, on Apple silicon and Intel Macs.</dd></div>
-                <div><dt>File</dt><dd><code>.zip</code></dd></div>
-                <div><dt>Install</dt><dd>Open the zip and drag DiaCraft.app to Applications. The download is not signed yet, so macOS asks you to confirm the first time.</dd></div>
+                <div><dt>File</dt><dd><code>.dmg</code> disk image, or <code>.zip</code></dd></div>
+                <div><dt>Install</dt><dd>Open the disk image and drag DiaCraft.app onto Applications. The download is not signed yet, so macOS asks you to confirm the first time.</dd></div>
               </dl>
-              <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-platform="macos" data-asset="diacraft-{tag}-macos-universal.zip" class="btn" aria-label="Download DiaCraft for macOS">Download <span class="arrow arrow-out" aria-hidden="true"></span></a>
+              <div class="get-main">
+                <a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="macos-universal-dmg" data-asset="diacraft-{tag}-macos-universal.dmg" class="btn" aria-label="Download DiaCraft for macOS, Apple silicon and Intel, as a disk image">Download .dmg <span class="arrow arrow-out" aria-hidden="true"></span></a>
+                <span class="get-cpu">Apple silicon and Intel</span>
+              </div>
+              <dl class="cpus" aria-label="More macOS downloads">
+                <div><dt>Universal</dt><dd><a data-repo="/releases/latest" href="https://github.com/intergrado/diacraft/releases/latest" data-download="macos-universal-zip" data-asset="diacraft-{tag}-macos-universal.zip" aria-label="Download DiaCraft for macOS, Apple silicon and Intel, as a .zip archive">.zip</a></dd></div>
+              </dl>
             </div>
           </div>
           <div class="platform-browser">

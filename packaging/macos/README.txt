@@ -13,7 +13,8 @@ What is in this folder
                                 Third-party licences shows the same text in the window)
 
 Install
-  Drag DiaCraft.app to your Applications folder. To use the command line from any terminal, copy diacraft-cli to
+  From the disk image (the .dmg): open it and drag DiaCraft.app onto the Applications link beside it. From the zip: drag
+  DiaCraft.app to your Applications folder. To use the command line from any terminal, copy diacraft-cli to
   /usr/local/bin (sudo cp diacraft-cli /usr/local/bin/).
 
 Opening an app that is not signed
@@ -29,7 +30,7 @@ Opening an app that is not signed
        xattr -d com.apple.quarantine /usr/local/bin/diacraft-cli
 
   To check the file you downloaded is the one that was released, compare it with SHA256SUMS on the release page:
-       shasum -a 256 diacraft-@NAME@-macos-universal.zip
+       shasum -a 256 diacraft-@NAME@-macos-@ARCH@.dmg     (or the .zip)
 
 What it needs
   macOS 11 or newer, on a Mac with an Apple silicon chip or an Intel chip.

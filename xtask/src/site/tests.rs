@@ -139,9 +139,14 @@ fn markup_location_for_invalid_html_points_to_the_element() {
 #[test]
 fn markup_location_is_reported_by_the_site_command_before_generation() {
     let site = Fixture::new();
+    // A draft: every download has a setting, and none has a name yet.
+    let assets: Vec<String> = super::settings::DOWNLOADS.iter().map(|id| format!(r#""{id}":"""#)).collect();
     site.write(
         "site.json",
-        r#"{"domain":"https://example.invalid","app_url":"https://app.example.invalid","repository":"owner/repo","linux_asset":"","windows_asset":"","macos_asset":""}"#,
+        format!(
+            r#"{{"domain":"https://example.invalid","app_url":"https://app.example.invalid","repository":"owner/repo","assets":{{{}}}}}"#,
+            assets.join(",")
+        ),
     );
     site.write("index.html", HTML.replace("<link rel=\"canonical\"", "<link 2bad=\"y\""));
     for args in [&[][..], &["--write"][..]] {

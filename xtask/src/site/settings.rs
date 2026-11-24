@@ -1,9 +1,24 @@
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-/// The platforms a download card is for, as `data-platform` names them. Each has its own `<platform>_asset` setting.
-const PLATFORMS: [&str; 3] = ["linux", "windows", "macos"];
+/// The downloads a page can link, as `data-download` names them: a system, a CPU and a kind of file. Each has a setting of its own in `site.json`, the name of its file in the
+/// release (`.github/workflows/release.yml` makes them, and `cargo xtask site --release` refuses a draft that leaves one without a name).
+pub(super) const DOWNLOADS: [&str; 12] = [
+    "linux-x86_64-appimage",
+    "linux-x86_64-deb",
+    "linux-x86_64-targz",
+    "linux-arm64-appimage",
+    "linux-arm64-deb",
+    "linux-arm64-targz",
+    "windows-x86_64-msi",
+    "windows-x86_64-zip",
+    "windows-arm64-msi",
+    "windows-arm64-zip",
+    "macos-universal-dmg",
+    "macos-universal-zip",
+];
 
 #[derive(Debug, Clone)]
 pub(super) struct Settings {
@@ -13,20 +28,14 @@ pub(super) struct Settings {
     /// of the site for a preview names another (`--app-url`, [`app_override`]).
     pub(super) app_url: String,
     pub(super) repository: String,
-    pub(super) linux_asset: String,
-    pub(super) windows_asset: String,
-    pub(super) macos_asset: String,
+    /// The release asset name (or pattern) of each of [`DOWNLOADS`].
+    pub(super) assets: BTreeMap<String, String>,
 }
 
 impl Settings {
-    /// The release asset name (or pattern) of a platform, or `None` for a platform that has no download.
-    fn asset(&self, platform: &str) -> Option<&str> {
-        match platform {
-            "linux" => Some(&self.linux_asset),
-            "windows" => Some(&self.windows_asset),
-            "macos" => Some(&self.macos_asset),
-            _ => None,
-        }
+    /// The release asset name (or pattern) of a download, or `None` for a name that is not one of [`DOWNLOADS`].
+    fn asset(&self, download: &str) -> Option<&str> {
+        self.assets.get(download).map(String::as_str)
     }
 }
 
@@ -97,16 +106,23 @@ pub(super) fn load(dir: &Path) -> Result<Settings, String> {
     if owner.is_empty() || !owner.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') || !valid_filename(name) || name.contains('+') {
         return Err("site.json: repository must be a GitHub owner/name".into());
     }
-    let mut assets = Vec::new();
-    for platform in PLATFORMS {
-        let key = format!("{platform}_asset");
-        let asset = field(&key)?;
-        valid_asset(&key, asset)?;
-        assets.push(asset.to_owned());
+    let given =
+        json.get("assets").and_then(serde_json::Value::as_object).ok_or("site.json: expected an object for assets, a file name for each download")?;
+    if let Some(unknown) = given.keys().find(|key| !DOWNLOADS.contains(&key.as_str())) {
+        return Err(format!("site.json: assets names `{unknown}`, which is not one of the downloads"));
     }
-    let [linux_asset, windows_asset, macos_asset]: [String; 3] =
-        assets.try_into().map_err(|_| "site.json: a platform has no asset setting".to_owned())?;
-    Ok(Settings { domain, app_url, repository: repository.into(), linux_asset, windows_asset, macos_asset })
+    let mut assets = BTreeMap::new();
+    for id in DOWNLOADS {
+        let key = format!("assets.{id}");
+        let asset = given
+            .get(id)
+            .ok_or_else(|| format!("site.json: assets has no file name for {id}"))?
+            .as_str()
+            .ok_or_else(|| format!("site.json: expected a string for {key}"))?;
+        valid_asset(&key, asset)?;
+        assets.insert(id.to_owned(), asset.to_owned());
+    }
+    Ok(Settings { domain, app_url, repository: repository.into(), assets })
 }
 
 fn valid_filename(s: &str) -> bool {
@@ -124,9 +140,9 @@ pub(super) fn release(settings: &Settings) -> Result<(), String> {
     if owner.eq_ignore_ascii_case("PUBLIC-OWNER") || repo.eq_ignore_ascii_case("PUBLIC-REPO") {
         return Err("site.json: set the public repository before release".into());
     }
-    for (platform, label) in [("linux", "Linux"), ("windows", "Windows"), ("macos", "macOS")] {
-        if settings.asset(platform).is_none_or(str::is_empty) {
-            return Err(format!("site.json: set the {label} release asset filename before release"));
+    for id in DOWNLOADS {
+        if settings.asset(id).is_none_or(str::is_empty) {
+            return Err(format!("site.json: set the release asset filename of {id} before release"));
         }
     }
     Ok(())
@@ -160,12 +176,12 @@ fn render_page(mut source: String, settings: &Settings, url: &str) -> Result<Str
         let (_, after_href) = attrs.split_once('"').filter(|(v, _)| !v.contains(['<', '>'])).ok_or("unterminated repository href")?;
         let (extra, tail) = after_href.split_once('>').ok_or("unterminated repository link")?;
         let mut extra = extra.to_owned();
-        if let Some((_, after)) = extra.split_once(r#" data-platform=""#) {
-            let platform = after.split_once('"').map_or("", |(name, _)| name);
-            let asset = settings.asset(platform).filter(|_| suffix == "/releases/latest");
+        if let Some((_, after)) = extra.split_once(r#" data-download=""#) {
+            let download = after.split_once('"').map_or("", |(name, _)| name);
+            let asset = settings.asset(download).filter(|_| suffix == "/releases/latest");
             let Some(asset) = asset else {
                 return Err(format!(
-                    "download cards must link to the latest release, for linux, windows or macos (found {platform:?} and {suffix:?})"
+                    "download links must go to the latest release and name one of the downloads (found {download:?} and {suffix:?})"
                 ));
             };
             let asset = asset.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;");
@@ -275,7 +291,8 @@ pub(super) fn apply(dir: &Path, settings: &Settings, write: bool) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use super::{Settings, app_override, apply, load, release};
+    use super::{DOWNLOADS, Settings, app_override, apply, load, release};
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
 
@@ -284,9 +301,9 @@ mod tests {
 <meta property="og:image" content="old" /></head><body>
 <a data-repo="" href="old" class="link">Source</a><a data-repo="/issues" href="old">Issues</a>
 <a data-app="" href="old" class="btn">Open DiaCraft in your browser</a><div class="frame-address" data-app-host="">old</div>
-<a data-repo="/releases/latest" href="old" data-platform="linux" data-asset="" class="button">Linux</a>
-<a data-repo="/releases/latest" href="old" data-platform="windows" data-asset="stale" class="button">Windows</a>
-<a data-repo="/releases/latest" href="old" data-platform="macos" data-asset="" class="button">macOS</a>
+<a data-repo="/releases/latest" href="old" data-download="linux-x86_64-appimage" data-asset="" class="button">Linux</a>
+<a data-repo="/releases/latest" href="old" data-download="windows-arm64-msi" data-asset="stale" class="button">Windows</a>
+<a data-repo="/releases/latest" href="old" data-download="macos-universal-dmg" data-asset="" class="button">macOS</a>
 </body></html>"#;
 
     struct Site(PathBuf);
@@ -305,14 +322,19 @@ mod tests {
         }
     }
 
+    /// The `assets` of a `site.json`: each download's setting is `asset(id)`.
+    fn assets_json(asset: impl Fn(&str) -> String) -> String {
+        let entries: Vec<String> = DOWNLOADS.iter().map(|id| format!(r#""{id}":"{}""#, asset(id))).collect();
+        format!(r#""assets":{{{}}}"#, entries.join(","))
+    }
+
+    /// Every download has a setting of its own, `<id>-{tag}`.
     fn configured() -> Settings {
         Settings {
             domain: "https://drawing.example".into(),
             app_url: "https://app.example".into(),
             repository: "owner/drawing".into(),
-            linux_asset: "linux-{version}.zip".into(),
-            windows_asset: "windows-{tag}.zip".into(),
-            macos_asset: "macos-{version}.zip".into(),
+            assets: DOWNLOADS.iter().map(|id| ((*id).to_owned(), format!("{id}-{{tag}}.bin"))).collect(),
         }
     }
 
@@ -322,9 +344,7 @@ mod tests {
         let config = |domain: &str, repo: &str, asset: &str| {
             // A draft has a draft address for the app too; a site that is set has a real one.
             let app = if domain.ends_with(".invalid") { "https://app.invalid" } else { "https://app.example" };
-            let input = format!(
-                r#"{{"domain":"{domain}","app_url":"{app}","repository":"{repo}","linux_asset":"{asset}","windows_asset":"{asset}","macos_asset":"{asset}"}}"#
-            );
+            let input = format!(r#"{{"domain":"{domain}","app_url":"{app}","repository":"{repo}",{}}}"#, assets_json(|_| asset.to_owned()));
             fs::write(site.0.join("site.json"), input).unwrap();
             load(&site.0)
         };
@@ -338,27 +358,36 @@ mod tests {
     }
 
     #[test]
-    fn each_platform_has_its_own_asset_setting() {
-        let site = Site::new("platforms");
-        let json = |keys: &str| format!(r#"{{"domain":"https://host.example","app_url":"https://app.example","repository":"owner/drawing"{keys}}}"#);
-        let load_keys = |keys: &str| {
-            fs::write(site.0.join("site.json"), json(keys)).unwrap();
+    fn each_download_has_its_own_asset_setting() {
+        let site = Site::new("downloads");
+        let load_assets = |assets: &str| {
+            fs::write(
+                site.0.join("site.json"),
+                format!(r#"{{"domain":"https://host.example","app_url":"https://app.example","repository":"owner/drawing",{assets}}}"#),
+            )
+            .unwrap();
             load(&site.0)
         };
-        let all = r#","linux_asset":"l-{tag}.tar.gz","windows_asset":"w-{tag}.zip","macos_asset":"m-{tag}.zip""#;
-        let loaded = load_keys(all).unwrap();
-        assert_eq!(
-            (loaded.asset("linux"), loaded.asset("windows"), loaded.asset("macos")),
-            (Some("l-{tag}.tar.gz"), Some("w-{tag}.zip"), Some("m-{tag}.zip"))
-        );
-        assert_eq!(loaded.asset("freebsd"), None);
-        for missing in ["linux_asset", "windows_asset", "macos_asset"] {
-            let without: String = all.split(',').filter(|part| !part.contains(missing)).collect::<Vec<_>>().join(",");
-            let error = load_keys(&without).err().unwrap();
+        assert_eq!(DOWNLOADS.len(), 12, "three systems: six Linux files, four Windows files, two macOS files");
+        let loaded = load_assets(&assets_json(|id| format!("x-{id}.{{tag}}"))).unwrap();
+        for id in DOWNLOADS {
+            assert_eq!(loaded.asset(id), Some(format!("x-{id}.{{tag}}").as_str()), "{id}");
+        }
+        assert_eq!(loaded.asset("freebsd-x86_64-tgz"), None);
+        // A download that has no setting, one that is not a download, a setting that is not a name, and no `assets` at all.
+        for missing in DOWNLOADS {
+            let without: BTreeMap<&str, String> = DOWNLOADS.iter().filter(|id| **id != missing).map(|id| (*id, "a".to_owned())).collect();
+            let entries: Vec<String> = without.iter().map(|(id, asset)| format!(r#""{id}":"{asset}""#)).collect();
+            let error = load_assets(&format!(r#""assets":{{{}}}"#, entries.join(","))).unwrap_err();
             assert!(error.contains(missing), "{error}");
         }
-        let bad = all.replace("w-{tag}.zip", "w/{tag}.zip");
-        assert!(load_keys(&bad).err().unwrap().contains("windows_asset"));
+        let extra = assets_json(|_| "a".into()).replace(r#""assets":{"#, r#""assets":{"freebsd-x86_64-tgz":"a","#);
+        assert!(load_assets(&extra).unwrap_err().contains("freebsd-x86_64-tgz"));
+        let bad = assets_json(|id| if id == "windows-arm64-msi" { "w/{tag}.msi".into() } else { "a".into() });
+        assert!(load_assets(&bad).unwrap_err().contains("windows-arm64-msi"));
+        let not_text = assets_json(|_| "a".into()).replace(r#""macos-universal-dmg":"a""#, r#""macos-universal-dmg":7"#);
+        assert!(load_assets(&not_text).unwrap_err().contains("macos-universal-dmg"));
+        assert!(load_assets(r#""linux_asset":"a""#).unwrap_err().contains("assets"));
     }
 
     #[test]
@@ -368,31 +397,33 @@ mod tests {
             Settings { app_url: "https://app.invalid".into(), ..configured() },
             Settings { repository: "PUBLIC-OWNER/drawing".into(), ..configured() },
             Settings { repository: "owner/PUBLIC-REPO".into(), ..configured() },
-            Settings { linux_asset: String::new(), ..configured() },
-            Settings { windows_asset: String::new(), ..configured() },
-            Settings { macos_asset: String::new(), ..configured() },
         ] {
             assert!(release(&draft).is_err());
         }
         assert!(release(&configured()).is_ok());
-        let error = release(&Settings { windows_asset: String::new(), ..configured() }).unwrap_err();
-        assert!(error.contains("Windows"), "{error}");
-        let error = release(&Settings { macos_asset: String::new(), ..configured() }).unwrap_err();
-        assert!(error.contains("macOS"), "{error}");
+        for id in DOWNLOADS {
+            let mut settings = configured();
+            settings.assets.insert((*id).to_owned(), String::new());
+            let error = release(&settings).unwrap_err();
+            assert!(error.contains(id), "{error}");
+        }
     }
 
     #[test]
-    fn a_download_card_for_an_unknown_platform_or_another_page_is_refused() {
+    fn a_download_link_for_an_unknown_download_or_another_page_is_refused() {
         let site = Site::new("cards");
         for bad in [
-            r#"<a data-repo="/releases/latest" href="old" data-platform="freebsd" data-asset="">x</a>"#,
-            r#"<a data-repo="/issues" href="old" data-platform="linux" data-asset="">x</a>"#,
+            r#"<a data-repo="/releases/latest" href="old" data-download="freebsd-x86_64-tgz" data-asset="">x</a>"#,
+            r#"<a data-repo="/releases/latest" href="old" data-download="linux" data-asset="">x</a>"#,
+            r#"<a data-repo="/issues" href="old" data-download="linux-x86_64-appimage" data-asset="">x</a>"#,
         ] {
-            let page =
-                PAGE.replace(r#"<a data-repo="/releases/latest" href="old" data-platform="linux" data-asset="" class="button">Linux</a>"#, bad);
+            let page = PAGE.replace(
+                r#"<a data-repo="/releases/latest" href="old" data-download="linux-x86_64-appimage" data-asset="" class="button">Linux</a>"#,
+                bad,
+            );
             fs::write(site.0.join("index.html"), page).unwrap();
             let error = apply(&site.0, &configured(), true).unwrap_err();
-            assert!(error.contains("download cards must link to the latest release"), "{error}");
+            assert!(error.contains("download links must go to the latest release and name one of the downloads"), "{error}");
         }
     }
 
@@ -417,9 +448,9 @@ mod tests {
             r#"property="og:image" content="https://drawing.example/assets/social.jpg""#,
             r#"data-repo="" href="https://github.com/owner/drawing" class="link""#,
             r#"data-repo="/issues" href="https://github.com/owner/drawing/issues""#,
-            r#"href="https://github.com/owner/drawing/releases/latest" data-platform="linux" data-asset="linux-{version}.zip" class="button""#,
-            r#"href="https://github.com/owner/drawing/releases/latest" data-platform="windows" data-asset="windows-{tag}.zip" class="button""#,
-            r#"href="https://github.com/owner/drawing/releases/latest" data-platform="macos" data-asset="macos-{version}.zip" class="button""#,
+            r#"href="https://github.com/owner/drawing/releases/latest" data-download="linux-x86_64-appimage" data-asset="linux-x86_64-appimage-{tag}.bin" class="button""#,
+            r#"href="https://github.com/owner/drawing/releases/latest" data-download="windows-arm64-msi" data-asset="windows-arm64-msi-{tag}.bin" class="button""#,
+            r#"href="https://github.com/owner/drawing/releases/latest" data-download="macos-universal-dmg" data-asset="macos-universal-dmg-{tag}.bin" class="button""#,
         ] {
             assert!(page.contains(expected), "{expected}");
         }
@@ -427,8 +458,10 @@ mod tests {
         assert!(sitemap.contains("<loc>https://drawing.example/guides/start</loc>"));
         assert!(!sitemap.contains("404"));
         assert!(fs::read_to_string(site.0.join("robots.txt")).unwrap().contains("Sitemap: https://drawing.example/sitemap.xml"));
-        apply(&site.0, &Settings { linux_asset: "Linux & CLI.zip".into(), ..configured() }, true).unwrap();
-        assert!(fs::read_to_string(site.0.join("index.html")).unwrap().contains(r#"data-asset="Linux &amp; CLI.zip""#));
+        let mut changed = configured();
+        changed.assets.insert("linux-x86_64-appimage".into(), "a & b.AppImage".into());
+        apply(&site.0, &changed, true).unwrap();
+        assert!(fs::read_to_string(site.0.join("index.html")).unwrap().contains(r#"data-asset="a &amp; b.AppImage""#));
         fs::write(site.0.join("guides/start.html"), PAGE.replace(r#"rel="canonical""#, r#"rel="other""#)).unwrap();
         assert!(apply(&site.0, &settings, true).is_err());
     }
@@ -436,11 +469,8 @@ mod tests {
     #[test]
     fn the_apps_address_is_a_setting_of_its_own_and_not_the_pages() {
         let site = Site::new("app-url");
-        let json = |extra: &str| {
-            format!(
-                r#"{{"domain":"https://host.example",{extra}"repository":"owner/drawing","linux_asset":"a","windows_asset":"b","macos_asset":"c"}}"#
-            )
-        };
+        let json =
+            |extra: &str| format!(r#"{{"domain":"https://host.example",{extra}"repository":"owner/drawing",{}}}"#, assets_json(|_| "a".into()));
         let load_with = |extra: &str| {
             fs::write(site.0.join("site.json"), json(extra)).unwrap();
             load(&site.0)
