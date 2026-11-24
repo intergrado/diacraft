@@ -12,5 +12,5 @@ workspace = true
 roxmltree = "0.21.2"
 serde_json = { workspace = true }
 # The hashes of the web app's parts and assets (`cargo xtask site --web`, `site/parts.rs`); the library is in the lock already.
-sha2 = "0.10"
+sha2 = "0.11"
 toml = { workspace = true }
