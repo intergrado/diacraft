@@ -35,15 +35,39 @@ fn make_msi(dir: &TempDir, name: &str, wix: Option<&Path>) -> Output {
     let mut command = Command::new("bash");
     command
         .env("PATH", "/usr/bin:/bin")
-        .env_remove("WIX")
+        .env_remove("DIACRAFT_WIX")
         .arg(xtask::root().join("packaging/windows/make-msi.sh"))
         .arg(name)
         .arg(dir.path().join("out"))
         .arg(dir.path().join("bin"));
     if let Some(wix) = wix {
-        command.env("WIX", wix);
+        command.env("DIACRAFT_WIX", wix);
     }
     command.output().unwrap()
+}
+
+/// GitHub's Windows images define `WIX`, the folder of the WiX 3 toolset, in every job. A program of the machine is found by its name on the `PATH`, and no variable
+/// of the image names it: the script once read `WIX` for the program, took the folder for it, and said wix was not there while the step before had installed it.
+#[test]
+fn the_wix_variable_of_a_windows_image_is_a_folder_and_not_the_program() {
+    let (dir, _) = setup(0x8664);
+    let tools = dir.path().join("tools");
+    let mut command = Command::new("bash");
+    command
+        .env("PATH", format!("{}:/usr/bin:/bin", tools.display()))
+        .env("WIX", dir.path().join("wix3-folder"))
+        .env_remove("DIACRAFT_WIX")
+        .arg(xtask::root().join("packaging/windows/make-msi.sh"))
+        .arg("v0.2.0")
+        .arg(dir.path().join("out"))
+        .arg(dir.path().join("bin"));
+    std::fs::create_dir(dir.path().join("wix3-folder")).unwrap();
+    let out = command.output().unwrap();
+    assert!(out.status.success(), "{}", say(&out));
+    assert!(recorded(&dir).first().is_some_and(|a| a == "build"), "the wix of the PATH was run: {:?}", recorded(&dir));
+    // The variable the tests and a person may use to name another program is DiaCraft's own.
+    let source = read("packaging/windows/make-msi.sh");
+    assert!(source.contains("${DIACRAFT_WIX:-wix}") && !source.contains("${WIX"), "the override is DIACRAFT_WIX");
 }
 
 fn setup(machine: u16) -> (TempDir, std::path::PathBuf) {

@@ -15,8 +15,9 @@
 # an installer's version has no suffix), and for a name that holds none (a rehearsal's dev-<commit>) the workspace's own. The application's icon is made into an .ico
 # here, from the PNG that is in the repository (an icon file is an asset, and there is one picture): a PNG inside an .ico is what Windows reads since Vista.
 #
-# Needs `wix` (WiX 5, which the workflows install by version and checksum; the WIX environment variable names another program for it, which the tests use), and
-# runs in Git Bash on Windows (or any bash, with a stand-in for WiX). Uses bash 3.2 syntax like the other scripts.
+# Needs `wix` (WiX 5, which the workflows install by version and checksum) on the PATH. The environment variable DIACRAFT_WIX names another program for it, which the
+# tests use. It is not called WIX: GitHub's Windows images set WIX to the folder of the WiX 3 toolset. Runs in Git Bash on Windows (or any bash, with a stand-in for WiX).
+# Uses bash 3.2 syntax like the other scripts.
 set -euo pipefail
 
 script=make-msi.sh
@@ -30,7 +31,7 @@ bin=$3
 check_name "$name"
 [ -d "$bin" ] || die "no such folder: $bin"
 bin=$(cd "$bin" && pwd)
-wix=${WIX:-wix}
+wix=${DIACRAFT_WIX:-wix}
 command -v "$wix" >/dev/null 2>&1 || die "wix is not here: install WiX 5 (dotnet tool install wix --version 5.0.2)"
 mkdir -p "$out"
 out=$(cd "$out" && pwd)

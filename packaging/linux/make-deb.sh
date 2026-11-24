@@ -117,9 +117,18 @@ install -d -m 755 "$pkg/DEBIAN" "$pkg/usr/bin" "$pkg/usr/share/applications" "$p
 
 install -m 755 "$bin/diacraft" "$bin/diacraft-cli" "$pkg/usr/bin/"
 # Debian packages hold stripped programs: the symbols are of no use to a person, and the program is a good deal smaller. A machine without `strip` makes a larger
-# package that works as well.
-if command -v strip >/dev/null 2>&1; then
-    strip --strip-unneeded "$pkg/usr/bin/diacraft" "$pkg/usr/bin/diacraft-cli"
+# package that works as well, and so does a package for the other CPU than the machine's: the machine's `strip` reads the programs of its own CPU only (the release
+# workflow builds each CPU's package on a runner of that CPU). A program of the machine's CPU that `strip` cannot read is no program, and stops the script.
+machine_arch=$(uname -m)
+case $machine_arch in
+aarch64) machine_arch=arm64 ;;
+esac
+if [ "$arch" != "$machine_arch" ]; then
+    echo "make-deb.sh: the programs are for $arch and this machine is $machine_arch: they are packaged as they are, not stripped" >&2
+elif command -v strip >/dev/null 2>&1; then
+    for program in diacraft diacraft-cli; do
+        strip --strip-unneeded "$pkg/usr/bin/$program" || die "strip could not read $program, which says it is a program of this machine's CPU ($arch)"
+    done
 else
     echo "make-deb.sh: strip is not here: the programs in the package keep their symbols" >&2
 fi
