@@ -15,12 +15,13 @@
 # (packaging/smoke.sh) before anything is uploaded, on a runner of its own CPU. How to cut a release, and what the owner fills in: docs/releasing.md.
 #
 # The programs are unsigned. The signing and notarisation steps are written below as comments, with the secrets they read, for the owner to switch on.
-# No third-party actions: only GitHub's own `checkout` and `upload-artifact`. The GitHub CLI (`gh`) on every runner uploads the files.
+# No third-party actions: only GitHub's own `checkout`, `upload-artifact` and `download-artifact`. The GitHub CLI (`gh`) on every runner uploads the files.
 #
 # The `site` job builds the website, which is two sites: `cargo xtask site --web` copies the pages (for diacraft.dev) into one folder, and runs trunk on
 # apps/diacraft-web and makes the web app (for diacraft.app, at the root of its own site) into another. The job keeps each as a workflow artifact (diacraft-site-<name> and
-# diacraft-app-<name>). Cloudflare's own build image has neither Rust nor the time for that build, so the sites are built here and the artifacts are what is deployed; the two deploy
-# steps are comments at the end of the job, with the secrets they read, for the owner to switch on (docs/website.md, "Deploy to Cloudflare Pages").
+# diacraft-app-<name>). Cloudflare's own build image has neither Rust nor the time for that build, so the sites are built here. The `deploy` job, the last, takes the
+# two artifacts and sends them to Cloudflare Pages once the site, all the builds and the checksums have succeeded: a pushed tag that is not a pre-release deploys both together with
+# the downloads (docs/website.md, "Deploy to Cloudflare Pages"). Besides GitHub's own `checkout` and `upload-artifact`, it uses GitHub's own `download-artifact`, for those artifacts.
 
 name: Release
 
@@ -722,6 +723,8 @@ jobs:
           name: diacraft-site-${{ needs.plan.outputs.name }}
           path: site-dist
           if-no-files-found: error
+          # The deploy job takes this folder as it is: a file whose name starts with a dot (a `.well-known` folder) is kept, not left out as the action does by default.
+          include-hidden-files: true
 
       - name: Keep the web app as an artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -729,28 +732,7 @@ jobs:
           name: diacraft-app-${{ needs.plan.outputs.name }}
           path: app-dist
           if-no-files-found: error
-
-      # ---- Deploy hook (the owner fills this in: docs/website.md, "Deploy to Cloudflare Pages"). Secrets to add to the repository:
-      #   CLOUDFLARE_API_TOKEN    an API token that may edit Cloudflare Pages on the account
-      #   CLOUDFLARE_ACCOUNT_ID   the account's id (on the Workers & Pages overview page)
-      # Make two Pages projects once, each as a Direct Upload project with no Git connection (in the dashboard, or `npx wrangler pages project create diacraft-site` and
-      # `npx wrangler pages project create diacraft-app`): the pages get diacraft.dev as their custom domain and the app diacraft.app. Change the two names below to the projects'
-      # names, and add `permissions: deployments: write` only if a deployment status is wanted. To deploy only a release and not a run by hand on a branch, keep the condition:
-      #
-      # - name: Deploy the pages to Cloudflare Pages
-      #   if: needs.plan.outputs.publish == 'true'
-      #   env:
-      #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      #   run: npx --yes wrangler@4 pages deploy site-dist --project-name diacraft-site --branch main
-      #
-      # - name: Deploy the web app to Cloudflare Pages
-      #   if: needs.plan.outputs.publish == 'true'
-      #   env:
-      #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      #   run: npx --yes wrangler@4 pages deploy app-dist --project-name diacraft-app --branch main
-      # ---- end of the deploy hook
+          include-hidden-files: true
 
   # SHA256SUMS over every download, uploaded last, once all of them are there.
   checksums:
@@ -797,3 +779,67 @@ jobs:
             cat downloads/SHA256SUMS
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
+
+  # The websites go live last (the owner, 2026-11-24): once the site is built and every download is built, packaged and uploaded with its checksums, and only for a pushed tag
+  # that is not a pre-release. The condition has no status function, so GitHub's own `success()` applies to every job in `needs`: one that failed, was cancelled or was skipped (a run by
+  # hand on a branch skips `checksums`) leaves the sites as they are. The job sends the pages (site-dist) to the Pages project `diacraft-site`, which serves diacraft.dev, and the web app
+  # (app-dist) to `diacraft-app`, which serves diacraft.app, each as a production deployment (branch main). What it needs: the two projects, made once as Direct Upload projects with
+  # production branch `main`, and the repository's secrets CLOUDFLARE_API_TOKEN (an account token that may edit Cloudflare Pages and nothing else) and CLOUDFLARE_ACCOUNT_ID. Only the two
+  # deploy steps see the secrets. The tool is installed from the lock in packaging/cloudflare (`npm ci`: every package by its SHA-512, no install script), on the runner's own Node, which
+  # `--engine-strict` holds to what wrangler needs; its version is also in that folder's package.json and docs/releasing.md (a test in xtask holds the four together). `cargo xtask
+  # deploy-check` is not a step: see "Deploy to Cloudflare Pages", step 7.
+  deploy:
+    name: Deploy the websites
+    needs: [plan, site, linux, windows, macos, checksums]
+    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.prerelease == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      NAME: ${{ needs.plan.outputs.name }}
+      WRANGLER_VERSION: 4.166.0
+      # wrangler sends Cloudflare a report of each command unless told not to.
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Check out the repository, which holds the lock of wrangler
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the pages the site job made
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: diacraft-site-${{ needs.plan.outputs.name }}
+          path: site-dist
+
+      - name: Download the web app the site job made
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: diacraft-app-${{ needs.plan.outputs.name }}
+          path: app-dist
+
+      - name: Install wrangler, the Cloudflare Pages tool
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          npm ci --prefix packaging/cloudflare --ignore-scripts --engine-strict --no-audit --no-fund --no-update-notifier --fetch-retries 5
+          bin="$PWD/packaging/cloudflare/node_modules/.bin"
+          reported=$("$bin/wrangler" --version)
+          [ "$reported" = "$WRANGLER_VERSION" ] || { echo "::error::wrangler reports: $reported"; exit 1; }
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Deploy the pages to Cloudflare Pages
+        timeout-minutes: 15
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler pages deploy site-dist --project-name diacraft-site --branch main --commit-hash "$GITHUB_SHA" --commit-message "DiaCraft $NAME" --commit-dirty=false
+
+      - name: Deploy the web app to Cloudflare Pages
+        timeout-minutes: 15
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler pages deploy app-dist --project-name diacraft-app --branch main --commit-hash "$GITHUB_SHA" --commit-message "DiaCraft $NAME" --commit-dirty=false

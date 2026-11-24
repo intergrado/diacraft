@@ -19,6 +19,8 @@ mod packaging;
 mod packaging_appimage;
 mod packaging_deb;
 mod packaging_msi;
+mod packaging_smoke;
+mod pages_deploy;
 mod parity;
 mod provenance;
 mod repo_files;

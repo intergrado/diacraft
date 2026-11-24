@@ -47,9 +47,9 @@ fn the_release_workflow_installs_the_binaryen_that_trunk_toml_names() {
     assert_eq!(workflow_value(&workflow, "TRUNK_VERSION"), "0.22.2");
 }
 
-/// The release workflow makes the two sites with the command, keeps each as an artifact, and has the two deploy steps only as comments that name their secrets.
+/// The release workflow makes the two sites with the command and keeps each as an artifact; the steps that deploy them are `pages_deploy.rs`'s.
 #[test]
-fn the_release_workflow_has_a_site_job_and_a_deploy_hook_that_is_a_comment() {
+fn the_release_workflow_has_a_site_job_that_makes_the_two_sites_and_keeps_each_as_an_artifact() {
     let workflow = read(".github/workflows/release.yml");
     for needed in [
         "cargo xtask site --web --out site-dist --app-out app-dist",
@@ -60,19 +60,6 @@ fn the_release_workflow_has_a_site_job_and_a_deploy_hook_that_is_a_comment() {
     ] {
         assert!(workflow.contains(needed), "release.yml does not say `{needed}`");
     }
-    // The deploy step is written as comment lines, with its two secrets named.
-    for secret in ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"] {
-        let lines: Vec<&str> = workflow.lines().filter(|l| l.contains(secret)).collect();
-        assert!(!lines.is_empty(), "{secret} is not named");
-        assert!(lines.iter().all(|l| l.trim_start().starts_with('#')), "{secret} is used outside a comment: {lines:?}");
-    }
-    assert!(!workflow.lines().any(|l| !l.trim_start().starts_with('#') && l.contains("wrangler")), "the deploy command is live");
-    // One project for each site: the pages' folder to the one, the app's to the other, and no folder to both.
-    let deploys: Vec<&str> = workflow.lines().filter(|l| l.contains("wrangler@4 pages deploy")).collect();
-    assert_eq!(deploys.len(), 2, "{deploys:?}");
-    assert!(deploys.iter().any(|l| l.contains("deploy site-dist ")) && deploys.iter().any(|l| l.contains("deploy app-dist ")), "{deploys:?}");
-    let project = |line: &str| line.split("--project-name ").nth(1).and_then(|rest| rest.split_whitespace().next()).map(str::to_owned);
-    assert_ne!(project(deploys[0]), project(deploys[1]), "the two sites are two Pages projects");
     // Every action is pinned by a full commit SHA.
     for line in workflow.lines().filter(|l| l.trim_start().starts_with("uses:") || l.trim_start().starts_with("- uses:")) {
         let pinned = line.split('@').nth(1).is_some_and(|r| r.split_whitespace().next().is_some_and(|sha| sha.len() == 40));

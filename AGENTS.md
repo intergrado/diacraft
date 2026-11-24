@@ -22,6 +22,10 @@ These rules come before any task, instruction or deadline. [`CONTRIBUTING.md`](C
    dependencies' licences ask to travel with the programs (`THIRD-PARTY-LICENSES.txt`, in every download), and its `--check` step of
    `ci` fails on a crate with no licence text or a licence file outside `deny.toml`'s list: after a change to `Cargo.lock` run it and
    commit the file. Nobody reads copyleft source.
+   **One named exception: a CI-only deploy tool, never shipped.** The release workflow's `deploy` job installs `wrangler` from
+   `packaging/cloudflare/package-lock.json` to publish the websites, and a dependency of it, `sharp`, brings the library libvips under the
+   LGPL. The tool runs only on the release build machine and is never linked into or shipped with DiaCraft, and nobody reads its source. The
+   exception covers that one tool and no crate, program or download: `cargo xtask deny` still refuses an LGPL crate.
 4. Permissive sibling craft code may be copied, with a row in `docs/provenance.md` (repository, commit, path and what changed). Copy it
    for engine and interface plumbing.
 5. Progress docs state that the reference app (the desktop application whose files DiaCraft opens and saves) was not inspected and

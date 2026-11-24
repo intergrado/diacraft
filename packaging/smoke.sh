@@ -54,6 +54,13 @@ fi
 [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: smoke.sh BIN_DIR [EXPECTED_TAG] | --licences DIR"
 bin=$(cd "$1" && pwd)
 expected_tag=${2:-}
+# The folder of an unpacked download, made absolute here as `bin` is: the script leaves the folder it was started in (below), and the workflows name this one by a path
+# relative to it (`unpacked/diacraft-<tag>-linux-x86_64`).
+package_dir=""
+if [ -n "${SMOKE_PACKAGE_DIR:-}" ]; then
+    [ -d "$SMOKE_PACKAGE_DIR" ] || die "no such folder: $SMOKE_PACKAGE_DIR"
+    package_dir=$(cd "$SMOKE_PACKAGE_DIR" && pwd)
+fi
 
 exe=""
 case "$(uname -s)" in
@@ -77,9 +84,9 @@ native() {
 step() { echo "smoke: $*"; }
 
 # 0. The licence files of an unpacked download.
-if [ -n "${SMOKE_PACKAGE_DIR:-}" ]; then
+if [ -n "$package_dir" ]; then
     step "the licence files of the download"
-    check_licences "$SMOKE_PACKAGE_DIR"
+    check_licences "$package_dir"
 fi
 
 # 1. The versions.

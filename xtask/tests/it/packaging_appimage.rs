@@ -187,3 +187,24 @@ fn the_workflow_pins_the_appimage_tool_and_runtime_by_version_and_by_a_checksum_
     assert!(!workflow.contains("download/continuous"), "a rolling release is not a version");
     assert!(workflow.contains("sha256sum --check --strict"), "each download is checked");
 }
+
+/// The tool and the runtime may be given by paths relative to where the script is started, as the workflows give the folders of the programs; they are made absolute
+/// before the tool is run, which is an AppImage that unpacks itself and runs from a folder of its own.
+#[test]
+fn the_tool_and_the_runtime_given_by_relative_paths_are_passed_on_as_absolute_ones() {
+    let (dir, _, _) = setup(0x3e);
+    let out = Command::new("bash")
+        .current_dir(dir.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env("APPIMAGETOOL", "tools/appimagetool")
+        .env("APPIMAGE_RUNTIME", "tools/runtime")
+        .arg(xtask::root().join("packaging/linux/make-appimage.sh"))
+        .args(["v0.2.0", "out", "bin"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", say(&out));
+    let record = std::fs::read_to_string(dir.path().join("tools/record")).unwrap();
+    let runtime = dir.path().join("tools/runtime");
+    assert!(record.contains(&format!("--runtime-file {}", runtime.display())), "the runtime is an absolute path: {record}");
+    assert!(dir.path().join("out/diacraft-v0.2.0-linux-x86_64.AppImage").is_file());
+}

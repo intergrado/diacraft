@@ -7,3 +7,5 @@
 .DS_Store
 # A craft-fonts checkout for CRAFT_FONTS_DIR
 /craft-fonts
+# wrangler, installed by `npm ci --prefix packaging/cloudflare` (the release workflow's deploy)
+/packaging/cloudflare/node_modules

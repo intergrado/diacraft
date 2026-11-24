@@ -41,6 +41,9 @@ check_name "$name"
 bin=$(cd "$bin" && pwd)
 [ -n "${APPIMAGETOOL:-}" ] && [ -f "$APPIMAGETOOL" ] || die "APPIMAGETOOL must be the path of appimagetool"
 [ -n "${APPIMAGE_RUNTIME:-}" ] && [ -f "$APPIMAGE_RUNTIME" ] || die "APPIMAGE_RUNTIME must be the path of the type 2 runtime"
+# Both made absolute: appimagetool is an AppImage that unpacks itself and runs from a folder of its own, where a path relative to this one means nothing.
+appimagetool=$(cd "$(dirname "$APPIMAGETOOL")" && pwd)/$(basename "$APPIMAGETOOL")
+appimage_runtime=$(cd "$(dirname "$APPIMAGE_RUNTIME")" && pwd)/$(basename "$APPIMAGE_RUNTIME")
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
@@ -91,7 +94,7 @@ file=$out/diacraft-$name-linux-$arch.AppImage
 rm -f "$file"
 # --appimage-extract-and-run: appimagetool is an AppImage itself, and a build machine has no FUSE to mount it. --no-appstream: the package has no AppStream data to check.
 # VERSION names the version in the entry the file carries.
-ARCH=$appimage_arch VERSION=$version "$APPIMAGETOOL" --appimage-extract-and-run --no-appstream --runtime-file "$APPIMAGE_RUNTIME" "$dir" "$file" >&2
+ARCH=$appimage_arch VERSION=$version "$appimagetool" --appimage-extract-and-run --no-appstream --runtime-file "$appimage_runtime" "$dir" "$file" >&2
 [ -s "$file" ] || die "the AppImage was not written: $file"
 chmod 755 "$file"
 echo "$file"

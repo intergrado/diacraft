@@ -1,0 +1,9 @@
+{
+  "name": "diacraft-pages-deploy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The one tool the release workflow deploys the two websites with (docs/website.md, Deploy to Cloudflare Pages). Move the version here, in WRANGLER_VERSION of .github/workflows/release.yml, and in the lock with `npm install --package-lock-only --ignore-scripts`.",
+  "dependencies": {
+    "wrangler": "4.166.0"
+  }
+}
