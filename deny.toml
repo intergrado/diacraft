@@ -78,6 +78,9 @@ allow-git = [
     # `craft-print` (the system's printing) pins storytold's winprint fork, which holds its Windows spooler calls, to immutable revisions
     # of its own (BSD-3-Clause, MIT OR Apache-2.0).
     "https://github.com/storytold/winprint.rs",
+    # `rfd` (the native file dialogs) comes from the one-bit fork, at one immutable revision pinned in the `patch.crates-io` table of Cargo.toml (MIT): the Save dialog's chosen format sets the
+    # extension of the name it returns, which rfd 0.18.0 does not do. The entry goes when the next rfd release holds the three changes and the patch line is deleted.
+    "https://github.com/one-bit/rfd",
     "https://github.com/storytold/egui",
     "https://github.com/storytold/winit",
 ]

@@ -7,13 +7,16 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use diacraft_engine::Session;
-use diacraft_ui_egui::splash::{SHOWN_FOR, SplashKind};
+use diacraft_ui_egui::clock::Clock;
+use diacraft_ui_egui::splash::{ART_SIZE, SHOWN_FOR, SplashKind};
 use diacraft_ui_egui::{Asset, AssetHost, Bytes, DiacraftApp, Fetch};
 use egui::{Context, Key, Modifiers};
+use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
 use crate::editing::key;
+use crate::splash::panel_picture;
 use crate::support::{Rest, Window, run_command, window};
 
 /// A host that answers what the test put in it, and records what the window asked for and what it let go of.
@@ -174,6 +177,81 @@ fn a_file_that_is_not_the_picture_is_told_in_words_and_not_decoded() {
     assert_eq!(w.state().splash_kind(), None);
     let notice = w.state().notice().expect("the person is told");
     assert!(notice.contains("artwork could not load"), "{notice}");
+}
+
+/// A window with `host`, of 1280 × 800 points at `ppp` pixels to the point, with the start splash or with none, on a clock that stands still until the test moves it.
+fn dense_window(host: &Arc<Fake>, ppp: f32, splash: bool) -> Window {
+    let mut session = Session::new();
+    session.execute("file.new", &json!({})).unwrap();
+    let app = DiacraftApp::new(session, None).with_asset_host(host.clone());
+    let app = if splash { app.with_start_splash() } else { app };
+    let mut w = Harness::builder().with_size([1280.0, 800.0]).with_pixels_per_point(ppp).build_eframe(|_| app.with_clock(Clock::manual()));
+    w.rest();
+    w
+}
+
+const COPY: [usize; 2] = [836, 470];
+const COVER: [usize; 2] = [1672, 941];
+
+/// The web build fetches the cover when the File view first shows it, and not for the splash (the start download stays as it is): on a screen of two pixels to the point the splash
+/// asks for its copy and for nothing else, and is painted from the copy, scaled up to the panel's 836 × 470 points. Once the File view has had the cover, About on that screen is painted from
+/// it, with nothing more fetched and the cover's texture made once.
+#[test]
+fn on_a_dense_screen_the_web_splash_asks_for_no_cover_and_uses_the_one_the_file_view_fetched() {
+    let host = Arc::new(Fake::default());
+    host.answer(Asset::Splash, splash_png());
+    let mut w = dense_window(&host, 2.0, true);
+    assert_eq!(w.state().splash_kind(), Some(SplashKind::Start));
+    assert!((w.state().element("splash.panel").unwrap().rect.size() - ART_SIZE).abs().max_elem() < 0.01, "836 × 470 points");
+    assert_eq!(panel_picture(&w), ("diacraft-splash".to_owned(), COPY), "until the cover is here, the copy scaled up");
+    assert_eq!(host.wanted(Asset::Cover), 0, "the splash does not fetch the cover");
+    key(&mut w, Key::Escape, Modifiers::NONE);
+    run_command(&mut w, "window.backstage", json!({"page": "Home"}));
+    w.rest();
+    assert!(host.wanted(Asset::Cover) >= 1, "the File view asks for it");
+    host.answer(Asset::Cover, cover_png());
+    w.step();
+    w.rest();
+    assert_eq!(host.taken(Asset::Cover), 1);
+    let asked = host.wanted(Asset::Cover);
+    run_command(&mut w, "app.about", json!({}));
+    w.rest();
+    assert_eq!(w.state().splash_kind(), Some(SplashKind::About));
+    assert_eq!(panel_picture(&w), ("diacraft-cover".to_owned(), COVER), "About is painted from the cover the File view has");
+    assert_eq!(host.wanted(Asset::Cover), asked, "nothing more is asked for");
+    assert_eq!(host.taken(Asset::Cover), 1, "the texture is the File view's, made once");
+    assert_eq!(w.state().ui_panics(), 0);
+}
+
+/// A cover the host has but the window has not made into a texture yet (the File view asked for it and was closed before it came) is used as it is, without asking for it; one the host is
+/// still getting, or could not get, is not waited for: the splash is painted from its copy, and the File view says why when it shows its place.
+#[test]
+fn a_dense_splash_uses_a_cover_the_host_has_and_never_waits_for_one_it_has_not() {
+    let host = Arc::new(Fake::default());
+    host.answer(Asset::Splash, splash_png());
+    host.answer(Asset::Cover, cover_png());
+    let w = dense_window(&host, 2.0, true);
+    assert_eq!(panel_picture(&w), ("diacraft-cover".to_owned(), COVER));
+    assert_eq!(host.wanted(Asset::Cover), 0, "used, not asked for");
+    assert_eq!(host.taken(Asset::Cover), 1, "made into a texture, and the host let go of the bytes");
+    let host = Arc::new(Fake::default());
+    host.answer(Asset::Splash, splash_png());
+    host.answer(Asset::Cover, Fetch::Failed("the cover picture could not be fetched (Failed to fetch)".to_owned()));
+    let mut w = dense_window(&host, 2.0, true);
+    assert_eq!(panel_picture(&w), ("diacraft-splash".to_owned(), COPY));
+    assert!(w.state().notice().is_none_or(|n| !n.contains("artwork")), "the splash says nothing of the cover");
+    key(&mut w, Key::Escape, Modifiers::NONE);
+    run_command(&mut w, "window.backstage", json!({"page": "Home"}));
+    w.rest();
+    let notice = w.state().notice().expect("the File view says why");
+    assert!(notice.contains("artwork could not load") && notice.contains("Failed to fetch"), "{notice}");
+    // At one pixel to the point the copy is the panel's own pixels: a cover the host has is not used.
+    let host = Arc::new(Fake::default());
+    host.answer(Asset::Splash, splash_png());
+    host.answer(Asset::Cover, cover_png());
+    let w = dense_window(&host, 1.0, true);
+    assert_eq!(panel_picture(&w), ("diacraft-splash".to_owned(), COPY));
+    assert_eq!(host.taken(Asset::Cover), 0);
 }
 
 /// About shows the same panel with no timer, and the picture is made once: the second time it is not asked for.

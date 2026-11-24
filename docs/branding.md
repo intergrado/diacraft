@@ -8,8 +8,8 @@ Original artwork for DiaCraft, integrated in and corrected in to the owner's req
 |---|---|---|
 | [Icon master](../assets/branding/diacraft-icon-master.png) | 1254 × 1254 px, RGB PNG | Opaque square source for platform icon exports |
 | [Runtime icon](../assets/branding/diacraft-icon-256.png) | 256 × 256 px, RGB PNG | Native window icon and web favicon |
-| [Cover](../assets/branding/diacraft-cover.png) | 1672 × 941 px, RGB PNG | Landscape cover, approximately 16:9 |
-| [Splash copy](../assets/branding/diacraft-splash.png) | 836 × 470 px, 256-colour PNG, about 206 KB | The cover at half its size, the background of the splash popup and About DiaCraft (`crates/ui-egui/src/splash.rs`) |
+| [Cover](../assets/branding/diacraft-cover.png) | 1672 × 941 px, RGB PNG | Landscape cover, approximately 16:9; also the background of the splash popup and About DiaCraft above one pixel to the point, where the window has it |
+| [Splash copy](../assets/branding/diacraft-splash.png) | 836 × 470 px, 256-colour PNG, about 206 KB | The cover at half its size, the background of the splash popup and About DiaCraft at one pixel to the point, and in the web build until the cover has come (`crates/ui-egui/src/splash.rs`) |
 
 The octopus coordinates a process rectangle and a decision diamond. Its branching arms connect the creature convention to the application's purpose. The cover pairs the same illustration with the name **DiaCraft** and the factual descriptor **Diagramming software**.
 
@@ -34,7 +34,7 @@ On KDE, refresh the application cache with `kbuildsycoca6`. The desktop-entry fi
 
 The web entry point uses Trunk's local icon asset pipeline. No JavaScript, fonts, dependencies or remote requests were added. The shared UI displays the same artwork on native and WASM builds.
 
-The splash copy is the cover halved with the same filter and written as a palette picture with no dithering, so that the cream the text lies on keeps its exact colour (a dithered palette moved it): it is a mechanical export of the cover and shares its terms. The popup shows it at its size over the window's pixels to the point, with the version, the git release, the year and the licence painted over its lower left corner, in the two inks of the art (`splash_ink`, the near-black of the title, and `splash_link`, the teal of the subtitle, in `crates/ui-egui/src/theme.rs`); a test reads the picture and holds that corner clear of art.
+The splash copy is the cover halved with the same filter and written as a palette picture with no dithering, so that the cream the text lies on keeps its exact colour (a dithered palette moved it): it is a mechanical export of the cover and shares its terms. The popup is 836 × 470 points on every screen (the owner, 2026-11-24: "same size on every screen"), scaled down only to fit a small window, with the version, the git release, the year and the licence painted over its lower left corner, in the two inks of the art (`splash_ink`, the near-black of the title, and `splash_link`, the teal of the subtitle, in `crates/ui-egui/src/theme.rs`). At one pixel to the point the copy fills it at its own pixels. Where the popup is more pixels wide than the copy (at its full size, every screen above one pixel to the point) it is drawn from the cover itself where the window has it, so that it is not the copy blown up: the desktop app carries the cover, and the web build, which fetches the cover only when the File view first shows its Home page, draws the copy scaled up until then. The copy is the whole cover resized, so the text lies at the same place on either picture, and a test reads each and holds the text's corners clear of art in both.
 
 ```sh
 magick assets/branding/diacraft-cover.png -filter Lanczos -resize 836x470! -strip -dither None -colors 256 PNG8:splash.png
@@ -105,6 +105,7 @@ The bundled-image test checks decoding, truncated input and incorrect dimensions
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-24 | minor | The splash popup and About are 836 × 470 points on every screen, drawn from the cover above one pixel to the point where the window has it, and from the splash copy at one pixel to the point and in the web build until the cover has come |
 | 2026-11-24 | minor | APPID: the application id is `app.diacraft` (the desktop entry, the window's app id and the bundle id), and the page says that the registration of the earlier id is a different entry that is left alone |
 | 2026-11-23 | trivial | Sentences reworded so that each reads whole on its own; nothing they say changes |
 | 2026-11-23 | minor | The reference product is named only in the format lists ("the reference app" or VSDX elsewhere), and the page keeps to the words of the public tree |

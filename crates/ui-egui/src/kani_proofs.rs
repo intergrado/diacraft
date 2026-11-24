@@ -2,8 +2,12 @@
 //! (`ribbon::controls::submenu_height`), the colour of a template's tile (`new_page::parse_hex`), the art of a line end (`ribbon::line_ends::art`)
 //! and the width of a strength's slider (`snap_dialog::slider_width`); and, where an arrow key takes the AutoConnect flyout
 //! (`edit::autoconnect::tile_after`), the start splash's timer and size (`splash::Splash::tick`, `ended`, `panel_size`), and the macro-enabled twin of a
-//! VSDX type (`save_kinds::macro_twin`); and, a gradient stop's opacity and a percent's hundredths (`format_fx::alpha_of`, `hundredths`).
-//! Run with `cargo xtask kani` (`docs/development.md`, Proofs).
+//! VSDX type (`save_kinds::macro_twin`); and, a gradient stop's opacity and a percent's hundredths (`format_fx::alpha_of`, `hundredths`);
+//! and, the splash's size in points at every density and the picture it is drawn from on a dense screen (`panel_size`, `drawn_from_cover`). Run with
+//! `cargo xtask kani` (`docs/development.md`, Proofs).
+//!
+//! **Not proved:** that the splash panel lies inside the window with its margin (`panel_size`: a division and a product taken back to the window, 102 s and 192 s in
+//! two forms, where its laws here take half a second; the unit and window tests of `splash.rs` hold it).
 //!
 //! **Not proved:** that two percents in order have hundredths in order (`hundredths` twice: two products and two roundings, the second circuit, past 300 s);
 //! `comments_ui::age_of` (`split_once`, the memchr trap); the number boxes of the Define Shape Data dialog (`Draft::json`: took them out while the batch ran);
@@ -218,34 +222,49 @@ fn the_start_splash_goes_when_its_time_is_used_up_by_frames_with_the_pointer_awa
     kani::cover!(!start.ended() & (left < SHOWN_FOR.as_secs()), "a splash with time used and some left");
 }
 
-/// The splash's own pixels at one pixel to the point.
+/// The splash's size in points at every density, and the splash copy's width in pixels.
 const ART: (f32, f32) = (836.0, 470.0);
 
-/// `splash::panel_size` (the panel's size in a window) at `ppp` pixels to the point, whose picture is `natural` points, for a window of **every** size, a number or not:
-/// never a size that is no number, always some size, never wider or taller than the picture's own size in points (never scaled up), and the picture's own size in a window with room
-/// for it and its margin (16 points each side).
-fn panel_law(ppp: f32, natural: (f32, f32)) -> egui::Vec2 {
+/// `splash::panel_size` (the panel's size in a window, the same at every pixel density) for a window of **every** size, a number or not: never a size that is no
+/// number, always some size, never wider or taller than the picture's size in points (never scaled up), the picture's size exactly in a window with room for it and its margin (16 points
+/// each side), and smaller than the picture in a window without that room. **Not proved here: that the panel lies inside the window with its margin** (the unit and window tests of
+/// `splash.rs` hold it): that is a division and a product taken back to the window, which Kani settles slowly (measured on 0.68.0, 2026-11-24: 102 s stated against the room worked again,
+/// 192 s as one sum against the window, where this harness takes half a second).
+#[kani::proof]
+fn the_splash_panel_is_its_pictures_size_in_points_or_smaller_to_fit_in_every_window_and_never_no_number() {
     use crate::splash::panel_size;
     let (w, h): (f32, f32) = (kani::any(), kani::any());
-    let got = panel_size(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(w, h)), ppp);
+    let got = panel_size(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(w, h)));
     assert!(got.x.is_finite() && got.y.is_finite() && got.x > 0.0 && got.y > 0.0);
-    assert!(got.x <= natural.0 && got.y <= natural.1);
-    if w >= natural.0 + 32.0 && h >= natural.1 + 32.0 {
-        assert!(got.x == natural.0 && got.y == natural.1);
+    assert!(got.x <= ART.0 && got.y <= ART.1);
+    if w >= ART.0 + 32.0 && h >= ART.1 + 32.0 {
+        assert!(got.x == ART.0 && got.y == ART.1);
     }
-    got
-}
-
-#[kani::proof]
-fn the_splash_at_one_pixel_to_the_point_is_its_pictures_size_or_smaller_to_fit_and_never_no_number() {
-    let got = panel_law(1.0, ART);
+    if w < ART.0 + 32.0 || h < ART.1 + 32.0 {
+        assert!(got.x < ART.0 && got.y < ART.1);
+    }
     kani::cover!(got.x < ART.0 / 2.0, "a window that holds half the picture");
+    kani::cover!((got.x == ART.0) & (got.y == ART.1), "a window with room for it");
 }
 
+/// `splash::drawn_from_cover` (the panel is drawn from the cover where it is more pixels wide than the splash copy) for the panel `panel_size` gives in a window of **every**
+/// size and at **every** density, a number or not: at one pixel to the point or less, at none, and at a density that is no number, the copy (whose pixels the panel never exceeds there); at
+/// its full size above one pixel to the point, the cover.
 #[kani::proof]
-fn the_splash_at_two_pixels_to_the_point_is_half_its_pictures_size_or_smaller_to_fit_and_never_no_number() {
-    let got = panel_law(2.0, (ART.0 / 2.0, ART.1 / 2.0));
-    kani::cover!(got.x == ART.0 / 2.0, "a window with room for it");
+fn the_splash_is_drawn_from_the_cover_exactly_above_one_pixel_to_the_point_at_its_full_size_and_never_at_one_or_less() {
+    use crate::splash::{drawn_from_cover, panel_size};
+    let (w, h, ppp): (f32, f32, f32) = (kani::any(), kani::any(), kani::any());
+    let size = panel_size(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(w, h)));
+    let cover = drawn_from_cover(size.x, ppp);
+    if !(ppp > 1.0) {
+        assert!(!cover);
+    }
+    if size.x == ART.0 {
+        assert!(cover == (ppp > 1.0));
+    }
+    kani::cover!(cover & (size.x < ART.0), "a panel shrunk to fit on a dense screen, still more pixels than the copy");
+    kani::cover!(!cover & (size.x < ART.0) & (ppp > 1.0), "a panel shrunk to fewer pixels than the copy on a dense screen");
+    kani::cover!(cover & (size.x == ART.0), "the panel at its full size on a dense screen");
 }
 
 /// `save_kinds::macro_twin` (the macro-enabled type the Save As dialog offers beside a VSDX type) for **every** extension of four bytes that is text: `vsdm`, `vssm`

@@ -11,8 +11,13 @@
 //! **The timer asks for one frame, at its end** (`request_repaint_after` the time left), never one for each frame: kittest's `run` fails on a window that repaints for ever,
 //! and a held timer asks for none. Nothing here reads the machine's clock.
 //!
-//! **Layout.** The picture is the popup, edge to edge, at its size divided by the pixels to the point (836 × 470 pixels, 836 × 470 points at 1, a half of that at 2), or
-//! scaled down to fit a window with a margin. There is no strip or margin of the theme round or under the text: it is painted over the picture, in [`TEXT_ZONE`], the corner
+//! **Layout.** The picture is the popup, edge to edge, **836 × 470 points on every screen** (`panel_size`; the owner, 2026-11-24: "same size on every screen"), or scaled down
+//! to fit a window with a margin, never up. **The picture it is drawn from** (`drawn_from_cover`): the splash copy (836 × 470 pixels, the cover halved) where the
+//! panel is no more pixels wide than the copy, which is every screen of one pixel to the point; where it is more (at its full size, every density above one), the cover itself
+//! (1672 × 941 pixels, `branding.rs`), **where the window has it**, so that the panel is not the copy blown up. The desktop carries the cover. The web build fetches it when the File
+//! view first shows its Home page and not for the splash: until then its splash on a dense screen is the copy scaled up, and from then on the cover. Either is drawn whole
+//! over the panel (the copy is the whole cover resized), so a point of the picture is at the same place in both, and the zones below hold in both (a test reads each picture).
+//! There is no strip or margin of the theme round or under the text: it is painted over the picture, in [`TEXT_ZONE`], the corner
 //! under the small flowchart and left of the lone diamond and the tentacles (a test reads the picture and holds the zone clear of art). **The rows are laid out from the
 //! zone's bottom up**, and the zone ends as far above the picture's bottom edge as it starts from its left edge (the owner, 2026-11-23: the last row is not at the edge):
 //! the block's height is the rows' own, read from the fonts in use, so the space under the last row is that margin whatever the fonts. Text sizes scale with the picture.
@@ -197,12 +202,20 @@ impl Splash {
     }
 }
 
-/// The panel's size in points in a window of `screen`: the picture's own size over the pixels to the point, scaled down (never up) to fit with a margin.
-pub(crate) fn panel_size(screen: Rect, pixels_per_point: f32) -> Vec2 {
-    let natural = ART_SIZE / pixels_per_point.clamp(0.25, 8.0);
+/// The panel's size in points in a window of `screen`: the picture's size in points, [`ART_SIZE`], **the same at every pixel density** (the owner, 2026-11-24: "same size on every screen"),
+/// scaled down (never up) to fit with a margin. A window of no size, or of one that is no number, has a panel of a point or so, never one of no size or of NaN.
+pub(crate) fn panel_size(screen: Rect) -> Vec2 {
     let room = (screen.size() - Vec2::splat(2.0 * MARGIN)).max(Vec2::splat(1.0));
-    let fit = (room.x / natural.x).min(room.y / natural.y).min(1.0);
-    natural * fit
+    let fit = (room.x / ART_SIZE.x).min(room.y / ART_SIZE.y).min(1.0);
+    ART_SIZE * fit
+}
+
+/// Whether a panel `width` points wide at `pixels_per_point` is drawn from the cover (twice the splash copy's pixels each way) rather than from the copy: **when it is more pixels wide than
+/// the copy**, which would be blown up to fill it. At the panel's full size that is every density above one pixel to the point; a panel shrunk to fit a small window on such a screen that is
+/// still no more pixels than the copy has it, which is not blown up there (and the cover would be shrunk past half, which its texture's filter does not smooth). A width or a density that is
+/// no number, nothing or less is the copy, and no product of them is made that could be no number.
+pub(crate) fn drawn_from_cover(width: f32, pixels_per_point: f32) -> bool {
+    width > 0.0 && pixels_per_point > 0.0 && width * pixels_per_point > ART_SIZE.x
 }
 
 impl DiacraftApp {
@@ -251,18 +264,25 @@ impl DiacraftApp {
     /// Draws the panel over the window, counts its time, and dismisses it on a click outside the links.
     pub(crate) fn splash(&mut self, ctx: &Context, t: Tokens) {
         let Some(mut splash) = self.ui.splash.take() else { return };
-        // The picture first: one that cannot be had or decoded is no splash, and says so once (the status bar, the log). **One that has not come yet is a panel with the words and no picture**
-        // (the web build fetches it, and the host wakes the window when it is here): the layout does not move when it comes, and its four seconds begin then.
+        let size = panel_size(ctx.content_rect());
+        // The picture first. **On a dense screen it is the cover where the window has it** (the desktop carries it, the web build has it once the File view has fetched it),
+        // so that the panel is not the splash copy blown up; the web build does not fetch it for the splash, and draws the copy until then. Else the copy: one that cannot be had or decoded
+        // is no splash, and says so once (the status bar, the log). **One that has not come yet is a panel with the words and no picture** (the web build fetches it, and the host wakes
+        // the window when it is here): the layout does not move when it comes, and its four seconds begin then.
         let source = self.asset_source();
-        let texture = match self.artwork.splash_picture(ctx, &source) {
-            Picture::Ready(texture) => Some(texture),
-            Picture::Waiting => None,
-            Picture::Failed(error) => {
-                let message = format!("DiaCraft artwork could not load: {error}");
-                log::error!("{message}");
-                self.set_notice(&message);
-                return;
-            }
+        let cover = if drawn_from_cover(size.x, ctx.pixels_per_point()) { self.artwork.cover_if_here(ctx, &source) } else { None };
+        let texture = match cover {
+            Some(cover) => Some(cover),
+            None => match self.artwork.splash_picture(ctx, &source) {
+                Picture::Ready(texture) => Some(texture),
+                Picture::Waiting => None,
+                Picture::Failed(error) => {
+                    let message = format!("DiaCraft artwork could not load: {error}");
+                    log::error!("{message}");
+                    self.set_notice(&message);
+                    return;
+                }
+            },
         };
         let over = splash.over(ctx.pointer_hover_pos());
         let about = splash.kind() == SplashKind::About;
@@ -272,7 +292,6 @@ impl DiacraftApp {
                 return;
             }
         }
-        let size = panel_size(ctx.content_rect(), ctx.pixels_per_point());
         let k = size.x / ART_SIZE.x;
         let mut shown = Shown::default();
         let frame = Frame::new()
@@ -514,19 +533,74 @@ mod tests {
         assert_eq!((SplashKind::Start.name(), SplashKind::About.name()), ("start", "about"));
     }
 
+    fn screen(w: f32, h: f32) -> Rect {
+        Rect::from_min_size(Pos2::ZERO, vec2(w, h))
+    }
+
+    /// The owner, 2026-11-24 ("same size on every screen"): in a window with room for it the panel is 836 × 470 points at 1, 1.5, 2 and 3 pixels to the point, never larger in a larger
+    /// window; at one pixel to the point it is the copy's own pixels, and above one it is more pixels than the copy, so it is drawn from the cover.
     #[test]
-    fn the_panel_is_the_pictures_size_over_the_pixels_to_the_point_and_scaled_down_never_up() {
-        let screen = |w: f32, h: f32| Rect::from_min_size(Pos2::ZERO, vec2(w, h));
-        assert_eq!(panel_size(screen(1280.0, 800.0), 1.0), ART_SIZE);
-        assert_eq!(panel_size(screen(3000.0, 2000.0), 1.0), ART_SIZE, "never larger than the picture");
-        assert_eq!(panel_size(screen(1280.0, 800.0), 2.0), ART_SIZE / 2.0);
-        let small = panel_size(screen(480.0, 320.0), 1.0);
-        assert!(small.x <= 480.0 - 2.0 * MARGIN && small.y <= 320.0 - 2.0 * MARGIN, "{small:?}");
-        assert!((small.x / small.y - ART_SIZE.x / ART_SIZE.y).abs() < 1e-4, "the picture keeps its shape");
-        // A window of no size, or a screen of no pixels to the point, is not a panel of no size, nor of NaN.
-        for size in [panel_size(screen(0.0, 0.0), 1.0), panel_size(screen(100.0, 100.0), 0.0), panel_size(screen(f32::MAX, 1.0), f32::MIN_POSITIVE)] {
-            assert!(size.x.is_finite() && size.y.is_finite() && size.x > 0.0 && size.y > 0.0, "{size:?}");
+    fn the_panel_is_836_by_470_points_at_every_density_and_drawn_from_the_cover_above_one_pixel_to_the_point() {
+        assert_eq!(ART_SIZE, vec2(836.0, 470.0));
+        for (ppp, cover) in [(1.0, false), (1.5, true), (2.0, true), (3.0, true)] {
+            for window in [screen(1280.0, 800.0), screen(3000.0, 2000.0), screen(836.0 + 2.0 * MARGIN, 470.0 + 2.0 * MARGIN)] {
+                let size = panel_size(window);
+                assert_eq!(size, ART_SIZE, "{window:?} at {ppp}");
+                assert_eq!(drawn_from_cover(size.x, ppp), cover, "{window:?} at {ppp}");
+            }
         }
+        assert!(drawn_from_cover(ART_SIZE.x, 1.0 + f32::EPSILON), "the least density above one");
+        assert!(!drawn_from_cover(ART_SIZE.x, 1.0 - f32::EPSILON / 2.0));
+    }
+
+    /// A small window shrinks the panel to fit with its margin, keeping the picture's shape, the same at one and at two pixels to the point; the panel shrunk is drawn from the copy at one,
+    /// and from the cover at two, where it is still more pixels than the copy (448 × 252 points in a window of 480 × 320, 896 pixels wide). Just above one it is the copy, which it does not blow up.
+    #[test]
+    fn in_a_small_window_the_panel_shrinks_to_fit_at_one_and_at_two_pixels_to_the_point() {
+        for (w, h) in [(480.0, 320.0), (640.0, 400.0), (800.0, 300.0), (867.0, 1000.0), (1000.0, 501.0)] {
+            let small = panel_size(screen(w, h));
+            assert!(small.x <= w - 2.0 * MARGIN && small.y <= h - 2.0 * MARGIN, "{w} × {h}: {small:?}");
+            assert!(small.x < ART_SIZE.x && small.y < ART_SIZE.y, "{w} × {h}: smaller than the picture, never larger: {small:?}");
+            assert!(
+                (small.x - (w - 2.0 * MARGIN)).abs() < 1e-3 || (small.y - (h - 2.0 * MARGIN)).abs() < 1e-3,
+                "{w} × {h}: as large as fits: {small:?}"
+            );
+            assert!((small.x / small.y - ART_SIZE.x / ART_SIZE.y).abs() < 1e-4, "{w} × {h}: the picture keeps its shape");
+        }
+        let small = panel_size(screen(480.0, 320.0));
+        assert!((small - vec2(448.0, 448.0 * ART_SIZE.y / ART_SIZE.x)).abs().max_elem() < 1e-3, "{small:?}");
+        assert!(!drawn_from_cover(small.x, 1.0) && drawn_from_cover(small.x, 2.0));
+        assert!(!drawn_from_cover(small.x, 1.25), "{} pixels wide, fewer than the copy's 836", small.x * 1.25);
+    }
+
+    /// A window of no size, of a negative one, or of one that is no number or infinite, is not a panel of no size, nor of NaN, nor larger than the picture; and a width or a density that is
+    /// no number, nothing or negative is drawn from the copy.
+    #[test]
+    fn a_window_that_is_no_number_is_a_panel_of_some_size_and_drawn_from_the_copy() {
+        let (nan, inf) = (f32::NAN, f32::INFINITY);
+        for window in [
+            screen(0.0, 0.0),
+            screen(-100.0, 100.0),
+            screen(nan, nan),
+            screen(nan, 800.0),
+            screen(inf, inf),
+            screen(f32::MAX, 1.0),
+            screen(-inf, inf),
+            Rect::NOTHING,
+            Rect::EVERYTHING,
+            Rect::NAN,
+        ] {
+            let size = panel_size(window);
+            assert!(size.x.is_finite() && size.y.is_finite() && size.x > 0.0 && size.y > 0.0, "{window:?}: {size:?}");
+            assert!(size.x <= ART_SIZE.x && size.y <= ART_SIZE.y, "{window:?}: {size:?}");
+        }
+        assert_eq!(panel_size(screen(inf, inf)), ART_SIZE);
+        for (width, ppp) in
+            [(nan, 2.0), (ART_SIZE.x, nan), (inf, 0.0), (0.0, inf), (-ART_SIZE.x, -2.0), (ART_SIZE.x, -2.0), (ART_SIZE.x, 0.0), (nan, nan)]
+        {
+            assert!(!drawn_from_cover(width, ppp), "{width} at {ppp}");
+        }
+        assert!(drawn_from_cover(inf, 2.0) && drawn_from_cover(ART_SIZE.x, inf), "an infinity is more pixels");
     }
 
     /// The notice's size: the start when its height fits, smaller in steps of a twentieth when it does not, never below the least, and the least when nothing fits or the

@@ -65,7 +65,7 @@ fn deny_toml_allows_the_permissive_licences_and_no_copyleft() {
 }
 
 #[test]
-fn deny_toml_allows_only_the_storytold_git_sources_and_the_one_fork_a_pull_request_waits_on() {
+fn deny_toml_allows_only_the_storytold_git_sources_and_the_forks_a_pull_request_waits_on() {
     let text = deny_toml();
     assert_eq!(
         list(&text, "[sources]", "allow-git"),
@@ -76,6 +76,8 @@ fn deny_toml_allows_only_the_storytold_git_sources_and_the_one_fork_a_pull_reque
             "https://github.com/one-bit/craft-libs",
             // `craft-print`'s Windows spooler calls, at immutable revisions of their own.
             "https://github.com/storytold/winprint.rs",
+            // `rfd`, the native file dialogs, at one immutable revision of the one-bit fork, until the next rfd release holds its changes: then this source goes (and so does this line).
+            "https://github.com/one-bit/rfd",
             "https://github.com/storytold/egui",
             "https://github.com/storytold/winit"
         ]

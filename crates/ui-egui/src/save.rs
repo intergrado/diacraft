@@ -14,7 +14,9 @@
 //! send the open text box first (`DiacraftApp::commit_pending_text`), so the question is about the drawing as the person sees it.
 //!
 //! **The kinds the Save dialog offers** (`save_kinds.rs`): the drawing's own type first (`.diacraft` for a new drawing, the default from 0.2), then the others that the
-//! engine says it writes for this drawing, in the design's order. A name the dialog returns with no type gets the drawing's own type.
+//! engine says it writes for this drawing, in the design's order. **The dialog keeps the name's extension in step with the kind chosen** (`dialogs.rs`): the name it starts with
+//! has the first kind's extension, and choosing another kind gives the name that kind's. A name the dialog still returns with no type (one that does not set it, such as the zenity fallback
+//! on Linux) gets the drawing's own type from the window.
 //!
 //! **Two more questions** (`ask.rs`). A name the Save dialog returned with no file type gets the drawing's own type, and if that file is there the window asks
 //! before replacing it (M2). A save onto a file that changed on the disk since the drawing was opened or last saved is refused by the engine
@@ -207,8 +209,8 @@ impl DiacraftApp {
     }
 
     /// Writes the drawing to the file the Save dialog returned. **A name with no file type gets the drawing's own type here** (`.diacraft` for a new drawing, `.vsdx` for one
-    /// opened from a VSDX file, `.odg` for a drawing that came from an `.odg`), after the dialog's own check
-    /// of the name it was given, so when that file is there the person is asked before it is replaced (M2).
+    /// opened from a VSDX file, `.odg` for a drawing that came from an `.odg`): the fallback for a dialog that did not set the extension of the kind chosen (see the module
+    /// docs). It comes after the dialog's own check of the name it was given, so when that file is there the person is asked before it is replaced (M2).
     pub(crate) fn save_to(&mut self, ctx: &Context, path: PathBuf) {
         let Some(text) = path.to_str() else {
             self.opening.banner = Some("That file name is not text DiaCraft can use, so the drawing was not saved.".to_owned());

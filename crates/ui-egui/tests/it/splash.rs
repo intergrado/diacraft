@@ -15,7 +15,7 @@ use diacraft_ui_egui::render_worker::bundled_drawer;
 use diacraft_ui_egui::snap_reader::SnapReader;
 use diacraft_ui_egui::splash::{APACHE_URL, ART_SIZE, LEGAL_ZONE, MIT_URL, SHOWN_FOR, SplashKind, TEXT_ZONE, TRADEMARK};
 use diacraft_ui_egui::theme::Tokens;
-use egui::{Key, Modifiers, OutputCommand, Pos2, Rect, ViewportId, pos2, vec2};
+use egui::{Key, Modifiers, OutputCommand, Pos2, Rect, Shape, TextureId, ViewportId, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
@@ -117,25 +117,90 @@ fn a_build_with_no_git_release_shows_unknown_and_the_last_resort_year() {
     w.get_by_label("© 2026 the DiaCraft contributors");
 }
 
-/// The image is the popup, edge to edge: the panel is the picture's own size divided by the pixels to the point, in the middle of the window, with no strip or margin
-/// round it; in a window too small for it, it is scaled to fit with a margin.
+/// The image is the popup, edge to edge: the panel is the picture's size in points, 836 × 470 **at every pixel density** (the owner, 2026-11-24: the same size on every screen), in the
+/// middle of the window, with no strip or margin round it; in a window too small for it, it is scaled to fit with a margin, the same at one and at two pixels to the point.
 #[test]
-fn the_picture_is_the_whole_popup_at_its_size_over_the_pixels_to_the_point() {
-    for (size, ppp) in [([1280.0, 800.0], 1.0), ([1280.0, 800.0], 2.0), ([1600.0, 1000.0], 1.5)] {
+fn the_picture_is_the_whole_popup_at_836_by_470_points_at_every_density() {
+    assert_eq!(ART_SIZE, vec2(836.0, 470.0));
+    for (size, ppp) in [([1280.0, 800.0], 1.0), ([1280.0, 800.0], 2.0), ([1600.0, 1000.0], 1.5), ([1280.0, 800.0], 3.0)] {
         let w = splash_window_at(size, ppp, app().with_start_splash());
         let panel = rect_of(&w, "splash.panel");
-        let expected = ART_SIZE / ppp;
-        assert!((panel.size() - expected).abs().max_elem() < 0.6, "{size:?} at {ppp}: {:?} is not {expected:?}", panel.size());
+        assert!((panel.size() - ART_SIZE).abs().max_elem() < 0.6, "{size:?} at {ppp}: {:?} is not {ART_SIZE:?}", panel.size());
         let middle = vec2(size[0], size[1]) / 2.0;
         assert!((panel.center() - middle.to_pos2()).abs().max_elem() < 1.5, "{size:?} at {ppp}: {panel:?} is not in the middle");
     }
     for size in [[480.0, 320.0], [640.0, 400.0], [800.0, 300.0]] {
-        let w = splash_window_at(size, 1.0, app().with_start_splash());
-        let panel = rect_of(&w, "splash.panel");
-        let screen = Rect::from_min_size(Pos2::ZERO, vec2(size[0], size[1]));
-        assert!(screen.shrink(8.0).contains_rect(panel), "{size:?}: {panel:?} does not fit with a margin");
-        assert!(((panel.width() / panel.height()) - (ART_SIZE.x / ART_SIZE.y)).abs() < 0.01, "{size:?}: the picture keeps its shape");
+        let at_one = rect_of(&splash_window_at(size, 1.0, app().with_start_splash()), "splash.panel");
+        for ppp in [1.0, 2.0] {
+            let w = splash_window_at(size, ppp, app().with_start_splash());
+            let panel = rect_of(&w, "splash.panel");
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(size[0], size[1]));
+            assert!(screen.shrink(8.0).contains_rect(panel), "{size:?} at {ppp}: {panel:?} does not fit with a margin");
+            assert!(((panel.width() / panel.height()) - (ART_SIZE.x / ART_SIZE.y)).abs() < 0.01, "{size:?} at {ppp}: the picture keeps its shape");
+            assert!(
+                (panel.size() - at_one.size()).abs().max_elem() < 0.6,
+                "{size:?}: {:?} at {ppp}, {:?} at one pixel to the point",
+                panel.size(),
+                at_one.size()
+            );
+        }
     }
+}
+
+/// The picture the panel is painted with, as the frame drew it: the name and the size in pixels of the texture of the one image over the whole panel.
+#[track_caller]
+pub(crate) fn panel_picture(w: &Window) -> (String, [usize; 2]) {
+    let panel = rect_of(w, "splash.panel");
+    let images: Vec<TextureId> = w
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            Shape::Mesh(mesh) if mesh.texture_id != TextureId::default() => Some((mesh.texture_id, mesh.calc_bounds())),
+            _ => None,
+        })
+        .filter(|(_, bounds)| (bounds.min - panel.min).abs().max_elem() < 0.01 && (bounds.max - panel.max).abs().max_elem() < 0.01)
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(images.len(), 1, "one image covers the panel {panel:?}: {images:?}");
+    let manager = w.ctx.tex_manager();
+    let meta = manager.read().meta(images[0]).cloned().expect("the texture is the window's");
+    (meta.name, meta.size)
+}
+
+/// On a dense screen the panel is painted from the cover, 1672 × 941 pixels, which the desktop carries, and not from the splash copy blown up (the owner, 2026-11-24): at two pixels to the
+/// point the panel of 836 × 470 points is 1672 × 940 pixels, the cover's own. At one pixel to the point it is the copy's, and so is a panel shrunk to fewer pixels than the copy has. The
+/// timer and the About panel are as they are on any screen, and the window comes to rest (no repaint loop).
+#[test]
+fn at_two_pixels_to_the_point_the_panel_is_836_by_470_points_painted_from_the_cover() {
+    const COVER: [usize; 2] = [1672, 941];
+    const COPY: [usize; 2] = [836, 470];
+    let mut w = splash_window_at([1280.0, 800.0], 2.0, app().with_start_splash());
+    assert!(w.ctx.pixels_per_point() == 2.0);
+    assert!((rect_of(&w, "splash.panel").size() - ART_SIZE).abs().max_elem() < 0.01, "{:?}", rect_of(&w, "splash.panel"));
+    assert_eq!(panel_picture(&w), ("diacraft-cover".to_owned(), COVER));
+    w.advance(SHOWN_FOR - Duration::from_millis(100));
+    w.step();
+    assert!(open(&w), "3.9 s");
+    w.advance(Duration::from_millis(200));
+    w.step();
+    assert!(!open(&w), "it goes after four seconds, as it does on any screen");
+    run_command(&mut w, "app.about", json!({}));
+    w.rest();
+    assert_eq!(w.state().splash_kind(), Some(SplashKind::About));
+    assert_eq!(panel_picture(&w), ("diacraft-cover".to_owned(), COVER), "About is the same panel");
+    w.get_by_label(TRADEMARK);
+    // One pixel to the point: the copy, at its own pixels.
+    let w = splash_window_at([1280.0, 800.0], 1.0, app().with_start_splash());
+    assert_eq!(panel_picture(&w), ("diacraft-splash".to_owned(), COPY));
+    // Just above one, in the smallest window: a panel of 448 × 252 points is 560 pixels wide at 1.25, fewer than the copy's 836, so the copy, which is not blown up there.
+    let w = splash_window_at([480.0, 320.0], 1.25, app().with_start_splash());
+    assert!(rect_of(&w, "splash.panel").width() * 1.25 < 836.0);
+    assert_eq!(panel_picture(&w), ("diacraft-splash".to_owned(), COPY));
+    // The same window at two pixels to the point is 896 pixels wide: the cover.
+    let w = splash_window_at([480.0, 320.0], 2.0, app().with_start_splash());
+    assert_eq!(panel_picture(&w), ("diacraft-cover".to_owned(), COVER));
+    assert_eq!(w.state().ui_panics(), 0);
 }
 
 /// The text lies in the lower left corner of the picture, under the flowchart and clear of the diamond and the tentacles, whatever the size of the window and the
@@ -480,7 +545,12 @@ fn the_splash_shows_in_the_light_and_the_dark_theme_with_the_same_ink() {
 
 /// The splash copy as the app embeds it, decoded to RGB: its width, its height and its pixels.
 fn picture() -> (usize, usize, Vec<[u8; 3]>) {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/branding/diacraft-splash.png");
+    branding_picture("diacraft-splash.png")
+}
+
+/// The picture `name` of the branding folder, decoded to RGB: its width, its height and its pixels.
+fn branding_picture(name: &str) -> (usize, usize, Vec<[u8; 3]>) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/branding").join(name);
     let mut decoder = png::Decoder::new(std::io::Cursor::new(std::fs::read(path).unwrap()));
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().unwrap();
@@ -493,6 +563,39 @@ fn picture() -> (usize, usize, Vec<[u8; 3]>) {
     };
     let pixels = bytes[..info.buffer_size()].chunks(step).map(|p| [p[0], p[1], p[2]]).collect();
     (info.width as usize, info.height as usize, pixels)
+}
+
+/// A rectangle of the splash copy's pixels (left, top, right, bottom) taken to the cover's: the panel is painted from the whole of either (the copy is the whole cover resized to 836 × 470,
+/// `docs/branding.md`), so a point of the panel is at the same fraction of the width and the height of each. Rounded outwards, so that the rectangle holds every pixel the text can lie on.
+fn on_cover([l, t, r, b]: [f32; 4], cover: &(usize, usize, Vec<[u8; 3]>)) -> [f32; 4] {
+    let (sx, sy) = (cover.0 as f32 / ART_SIZE.x, cover.1 as f32 / ART_SIZE.y);
+    [(l * sx).floor(), (t * sy).floor(), (r * sx).ceil(), (b * sy).ceil()]
+}
+
+/// On a dense screen the panel is painted from the cover, so the corners the text lies on must be clear in the cover too, and not only in the copy, which is the cover resized
+/// with a filter that smooths its grain: the zone of the version and the licence and the corner of the notice hold only cream there, the art is just past each, and the two inks read on it at 4.5
+/// to 1 at least.
+#[test]
+fn the_text_zones_are_clear_cream_in_the_cover_too() {
+    let cover = branding_picture("diacraft-cover.png");
+    assert_eq!((cover.0, cover.1), (1672, 941));
+    let cream = |c: &[u8; 3]| c[0] >= 228 && c[1] >= 218 && c[2] >= 203;
+    for (what, zone) in [("the text zone", TEXT_ZONE), ("the notice's corner", LEGAL_ZONE)] {
+        let pixels = region(&cover, on_cover(zone, &cover));
+        assert!(pixels.len() > 4 * 20_000, "{what}: {} pixels", pixels.len());
+        let marks: Vec<&[u8; 3]> = pixels.iter().filter(|c| !cream(c)).collect();
+        assert!(marks.is_empty(), "{what}: {} pixels of the cover are art, for example {:?}", marks.len(), marks.first());
+        let tokens = Tokens::light();
+        for (ink, colour) in [("ink", tokens.splash_ink), ("link", tokens.splash_link)] {
+            let worst = pixels.iter().map(|bg| contrast([colour.r(), colour.g(), colour.b()], *bg)).fold(f64::INFINITY, f64::min);
+            assert!(worst >= 4.5, "{what}: the {ink} reads at {worst:.2} to 1 on the cover's cream");
+        }
+    }
+    // The art is just past them: the flowchart over the text zone, the title under the notice.
+    let above = on_cover([TEXT_ZONE[0], TEXT_ZONE[1] - 24.0, TEXT_ZONE[2], TEXT_ZONE[1] - 8.0], &cover);
+    assert!(region(&cover, above).iter().any(|c| !cream(c)), "the flowchart is just above the text zone in the cover");
+    let under = on_cover([LEGAL_ZONE[0], LEGAL_ZONE[3] + 16.0, LEGAL_ZONE[2], LEGAL_ZONE[3] + 40.0], &cover);
+    assert!(region(&cover, under).iter().any(|c| !cream(c)), "the title is just under the notice's corner in the cover");
 }
 
 fn luminance(c: [u8; 3]) -> f64 {

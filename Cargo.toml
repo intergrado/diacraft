@@ -189,3 +189,9 @@ egui_glow = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003
 egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
 eframe = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
 winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+# The native file dialogs (`rfd`, used by `apps/diacraft` only), from the one-bit fork at the head of its `craft/0.18.0` branch: rfd 0.18.0 plus the Save dialog's chosen format
+# setting the file's extension on each system. The XDG portal part is the open upstream pull request PolyMeilex/rfd#341 (by itsF4LCON, a cherry-pick that keeps its
+# author); the macOS and Windows parts are the fork's branches `macos-save-format-extension` and `windows-save-format-extension`, each offered upstream as a pull request of its own.
+# Without them the Save dialog returns the name it was given, with the old extension, once another format is chosen (Linux, and Windows where the dialog does not swap it), or the
+# macOS panel refuses that name. Pinned by full revision; the line goes, and the dependency returns to crates.io, when the next rfd release holds the three changes.
+rfd = { git = "https://github.com/one-bit/rfd", rev = "2cc1e3e87579ba1bc4912d24dde7099aa5751d77" }

@@ -64,7 +64,9 @@ pub fn picture_picker() -> FilePicker {
 
 /// The chooser for File, Save As: a name to start with (the drawing's) and the kinds of file the window asks it to offer, **the drawing's own first** (the dialog selects its
 /// first kind). Which kinds, and in what order, is the window's request ([`SaveRequest`]): it asks the engine which saves are written, and this keeps no list of its own.
-/// A name chosen without an extension gets the drawing's own type from the window.
+/// **The dialog keeps the name's extension in step with the kind chosen** (`rfd` is pinned to the fork that does this on each system, in `[patch.crates-io]`): the name starts with
+/// the first kind's extension, so that is the one the dialog selects, and choosing another kind changes it to that kind's, unless the person typed an extension of their own. A name that
+/// still comes back without an extension (a dialog that does not set one, such as the zenity fallback on Linux) gets the drawing's own type from the window.
 pub fn save_picker() -> SavePicker {
     Arc::new(|request: SaveRequest| {
         let mut dialog = rfd::FileDialog::new().set_title("Save the drawing").set_file_name(request.name.as_str());
@@ -75,8 +77,8 @@ pub fn save_picker() -> SavePicker {
     })
 }
 
-/// The chooser for File, Export: a name to start with (the drawing's, as a PNG) and the three kinds the engine writes as the filters. A name
-/// chosen without an extension gets `.png` from the window; one with another extension is told so in words.
+/// The chooser for File, Export: a name to start with (the drawing's, as a PNG) and the three kinds the engine writes as the filters. As in [`save_picker`], the dialog gives the name
+/// the extension of the kind chosen; a name that comes back without an extension gets `.png` from the window, and one with another extension is told so in words.
 pub fn export_picker() -> ExportPicker {
     Arc::new(|suggestion: String| {
         rfd::FileDialog::new()
@@ -89,7 +91,7 @@ pub fn export_picker() -> ExportPicker {
     })
 }
 
-/// The chooser for the Print view's Save as PDF: a name to start with (the drawing's, as a PDF) and PDF as the only kind. A name chosen without an
+/// The chooser for the Print view's Save as PDF: a name to start with (the drawing's, as a PDF) and PDF as the only kind. A name that comes back without an
 /// extension gets `.pdf` from the window; one with another extension is told so in words.
 pub fn print_pdf_picker() -> ExportPicker {
     Arc::new(|suggestion: String| {

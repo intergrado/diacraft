@@ -159,8 +159,8 @@ impl DiacraftApp {
         }
     }
 
-    /// Starts writing the page on view to `path`, on a thread. **A name with no file type gets `.png` here**, after the dialog's own check of the
-    /// name it was given, so when that file is there the person is asked before it is replaced (M2 of the M3 review).
+    /// Starts writing the page on view to `path`, on a thread. **A name with no file type gets `.png` here**: the dialog gives a name the extension of the kind chosen, so this is the
+    /// fallback for one that did not. It comes after the dialog's own check of the name it was given, so when that file is there the person is asked before it is replaced (M2 of the M3 review).
     pub(crate) fn export_to(&mut self, ctx: &Context, path: PathBuf) {
         let name_of = |path: &Path| path.file_name().map_or_else(|| "the picture".to_owned(), |n| shown(&n.to_string_lossy(), 64));
         let Some(text) = path.to_str() else {

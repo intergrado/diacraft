@@ -300,6 +300,36 @@ fn every_kind_offered_is_one_the_engine_writes() {
     }
 }
 
+/// The dialog keeps the extension of the name in step with the kind chosen (the `rfd` fork), and the kind it starts on is the first one it is asked to offer: so the name it
+/// starts with must carry that kind's extension, for every drawing, and no kind may be offered twice (two filters of one extension could not be told apart by the name).
+#[test]
+fn the_dialog_starts_with_a_name_that_has_the_extension_of_the_first_kind_it_offers() {
+    let dir = TempDir::new("native-first-kind");
+    let sources: [(&str, Option<PathBuf>); 5] = [
+        ("a new drawing", None),
+        ("a VSDX drawing", Some(vsdx_file(&dir, "plans.vsdx"))),
+        ("a .diacraft drawing", Some(diacraft_file(&dir, "plans.diacraft"))),
+        ("an .odg drawing", Some(odg_file(&dir, "plan.odg"))),
+        ("a VSDX stencil", Some(write_stencil(&dir, "Mine.vssx"))),
+    ];
+    for (what, source) in sources {
+        let asked = Asked::default();
+        let mut w = match &source {
+            Some(file) => window_on(file, None, &asked),
+            None => new_window(None, &asked),
+        };
+        save_as(&mut w);
+        let kinds = offered(&asked);
+        let name = started_with(&asked);
+        let extension = Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or_default().to_owned();
+        assert_eq!(Some(&extension.as_str()), kinds.first(), "{what}: the dialog starts with {name} and offers {kinds:?}");
+        let mut seen = kinds.clone();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), kinds.len(), "{what}: a kind is offered twice in {kinds:?}");
+    }
+}
+
 /// The title is the name of the `.diacraft` file after it is opened, and after a Save As, which switches the drawing to the file written (Call 15), whatever it is written as.
 #[test]
 fn the_title_shows_the_diacraft_name() {

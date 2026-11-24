@@ -132,6 +132,15 @@ impl Source {
         }
     }
 
+    /// Where `asset` stands **without asking for it**: the host's answer as it is (an asset nobody has asked for is waiting, and stays so), else the program's own copy. For a window that
+    /// would use an asset it has, and that is no reason to fetch it (the splash on a dense screen and the cover, which the web build fetches when the File view first shows it).
+    pub(crate) fn peek(&self, asset: Asset) -> Fetch {
+        match &self.0 {
+            Some(host) => host.state(asset),
+            None => embedded(asset),
+        }
+    }
+
     /// The window has what it needs from `asset`: the host may let the bytes go.
     pub(crate) fn taken(&self, asset: Asset) {
         if let Some(host) = &self.0 {

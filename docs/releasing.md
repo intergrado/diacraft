@@ -103,6 +103,7 @@ bash packaging/package.sh linux v0.2.0 dist target/release                      
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-24 | minor | The repositories the public tree's lock names include the `one-bit/rfd` fork |
 | 2026-11-24 | minor | APPID: the launcher entry of the Linux download is `app.diacraft.desktop` |
 | 2026-11-24 | minor | The public repository is `intergrado/diacraft`, at the organisation `intergrado`: the first step of a release, the owner's table and the publish section name it; the owner's own account still makes the commits and pushes (an admin of the organisation), to `git@github-intergrado:intergrado/diacraft.git`, and a clone whose remote is any other address, the old ones included, is refused |
 | 2026-11-24 | minor | The web build is the second site of the website, kept as a second artifact (`diacraft-app-<name>`) beside the pages' (`diacraft-site-<name>`) |

@@ -1,5 +1,7 @@
 //! Approved application artwork, separate from the hostile stencil-image decoder.
-//! The icon is a mechanical 256-pixel export; the cover retains its original pixels; the splash is the cover at half its size, in at most 256 colours.
+//! The icon is a mechanical 256-pixel export; the cover retains its original pixels; the splash is the cover at half its size, in at most 256 colours. The splash
+//! panel is 836 × 470 points on every screen, so above one pixel to the point it is drawn from the cover where the window has it (`Artwork::cover_if_here`), and
+//! the copy serves a screen of one pixel to the point and the web build's splash until the File view has fetched the cover.
 //!
 //! **The web build carries none of the three** (`asset_host.rs`): the `include_bytes!` lines are for the desktop programs (`cfg(not(target_arch = "wasm32"))`), and the
 //! window of the browser asks its [`AssetHost`](crate::asset_host::AssetHost) for the splash picture and the cover, and shows a placeholder until they come (or the reason they did
@@ -97,7 +99,21 @@ fn picture(slot: &mut Option<Result<TextureHandle, String>>, ctx: &Context, sour
             Err(error) => Picture::Failed(error.clone()),
         };
     }
-    let made = match source.get(ctx, asset) {
+    let fetch = source.get(ctx, asset);
+    settle(slot, ctx, source, asset, size, fetch)
+}
+
+/// The picture in the empty `slot` from what the source answered, `fetch`: nothing kept while it is waiting, else the texture or the reason there is none, kept, and the host told to let go of
+/// the bytes.
+fn settle(
+    slot: &mut Option<Result<TextureHandle, String>>,
+    ctx: &Context,
+    source: &Source,
+    asset: Asset,
+    size: (usize, usize),
+    fetch: Fetch,
+) -> Picture {
+    let made = match fetch {
         Fetch::Waiting => return Picture::Waiting,
         Fetch::Failed(error) => Err(error),
         Fetch::Ready(bytes) => picture_texture(ctx, &format!("diacraft-{}", asset.key()), bytes.as_slice(), size.0, size.1),
@@ -120,6 +136,22 @@ impl Artwork {
     /// The cover, made when it is first asked for.
     pub(crate) fn cover_picture(&mut self, ctx: &Context, source: &Source) -> Picture {
         picture(&mut self.cover, ctx, source, Asset::Cover, (COVER_WIDTH, COVER_HEIGHT))
+    }
+
+    /// The cover **where the window has it**, for the splash on a dense screen, which it is drawn from so as not to be the splash copy blown up: the texture once it is made, or made now
+    /// from bytes that are here (the desktop carries them; the web build has them once the File view has fetched them), and nothing while they are not. **It never asks for the cover**: the web
+    /// build fetches it when the File view first shows it, not for the splash, which has its own copy. A cover that could not be had or decoded is nothing here, and is kept as it is for the File
+    /// view, which says why when it shows its place.
+    pub(crate) fn cover_if_here(&mut self, ctx: &Context, source: &Source) -> Option<TextureHandle> {
+        let picture = match &self.cover {
+            Some(Ok(texture)) => return Some(texture.clone()),
+            Some(Err(_)) => return None,
+            None => settle(&mut self.cover, ctx, source, Asset::Cover, (COVER_WIDTH, COVER_HEIGHT), source.peek(Asset::Cover)),
+        };
+        match picture {
+            Picture::Ready(texture) => Some(texture),
+            Picture::Waiting | Picture::Failed(_) => None,
+        }
     }
 }
 
