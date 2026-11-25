@@ -70,19 +70,55 @@ fn attribute<'a>(tag: &'a str, name: &str) -> &'a str {
     tag[start..].split('"').next().unwrap()
 }
 
+/// The rows of a card's CPUs: from `<dl class="cpus"` to its `</dl>`.
+fn rows_of(card: &str) -> &str {
+    card.split("<dl class=\"cpus\"").nth(1).and_then(|rest| rest.split("</dl>").next()).expect("the card's CPU rows")
+}
+
+/// The box of a card's main button: from `<div class="get-main">` to its `</div>`.
+fn main_of(card: &str) -> &str {
+    card.split("<div class=\"get-main\">").nth(1).and_then(|rest| rest.split("</div>").next()).expect("the card's main button")
+}
+
+/// The ids of the downloads that a fragment of the page links, in order.
+fn ids_of(fragment: &str) -> Vec<String> {
+    download_links(fragment).iter().map(|(tag, _)| attribute(tag, "data-download").to_owned()).collect()
+}
+
+/// The owner's ruling (2026-11-25): every CPU row lists all its formats, and the main button repeats one of them. So each of the fourteen files of the release is in the CPU rows exactly
+/// once, and the main button of each card links one of the files of its card's rows (the same link, with the same address).
 #[test]
-fn the_home_page_links_each_download_once_with_the_installer_as_the_main_button_of_each_system() {
+fn the_home_page_lists_each_download_once_in_the_cpu_rows_and_the_main_button_of_each_system_repeats_one_of_them() {
     let page = read("site/index.html");
     let links = download_links(&page);
     let assets = assets();
     let version = xtask::version::read(&read("Cargo.toml")).unwrap();
     let repository = serde_json::from_str::<serde_json::Value>(&read("site/site.json")).unwrap()["repository"].as_str().unwrap().to_owned();
     let in_the_release: BTreeSet<String> = listed_files().iter().map(|name| name.replace("{tag}", &format!("v{version}"))).collect();
-    let ids: Vec<&str> = links.iter().map(|(tag, _)| attribute(tag, "data-download")).collect();
-    let unique: BTreeSet<&str> = ids.iter().copied().collect();
-    // A download is linked once: the main file of a card is the button and is not repeated in its CPU's row (the owner, 2026-11-25: "like we have for Linux and Windows").
-    assert_eq!(ids.len(), unique.len(), "a download is linked once: {ids:?}");
-    assert_eq!(unique, assets.iter().map(|(id, _)| id.as_str()).collect::<BTreeSet<_>>(), "every download has a link, and every link a download");
+    let cards = cards(&page);
+    assert_eq!(cards.len(), 3, "Linux, Windows and macOS");
+    let in_rows: Vec<String> = cards.iter().flat_map(|card| ids_of(rows_of(card))).collect();
+    let unique: BTreeSet<&str> = in_rows.iter().map(String::as_str).collect();
+    assert_eq!(in_rows.len(), 14, "fourteen files in the rows: {in_rows:?}");
+    assert_eq!(in_rows.len(), unique.len(), "a file is listed once in the CPU rows: {in_rows:?}");
+    assert_eq!(
+        unique,
+        assets.iter().map(|(id, _)| id.as_str()).collect::<BTreeSet<_>>(),
+        "every download is in a row, and every link of a row is a download"
+    );
+    // The page's links are those of the rows and the three main buttons, and no other.
+    assert_eq!(links.len(), 14 + 3, "the rows' fourteen and the three main buttons");
+    for card in &cards {
+        let main = download_links(main_of(card));
+        assert_eq!(main.len(), 1, "one main button in a card");
+        let (tag, _) = &main[0];
+        let id = attribute(tag, "data-download");
+        let row = download_links(rows_of(card)).into_iter().find(|(row, _)| attribute(row, "data-download") == id);
+        let (row, _) = row.unwrap_or_else(|| panic!("the main button {id} is one of the files of its card's rows"));
+        for name in ["href", "data-asset", "aria-label"] {
+            assert_eq!(attribute(tag, name), attribute(&row, name), "{id}: the button and its row's link are one link ({name})");
+        }
+    }
     for (tag, text) in &links {
         let id = attribute(tag, "data-download");
         let name = &assets.iter().find(|(i, _)| i == id).unwrap().1;
@@ -192,29 +228,70 @@ fn the_script_upgrades_the_direct_links_only_to_a_newer_release_and_keeps_its_ch
     assert!(script.contains("https://api.github.com/repos/${path}/releases/latest"));
 }
 
+/// The owner's ruling (2026-11-25): every CPU row of every card lists all its formats, in one order for the whole card. The Linux rows are `.AppImage .deb .tar.gz`, the Windows rows `.msi .zip`
+/// and the macOS rows `.dmg .zip`; the rows are one for each CPU, in the words of the labels.
+#[test]
+fn every_cpu_row_lists_all_its_formats_in_the_order_of_its_card() {
+    let page = read("site/index.html");
+    let cards = cards(&page);
+    /// What a card's rows must hold: the card's name, its rows as (the CPU's label, the CPU in an id), and its formats as (the kind in an id, the text of the link).
+    struct Card {
+        name: &'static str,
+        cpus: [(&'static str, &'static str); 2],
+        formats: &'static [(&'static str, &'static str)],
+    }
+    let wanted = [
+        Card {
+            name: "Linux",
+            cpus: [("Intel/AMD (x64)", "x86_64"), ("ARM64", "arm64")],
+            formats: &[("appimage", ".AppImage"), ("deb", ".deb"), ("targz", ".tar.gz")],
+        },
+        Card { name: "Windows", cpus: [("Intel/AMD (x64)", "x86_64"), ("ARM64", "arm64")], formats: &[("msi", ".msi"), ("zip", ".zip")] },
+        Card { name: "macOS", cpus: [("Apple silicon (ARM64)", "arm64"), ("Intel (x64)", "x86_64")], formats: &[("dmg", ".dmg"), ("zip", ".zip")] },
+    ];
+    for Card { name, cpus, formats } in wanted {
+        let card = cards.iter().find(|card| card.contains(&format!("<h3>{name}</h3>"))).unwrap_or_else(|| panic!("the {name} card"));
+        let rows: Vec<&str> = rows_of(card).split("<div><dt>").skip(1).collect();
+        assert_eq!(rows.len(), 2, "{name}: a row for each CPU");
+        for (row, (label, cpu)) in rows.iter().zip(cpus) {
+            assert!(row.starts_with(&format!("{label}</dt>")), "{name}: the row of {label}");
+            let links = download_links(row);
+            let system = name.to_lowercase();
+            let ids: Vec<String> = links.iter().map(|(tag, _)| attribute(tag, "data-download").to_owned()).collect();
+            let want: Vec<String> = formats.iter().map(|(kind, _)| format!("{system}-{cpu}-{kind}")).collect();
+            assert_eq!(ids, want, "{name}, {label}: every format of the card, in the card's order");
+            let texts: Vec<&str> = links.iter().map(|(_, text)| text.as_str()).collect();
+            let want: Vec<&str> = formats.iter().map(|(_, text)| *text).collect();
+            assert_eq!(texts, want, "{name}, {label}: the links say their formats");
+        }
+    }
+}
+
+/// The rows of a card hold all its downloads, so the list is named for what it holds (the owner, 2026-11-25): "All Linux downloads", "All Windows downloads" and "All macOS downloads", and
+/// not "More ... downloads", which would say that the list holds what the main button does not.
+#[test]
+fn the_list_of_each_cards_rows_is_named_all_its_downloads() {
+    let page = read("site/index.html");
+    let cards = cards(&page);
+    assert_eq!(cards.len(), 3, "Linux, Windows and macOS");
+    for (card, name) in cards.iter().zip(["Linux", "Windows", "macOS"]) {
+        assert!(card.contains(&format!("<h3>{name}</h3>")), "the cards are in the order {name} is");
+        let tag = rows_of(card).split('>').next().expect("the list's start tag");
+        assert_eq!(attribute(tag, "aria-label"), format!("All {name} downloads"));
+    }
+    assert!(!page.contains("More Linux") && !page.contains("More Windows") && !page.contains("More macOS"), "no list says it holds more downloads");
+}
+
 /// The owner's request (2026-11-25): the macOS card has two rows like the Linux and Windows cards, "Apple silicon (ARM64)" and "Intel (x64)", each with its `.dmg` and its `.zip` (builds of
 /// one CPU each). There is no universal download (the owner's ruling, 2026-11-25): the main button is the `.dmg` for Apple silicon, as the other cards' main button is their x64 installer, and the
 /// card says that the button is for Apple silicon Macs and that Intel Macs use the Intel row; its "File" line is as short as the other cards'.
 #[test]
-fn the_macos_card_has_a_row_for_each_cpu_and_a_main_button_for_apple_silicon_that_says_where_intel_macs_go() {
+fn the_macos_card_has_a_main_button_for_apple_silicon_that_says_where_intel_macs_go() {
     let page = read("site/index.html");
     let cards = cards(&page);
     let mac = cards.iter().find(|card| card.contains("<h3>macOS</h3>")).expect("the macOS card");
-    let rows = mac.split("<dl class=\"cpus\"").nth(1).expect("the rows");
-    let rows: Vec<&str> = rows.split("<div><dt>").skip(1).collect();
-    assert_eq!(rows.len(), 2, "two rows, as the other cards' rows are one for each CPU");
-    // The Apple silicon row has its archive only, since its disk image is the main button; the Intel row has both its files.
-    let wanted: [(&str, &str, Vec<&str>); 2] = [
-        ("Apple silicon (ARM64)", "macos-arm64", vec!["macos-arm64-zip"]),
-        ("Intel (x64)", "macos-x86_64", vec!["macos-x86_64-dmg", "macos-x86_64-zip"]),
-    ];
-    for (row, (label, _, files)) in rows.iter().zip(wanted) {
-        assert!(row.starts_with(&format!("{label}</dt>")), "{label}");
-        let kinds: Vec<&str> = row.split("data-download=\"").skip(1).filter_map(|rest| rest.split('"').next()).collect();
-        assert_eq!(kinds, files, "{label}: its files, but for the main button's");
-    }
     // The main button is the Apple silicon disk image, and the card says whom it is for and where the Intel Macs go.
-    let main = mac.split("<div class=\"get-main\">").nth(1).and_then(|rest| rest.split("</div>").next()).unwrap();
+    let main = main_of(mac);
     assert!(main.contains("data-download=\"macos-arm64-dmg\"") && main.contains("Apple silicon (ARM64), as a disk image"), "{main}");
     let facts = mac.split("<dl class=\"spec\">").nth(1).and_then(|rest| rest.split("</dl>").next()).unwrap();
     let fact = |name: &str| -> String {
