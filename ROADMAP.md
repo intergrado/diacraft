@@ -1,12 +1,12 @@
 # DiaCraft roadmap
 
-**Stage: pre-alpha** · next: alpha, once core workflows work end to end with save and reopen. No hours are given until M1 sets the parity count.
+**Stage: an early release (0.2.0)** · next: 0.3, in which an `.odg` drawing comes back from `.diacraft` with the same content and a drawing is checked before a save (the Compatibility Checker), while the M1 to M5 slices keep running. No hours are given until M1 sets the parity count.
 
 > **Last reviewed:** 2026-11-07
 
 DiaCraft targets behavioural parity with the reference app (the desktop diagramming application whose files DiaCraft opens and saves), and adds what the reference app lacks: Linux, macOS, FreeBSD and web builds, agent control through a CLI and an MCP server, and a free licence. The reference app was not inspected, nothing was launched or measured, and our output has not been opened in it by the project.
 
-**Why pre-alpha:** the desktop window opens `.vsdx` files and OpenDocument drawings (`.odg`, `.fodg`) and draws them, and edits and saves drawings: shapes from seven built-in stencils (Basic Shapes, Basic Flowchart, Decorative Shapes, Arrow Shapes, Gane-Sarson, the Cross-Functional Flowchart Shapes and the Organization Chart Shapes) and from opened stencil files, connectors that stay glued and reroute, text with formatting, fill, line, font and paragraph formatting, rotate, flip, align, order, copy, paste, group, undo and redo, and save and reopen. Much of the target app is still missing (the parity checklist scores 34% weighted breadth), and nothing is checked against the target app itself.
+**Where 0.2 stands:** the desktop window opens `.vsdx` files and OpenDocument drawings (`.odg`, `.fodg`) and draws them, and edits and saves drawings: shapes from seven built-in stencils (Basic Shapes, Basic Flowchart, Decorative Shapes, Arrow Shapes, Gane-Sarson, the Cross-Functional Flowchart Shapes and the Organization Chart Shapes) and from opened stencil files, connectors that stay glued and reroute, text with formatting, fill, line, font and paragraph formatting, rotate, flip, align, order, copy, paste, group, undo and redo, and save and reopen. Much of the target app is still missing (the parity checklist scores 34% weighted breadth), and nothing is checked against the target app itself.
 
 ## Headline numbers
 
@@ -30,7 +30,7 @@ DiaCraft targets behavioural parity with the reference app (the desktop diagramm
 
 ## Upcoming
 
-The milestones are in [`docs/roadmap.md`](docs/roadmap.md). The next release is 0.2, the first public one, with DiaCraft's own `.diacraft` format as the default (its row there says how far it is); the M1 baseline and the M2 to M5 slices keep running beside it. Beyond the reference app, the owner wants AI agents inside the app, talking to a person in a chat pane and drawing or editing through the app's commands; it is listed under Additions beyond the reference app in the same file, not yet designed or scheduled. Engines shared with the other Craft apps are carved into craft-libs in the order listed there under Shared libraries: path operations (in review), snapping, the bounded package layer, metafiles and SVG, ODF, then DXF, effects and the Office package layer.
+The milestones are in [`docs/roadmap.md`](docs/roadmap.md). 0.2.0 is the first public release, with DiaCraft's own `.diacraft` format as the default (its row there says what it holds), and the next is 0.3 ([`docs/gaps.md`](docs/gaps.md) says what is left for it); the M1 baseline and the M2 to M5 slices keep running beside it. Beyond the reference app, the owner wants AI agents inside the app, talking to a person in a chat pane and drawing or editing through the app's commands; it is listed under Additions beyond the reference app in the same file, not yet designed or scheduled. Engines shared with the other Craft apps are carved into craft-libs in the order listed there under Shared libraries: path operations (in review), snapping, the bounded package layer, metafiles and SVG, ODF, then DXF, effects and the Office package layer.
 
 ## Progress log
 
@@ -55,13 +55,14 @@ The milestones are in [`docs/roadmap.md`](docs/roadmap.md). The next release is 
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-25 | minor | The stage line gives the stage as an early release (0.2.0) and names 0.3 as what comes next, the stage summary under the opening paragraph is titled "Where 0.2 stands", the rows below call it the stage summary, and Upcoming says that 0.2.0 is the first public release and 0.3 the next (owner, 2026-11-25) |
 | 2026-11-23 | trivial | Sentences reworded so that each reads whole on its own; nothing they say changes |
 | 2026-11-23 | minor | The M1 milestone is the baseline |
 | 2026-11-23 | minor | The reference product is named only in the format lists ("the reference app" or VSDX elsewhere), and the page keeps to the words of the public tree |
-| 2026-11-23 | minor | The pre-alpha line names the seven built-in stencils and says 34% weighted breadth, and the stencil, breadth and command rows are recounted on the merged tree (seven stencils, 58 masters, 178 commands) |
+| 2026-11-23 | minor | The stage summary names the seven built-in stencils and says 34% weighted breadth, and the stencil, breadth and command rows are recounted on the merged tree (seven stencils, 58 masters, 178 commands) |
 | 2026-11-23 | minor | The headline breadth is 34% weighted (P0 99%, P1 45%, P2 6%) over 977 rows beside the swimlane and shape-search rows, with the Organization Chart template and Re-layout an org chart done, and Drop a shape on its manager, Org chart layout for a whole chart, Arrange one manager's subordinates and Org chart picture on a shape partly done (the `orgchart.*` commands, the Organization Chart Shapes, the template and the Org Chart tab); the catalogue has seven stencils and 58 masters, four templates, and the registry has 178 commands, measured with `diacraft-cli commands` |
 | 2026-11-23 | minor | The headline breadth is 33% weighted (P0 99%, P1 43%, P2 6%, recounted with the swimlane rows) with Search for shapes and Quick Shapes done (two P1 rows, M to D) and Shape search options partial (one P2 row), and the Shapes area is 62%, and the registry has five commands more (`stencil.search`, `stencil.quick`, `stencil.add_quick`, `stencil.remove_quick`, `stencil.reset`: 170) |
-| 2026-11-23 | minor | The pre-alpha line says 33% weighted breadth (it said 20%), the Features row says 55 of the 56 P0 rows are done and 1 partly (it said 38 and 18), the UI/UX row names the controls that work, the File formats row says `.diacraft` is the default and the window's dialogs offer it (it said they did not), and names the saves across the formats and the check after a save, the Hardware row names the Intel Mac and the web build, and the progress log has an entry for the work since 2026-11-21 |
+| 2026-11-23 | minor | The stage summary says 33% weighted breadth (it said 20%), the Features row says 55 of the 56 P0 rows are done and 1 partly (it said 38 and 18), the UI/UX row names the controls that work, the File formats row says `.diacraft` is the default and the window's dialogs offer it (it said they did not), and names the saves across the formats and the check after a save, the Hardware row names the Intel Mac and the web build, and the progress log has an entry for the work since 2026-11-21 |
 | 2026-11-23 | minor | The headline breadth is 33% (P0 99%, P1 43%, P2 6%) with the Cross-Functional Flowchart template, Insert a swimlane, Swimlane holds its shapes, Swimlane label text and direction and Phase separators done and Swimlane orientation and Move and resize swimlanes partial; the catalogue has six stencils and 52 masters (the Cross-Functional Flowchart Shapes), three templates, and the registry has 165 commands, measured with `diacraft-cli commands` (it said 146, and counted before the commands of several earlier tasks) |
 | 2026-11-22 | minor | The headline breadth stays 32% weighted (P0 99%, P1 41%, P2 6%): Apply a theme and Fill colour are done, with Custom colours by RGB or hex and Standard colours stay put (the palette's Theme, Variant, Standard and Recent Colors, the Colors dialog, and a live preview of a theme under the pointer); one P0 row, Automatic reroute on moving shapes, is partial |
 | 2026-11-22 | minor | The headline breadth is 32% (P0 97%, P1 40%, P2 6%) with Auto Size extends the page, Snap on or off, Zoom controls and keys, Open a stencil from More Shapes, Group and ungroup, Horizontal paragraph alignment, Right-angle connectors, Edit a connector path by hand, Arrowheads on lines, Start a drawing from a template, Template opens its stencils, Basic Flowchart template, Basic Diagram template and Ribbon with tabs and groups done, and Automatic reroute on moving shapes, Apply a theme and Fill colour still partial |
@@ -85,7 +86,7 @@ The milestones are in [`docs/roadmap.md`](docs/roadmap.md). The next release is 
 | 2026-11-21 | minor | The headline breadth is 21% (P0 84%, P1 22%, P2 2%) and the command count is 83 (`page.duplicate`, `page.type`, `page.background`): a page is copied, and background pages are added, assigned and drawn under their pages, from the window |
 | 2026-11-21 | minor | The File formats row says the engine opens and saves a `.diacraft` file through the command line, the MCP server and the control channel, and that the window's dialogs do not offer it yet (it said nothing in the app did); the progress log has an entry |
 | 2026-11-21 | minor | The File formats row says the `.diacraft` package has a reader and a writer (`diacraft-native`) and that the app does not use them yet; the progress log has an entry |
-| 2026-11-21 | minor | The command count is 80 (it said 75), the pre-alpha line and the File formats row name OpenDocument drawings, the page exports and the `.diacraft` specification, Upcoming names 0.2 as the next release, and the progress log gains four entries (with SHAPEOPS) |
+| 2026-11-21 | minor | The command count is 80 (it said 75), the stage summary and the File formats row name OpenDocument drawings, the page exports and the `.diacraft` specification, Upcoming names 0.2 as the next release, and the progress log gains four entries (with SHAPEOPS) |
 | 2026-11-12 | minor | Decorative Shapes, Arrow Shapes and basic Gane-Sarson add 20 masters; five stencils and 50 masters; new masters are refused on ODG save |
 | 2026-11-09 | minor | Upcoming names the order in which shared engines are carved into craft-libs |
 | 2026-11-07 | minor | The command count is 75 (`shape.place`) |
@@ -95,7 +96,7 @@ The milestones are in [`docs/roadmap.md`](docs/roadmap.md). The next release is 
 | 2026-11-07 | minor | The command count is 67 (`template.list`; `shape.pin`, `shape.size`, `shape.set_end`, `shape.set_length`, `shape.placement`), and P1 is 17% |
 | 2026-11-07 | minor | The command count is 61 with the three theme commands, and the headline is 18% (P0 84%, P1 16%) |
 | 2026-11-07 | minor | The feature breadth moves to 16% and the command count to 58 with the connector commands |
-| 2026-11-07 | minor | The pre-alpha line and the command count brought up to date |
+| 2026-11-07 | minor | The stage summary and the command count brought up to date |
 | 2026-11-07 | minor | The feature breadth number is counted over the 977 inventory rows, each scored against the code |
 | 2026-11-07 | minor | Upcoming names the owner's idea of AI agents in the app |
 | 2026-11-07 | minor | The window formats and arranges the selection |
