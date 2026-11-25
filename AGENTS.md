@@ -159,3 +159,7 @@ else's name.
 `.github/workflows/release.yml` builds the downloads of a pushed `v*` tag into a draft release and deploys the website and the web
 app (`docs/releasing.md`); `.github/workflows/deploy-site.yml` deploys the two sites by hand between releases. Don't add or change CI
 in a feature or fix change.
+
+CodeRabbit reviews pull requests to this repository, as the `.coderabbit.yaml` at the root sets it up. **Its review is advice only and
+never blocks a merge.** A maintainer checks each finding. A real one is fixed in the source tree this repository is published from and
+published again, not on the public branch; a finding that is not real is dropped.

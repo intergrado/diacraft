@@ -7,6 +7,7 @@
 mod assets;
 mod brands;
 mod ci;
+mod coderabbit;
 mod deny;
 mod deploy_site;
 mod docs_check;

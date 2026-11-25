@@ -1,0 +1,89 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit reviews the pull requests of this repository. Its review is advice and nothing more: it never blocks a merge. A person
+# checks every finding, and a real one is fixed in the source tree and published again, not on the public branch (AGENTS.md,
+# "CI workflows").
+#
+# A public repository with fewer than 10 stars gets no automatic review, so a maintainer starts one by commenting
+# `@coderabbitai review` on the pull request. `auto_review` below takes over when the repository passes that count.
+
+language: en-US
+tone_instructions: Plain and short. Name the file and the line, say what breaks and why. No praise and no filler.
+
+chat:
+  art: false
+
+reviews:
+  profile: chill
+  poem: false
+  in_progress_fortune: false
+  suggested_reviewers: false
+
+  # Never block: no request for changes and no automatic approval, a review that fails ends its check as neutral, and the
+  # checks of a pull request's title, description and linked issues are off, as they are noise on a snapshot or a bot's change.
+  # (The CodeRabbit check must not be a required status in the branch protection of `main`.)
+  auto_approvals:
+    enabled: false
+  fail_commit_status: false
+  pre_merge_checks:
+    title:
+      mode: "off"
+    description:
+      mode: "off"
+    issue_assessment:
+      mode: "off"
+
+  # Pull requests to `main` (the default branch is always reviewed), as soon as they are not drafts.
+  auto_review:
+    enabled: true
+    drafts: false
+
+  # What is not worth a review. Every pattern starts with `!`, so this list can only take files out: one pattern without it would
+  # turn the list into an allowlist. Lock files, pictures, fonts and generated code are skipped without a line here.
+  path_filters:
+    # Written by `cargo xtask licenses` and `cargo xtask site --write`.
+    - "!THIRD-PARTY-LICENSES*.txt"
+    - "!site/sitemap.xml"
+    - "!site/robots.txt"
+    # The site's pictures, fonts and icons, and the branding pictures.
+    - "!site/assets/**"
+    - "!assets/**"
+    # Licence texts, kept as their authors wrote them.
+    - "!LICENSE-*"
+    - "!docs/licenses/**"
+    - "!xtask/src/licenses/texts/**"
+    # Test data: a saved file, the seeds proptest keeps for a failure, and a table of pinned numbers.
+    - "!crates/testkit/fixtures/**"
+    - "!**/proptest-regressions/**"
+    - "!crates/odg/src/write/marker_art/pinned.txt"
+
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: |
+        The rules are in AGENTS.md ("Never crash" and "Architecture") and docs/development.md. In shipped code, not in tests, flag
+        unwrap, expect, panic, unreachable, todo and unsafe, indexing and arithmetic that are not checked on data from a file, a
+        pasted value or a message, allocations, loops and recursion with no cap, and an error dropped with no reason. Tests may
+        unwrap and panic. A crash fix needs a regression test. Leave out what rustfmt and clippy already check.
+    - path: "**/Cargo.toml"
+      instructions: |
+        A new dependency must be allowed by deny.toml: no GPL, AGPL or LGPL, and MPL-2.0 only unmodified, with a NOTICE entry. A
+        change to Cargo.lock needs THIRD-PARTY-LICENSES.txt written again (`cargo xtask licenses`). Every manifest has
+        `[lints] workspace = true`.
+    - path: ".github/workflows/**"
+      instructions: |
+        Flag a secret that a pull request from a fork can reach, a token with more permissions than its job needs, and an action
+        that is not pinned to a full commit.
+
+  # The docs have their own check (`cargo xtask docs`), and a prose linter reads their long lines as faults.
+  tools:
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+# The project's rules and its development notes, which the reviewer reads for what the project asks of a change.
+knowledge_base:
+  code_guidelines:
+    filePatterns:
+      - AGENTS.md
+      - docs/development.md
