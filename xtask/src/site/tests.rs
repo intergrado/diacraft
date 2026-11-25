@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const DOMAIN: &str = "https://example.invalid";
-const HEADERS: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src https://api.github.com; img-src 'self'; style-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=()\n";
+const HEADERS: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self' https://api.github.com; img-src 'self'; style-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=()\n";
 const HTML: &str = r##"<!DOCTYPE html><html lang="en"><head><title>Drawing</title><meta name="description" content="A drawing guide." />
 <link rel="canonical" href="https://example.invalid/" /><meta property="og:url" content="https://example.invalid/" />
 <meta property="og:image" content="https://example.invalid/art.png" /><link rel="stylesheet" href="/style.css" />
@@ -140,7 +140,8 @@ fn markup_location_for_invalid_html_points_to_the_element() {
 fn markup_location_is_reported_by_the_site_command_before_generation() {
     // The site folder is in a repository root, which holds the workspace's version: the pages are made for that release.
     let root = Fixture::new();
-    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.0\"\n");
+    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.0\"\nlicense = \"MIT\"\n");
+    root.write("LICENSE-MIT", "MIT");
     let site = root.0.join("site");
     // A draft: every download has a setting, and none has a name yet.
     let assets: Vec<String> = super::settings::DOWNLOADS.iter().map(|id| format!(r#""{id}":"""#)).collect();

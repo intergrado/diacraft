@@ -88,9 +88,10 @@ fn no_file_of_the_web_app_names_another_app() {
             assert!(!text.contains(name), "{file} contains `{name}`");
         }
     }
-    // The page's title and its text are DiaCraft's.
+    // The page's title and its text are DiaCraft's: a title and a description a search engine shows (`cargo xtask site --web` makes the rest of what it reads from them).
     let html = read("index.html");
-    assert!(html.contains("<title>DiaCraft</title>") && html.contains("Loading DiaCraft"));
+    assert!(html.contains("<title>DiaCraft: free online diagram editor</title>") && html.contains("Loading DiaCraft"));
+    assert!(html.contains("<meta name=\"description\" content=\"Free online diagram editor."));
 }
 
 /// Colours come from theme tokens: the page's are the canvas, the status text and the top bar of the two themes,

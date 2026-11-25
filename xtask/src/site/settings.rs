@@ -35,6 +35,9 @@ pub(super) struct Settings {
     /// The version of `[workspace.package]` in the root `Cargo.toml`, `0.2.0`: the release these pages are made for. Its tag is `v0.2.0`, and each download link of a page is the address of that
     /// release's file ([`direct_address`]).
     pub(super) version: String,
+    /// The files of the repository that hold the licences of the code (`LICENSE-MIT`), which the home page's structured data names: `Cargo.toml`'s `license` read by `seo::licence_files`. Empty
+    /// where no manifest is read (the tests), and then the data names no licence.
+    pub(super) licences: Vec<String>,
 }
 
 impl Settings {
@@ -167,7 +170,7 @@ pub(super) fn load(dir: &Path, version: &str) -> Result<Settings, String> {
         valid_asset(&key, asset)?;
         assets.insert(id.to_owned(), asset.to_owned());
     }
-    Ok(Settings { domain, app_url, repository: repository.into(), assets, version: version.to_owned() })
+    Ok(Settings { domain, app_url, repository: repository.into(), assets, version: version.to_owned(), licences: Vec::new() })
 }
 
 fn valid_filename(s: &str) -> bool {
@@ -209,7 +212,7 @@ fn set_value(html: &mut String, prefix: &str, value: &str) -> Result<(), String>
 /// `--write` makes from `site.json` and the workspace's version.
 pub(super) const DOWNLOAD_SUFFIX: &str = "/releases/download";
 
-fn render_page(mut source: String, settings: &Settings, url: &str) -> Result<String, String> {
+fn render_page(mut source: String, settings: &Settings, name: &str, url: &str) -> Result<String, String> {
     set_value(&mut source, r#"<link rel="canonical" href=""#, url)?;
     set_value(&mut source, r#"<meta property="og:url" content=""#, url)?;
     set_value(&mut source, r#"<meta property="og:image" content=""#, &format!("{}/assets/social.jpg", settings.domain))?;
@@ -244,7 +247,9 @@ fn render_page(mut source: String, settings: &Settings, url: &str) -> Result<Str
     }
     output.push_str(rest);
     let output = app_links(&output, settings)?;
-    app_host(&output, settings)
+    let output = app_host(&output, settings)?;
+    // The social cards and the structured data come last: they are made from what the page says by now.
+    super::seo::render(&output, settings, name, url)
 }
 
 /// The start of a link to the web app. The app is a site of its own (`site.json`, `app_url`), so a page that links it is written `<a data-app="" href="...">` and `--write` gives the link the
@@ -300,8 +305,79 @@ fn app_host(source: &str, settings: &Settings) -> Result<String, String> {
     Ok(output)
 }
 
+/// Where the `<lastmod>` dates of `sitemap.xml` come from when it is made.
+pub(super) enum DateSource<'a> {
+    /// The dates the sitemap in the folder has now, kept as they are: a check, and the copy of the pages that a build makes (the workflows' checkouts hold one commit, so they cannot compute dates:
+    /// the sitemap committed in `site/` is what is deployed).
+    Keep,
+    /// The date of the last commit that touched each page, from the history of the repository whose root is given (`cargo xtask site --write`).
+    Git(&'a Path),
+}
+
+/// The most bytes of sitemap that are read.
+const MAX_SITEMAP: u64 = 1024 * 1024;
+
+/// The path of the address `loc` (`https://diacraft.dev/guides/agents` is `/guides/agents`).
+fn loc_path(loc: &str) -> &str {
+    let rest = loc.split_once("://").map_or(loc, |(_, rest)| rest);
+    rest.find('/').and_then(|at| rest.get(at..)).unwrap_or("/")
+}
+
+/// The text between `open` and `close` in `text`, if both are there.
+fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let start = text.find(open)? + open.len();
+    let len = text.get(start..)?.find(close)?;
+    text.get(start..start + len)
+}
+
+/// The dates in the sitemap of `dir`, by the path of the address they are for. A date that is not `YYYY-MM-DD`, or that is not a day, is an error. No sitemap is no dates.
+fn kept_dates(dir: &Path) -> Result<BTreeMap<String, String>, String> {
+    let path = dir.join("sitemap.xml");
+    let meta = match fs::metadata(&path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    if meta.len() > MAX_SITEMAP {
+        return Err(format!("{}: over {MAX_SITEMAP} bytes", path.display()));
+    }
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut dates = BTreeMap::new();
+    for entry in text.split("<url>").skip(1) {
+        let Some(date) = between(entry, "<lastmod>", "</lastmod>") else { continue };
+        if !super::seo::valid_date(date) {
+            return Err(format!("{}: `{date}` is not a date (YYYY-MM-DD) for a <lastmod>", path.display()));
+        }
+        let loc = between(entry, "<loc>", "</loc>").ok_or_else(|| format!("{}: a <lastmod> in a <url> with no <loc>", path.display()))?;
+        dates.insert(loc_path(loc).to_owned(), date.to_owned());
+    }
+    Ok(dates)
+}
+
+/// The dates of the last commits that touched the page files of `pages` (names from `dir`), by the path of the page's address. Where the history cannot give them it says why, and the sitemap has none.
+fn git_page_dates(dir: &Path, root: &Path, pages: &[(String, String)]) -> BTreeMap<String, String> {
+    let Ok(relative) = dir.strip_prefix(root) else { return BTreeMap::new() };
+    let Some(relative) = relative.to_str().map(|r| r.replace(std::path::MAIN_SEPARATOR, "/")) else { return BTreeMap::new() };
+    let files: Vec<String> = pages.iter().map(|(name, _)| if relative.is_empty() { name.clone() } else { format!("{relative}/{name}") }).collect();
+    match super::seo::git_dates(root, &files) {
+        super::seo::Dates::Found(found) => {
+            pages.iter().zip(&files).filter_map(|((_, route), file)| found.get(file).map(|date| (route.clone(), date.clone()))).collect()
+        }
+        super::seo::Dates::Unavailable(why) => {
+            println!("site: sitemap.xml has no <lastmod>: {why}");
+            BTreeMap::new()
+        }
+    }
+}
+
 pub(super) fn apply(dir: &Path, settings: &Settings, write: bool) -> Result<(), String> {
-    let mut public_urls = Vec::new();
+    apply_with(dir, settings, write, &DateSource::Keep)
+}
+
+/// [`apply`], with the source of the sitemap's dates given.
+pub(super) fn apply_with(dir: &Path, settings: &Settings, write: bool, dates: &DateSource<'_>) -> Result<(), String> {
+    // (the address, the file name, the path of the address) of each public page.
+    let mut public_pages: Vec<(String, String, String)> = Vec::new();
     let mut outputs = Vec::new();
     for name in super::inventory(dir)? {
         let Some(stem) = name.strip_suffix(".html") else { continue };
@@ -310,19 +386,27 @@ pub(super) fn apply(dir: &Path, settings: &Settings, write: bool) -> Result<(), 
         }
         let path = dir.join(&name);
         let route = format!("/{stem}");
-        let route = route.strip_suffix("index").filter(|prefix| prefix.ends_with('/')).unwrap_or(&route);
+        let route = route.strip_suffix("index").filter(|prefix| prefix.ends_with('/')).unwrap_or(&route).to_owned();
         let url = format!("{}{route}", settings.domain);
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let page = render_page(source, settings, &url).map_err(|e| format!("{}: {e}", path.display()))?;
+        let page = render_page(source, settings, &name, &url).map_err(|e| format!("{}: {e}", path.display()))?;
         outputs.push((path, page));
         if name != "404.html" {
-            public_urls.push(url);
+            public_pages.push((url, name, route));
         }
     }
+    let dates = match dates {
+        DateSource::Keep => kept_dates(dir)?,
+        DateSource::Git(root) => {
+            let pages: Vec<(String, String)> = public_pages.iter().map(|(_, name, route)| (name.clone(), route.clone())).collect();
+            git_page_dates(dir, root, &pages)
+        }
+    };
     let mut sitemap = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
-    public_urls.sort_unstable();
-    for url in public_urls {
-        writeln!(sitemap, "  <url><loc>{url}</loc></url>").map_err(|e| e.to_string())?;
+    public_pages.sort_unstable();
+    for (url, _, route) in public_pages {
+        let lastmod = dates.get(&route).map(|date| format!("<lastmod>{date}</lastmod>")).unwrap_or_default();
+        writeln!(sitemap, "  <url><loc>{url}</loc>{lastmod}</url>").map_err(|e| e.to_string())?;
     }
     sitemap.push_str("</urlset>\n");
     outputs.push((dir.join("sitemap.xml"), sitemap));
@@ -348,9 +432,13 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    const PAGE: &str = r#"<html><head>
+    const PAGE: &str = r#"<!DOCTYPE html>
+<html lang="en"><head>
+<title>Drawing</title><meta name="description" content="A drawing." />
 <link rel="canonical" href="old" /><meta property="og:url" content="old" />
-<meta property="og:image" content="old" /></head><body>
+<meta property="og:title" content="Drawing" /><meta property="og:description" content="A drawing." />
+<meta property="og:image" content="old" />
+</head><body>
 <a data-repo="" href="old" class="link">Source</a><a data-repo="/issues" href="old">Issues</a>
 <a data-app="" href="old" class="btn">Open DiaCraft in your browser</a><div class="frame-address" data-app-host="">old</div>
 <a data-repo="/releases/download" href="old" data-download="linux-x86_64-appimage" data-asset="" class="button">Linux</a>
@@ -391,6 +479,7 @@ mod tests {
             repository: "owner/drawing".into(),
             assets: DOWNLOADS.iter().map(|id| ((*id).to_owned(), format!("{id}-{{tag}}.bin"))).collect(),
             version: VERSION.into(),
+            licences: Vec::new(),
         }
     }
 

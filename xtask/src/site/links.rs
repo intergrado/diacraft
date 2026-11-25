@@ -54,7 +54,11 @@ pub(super) fn hosts(text: &str, origins: &Origins, name: &str) -> Result<(), Str
         let namespace = name == "sitemap.xml"
             && before.strip_suffix("http:").is_some_and(|s| s.ends_with("xmlns=\"") || s.ends_with("xmlns='"))
             && after.strip_prefix(SITEMAP_NS.trim_start_matches("http://")).is_some_and(|s| s.starts_with(['"', '\'']));
-        if namespace {
+        // The context of structured data (`seo.rs`) is a name and no address that is loaded: the one line the generator writes, and no other use of the host.
+        let schema = before.ends_with("\"@context\": \"https:")
+            && host == "schema.org"
+            && after.strip_prefix("schema.org").is_some_and(|s| s.starts_with('"'));
+        if namespace || schema {
             continue;
         }
         if !origins.allows(scheme, host) {

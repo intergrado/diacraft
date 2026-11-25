@@ -6,7 +6,10 @@
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#202020">
   <meta name="theme-color" content="#efefef" media="(prefers-color-scheme: light)">
-  <title>DiaCraft</title>
+  <title>DiaCraft: free online diagram editor</title>
+  <meta name="description" content="Free online diagram editor. Draw in your browser with nothing to install, open and save VSDX and OpenDocument drawings, and keep your files on your computer.">
+  <!-- What a search engine and a social card read is made from this title and description and from the settings of the site (site/site.json): `cargo xtask site --web` puts the canonical
+       address, the og: and twitter: tags and the structured data before the end of the head, and the robots, sitemap and share picture files beside the page. -->
   <!-- trunk builds the `diacraft-web` binary and adds the script that starts it (`cargo xtask site --web` replaces that script with the loader: loader.js). Nothing here is fetched from
        another site: no script, style or font by URL, and nothing inline (no style element, no script, no style
        attribute), so the page runs under the website's content security policy for the app (`script-src 'self'
@@ -24,14 +27,16 @@
   <link data-trunk rel="rust" data-bin="diacraft-web" data-cargo-profile-release="web" data-wasm-opt="z" />
 </head>
 <body>
-  <canvas id="diacraft_canvas"></canvas>
-  <!-- What the loader (loader.js, which `cargo xtask site --web` makes the page's start script) keeps up to date while the program comes: the words, and the bytes that have arrived
-       out of the bytes there are. The program takes the whole element away when it has drawn its first frame, and puts its own words in it when it cannot start. The button
-       shows only when something went wrong. -->
-  <div id="diacraft_loading" role="status">
-    <p id="diacraft_status">Loading DiaCraft&hellip;</p>
-    <progress id="diacraft_progress" max="1" value="0" aria-labelledby="diacraft_status"></progress>
-    <button id="diacraft_again" type="button" hidden>Try again</button>
-  </div>
+  <main>
+    <canvas id="diacraft_canvas"></canvas>
+    <!-- What the loader (loader.js, which `cargo xtask site --web` makes the page's start script) keeps up to date while the program comes: the words, and the bytes that have arrived
+         out of the bytes there are. The program takes the whole element away when it has drawn its first frame, and puts its own words in it when it cannot start. The button
+         shows only when something went wrong. -->
+    <div id="diacraft_loading" role="status">
+      <p id="diacraft_status">Loading DiaCraft&hellip;</p>
+      <progress id="diacraft_progress" max="1" value="0" aria-labelledby="diacraft_status"></progress>
+      <button id="diacraft_again" type="button" hidden>Try again</button>
+    </div>
+  </main>
 </body>
 </html>

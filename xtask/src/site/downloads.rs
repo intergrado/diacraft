@@ -134,6 +134,7 @@ mod tests {
             repository: "owner/drawing".into(),
             assets,
             version: "0.2.0".into(),
+            licences: Vec::new(),
         }
     }
 

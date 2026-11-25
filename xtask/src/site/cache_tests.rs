@@ -233,7 +233,7 @@ impl Folder {
 }
 
 /// The policy of the pages (`/*`, with the header that follows it), and of the app: the shape of the real `_headers` files, each for a site of its own.
-const PAGES_POLICY: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src https://api.github.com; img-src 'self'; style-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n";
+const PAGES_POLICY: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self' https://api.github.com; img-src 'self'; style-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n";
 const APP_POLICY: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self'; style-src 'self'; manifest-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\n  X-Content-Type-Options: nosniff\n";
 const KEEP: &str = "  Cache-Control: public, max-age=31536000, immutable\n";
 
@@ -407,8 +407,10 @@ fn every_page_has_one_policy_and_it_is_the_sites_own() {
     assert!(error.contains("index.html") && error.contains("script-src"), "{error}");
     let error = pages().check(&headers(APP_POLICY, &["/assets/hashed/*"])).unwrap_err();
     assert!(error.contains("html") && error.contains("script-src"), "{error}");
-    let loose = pages_rules()
-        .replace("script-src 'self'; connect-src https://api.github.com", "script-src 'self' 'unsafe-inline'; connect-src https://api.github.com");
+    let loose = pages_rules().replace(
+        "script-src 'self'; connect-src 'self' https://api.github.com",
+        "script-src 'self' 'unsafe-inline'; connect-src 'self' https://api.github.com",
+    );
     let error = pages().check(&loose).unwrap_err();
     assert!(error.contains("script-src"), "{error}");
 }

@@ -20,6 +20,9 @@ mod live_tests;
 mod parts;
 #[cfg(test)]
 mod parts_tests;
+mod seo;
+#[cfg(test)]
+mod seo_tests;
 mod settings;
 #[cfg(test)]
 mod tests;
@@ -105,6 +108,27 @@ fn workspace_version(root: &Path) -> Result<String, String> {
     xtask::version::read(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The files of the repository that hold the licences of the code, from `license` in `[workspace.package]` of the root `Cargo.toml` of the repository at `root` (`seo::LICENSE_FILES`): each is a file of
+/// `root`, and a licence with no such file is an error, so that the pages never name a file that is not there.
+fn workspace_licences(root: &Path) -> Result<Vec<String>, String> {
+    let path = root.join("Cargo.toml");
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let manifest: toml::Table = text.parse().map_err(|e| format!("{}: {e}", path.display()))?;
+    let expression = manifest
+        .get("workspace")
+        .and_then(|workspace| workspace.get("package"))
+        .and_then(|package| package.get("license"))
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| format!("{}: [workspace.package] has no license", path.display()))?;
+    let files = seo::licence_files(expression).map_err(|e| format!("{}: {e}", path.display()))?;
+    for file in &files {
+        if !root.join(file).is_file() {
+            return Err(format!("{}: the licence file {file} is not in the repository's root", root.display()));
+        }
+    }
+    Ok(files.into_iter().map(str::to_owned).collect())
+}
+
 /// What a build for a preview names as the app's address when `--app-url` is not given: `DIACRAFT_APP_URL`.
 const APP_URL_ENV: &str = "DIACRAFT_APP_URL";
 
@@ -126,7 +150,8 @@ fn run_with(dir: &Path, args: &[&str], env_app_url: Option<&str>) -> Result<(), 
     let files = inventory(dir)?;
     // The pages are made for the release of the workspace's version: each download link is a file of that release.
     let root = dir.parent().ok_or_else(|| format!("{}: the site folder has no parent", dir.display()))?;
-    let settings = settings::load(dir, &workspace_version(root)?)?;
+    let mut settings = settings::load(dir, &workspace_version(root)?)?;
+    settings.licences = workspace_licences(root)?;
     if mode == Mode::Release {
         settings::release(&settings)?;
     }
@@ -140,7 +165,8 @@ fn run_with(dir: &Path, args: &[&str], env_app_url: Option<&str>) -> Result<(), 
             let bytes = fs::read(path).map_err(|e| format!("{name}: {e}"))?;
             html::utf8(&bytes).and_then(html::before_write).map_err(|e| format!("{name}: {e}"))?;
         }
-        settings::apply(dir, &settings, true)?;
+        // The dates of the sitemap are the last commits' own: `--write` is the one command that reads the history.
+        settings::apply_with(dir, &settings, true, &settings::DateSource::Git(root))?;
         // Generation may have created robots.txt and sitemap.xml.
         inventory(dir)?
     } else {

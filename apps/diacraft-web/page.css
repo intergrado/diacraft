@@ -2,6 +2,8 @@
    content security policy with no inline styles (apps/diacraft-web/_headers): trunk copies this file beside the app. The colours are the theme
    tokens' (crates/ui-egui/src/theme.rs, the canvas and the status text), kept in step by a test (tests/it/html.rs). */
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #181818; }
+/* The page's one landmark (what a screen reader jumps to): it is the size of the page, so that the canvas in it is. */
+main { display: block; width: 100%; height: 100%; }
 #diacraft_canvas { display: block; width: 100%; height: 100%; }
 #diacraft_loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 12px; color: #cdcdcd; font: 14px system-ui, sans-serif; pointer-events: none; }

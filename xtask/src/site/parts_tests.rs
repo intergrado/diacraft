@@ -1,7 +1,7 @@
 //! Tests of the web app's module in parts and of the files beside it: where the module is cut, the manifest, the preloads, and what the check refuses.
 
 use super::app;
-use super::app_tests::{Dir, EMPTY_WASM, HEADERS, LOADER, glue_out, module, out_dir_with, repo};
+use super::app_tests::{Dir, EMPTY_WASM, HEADERS, LOADER, glue_out, module, out_dir_with, repo, settings};
 use super::parts::{self, ASSETS, MAX_MODULE, MAX_PARTS, MODULE_BUDGET, PART_LIMIT};
 use serde_json::{Value, json};
 use std::fs;
@@ -391,21 +391,21 @@ fn an_asset_that_is_missing_damaged_or_over_its_limit_is_refused() {
     let root = repo();
     root.write("THIRD-PARTY-LICENSES-WEB.txt", "Copyright (c) Microsoft Corporation\n");
     let out = Dir::new("named");
-    app::assemble(root.path(), &root.path().join("dist/web"), out.path()).unwrap();
+    app::assemble(root.path(), &root.path().join("dist/web"), out.path(), &settings("https://app.example.invalid")).unwrap();
     assert!(app::check(out.path()).unwrap_err().contains("banned name microsoft"));
     // The copyright line of a licence that the repository's own check keeps as the licence has it is kept here too.
     let kept = xtask::brands::NAME_EXCEPTIONS.iter().find(|(file, _)| *file == "THIRD-PARTY-LICENSES-WEB.txt").map(|(_, line)| *line).unwrap();
     let root = repo();
     root.write("THIRD-PARTY-LICENSES-WEB.txt", format!("Copyright (c) 2026 {kept}\n"));
     let out = Dir::new("kept");
-    app::assemble(root.path(), &root.path().join("dist/web"), out.path()).unwrap();
+    app::assemble(root.path(), &root.path().join("dist/web"), out.path(), &settings("https://app.example.invalid")).unwrap();
     app::check(out.path()).unwrap();
     // ... and any other line with that name is not.
     let root = repo();
     let name = kept.split(' ').next().unwrap();
     root.write("THIRD-PARTY-LICENSES-WEB.txt", format!("Copyright (c) 2026 {kept}\nBy {name}\n"));
     let out = Dir::new("other");
-    app::assemble(root.path(), &root.path().join("dist/web"), out.path()).unwrap();
+    app::assemble(root.path(), &root.path().join("dist/web"), out.path(), &settings("https://app.example.invalid")).unwrap();
     assert!(app::check(out.path()).unwrap_err().contains(&format!("banned name {}", name.to_lowercase())));
 }
 
@@ -421,7 +421,7 @@ fn the_build_is_refused_when_what_the_repository_gives_it_is_missing_or_too_big(
         let root = repo();
         fs::remove_file(root.path().join(file)).unwrap();
         let out = Dir::new("missing");
-        let error = app::assemble(root.path(), &root.path().join("dist/web"), out.path()).unwrap_err();
+        let error = app::assemble(root.path(), &root.path().join("dist/web"), out.path(), &settings("https://app.example.invalid")).unwrap_err();
         assert!(error.contains(diagnostic), "{file}: {error}");
     }
     // Data over what the program takes of it is not copied into the site: it would only be refused by the program, at run time, on every visit.
@@ -429,7 +429,7 @@ fn the_build_is_refused_when_what_the_repository_gives_it_is_missing_or_too_big(
         let root = repo();
         fs::File::create(root.path().join(file)).unwrap().set_len(limit + 1).unwrap();
         let out = Dir::new("big");
-        let error = app::assemble(root.path(), &root.path().join("dist/web"), out.path()).unwrap_err();
+        let error = app::assemble(root.path(), &root.path().join("dist/web"), out.path(), &settings("https://app.example.invalid")).unwrap_err();
         assert!(error.contains("may be read"), "{file}: {error}");
     }
 }

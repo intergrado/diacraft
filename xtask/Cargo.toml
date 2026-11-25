@@ -9,6 +9,8 @@ publish = false
 workspace = true
 
 [dependencies]
+# The dates of the sitemap (`site/seo.rs`): all date handling goes through jiff (AGENTS.md).
+jiff = { workspace = true }
 roxmltree = "0.21.2"
 serde_json = { workspace = true }
 # The hashes of the web app's parts and assets (`cargo xtask site --web`, `site/parts.rs`); the library is in the lock already.

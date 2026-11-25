@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::settings::Settings;
-use super::{cache, headers, parts, web_manifest};
+use super::{cache, headers, parts, seo, web_manifest};
 
 /// The folder the pages must not have. The app was the pages' `app/` folder until it was given a site of its own: a folder of this name in `site/` would be deployed at `https://diacraft.dev/app/`.
 pub(super) const APP_DIR: &str = "app";
@@ -138,7 +138,7 @@ pub(super) fn run(site: &Path, settings: &Settings, app_url: Option<String>, web
             root.join("dist").join("web")
         }
     };
-    assemble(root, &dist, &app_out)?;
+    assemble(root, &dist, &app_out, settings)?;
     let report = check(&app_out)?;
     for line in report.lines() {
         println!("{line}");
@@ -217,7 +217,7 @@ pub(super) fn assemble_pages(root: &Path, site: &Path, out: &Path, settings: &Se
 
 /// Makes the app's folder from the Trunk build in `dist`: the build copied into `app` (an empty folder), the start script moved into a file, the files Trunk hashed named again, the module in parts with
 /// the data beside it, the manifest, the loader and the app's own `_headers`.
-pub(super) fn assemble(root: &Path, dist: &Path, app: &Path) -> Result<(), String> {
+pub(super) fn assemble(root: &Path, dist: &Path, app: &Path, settings: &Settings) -> Result<(), String> {
     let start = dist.join("index.html");
     if !start.is_file() {
         return Err(format!("{}: no index.html there: is that the output of `trunk build --release` in apps/diacraft-web?", dist.display()));
@@ -239,7 +239,10 @@ pub(super) fn assemble(root: &Path, dist: &Path, app: &Path) -> Result<(), Strin
     let html = rehash(app, &html)?;
     // The module in parts, the data beside it, the manifest, and the loader in place of Trunk's start script (`parts.rs`).
     let html = parts::finish(root, app, &html)?;
+    // The tags a search engine and a social card read, from the page's own title and description and the settings: the app's own address, which a preview does not change.
+    let html = seo::app_page(&html, settings)?;
     fs::write(&page, html).map_err(|e| format!("{}: {e}", page.display()))?;
+    seo_files(root, app, settings)?;
     // The headers of the app's own site: its policy, and what is kept for a year.
     let headers = app.join("_headers");
     if fs::symlink_metadata(&headers).is_ok() {
@@ -247,6 +250,22 @@ pub(super) fn assemble(root: &Path, dist: &Path, app: &Path) -> Result<(), Strin
     }
     let text = parts::read_bounded(&root.join(HEADERS_SOURCE), MAX_TEXT)?;
     fs::write(&headers, text).map_err(|e| format!("{}: {e}", headers.display()))?;
+    Ok(())
+}
+
+/// The files beside the page that search engines and social cards ask for: `robots.txt`, `sitemap.xml` and the share picture, a copy of the pages' own. Trunk makes none of them, and a
+/// file of those names in the build is an error, as it is for the headers.
+fn seo_files(root: &Path, app: &Path, settings: &Settings) -> Result<(), String> {
+    let picture = parts::read_bounded(&root.join("site").join("assets").join("social.jpg"), FILE_BUDGET)?;
+    for (name, bytes) in
+        [("robots.txt", seo::app_robots(settings).into_bytes()), ("sitemap.xml", seo::app_sitemap(settings).into_bytes()), (seo::APP_SOCIAL, picture)]
+    {
+        let path = app.join(name);
+        if fs::symlink_metadata(&path).is_ok() {
+            return Err(format!("{}: the build already has a file of that name", path.display()));
+        }
+        fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
     Ok(())
 }
 
@@ -386,6 +405,14 @@ pub(super) fn externalise(html: &str) -> Result<(String, Vec<(String, String)>),
         let open_end = tag_and_after.find('>').ok_or("an unterminated <script> tag")?;
         let (open, after_open) = tag_and_after.split_at(open_end + 1);
         out.push_str(before);
+        // A block of data is no script: it stays in the page as it is (the build then refuses a page that has one, since it makes its own).
+        if attribute(open, "type") == Some("application/ld+json") {
+            let close = find_ci(after_open, "</script>").ok_or("a block of data with no end tag")? + "</script>".len();
+            out.push_str(open);
+            out.push_str(after_open.get(..close).ok_or("a block of data is not inside the page")?);
+            rest = after_open.get(close..).unwrap_or("");
+            continue;
+        }
         if attribute(open, "src").is_some() {
             // Already a file: kept as it is, with its own end tag.
             let close = find_ci(after_open, "</script>").ok_or("a <script src> with no end tag")?;
@@ -511,7 +538,8 @@ pub(super) fn check(app: &Path) -> Result<Report, String> {
                 let text = read_text(&path)?;
                 web_manifest::check(&text, &names, app).map_err(|e| format!("app/{name}: {e}"))?;
             }
-            Some("txt") if name.starts_with("assets/") => {}
+            Some("txt") if name.starts_with("assets/") || name == "robots.txt" => {}
+            Some("xml") if name == "sitemap.xml" => {}
             Some("css") => {
                 let text = read_text(&path)?;
                 check_style(&text, &names).map_err(|e| format!("app/{name}: {e}"))?;
@@ -522,6 +550,12 @@ pub(super) fn check(app: &Path) -> Result<Report, String> {
         }
     }
     let module = parts::check(app, &files, &page)?;
+    // What a search engine and a social card read: the page's tags and data, and the files beside it.
+    let robots = read_text(&app.join("robots.txt")).map_err(|e| format!("app/robots.txt: {e}"))?;
+    let sitemap = read_text(&app.join("sitemap.xml")).map_err(|e| format!("app/sitemap.xml: {e}"))?;
+    super::brands(&robots, &[]).map_err(|e| format!("app/robots.txt: {e}"))?;
+    super::brands(&sitemap, &[]).map_err(|e| format!("app/sitemap.xml: {e}"))?;
+    seo::check_app(&page, &robots, &sitemap, &names).map_err(|e| format!("app/index.html: {e}"))?;
     let headers = read_text(&app.join("_headers")).map_err(|e| format!("_headers: {e}"))?;
     super::brands(&headers, &[]).map_err(|e| format!("_headers: {e}"))?;
     headers::check_app(&headers).map_err(|e| format!("_headers: {e}"))?;
@@ -570,7 +604,8 @@ fn check_page(html: &str, names: &[&str]) -> Result<(), String> {
     let mut rest = html;
     while let Some(at) = find_script_open(rest) {
         let tag = rest.get(at..).and_then(|s| s.split('>').next()).unwrap_or("");
-        if attribute(tag, "src").is_none() {
+        // A block of data (`type="application/ld+json"`) is no script: a browser does not run it, and the policy does not see it.
+        if attribute(tag, "src").is_none() && attribute(tag, "type") != Some("application/ld+json") {
             return Err("an inline <script>: the content security policy has no 'unsafe-inline'".into());
         }
         rest = rest.get(at + "<script".len()..).unwrap_or("");
@@ -585,6 +620,10 @@ fn check_page(html: &str, names: &[&str]) -> Result<(), String> {
             continue;
         }
         let tag = tag.split('>').next().unwrap_or("");
+        // The canonical address is the app's own address, which a page names and loads nothing from.
+        if attribute(tag, "rel") == Some("canonical") {
+            continue;
+        }
         for key in ["src", "href"] {
             if let Some(url) = attribute(tag, key) {
                 local_file(url, names)?;

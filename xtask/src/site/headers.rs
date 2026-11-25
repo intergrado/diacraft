@@ -5,14 +5,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The policy of every page of the site, as (directive, its one source). A directive that is not here may be `'none'` or `'self'` and nothing else.
-const CSP: &[(&str, &str)] = &[
-    ("default-src", "'self'"),
-    ("script-src", "'self'"),
-    ("connect-src", "https://api.github.com"),
-    ("img-src", "'self'"),
-    ("style-src", "'self'"),
-    ("frame-ancestors", "'none'"),
+/// The policy of every page of the site, as (directive, its sources). A directive that is not here may be `'none'` or `'self'` and nothing else. The pages may fetch their own files, which
+/// the check that Lighthouse's `robots.txt` audit makes needs (it asks as the page, under the page's policy: with no `'self'` in `connect-src` a valid robots file is reported invalid), and
+/// GitHub's API, for the release lookup of the home page; they connect to nothing else.
+const CSP: &[(&str, &[&str])] = &[
+    ("default-src", &["'self'"]),
+    ("script-src", &["'self'"]),
+    ("connect-src", &["'self'", "https://api.github.com"]),
+    ("img-src", &["'self'"]),
+    ("style-src", &["'self'"]),
+    ("frame-ancestors", &["'none'"]),
 ];
 
 /// The policy of the app, and no looser than it has to be. WebAssembly needs `'wasm-unsafe-eval'` to compile, and nothing else of
@@ -55,8 +57,9 @@ pub(super) fn csp(value: &str) -> Result<(), String> {
             return Err(format!("duplicate CSP directive {name}"));
         }
         if let Some((_, expected)) = CSP.iter().find(|(directive, _)| *directive == name) {
-            if !words.eq([*expected]) {
-                return Err(format!("expected {name} {expected}"));
+            let sources: BTreeSet<&str> = words.collect();
+            if sources != expected.iter().copied().collect::<BTreeSet<_>>() {
+                return Err(format!("expected {name} {}", expected.join(" ")));
             }
         } else if !matches!(words.collect::<Vec<_>>().as_slice(), ["'none'"] | ["'self'"] | []) {
             return Err(format!("additional CSP directive permits other sources: {directive}"));

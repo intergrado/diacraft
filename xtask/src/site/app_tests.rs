@@ -14,7 +14,8 @@ pub(super) const TRUNK_PAGE: &str = r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>DiaCraft</title>
+  <title>DiaCraft: free online diagram editor</title>
+  <meta name="description" content="Draw diagrams in your browser, free &amp; with nothing to install.">
   <link rel="icon" href="./diacraft-icon-256-00112233445566aa.png" integrity="sha384-x"/>
   <link rel="stylesheet" href="./page-00112233445566bb.css" integrity="sha384-y"/>
   <link rel="manifest" href="diacraft.webmanifest" />
@@ -46,7 +47,7 @@ pub(super) const GLUE: &str =
     "import * as inline from './snippets/eframe-1/inline0.js';\nexport default async function init(o) { return fetch(o.module_or_path); }\n";
 
 /// The pages' `_headers` (`site/_headers`), in short: the strict policy and the three headers under `/*`, and nothing of the app's.
-pub(super) const PAGES_HEADERS: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src https://api.github.com; img-src 'self'; style-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()\n";
+pub(super) const PAGES_HEADERS: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self' https://api.github.com; img-src 'self'; style-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()\n";
 
 /// The app's `_headers` (`apps/diacraft-web/_headers`), in short: its own policy and the three headers under `/*`, and the rules that cache the app's hashed files for good.
 pub(super) const HEADERS: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self'; style-src 'self'; manifest-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()\n\n/parts/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/diacraft-web-*.js\n  Cache-Control: public, max-age=31536000, immutable\n\n/page-*.css\n  Cache-Control: public, max-age=31536000, immutable\n\n/diacraft-icon-256-*.png\n  Cache-Control: public, max-age=31536000, immutable\n";
@@ -345,12 +346,74 @@ fn the_web_flags_are_read_and_a_bad_line_gets_the_usage() {
 
 pub(super) const PAGE: &str = r##"<!DOCTYPE html><html lang="en"><head><title>Drawing</title><meta name="description" content="A drawing guide." />
 <link rel="canonical" href="https://example.invalid/" /><meta property="og:url" content="https://example.invalid/" />
-<meta property="og:image" content="https://example.invalid/assets/social.jpg" /></head><body><main><a data-app="" href="https://app.example.invalid/">Open the app</a></main></body></html>"##;
+<meta property="og:title" content="Drawing" /><meta property="og:description" content="A drawing guide." />
+<meta property="og:image" content="https://example.invalid/assets/social.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Drawing" />
+  <meta name="twitter:description" content="A drawing guide." />
+  <meta name="twitter:image" content="https://example.invalid/assets/social.jpg" />
+  <script type="application/ld+json" data-generated="">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "applicationCategory": "DesignApplication",
+      "description": "A drawing guide.",
+      "downloadUrl": "https://github.com/owner/drawing/releases/tag/v0.2.0",
+      "image": "https://example.invalid/assets/social.jpg",
+      "license": [
+        "https://github.com/owner/drawing/blob/HEAD/LICENSE-MIT",
+        "https://github.com/owner/drawing/blob/HEAD/LICENSE-APACHE"
+      ],
+      "name": "DiaCraft",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "operatingSystem": "Windows, macOS, Linux, Web browser",
+      "sameAs": [
+        "https://github.com/owner/drawing"
+      ],
+      "softwareVersion": "0.2.0",
+      "url": "https://example.invalid/"
+    }
+  </script>
+  <script type="application/ld+json" data-generated="">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "DiaCraft",
+      "url": "https://example.invalid/"
+    }
+  </script>
+</head><body><main><a data-app="" href="https://app.example.invalid/">Open the app</a></main></body></html>"##;
 
 /// A second page of the pages, at `/guides/one`.
 pub(super) const GUIDE: &str = r##"<!DOCTYPE html><html lang="en"><head><title>One</title><meta name="description" content="A guide." />
 <link rel="canonical" href="https://example.invalid/guides/one" /><meta property="og:url" content="https://example.invalid/guides/one" />
-<meta property="og:image" content="https://example.invalid/assets/social.jpg" /></head><body><main><p>One.</p></main></body></html>"##;
+<meta property="og:title" content="One" /><meta property="og:description" content="A guide." />
+<meta property="og:image" content="https://example.invalid/assets/social.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="One" />
+  <meta name="twitter:description" content="A guide." />
+  <meta name="twitter:image" content="https://example.invalid/assets/social.jpg" />
+  <script type="application/ld+json" data-generated="">
+    {
+      "@context": "https://schema.org",
+      "@type": "TechArticle",
+      "description": "A guide.",
+      "headline": "One",
+      "image": "https://example.invalid/assets/social.jpg",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "DiaCraft",
+        "url": "https://example.invalid/"
+      },
+      "url": "https://example.invalid/guides/one"
+    }
+  </script>
+</head><body><main><p>One.</p></main></body></html>"##;
 
 fn site(headers: &str) -> Dir {
     let dir = Dir::new("pages");
@@ -411,7 +474,7 @@ pub(super) fn out_dir_with(module: &[u8]) -> Dir {
     let root = repo();
     root.write(&format!("dist/web/{TRUNK_WASM}"), module);
     let out = Dir::new("out");
-    app::assemble(root.path(), &root.path().join("dist/web"), out.path()).unwrap();
+    app::assemble(root.path(), &root.path().join("dist/web"), out.path(), &settings("https://app.example.invalid")).unwrap();
     out
 }
 
@@ -420,8 +483,8 @@ fn a_finished_app_folder_passes_and_reports_each_file_with_its_size() {
     let out = out_dir();
     let report = app::check(out.path()).unwrap();
     let names: Vec<&str> = report.files.iter().map(|(n, _)| n.as_str()).collect();
-    // The names with a hash in them are told by their shape: the module is one part (it is a header), and the data is three files.
-    assert_eq!(names.len(), 15, "{names:?}");
+    // The names with a hash in them are told by their shape: the module is one part (it is a header), and the data is three files; the search files are the three beside the page.
+    assert_eq!(names.len(), 18, "{names:?}");
     for plain in [
         "_headers",
         "diacraft.webmanifest",
@@ -429,7 +492,10 @@ fn a_finished_app_folder_passes_and_reports_each_file_with_its_size() {
         "icon-512.png",
         "index.html",
         "manifest.json",
+        "robots.txt",
+        "sitemap.xml",
         "snippets/eframe-1/inline0.js",
+        "social.jpg",
         "start.js",
     ] {
         assert!(names.contains(&plain), "{plain} in {names:?}");
@@ -446,10 +512,21 @@ fn a_finished_app_folder_passes_and_reports_each_file_with_its_size() {
     ] {
         assert!(names.iter().any(|n| n.starts_with(hashed)), "{hashed} in {names:?}");
     }
-    for name in names
-        .iter()
-        .filter(|n| !["_headers", "diacraft.webmanifest", "icon-192.png", "icon-512.png", "index.html", "manifest.json", "start.js"].contains(n))
-    {
+    for name in names.iter().filter(|n| {
+        ![
+            "_headers",
+            "diacraft.webmanifest",
+            "icon-192.png",
+            "icon-512.png",
+            "index.html",
+            "manifest.json",
+            "robots.txt",
+            "sitemap.xml",
+            "social.jpg",
+            "start.js",
+        ]
+        .contains(n)
+    }) {
         if name.starts_with("snippets/") {
             continue;
         }
@@ -462,7 +539,7 @@ fn a_finished_app_folder_passes_and_reports_each_file_with_its_size() {
     let lines = report.lines();
     assert!(lines.iter().any(|l| l.starts_with("site: app/parts/diacraft-web-1-") && l.ends_with("0.00 MiB (8 bytes)")), "{lines:?}");
     assert!(lines.iter().any(|l| l.contains("the module is 0.00 MiB (8 bytes) in 1 parts, none over 8.00 MiB")), "{lines:?}");
-    assert!(lines.iter().any(|l| l.starts_with("site: app: 15 files")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.starts_with("site: app: 18 files")), "{lines:?}");
     assert!(lines.last().unwrap().starts_with("site: caching: "), "{lines:?}");
 }
 
@@ -671,7 +748,8 @@ fn the_check_fails_on_a_module_that_has_a_shared_memory_and_the_build_on_one_tha
     // A module that is an error page saved under its name does not get as far as being cut.
     let root = repo();
     root.write(&format!("dist/web/{TRUNK_WASM}"), "<html>Not found</html>");
-    let error = app::assemble(root.path(), &root.path().join("dist/web"), &root.path().join("out")).unwrap_err();
+    let error =
+        app::assemble(root.path(), &root.path().join("dist/web"), &root.path().join("out"), &settings("https://app.example.invalid")).unwrap_err();
     assert!(error.contains("not a WebAssembly module"), "{error}");
 }
 
@@ -721,13 +799,13 @@ fn the_check_refuses_names_kinds_and_headers_it_does_not_expect() {
     refuses(|o| o.write("_headers", HEADERS.replace("'wasm-unsafe-eval'", "'unsafe-eval'")), "script-src");
     refuses(|o| o.write("_headers", HEADERS.replace("/*\n", "/app/*\n")), "a rule for /app/*");
     refuses(|o| fs::remove_file(o.path().join("_headers")).unwrap(), "_headers");
-    // Too many files: the folder is a handful (the finished one here has fifteen), and 64 is all it may hold.
+    // Too many files: the folder is a handful (the finished one here has eighteen), and 64 is all it may hold.
     let out = out_dir();
-    for n in 0..49 {
+    for n in 0..46 {
         out.write(&format!("extra{n}.png"), "x");
     }
     app::check(out.path()).unwrap();
-    out.write("extra49.png", "x");
+    out.write("extra46.png", "x");
     assert!(app::check(out.path()).unwrap_err().contains("more than 64 files"));
 }
 
@@ -748,7 +826,9 @@ pub(super) const WORKFLOW: &str =
 pub(super) fn repo() -> Dir {
     let root = Dir::new("repo");
     // What the pages are made for: the workspace's version, and the release workflow's list of the files (`downloads.rs`).
-    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.0\"\n");
+    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.0\"\nlicense = \"MIT OR Apache-2.0\"\n");
+    root.write("LICENSE-MIT", "MIT");
+    root.write("LICENSE-APACHE", "Apache");
     root.write(".github/workflows/release.yml", WORKFLOW);
     root.write("site/index.html", PAGE);
     root.write("site/_headers", PAGES_HEADERS);
@@ -806,17 +886,18 @@ pub(super) fn png(w: u32, h: u32) -> Vec<u8> {
 pub(super) const LOADER: &str = "// the loader\nconst manifest = await (await fetch('./manifest.json')).json();\nconst glue = await import(new URL(manifest.glue, location.href).href);\nawait glue.default({ module_or_path: new Response(new ReadableStream({}), { headers: { 'Content-Type': 'application/wasm' } }) });\n";
 
 pub(super) fn assemble(root: &Dir, out: &str) -> Result<(), String> {
-    app::assemble(root.path(), &root.path().join("dist/web"), &root.path().join(out))
+    app::assemble(root.path(), &root.path().join("dist/web"), &root.path().join(out), &settings("https://app.example.invalid"))
 }
 
 /// The settings the pages of [`repo`] are made for: their own address, and the app's at the address of a site of its own.
-fn settings(app_url: &str) -> super::settings::Settings {
+pub(super) fn settings(app_url: &str) -> super::settings::Settings {
     super::settings::Settings {
         domain: "https://example.invalid".into(),
         app_url: app_url.into(),
         repository: "owner/drawing".into(),
         assets: super::settings::DOWNLOADS.iter().map(|id| ((*id).to_owned(), "diacraft-{tag}-a.zip".to_owned())).collect(),
         version: "0.2.0".into(),
+        licences: vec!["LICENSE-MIT".into(), "LICENSE-APACHE".into()],
     }
 }
 
@@ -1111,10 +1192,10 @@ fn a_hashed_file_the_page_does_not_name_two_that_come_to_one_name_and_too_many_a
 fn a_finished_folder_reports_what_is_kept_for_good_and_what_is_asked_about() {
     let out = out_dir();
     let report = app::check(out.path()).unwrap();
-    // The module's one part, the three assets, the glue, the style and the icon are named by their hash; the page, the loader, the manifests, their icons and the snippet are not.
-    assert_eq!(report.caching, super::cache::Summary { kept: 7, revalidated: 7, pages: 1 }, "{report:?}");
+    // The module's one part, the three assets, the glue, the style and the icon are named by their hash; the page, the loader, the manifests, their icons, the snippet, `robots.txt`, `sitemap.xml` and the share picture are not.
+    assert_eq!(report.caching, super::cache::Summary { kept: 7, revalidated: 10, pages: 1 }, "{report:?}");
     assert!(
-        report.lines().iter().any(|l| l.contains("7 files named by their own hash are kept for a year, 7 are asked about")),
+        report.lines().iter().any(|l| l.contains("7 files named by their own hash are kept for a year, 10 are asked about")),
         "{:?}",
         report.lines()
     );
@@ -1162,7 +1243,7 @@ fn the_site_command_makes_the_download_links_for_the_workspace_version_and_holds
     assert!(home().contains(&format!(r#"href="{}" data-download="linux-x86_64-deb""#, file("0.2.0"))), "{}", home());
     super::run_with(&site, &[], None).unwrap();
     // The version moves: the pages are stale until `--write` makes them again, and then they name the new release only.
-    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.1\"\n");
+    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.1\"\nlicense = \"MIT OR Apache-2.0\"\n");
     let error = super::run_with(&site, &[], None).unwrap_err();
     assert!(error.contains("stale"), "{error}");
     super::run_with(&site, &["--write"], None).unwrap();

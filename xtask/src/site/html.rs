@@ -82,6 +82,61 @@ fn required<'a, 's>(parent: Node<'a, 's>, tag: &str, attr: Option<(&str, &str)>)
     Ok(first)
 }
 
+/// What the head of a page says of the page, as the parser reads it (character references resolved): the values the generated social cards and structured data are made from (`seo.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Head {
+    pub(super) title: String,
+    pub(super) description: String,
+    pub(super) og_title: String,
+    pub(super) og_description: String,
+    pub(super) og_image: String,
+    pub(super) og_image_alt: Option<String>,
+}
+
+/// The [`Head`] of the page `source`. A page that has no title, description or `og:title`, `og:description` or `og:image` is an error, as is a duplicate of any of them.
+pub(super) fn head(source: &str) -> Result<Head, String> {
+    let doc = document(source)?;
+    let head = required(doc.root_element(), "head", None)?;
+    let meta = |key: &str, value: &str| -> Result<String, String> {
+        let node = required(head, "meta", Some((key, value)))?;
+        node.attribute("content").map(str::to_owned).ok_or_else(|| at(node, &format!("missing content for {value}")))
+    };
+    let title = required(head, "title", None)?.children().filter_map(|n| n.text().filter(|_| n.is_text())).collect::<String>();
+    let alt = head
+        .children()
+        .filter(|n| n.has_tag_name("meta") && n.attribute("property") == Some("og:image:alt"))
+        .map(|n| n.attribute("content").unwrap_or("").to_owned())
+        .next();
+    Ok(Head {
+        title: title.trim().to_owned(),
+        description: meta("name", "description")?,
+        og_title: meta("property", "og:title")?,
+        og_description: meta("property", "og:description")?,
+        og_image: meta("property", "og:image")?,
+        og_image_alt: alt,
+    })
+}
+
+/// The `type` of a script that holds data and no program: what a browser does not run, and what a content security policy does not see.
+pub(super) const JSON_LD: &str = "application/ld+json";
+
+/// The structured data of a page: JSON that is an object with the schema.org context and a type (`seo.rs` writes it; a browser and a search engine read it as text, so it must parse).
+fn json_ld(script: Node<'_, '_>) -> Result<(), String> {
+    if script.has_attribute("src") {
+        return Err(at(script, "a JSON-LD script has its data inline and no src"));
+    }
+    let text: String = script.descendants().filter_map(|n| n.text().filter(|_| n.is_text())).collect();
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| at(script, &format!("JSON-LD that is not JSON: {e}")))?;
+    let object = value.as_object().ok_or_else(|| at(script, "JSON-LD must be one object"))?;
+    if object.get("@context").and_then(serde_json::Value::as_str) != Some("https://schema.org") {
+        return Err(at(script, "JSON-LD must have the context https://schema.org"));
+    }
+    if !object.get("@type").and_then(serde_json::Value::as_str).is_some_and(|t| !t.is_empty()) {
+        return Err(at(script, "JSON-LD must have a @type"));
+    }
+    Ok(())
+}
+
 fn structure(doc: &Document<'_>, canonical: Option<&str>) -> Result<(), String> {
     let root = doc.root_element();
     if !root.has_tag_name("html") {
@@ -124,6 +179,7 @@ fn structure(doc: &Document<'_>, canonical: Option<&str>) -> Result<(), String> 
             }
             "base" | "svg" => return Err(at(element, "unsupported base or svg element")),
             _ if element.has_attribute("srcdoc") => return Err(at(element, "unsupported embedded document")),
+            "script" if element.attribute("type") == Some(JSON_LD) => json_ld(element)?,
             "img" => validate_img(element)?,
             _ => {}
         }

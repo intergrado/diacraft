@@ -26,6 +26,7 @@ mod pages_deploy;
 mod parity;
 mod provenance;
 mod repo_files;
+mod seo;
 mod stats;
 mod usage;
 mod version;

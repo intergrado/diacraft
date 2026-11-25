@@ -74,7 +74,7 @@ fn the_pages_and_the_app_have_a_headers_file_each_and_only_the_apps_has_the_wasm
     let pages_rules: String = pages.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
     // The lines that are not comments: the comment above the rules names the keywords it explains.
     assert!(!pages_rules.contains("wasm-unsafe-eval") && !pages_rules.contains("unsafe-inline"), "the pages' policy is as strict as it was");
-    assert!(pages_rules.contains("script-src 'self';") && pages_rules.contains("connect-src https://api.github.com;"), "{pages_rules}");
+    assert!(pages_rules.contains("script-src 'self';") && pages_rules.contains("connect-src 'self' https://api.github.com;"), "{pages_rules}");
     assert!(!pages_rules.contains("/app"), "the pages' file has no rule for the app: it is a site of its own\n{pages_rules}");
     assert!(!pages_rules.contains("! Content-Security-Policy"), "no policy of the pages is taken away");
     let app = read("apps/diacraft-web/_headers");
