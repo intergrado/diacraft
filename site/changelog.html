@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Changelog · DiaCraft</title>
-  <meta name="description" content="Draft release notes for DiaCraft 0.2.0, including the native drawing format and file exchange." />
+  <meta name="description" content="Release notes for DiaCraft 0.2.0, the first public release: the native .diacraft format, saving across VSDX and OpenDocument, downloads for Windows, macOS and Linux, and the browser version." />
   <link rel="canonical" href="https://diacraft.dev/changelog" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="DiaCraft" />
   <meta property="og:title" content="Changelog · DiaCraft" />
-  <meta property="og:description" content="Draft release notes for DiaCraft 0.2.0, including the native drawing format and file exchange." />
+  <meta property="og:description" content="Release notes for DiaCraft 0.2.0, the first public release: the native .diacraft format, saving across VSDX and OpenDocument, downloads for Windows, macOS and Linux, and the browser version." />
   <meta property="og:url" content="https://diacraft.dev/changelog" />
   <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
@@ -43,13 +43,13 @@
         <div class="page-title">
           <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Changelog</span></p>
           <h1>Changelog</h1>
-          <p class="lead">Draft notes for 0.2.0, DiaCraft’s planned first public release. The changes below are in the development build, which says 0.2.0 followed by “dev” until the release is tagged. The release has no date yet, and the notes are still under review.</p>
+          <p class="lead">DiaCraft 0.2.0 is the first public release: a free, open-source diagram editor for Linux, Windows, macOS and the browser. It opens, edits and saves VSDX and OpenDocument drawings, and keeps new drawings in its own <code>.diacraft</code> format.</p>
         </div>
         <div class="title-block">
           <dl class="spec">
             <div><dt>Release</dt><dd><b>0.2.0</b></dd></div>
-            <div><dt>Date</dt><dd>Unreleased</dd></div>
-            <div><dt>Notes</dt><dd>A draft, still under review</dd></div>
+            <div><dt>Date</dt><dd><time datetime="2026-11-25">25 November 2026</time></dd></div>
+            <div><dt>Platforms</dt><dd>Linux · Windows · macOS · Browser</dd></div>
           </dl>
         </div>
       </div>
@@ -58,18 +58,81 @@
       <article class="prose">
         <section id="native-default">
           <h2>New drawings start in .diacraft</h2>
-          <p>The first time you save a new drawing, the desktop app offers <code>.diacraft</code> first. The file holds the drawing’s pages, shapes and styles, including details imported from VSDX and OpenDocument packages. Opening an existing <code>.vsdx</code> or <code>.odg</code> and choosing Save keeps its file type.</p>
-          <p>Grid, ruler, guide and connection-point visibility now travel with the drawing. Save after changing one of these settings to see it again when you reopen the file.</p>
+          <p>The first time you save a new drawing, the Save dialog offers DiaCraft’s own format, <code>.diacraft</code>, first. The file holds the drawing’s pages, shapes, styles and pictures, and keeps details that came from a VSDX or OpenDocument drawing without storing the original file. Opening an existing <code>.vsdx</code> or <code>.odg</code> and choosing Save keeps its file type.</p>
+          <p>Grid, ruler, guide and connection-point visibility travel with the drawing. Save after changing one of these settings to see it again when you reopen the file. <a href="/guides/native-format.html">Work with .diacraft files</a></p>
         </section>
         <section id="exchange">
-          <h2>More ways to exchange an editable drawing</h2>
+          <h2>Save across VSDX and OpenDocument</h2>
+          <p>Choose <strong>File → Save As</strong> and pick a type. A drawing can be saved from one family into the other.</p>
           <ul>
-            <li>Save a native drawing as a VSDX drawing, an OpenDocument drawing (<code>.odg</code>) or an OpenDocument template (<code>.otg</code>).</li>
-            <li>Save a VSDX drawing as an OpenDocument drawing, or an OpenDocument drawing as a VSDX type.</li>
+            <li>Save a VSDX drawing as an OpenDocument drawing (<code>.odg</code>) or template (<code>.otg</code>), and an OpenDocument drawing as any of the six VSDX types. Either can be saved as <code>.diacraft</code>, and a <code>.diacraft</code> drawing as any of them.</li>
+            <li>Where the new type cannot hold part of a drawing, a card over the drawing tells you what, in words. After the save, DiaCraft reads the new file back, compares it with the drawing and names what differs.</li>
+            <li>If you save a drawing that has a macro project as a VSDX type that cannot carry macros, DiaCraft asks whether to leave them out or to save as the macro-enabled type instead. It keeps the project as file data and never runs it.</li>
             <li>Start an untitled drawing from an <code>.otg</code> template. Your first save gives the drawing its own filename.</li>
-            <li>Check a conversion with <code>diacraft-cli roundtrip</code> and <code>--via diacraft</code>. For a VSDX or ODG package, the report compares the original content with the copy written back to the source format.</li>
+            <li>A flat OpenDocument drawing (<code>.fodg</code>) is written back to its own file by Save, and Save As writes it as another type.</li>
           </ul>
-          <p>Testing a wider range of files remains part of the release work. <a href="/guides/file-formats.html">Read the current format limits</a>.</p>
+          <p><a href="/guides/file-formats.html">See what each drawing can be saved as</a></p>
+        </section>
+        <section id="editor">
+          <h2>Inside the editor</h2>
+          <p>The window has a ribbon, a Shapes window, rulers and a grid, page tabs and a File view. In this release you can:</p>
+          <ul>
+            <li>Start from a blank drawing or one of four templates: Basic Diagram, Basic Flowchart, Cross-Functional Flowchart and Organization Chart.</li>
+            <li>Drag shapes from seven built-in stencils, including Basic Flowchart and Gane-Sarson, or from a stencil file you open.</li>
+            <li>Join shapes with connectors that stay glued as you move them. Use AutoConnect, choose right-angle, straight or curved lines, and drag a handle to move a leg.</li>
+            <li>Format text, fills and lines, with gradients, patterns, transparency, shadows and Quick Styles, and change the colours of a page with a theme and its variants.</li>
+            <li>Draw rectangles, ellipses, lines, arcs and freeform shapes, and combine shapes with Union, Combine, Fragment, Intersect and Subtract.</li>
+            <li>Use pages and background pages, layers, containers, swimlanes, callouts, comments and Shape Data, lay a page out again with Re-Layout Page, and find and replace text.</li>
+            <li>Export a page as PNG, SVG or PDF, or print with a preview of the sheets.</li>
+          </ul>
+          <p><a href="/guides/getting-started.html">Draw your first diagram</a></p>
+        </section>
+        <section id="downloads">
+          <h2>Downloads for Windows, macOS and Linux</h2>
+          <p>The release has twelve downloads: an installer and an archive for each system, built for Intel/AMD (x64) and ARM64 processors, and one universal build for Macs.</p>
+          <div class="table-scroll" tabindex="0" role="group" aria-label="The downloads of 0.2.0">
+            <table>
+              <thead>
+                <tr><th scope="col">System</th><th scope="col">Installer</th><th scope="col">Archive</th><th scope="col">Processors</th></tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">Windows 10 or 11</th><td><code>.msi</code></td><td><code>.zip</code></td><td>Intel/AMD (x64) and ARM64</td></tr>
+                <tr><th scope="row">macOS 11 or newer</th><td><code>.dmg</code></td><td><code>.zip</code></td><td>Apple silicon and Intel, in one universal build</td></tr>
+                <tr><th scope="row">Linux with glibc 2.35 or newer</th><td>AppImage and <code>.deb</code></td><td><code class="nowrap">.tar.gz</code></td><td>Intel/AMD (x64) and ARM64</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Each download holds the app and the command line tool, <code>diacraft-cli</code>, with the licences of DiaCraft and of the libraries it is built from. The Windows installer installs for you alone and needs no administrator rights: it adds a Start menu shortcut, puts <code>diacraft-cli</code> on your <code>PATH</code> and lists DiaCraft under “Open with” for <code>.diacraft</code>, <code>.vsdx</code> and <code>.odg</code> files. On Linux, install the <code>.deb</code> on Debian and Ubuntu, or make the AppImage executable and run it; the archive has an <code>install.sh</code> that adds DiaCraft to your application menu. On a Mac, open the disk image and drag DiaCraft.app onto Applications.</p>
+          <p>The downloads are not signed yet, so Windows may ask you to confirm the first time you open DiaCraft, and macOS asks. The release page has a <code>SHA256SUMS</code> file to check each download against. <a href="/#download">Go to the downloads</a></p>
+        </section>
+        <section id="browser">
+          <h2>DiaCraft in your browser</h2>
+          <p>The same editor runs in a browser tab at diacraft.app, with nothing to install. It opens and saves <code>.diacraft</code>, VSDX and OpenDocument files on your computer and exports PNG, SVG and PDF. It sends no drawing anywhere and stores nothing in your browser. It can open in a window of its own, and it asks before a tab with unsaved changes is closed or reloaded.</p>
+          <p>Very large drawings, your own fonts, printing to a printer, the command line and the MCP server are for the desktop app: in the browser, Print saves the PDF that a printer would be given. The browser version has been run in current releases of Chrome and Firefox on Linux. <a href="/browser.html">What the browser version needs and what it keeps</a></p>
+        </section>
+        <section id="automation">
+          <h2>From the command line and AI agents</h2>
+          <p><code>diacraft-cli convert</code> saves a drawing as another type and <code>diacraft-cli export</code> makes a picture of a page, without opening a window. Each prints a line of JSON that says what it wrote. To check a conversion, use <code>diacraft-cli roundtrip</code> with <code>--via diacraft</code>: for a VSDX or ODG package, the report compares the original content with the copy written back to the source format.</p>
+          <p>Through the MCP server, <code>diacraft-cli mcp</code>, an AI agent can create a diagram in a session of its own or edit the drawing you see on screen, with the same commands the window uses. <a href="/guides/command-line.html">Command-line guide</a> · <a href="/guides/agents.html">Agent guide</a></p>
+        </section>
+        <section id="details">
+          <h2>Also in this release</h2>
+          <ul>
+            <li><strong>The Save dialog sets the extension.</strong> Choosing a file type in the Save dialog changes the extension of the name to that type’s, on Windows, macOS and Linux. An extension you type yourself is kept. Export and Save as PDF use the same dialog.</li>
+            <li><strong>The splash at full size on dense screens.</strong> The splash and About DiaCraft are the same size on every screen, and on a high-density screen they are drawn from the full-resolution artwork, so they stay sharp.</li>
+            <li><strong>An updated renderer.</strong> The renderer that draws each page in the window and in PNG exports moves to version 0.4 of the vello_cpu library.</li>
+            <li><strong>The licences in the app.</strong> File → About → Third-party licences lists every library DiaCraft is built from, with its licence.</li>
+          </ul>
+        </section>
+        <section id="limits">
+          <h2>What is still limited</h2>
+          <ul>
+            <li><strong>An early release.</strong> DiaCraft is at an early stage, and many controls of the window are shown but do not work yet.</li>
+            <li><strong>File types.</strong> The older binary and XML drawing types (<code>.vsd</code>, <code>.vdx</code>) do not open. A stencil is never saved as an OpenDocument file, and no Save As writes a <code>.fodg</code>. Testing DiaCraft on a wider range of files continues.</li>
+            <li><strong>Opening a file from the desktop.</strong> By default, double-clicking a drawing does not open it in DiaCraft. On Windows, DiaCraft is listed under “Open with”; on every system, File → Open and <code>diacraft FILE</code> open a drawing.</li>
+            <li><strong>The browser version</strong> opens smaller drawings than the desktop app, and has only its two built-in fonts and no printer. <a href="/browser.html">What it cannot do</a></li>
+          </ul>
+          <p><a href="/guides/file-formats.html">Read the current format limits</a></p>
         </section>
       </article>
       <aside class="rail">
@@ -77,7 +140,13 @@
           <p class="label">On this page</p>
           <ol>
             <li><a href="#native-default"><span>New drawings start in .diacraft</span></a></li>
-            <li><a href="#exchange"><span>More ways to exchange an editable drawing</span></a></li>
+            <li><a href="#exchange"><span>Save across VSDX and OpenDocument</span></a></li>
+            <li><a href="#editor"><span>Inside the editor</span></a></li>
+            <li><a href="#downloads"><span>Downloads for Windows, macOS and Linux</span></a></li>
+            <li><a href="#browser"><span>DiaCraft in your browser</span></a></li>
+            <li><a href="#automation"><span>From the command line and AI agents</span></a></li>
+            <li><a href="#details"><span>Also in this release</span></a></li>
+            <li><a href="#limits"><span>What is still limited</span></a></li>
           </ol>
         </nav>
       </aside>
