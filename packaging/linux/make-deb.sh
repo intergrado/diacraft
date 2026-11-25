@@ -74,9 +74,11 @@ case $version in
 esac
 
 # What the package needs. `Depends`: the C library at the version the programs were built against, the library that runs the compiler's own unwinding, the keyboard
-# library (both window systems use it), a window system (Wayland or X11) and a graphics API (Vulkan, or OpenGL through EGL). `Recommends`: what completes them, the
+# library (both window systems use it), libxcb (the program loads it to talk to an X server: `x11rb`, with its `dl-libxcb` feature, in both CPUs' builds; a scan of the
+# bytes of the x86_64 build does not show the name, which the compiler wrote into the code a few bytes at a time, and the ARM64 build's does), a window system (Wayland
+# or X11) and a graphics API (Vulkan, or OpenGL through EGL). `Recommends`: what completes them, the
 # graphics drivers, and the desktop's portal that the Open and Save dialogs use. The packages are named the same on Debian and Ubuntu, for both CPUs.
-depends="libc6 (>= $glibc), libgcc-s1, libxkbcommon0, libwayland-client0 | libx11-6, libvulkan1 | libegl1"
+depends="libc6 (>= $glibc), libgcc-s1, libxkbcommon0, libxcb1, libwayland-client0 | libx11-6, libvulkan1 | libegl1"
 recommends="libxkbcommon-x11-0, libx11-xcb1, libxcursor1, libxi6, libwayland-egl1, libdbus-1-3, mesa-vulkan-drivers | libgl1-mesa-dri, xdg-desktop-portal"
 
 # The Debian package that holds a library the programs name, or nothing for a library this script does not know.
@@ -90,6 +92,7 @@ package_of_library() { # package_of_library SONAME
     libwayland-egl.so.1) echo libwayland-egl1 ;;
     libX11.so.6) echo libx11-6 ;;
     libX11-xcb.so.1) echo libx11-xcb1 ;;
+    libxcb.so.1) echo libxcb1 ;;
     libXcursor.so.1) echo libxcursor1 ;;
     libXi.so.6) echo libxi6 ;;
     libEGL.so.1) echo libegl1 ;;

@@ -195,6 +195,7 @@ On macOS and Windows the desktop window checks a graphics adapter before it draw
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-25 | minor | A `.deb` test names every library the programs load by name, on a stand-in of the other CPU |
 | 2026-11-24 | minor | The packaging tests hold the relative paths the workflows give the scripts (`packaging_smoke.rs`, and the AppImage script's tool and runtime) |
 | 2026-11-24 | trivial | Commands says `cargo xtask deploy-check` is a step of neither `ci` nor the release workflow |
 | 2026-11-24 | minor | The packaging tests of the `.deb` use a real program for the machine's own CPU, so that they pass on a runner that has `strip`; the MSI test sets `WIX` to a folder as the Windows images do |

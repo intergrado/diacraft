@@ -169,3 +169,60 @@ fn a_program_of_this_cpu_is_stripped_one_strip_refuses_stops_the_script_and_one_
     assert!(say(&out).contains("strip could not read diacraft"), "{}", say(&out));
     assert!(!dir.path().join("out").join("diacraft-v0.2.0-linux-x86_64.deb").exists());
 }
+
+/// The libraries the programs load by name when they start, each with the package that holds it, as `make-deb.sh` knows them. The names are the ones the crates that load
+/// them hold (`x11rb` loads `libxcb.so.1`, `ash` `libvulkan.so.1`, `winit`'s `x11-dl` the X libraries, `wayland-sys` the Wayland ones, and so on). Whether a program's
+/// build shows its names to a scan of its bytes is up to the compiler: a short name can be written into the code a few bytes at a time, as the x86_64 build does for
+/// `libxcb.so.1` and the ARM64 build does not, and the release run of the ARM64 `.deb` found the name when the x86_64 one had not. Every name is accepted, and its
+/// package is in the package's `Depends` or `Recommends`.
+const LIBRARIES: [(&str, &str); 14] = [
+    ("libc.so.6", "libc6"),
+    ("libm.so.6", "libc6"),
+    ("libgcc_s.so.1", "libgcc-s1"),
+    ("libxkbcommon.so.0", "libxkbcommon0"),
+    ("libxkbcommon-x11.so.0", "libxkbcommon-x11-0"),
+    ("libwayland-client.so.0", "libwayland-client0"),
+    ("libwayland-egl.so.1", "libwayland-egl1"),
+    ("libX11.so.6", "libx11-6"),
+    ("libX11-xcb.so.1", "libx11-xcb1"),
+    ("libxcb.so.1", "libxcb1"),
+    ("libXcursor.so.1", "libxcursor1"),
+    ("libXi.so.6", "libxi6"),
+    ("libEGL.so.1", "libegl1"),
+    ("libvulkan.so.1", "libvulkan1"),
+];
+
+#[test]
+fn every_library_the_programs_load_by_name_is_known_with_its_package_and_libxcb_is_a_dependency() {
+    if !has_dpkg_deb() {
+        return;
+    }
+    // A stand-in of the CPU this machine is not: the script leaves it as it is, and a scan of its bytes finds the names written in it, as the scan of the ARM64 build did.
+    let other = match std::env::consts::ARCH {
+        "x86_64" => 0xb7,
+        _ => 0x3e,
+    };
+    let arch = if other == 0xb7 { "arm64" } else { "x86_64" };
+    for (library, package) in LIBRARIES.into_iter().chain([("libdbus-1.so.3", "libdbus-1-3")]) {
+        let dir = TempDir::new("make-deb-libraries");
+        let mut named = elf(other);
+        named.extend(format!("{library}\0").bytes());
+        programs(&dir, &named, &named, "");
+        let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+        assert!(out.status.success(), "{library}: {}", say(&out));
+        let deb = dir.path().join("out").join(format!("diacraft-v0.2.0-linux-{arch}.deb"));
+        let wanted = format!("{} {}", field(&deb, "Depends"), field(&deb, "Recommends"));
+        let words: Vec<&str> = wanted.split(|c: char| !(c.is_ascii_alphanumeric() || "+-.".contains(c))).collect();
+        assert!(words.contains(&package), "{library}: {package} is neither depended on nor recommended: {wanted}");
+    }
+    // `x11rb` loads libxcb when the program opens a window on an X server, and a program that cannot is no window program: the package depends on it (it is small, and
+    // `libx11-6` depends on it anyway).
+    let depends = {
+        let dir = TempDir::new("make-deb-xcb");
+        programs(&dir, &elf(other), &elf(other), "");
+        let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+        assert!(out.status.success(), "{}", say(&out));
+        field(&dir.path().join("out").join(format!("diacraft-v0.2.0-linux-{arch}.deb")), "Depends")
+    };
+    assert!(depends.split(", ").any(|d| d == "libxcb1"), "Depends: {depends}");
+}
