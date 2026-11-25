@@ -13,10 +13,29 @@ die() {
 # The repository's root: the folder above this one.
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-# What goes in a file name: the release tag (v0.2.0), or a label for a test build.
+# What goes in a file name: the release's version (0.2.0), or a label for a test build. A tag (v0.2.0) is taken too, and named as its version.
 check_name() { # check_name NAME
     case $1 in
     '' | *[!A-Za-z0-9._-]*) die "NAME must be letters, digits, '.', '_' and '-' only: '$1'" ;;
+    esac
+}
+
+# The name as a file name has it: a launcher reads `diacraft-<version>-<system>-<cpu>` and wants the version to start with a digit, so the `v` of a tag
+# (v0.2.0) is left out, and only that one: a label that is no tag (dev-1a2b3c4, a test build's `ci`) is kept as it is.
+file_version() { # file_version NAME
+    case $1 in
+    v[0-9]*) printf '%s\n' "${1#v}" ;;
+    *) printf '%s\n' "$1" ;;
+    esac
+}
+
+# The CPU as a file name says it, from the architecture read from the programs (x86_64 or arm64): Linux on ARM is aarch64, as the kernel and the launchers say
+# it, Windows on Intel or AMD is x64, and everything else is as it is read (Linux x86_64, Windows arm64, and both CPUs of macOS).
+file_arch() { # file_arch linux|windows|macos ARCH
+    case $1:$2 in
+    linux:arm64) echo aarch64 ;;
+    windows:x86_64) echo x64 ;;
+    *) echo "$2" ;;
     esac
 }
 

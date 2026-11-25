@@ -29,7 +29,7 @@ Opening an app that is not signed
        xattr -dr com.apple.quarantine /Applications/DiaCraft.app
        xattr -d com.apple.quarantine /usr/local/bin/diacraft-cli
 
-  To check the file you downloaded is the one that was released, compare it with SHA256SUMS on the release page:
+  To check the file you downloaded is the one that was released, compare it with SHA256SUMS.txt on the release page:
        shasum -a 256 diacraft-@NAME@-macos-@ARCH@.dmg     (or the .zip)
 
 What it needs

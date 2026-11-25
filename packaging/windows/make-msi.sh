@@ -3,12 +3,13 @@
 #
 #   packaging/windows/make-msi.sh NAME OUT_DIR BIN_DIR
 #
-#   NAME     what goes in the file name: the release tag (v0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only.
+#   NAME     what goes in the file name: the release's version (0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only. A tag (v0.2.0) is named
+#            as its version, with no `v` in the file name.
 #   OUT_DIR  where the installer is written; created when it is not there.
 #   BIN_DIR  a folder holding the release programs `diacraft.exe` and `diacraft-cli.exe`.
 #
-# Writes OUT_DIR/diacraft-NAME-windows-ARCH.msi (ARCH is x86_64 or arm64, read from the programs; WiX says x64 or arm64) and prints its path. The name follows the
-# downloads' (diacraft-<tag>-windows-<arch>), which also says what CPU it is for.
+# Writes OUT_DIR/diacraft-NAME-windows-CPU.msi (CPU is x64 or arm64, read from the programs, as WiX says them) and prints its path. The name follows the
+# downloads' (diacraft-<version>-windows-<cpu>), which also says what CPU it is for.
 #
 # What the installer does is written in packaging/windows/diacraft.wxs: per user, into %LocalAppData%\Programs\DiaCraft, a Start menu shortcut, the folder on the person's
 # PATH, "Open with" for .diacraft, .vsdx and .odg and never the default program. The installer's version is the plain MAJOR.MINOR.PATCH of the name (v0.2.0-rc1 is 0.2.0:
@@ -29,6 +30,7 @@ name=$1
 out=$2
 bin=$3
 check_name "$name"
+name=$(file_version "$name")
 [ -d "$bin" ] || die "no such folder: $bin"
 bin=$(cd "$bin" && pwd)
 wix=${DIACRAFT_WIX:-wix}
@@ -79,7 +81,7 @@ case $repo_url in
 https://*) defines+=(-d "HomePage=$repo_url") ;;
 esac
 
-msi=$out/diacraft-$name-windows-$arch.msi
+msi=$out/diacraft-$name-windows-$(file_arch windows "$arch").msi
 rm -f "$msi"
 # -pdbtype none: no .wixpdb is written beside the installer. The installer's checks (ICE) run, which is what -sval would turn off.
 "$wix" build -nologo -arch "$wix_arch" -pdbtype none "${defines[@]}" -o "$(win "$msi")" "$(win "$root/packaging/windows/diacraft.wxs")" >&2

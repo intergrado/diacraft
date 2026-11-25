@@ -5,19 +5,21 @@
 #   packaging/package.sh PLATFORM NAME OUT_DIR BIN_DIR...
 #
 #   PLATFORM  linux, windows or macos.
-#   NAME      what goes in the file name: the release tag (v0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only.
+#   NAME      what goes in the file name: the release's version (0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only. A tag (v0.2.0) is
+#             named as its version: a launcher wants the version to start with a digit, so no file name has the tag's `v`.
 #   OUT_DIR   where the archive is written; created when it is not there.
 #   BIN_DIR   a folder holding the release binaries `diacraft` and `diacraft-cli` (with `.exe` on Windows): one folder, of one architecture. There is no
 #             universal macOS download (the owner, 2026-11-25): each architecture's programs are packaged on their own.
 #
 # Writes (the last line printed is the archive's path; macOS also writes a disk image, and prints its path before it):
-#   Linux    diacraft-NAME-linux-ARCH.tar.gz     a folder holding both programs, the launcher entry, the icon, an install script, the licences (LICENSE-MIT,
+#   Linux    diacraft-NAME-linux-CPU.tar.gz      a folder holding both programs, the launcher entry, the icon, an install script, the licences (LICENSE-MIT,
 #                                                LICENSE-APACHE), NOTICE, ATTRIBUTION.md, THIRD-PARTY-LICENSES.txt, a README
-#   Windows  diacraft-NAME-windows-ARCH.zip      a folder holding both .exe files, the same licence files, a README
-#   macOS    diacraft-NAME-macos-ARCH.zip        a folder holding DiaCraft.app (with its icon, and the licence files in its Resources), diacraft-cli, the licence
+#   Windows  diacraft-NAME-windows-CPU-portable.zip   a folder holding both .exe files, the same licence files, a README (the folder is diacraft-NAME-windows-CPU)
+#   macOS    diacraft-NAME-macos-CPU.zip         a folder holding DiaCraft.app (with its icon, and the licence files in its Resources), diacraft-cli, the licence
 #                                                files, a README
-#            diacraft-NAME-macos-ARCH.dmg        a disk image of that same folder, with a link to Applications beside the app
-#            ARCH is x86_64 or arm64, read from the header of the program (never from the machine the script runs on, which may be a cross build's).
+#            diacraft-NAME-macos-CPU.dmg         a disk image of that same folder, with a link to Applications beside the app
+#            CPU is read from the header of the program (never from the machine the script runs on, which may be a cross build's), and written as a file name has it
+#            (common.sh, `file_arch`): Linux x86_64 or aarch64, Windows x64 or arm64, macOS x86_64 or arm64.
 #
 # Environment (all optional):
 #   DIACRAFT_REPOSITORY  owner/name of the GitHub repository, for the link in the README.
@@ -40,6 +42,7 @@ out=$3
 shift 3
 
 check_name "$name"
+name=$(file_version "$name")
 
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
@@ -55,17 +58,18 @@ stage=$(mktemp -d "${TMPDIR:-/tmp}/diacraft-package.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 
 # The README of the platform, with the release's name and the repository's address filled in, and what it says of the CPU its download is for: @ARCH@ (x86_64 or
-# arm64), @CPU@ (Intel or AMD, or ARM; for macOS Apple silicon and Intel, Apple silicon, or Intel), for macOS @CHIP@ (the Macs the download runs on), and for Linux @GLIBC@ (the oldest
+# arm64), @FILEARCH@ (the same CPU as the names of the files say it: aarch64, x64), @CPU@ (Intel or AMD, or ARM; for macOS Apple silicon and Intel, Apple silicon, or Intel), for macOS @CHIP@ (the Macs the download runs on), and for Linux @GLIBC@ (the oldest
 # C library the programs run on) and @DISTROS@ (distributions that have one that new). A platform sets those once it has read the architecture of the programs.
 set_repo_url
 arch=""
+file_cpu=""
 cpu=""
 glibc=""
 distros=""
 chip=""
 render_readme() { # render_readme SOURCE DEST
     [ -f "$1" ] || die "missing $1"
-    sed -e "s|@NAME@|$name|g" -e "s|@REPO_URL@|$repo_url|g" -e "s|@ARCH@|$arch|g" -e "s|@CPU@|$cpu|g" -e "s|@CHIP@|$chip|g" -e "s|@GLIBC@|$glibc|g" \
+    sed -e "s|@NAME@|$name|g" -e "s|@REPO_URL@|$repo_url|g" -e "s|@ARCH@|$arch|g" -e "s|@FILEARCH@|$file_cpu|g" -e "s|@CPU@|$cpu|g" -e "s|@CHIP@|$chip|g" -e "s|@GLIBC@|$glibc|g" \
         -e "s|@DISTROS@|$distros|g" "$1" >"$2"
 }
 
@@ -87,8 +91,9 @@ case $platform in
 linux)
     [ ${#bin_dirs[@]} -eq 1 ] || die "linux takes one BIN_DIR"
     arch=$(programs_arch linux "${bin_dirs[0]}")
+    file_cpu=$(file_arch linux "$arch")
     linux_cpu_words "$arch"
-    base="diacraft-$name-linux-$arch"
+    base="diacraft-$name-linux-$file_cpu"
     dir=$stage/$base
     mkdir -p "$dir"
     for b in diacraft diacraft-cli; do
@@ -112,11 +117,12 @@ linux)
 windows)
     [ ${#bin_dirs[@]} -eq 1 ] || die "windows takes one BIN_DIR"
     arch=$(programs_arch windows "${bin_dirs[0]}")
+    file_cpu=$(file_arch windows "$arch")
     case $arch in
     x86_64) cpu="Intel or AMD" ;;
     *) cpu="ARM" ;;
     esac
-    base="diacraft-$name-windows-$arch"
+    base="diacraft-$name-windows-$file_cpu"
     dir=$stage/$base
     mkdir -p "$dir"
     for b in diacraft diacraft-cli; do
@@ -126,7 +132,8 @@ windows)
     add_licences "$dir"
     need "$dir/diacraft.exe" "$dir/diacraft-cli.exe" "$dir/README.txt"
     need_licences "$dir"
-    archive=$out/$base.zip
+    # The zip holds the whole program in a folder, and needs no installer, so its name says `portable` (the installer, the .msi, has the name without it).
+    archive=$out/$base-portable.zip
     rm -f "$archive"
     if command -v zip >/dev/null 2>&1; then
         (cd "$stage" && zip -qr -X "$archive" "$base")
@@ -156,7 +163,8 @@ macos)
         chip="a Mac with an Intel chip"
         ;;
     esac
-    base="diacraft-$name-macos-$arch"
+    file_cpu=$(file_arch macos "$arch")
+    base="diacraft-$name-macos-$file_cpu"
     dir=$stage/$base
     app=$dir/DiaCraft.app
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

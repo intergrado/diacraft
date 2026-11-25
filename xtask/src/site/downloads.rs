@@ -1,5 +1,5 @@
 //! The pages' download links against the release workflow. Each link of a page is the file of the release of the workspace's version, and each file is one that the release
-//! workflow's last job expects in the release and lists in `SHA256SUMS`: a link whose file the release never has would be a dead download.
+//! workflow's last job expects in the release and lists in `SHA256SUMS.txt`: a link whose file the release never has would be a dead download.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -13,7 +13,8 @@ pub(super) const WORKFLOW: &str = ".github/workflows/release.yml";
 /// The most the workflow's text may be.
 const MAX_WORKFLOW: u64 = 512 * 1024;
 
-/// The files the release workflow's checksums job expects in the release, as patterns with `{tag}` for the tag: each `"diacraft-$NAME-..."` word of its `expected=$(printf ... | sort` command.
+/// The files the release workflow's checksums job expects in the release, as patterns with `{version}` for the version (the tag without its `v`): each `"diacraft-$VERSION-..."` word of its
+/// `expected=$(printf ... | sort` command.
 pub(super) fn listed(workflow: &str) -> Result<Vec<String>, String> {
     let start =
         workflow.find("expected=$(printf").ok_or("the checksums job of the release workflow has no list of the files (`expected=$(printf`)")?;
@@ -23,11 +24,11 @@ pub(super) fn listed(workflow: &str) -> Result<Vec<String>, String> {
         .get(..end)
         .unwrap_or("")
         .split('"')
-        .filter(|word| word.starts_with("diacraft-$NAME-"))
-        .map(|word| word.replace("$NAME", "{tag}"))
+        .filter(|word| word.starts_with("diacraft-$VERSION-"))
+        .map(|word| word.replace("$VERSION", "{version}"))
         .collect();
     if names.is_empty() {
-        return Err("the checksums job of the release workflow lists no file (`\"diacraft-$NAME-...\"`)".into());
+        return Err("the checksums job of the release workflow lists no file (`\"diacraft-$VERSION-...\"`)".into());
     }
     Ok(names)
 }
@@ -92,8 +93,8 @@ mod tests {
     steps:
       - run: |
           expected=$(printf '%s\n' \
-            "diacraft-$NAME-linux-x86_64.tar.gz" "diacraft-$NAME-linux-arm64.tar.gz" \
-            "diacraft-$NAME-macos-arm64.dmg" "diacraft-$NAME-macos-x86_64.dmg" | sort | tr '\n' ' ' | sed 's/ $//')
+            "diacraft-$VERSION-linux-x86_64.tar.gz" "diacraft-$VERSION-linux-aarch64.tar.gz" \
+            "diacraft-$VERSION-macos-arm64.dmg" "diacraft-$VERSION-macos-x86_64.dmg" | sort | tr '\n' ' ' | sed 's/ $//')
           found=$(cd downloads && ls | sort)
 "#;
 
@@ -121,10 +122,10 @@ mod tests {
     fn settings() -> Settings {
         let mut assets: std::collections::BTreeMap<String, String> = DOWNLOADS.iter().map(|id| ((*id).to_owned(), String::new())).collect();
         for (id, name) in [
-            ("linux-x86_64-targz", "diacraft-{tag}-linux-x86_64.tar.gz"),
-            ("linux-arm64-targz", "diacraft-{tag}-linux-arm64.tar.gz"),
-            ("macos-arm64-dmg", "diacraft-{tag}-macos-arm64.dmg"),
-            ("macos-x86_64-dmg", "diacraft-{tag}-macos-x86_64.dmg"),
+            ("linux-x86_64-targz", "diacraft-{version}-linux-x86_64.tar.gz"),
+            ("linux-arm64-targz", "diacraft-{version}-linux-aarch64.tar.gz"),
+            ("macos-arm64-dmg", "diacraft-{version}-macos-arm64.dmg"),
+            ("macos-x86_64-dmg", "diacraft-{version}-macos-x86_64.dmg"),
         ] {
             assets.insert(id.to_owned(), name.to_owned());
         }
@@ -149,18 +150,24 @@ mod tests {
     }
 
     #[test]
-    fn the_list_is_the_words_of_the_checksums_job_with_the_tag_left_open() {
+    fn the_list_is_the_words_of_the_checksums_job_with_the_version_left_open() {
         assert_eq!(
             listed(WORKFLOW).unwrap(),
             [
-                "diacraft-{tag}-linux-x86_64.tar.gz",
-                "diacraft-{tag}-linux-arm64.tar.gz",
-                "diacraft-{tag}-macos-arm64.dmg",
-                "diacraft-{tag}-macos-x86_64.dmg"
+                "diacraft-{version}-linux-x86_64.tar.gz",
+                "diacraft-{version}-linux-aarch64.tar.gz",
+                "diacraft-{version}-macos-arm64.dmg",
+                "diacraft-{version}-macos-x86_64.dmg"
             ]
         );
-        for bad in ["", "expected=$(printf '%s\\n' \"diacraft-$NAME-a\"", "expected=$(printf '%s\\n' \"a\" \"b\" | sort", "expected=$(printf | sort"]
-        {
+        // A word named by the tag (`$NAME`, which the file names were made of before a change) is no file of the list.
+        for bad in [
+            "",
+            "expected=$(printf '%s\\n' \"diacraft-$VERSION-a\"",
+            "expected=$(printf '%s\\n' \"a\" \"b\" | sort",
+            "expected=$(printf | sort",
+            "expected=$(printf '%s\\n' \"diacraft-$NAME-a\" | sort",
+        ] {
             assert!(listed(bad).is_err(), "{bad:?}");
         }
     }
@@ -179,11 +186,14 @@ mod tests {
     fn an_asset_the_workflow_does_not_list_is_refused_where_site_json_names_it() {
         let root = Root::new(WORKFLOW);
         let mut settings = settings();
-        settings.assets.insert("linux-arm64-deb".into(), "diacraft-{tag}-linux-arm64.deb".into());
+        settings.assets.insert("linux-arm64-deb".into(), "diacraft-{version}-linux-aarch64.deb".into());
         let error = check(&root.0, &root.0.join("site"), &settings, &pages(&root, "")).unwrap_err();
         assert!(error.contains("assets.linux-arm64-deb") && error.contains("does not list"), "{error}");
-        // A name that is only the tag in another place is another file.
+        // A name made with the tag, which has the `v`, is another file than the one made with the version; so is the CPU in the words the names had before.
         settings.assets.insert("linux-arm64-deb".into(), String::new());
+        settings.assets.insert("linux-arm64-targz".into(), "diacraft-{tag}-linux-aarch64.tar.gz".into());
+        let error = check(&root.0, &root.0.join("site"), &settings, &pages(&root, "")).unwrap_err();
+        assert!(error.contains("assets.linux-arm64-targz"), "{error}");
         settings.assets.insert("linux-arm64-targz".into(), "diacraft-{version}-linux-arm64.tar.gz".into());
         let error = check(&root.0, &root.0.join("site"), &settings, &pages(&root, "")).unwrap_err();
         assert!(error.contains("assets.linux-arm64-targz"), "{error}");
@@ -197,7 +207,10 @@ mod tests {
         for (bad, said) in [
             // The page of the latest release, which was the link before a change.
             (
-                good.replace(&direct_address(&settings, "diacraft-{tag}-linux-arm64.tar.gz"), "https://github.com/owner/drawing/releases/latest"),
+                good.replace(
+                    &direct_address(&settings, "diacraft-{version}-linux-aarch64.tar.gz"),
+                    "https://github.com/owner/drawing/releases/latest",
+                ),
                 "not a file of the release v0.2.0",
             ),
             // A file of an older release.
@@ -205,13 +218,15 @@ mod tests {
             // Another repository.
             (good.replace("owner/drawing", "other/drawing"), "not a file of the release v0.2.0"),
             // A file the workflow does not list.
-            (good.replace("linux-arm64.tar.gz", "linux-arm64.tar.xz"), "does not list"),
+            (good.replace("linux-aarch64.tar.gz", "linux-aarch64.tar.xz"), "does not list"),
+            // The name the file had before a change, with the tag's `v` and the CPU as the site says it: the release has no such file.
+            (good.replace("diacraft-0.2.0-linux-aarch64.tar.gz", "diacraft-v0.2.0-linux-arm64.tar.gz"), "does not list"),
             // A file in a folder under the release's, a query and a fragment.
-            (good.replace("/diacraft-v0.2.0-linux", "/x/diacraft-v0.2.0-linux"), "not a file of the release v0.2.0"),
+            (good.replace("/diacraft-0.2.0-linux", "/x/diacraft-0.2.0-linux"), "not a file of the release v0.2.0"),
             (good.replace(".tar.gz\"", ".tar.gz?raw=1\""), "not a file of the release v0.2.0"),
             (good.replace(".tar.gz\"", ".tar.gz#x\""), "not a file of the release v0.2.0"),
             // No file name at all.
-            (good.replace("diacraft-v0.2.0-linux-arm64.tar.gz", ""), "not a file of the release v0.2.0"),
+            (good.replace("diacraft-0.2.0-linux-aarch64.tar.gz", ""), "not a file of the release v0.2.0"),
         ] {
             let error = check(&root.0, &root.0.join("site"), &settings, &pages(&root, &bad)).unwrap_err();
             assert!(error.contains(said), "{bad}: {error}");

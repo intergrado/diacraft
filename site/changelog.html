@@ -3,21 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Changelog: release notes for 0.2.0 · DiaCraft</title>
-  <meta name="description" content="Release notes for DiaCraft 0.2.0, the first public release: the .diacraft format, saving across VSDX and OpenDocument, and downloads for Windows, Mac and Linux." />
+  <title>Changelog: release notes for 0.2.1 · DiaCraft</title>
+  <meta name="description" content="Release notes for DiaCraft 0.2.1, with new download file names, and 0.2.0, the first public release: the .diacraft format and saving as VSDX or OpenDocument." />
   <link rel="canonical" href="https://diacraft.dev/changelog" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="DiaCraft" />
-  <meta property="og:title" content="Changelog: release notes for 0.2.0 · DiaCraft" />
-  <meta property="og:description" content="Release notes for DiaCraft 0.2.0, the first public release: the .diacraft format, saving across VSDX and OpenDocument, and downloads for Windows, Mac and Linux." />
+  <meta property="og:title" content="Changelog: release notes for 0.2.1 · DiaCraft" />
+  <meta property="og:description" content="Release notes for DiaCraft 0.2.1, with new download file names, and 0.2.0, the first public release: the .diacraft format and saving as VSDX or OpenDocument." />
   <meta property="og:url" content="https://diacraft.dev/changelog" />
   <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Changelog: release notes for 0.2.0 · DiaCraft" />
-  <meta name="twitter:description" content="Release notes for DiaCraft 0.2.0, the first public release: the .diacraft format, saving across VSDX and OpenDocument, and downloads for Windows, Mac and Linux." />
+  <meta name="twitter:title" content="Changelog: release notes for 0.2.1 · DiaCraft" />
+  <meta name="twitter:description" content="Release notes for DiaCraft 0.2.1, with new download file names, and 0.2.0, the first public release: the .diacraft format and saving as VSDX or OpenDocument." />
   <meta name="twitter:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta name="twitter:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
@@ -31,14 +31,14 @@
     {
       "@context": "https://schema.org",
       "@type": "WebPage",
-      "description": "Release notes for DiaCraft 0.2.0, the first public release: the .diacraft format, saving across VSDX and OpenDocument, and downloads for Windows, Mac and Linux.",
+      "description": "Release notes for DiaCraft 0.2.1, with new download file names, and 0.2.0, the first public release: the .diacraft format and saving as VSDX or OpenDocument.",
       "inLanguage": "en",
       "isPartOf": {
         "@type": "WebSite",
         "name": "DiaCraft",
         "url": "https://diacraft.dev/"
       },
-      "name": "Changelog: release notes for 0.2.0",
+      "name": "Changelog: release notes for 0.2.1",
       "url": "https://diacraft.dev/changelog"
     }
   </script>
@@ -63,11 +63,11 @@
         <div class="page-title">
           <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Changelog</span></p>
           <h1>Changelog</h1>
-          <p class="lead">DiaCraft 0.2.0 is the first public release: a free, open-source diagram editor for Linux, Windows, macOS and the browser. It opens, edits and saves VSDX and OpenDocument drawings, and keeps new drawings in its own <code>.diacraft</code> format.</p>
+          <p class="lead">DiaCraft 0.2.1 gives the download files names that an app launcher can read. DiaCraft 0.2.0 was the first public release, and 0.2.1 keeps all of it: a free, open-source diagram editor for Linux, Windows, macOS and the browser. It opens, edits and saves VSDX and OpenDocument drawings, and keeps new drawings in its own <code>.diacraft</code> format.</p>
         </div>
         <div class="title-block">
           <dl class="spec">
-            <div><dt>Release</dt><dd><b>0.2.0</b></dd></div>
+            <div><dt>Release</dt><dd><b>0.2.1</b></dd></div>
             <div><dt>Date</dt><dd><time datetime="2026-11-25">25 November 2026</time></dd></div>
             <div><dt>Platforms</dt><dd>Linux · Windows · macOS · Browser</dd></div>
           </dl>
@@ -76,6 +76,16 @@
     </header>
     <div class="wrap doc">
       <article class="prose">
+        <section id="release-0-2-1">
+          <h2>New in 0.2.1</h2>
+          <p>The editor and the drawing files are as they were in 0.2.0. What changed is how the downloads are named and checked, and a few lines of text.</p>
+          <ul>
+            <li><strong>New names for the download files.</strong> Every file is named <code>diacraft-&lt;version&gt;-&lt;system&gt;-&lt;processor&gt;[-portable].&lt;extension&gt;</code>, with a version that starts with a digit, for example <code>diacraft-0.2.1-linux-x86_64.AppImage</code>. Windows on Intel/AMD is <code>x64</code>, Linux on ARM is <code>aarch64</code>, and the Windows zips end in <code>-portable</code>. The address of the release keeps its <code>v</code>: <code>/releases/download/v0.2.1/</code>.</li>
+            <li><strong>The checksums are in SHA256SUMS.txt.</strong> The file lists the checksum of each of the fourteen downloads, one line each, as <code>sha256sum</code> writes them. In 0.2.0 it was called <code>SHA256SUMS</code>.</li>
+            <li><strong>About DiaCraft names more trademarks.</strong> The notice there and in the <code>NOTICE</code> file now names ArchiMate, UML and BPMN with their owners, as the website does.</li>
+            <li><strong>New pages on this website.</strong> <a href="/flowcharts.html">Flowcharts</a>, <a href="/architecture-diagrams.html">architecture diagrams</a>, <a href="/org-charts.html">org charts</a> and <a href="/vsdx-editor.html">VSDX files</a>, and an <a href="/guides/">index of the guides</a>. The web app has a title and a description for search engines and social cards.</li>
+          </ul>
+        </section>
         <section id="native-default">
           <h2>New drawings start in .diacraft</h2>
           <p>The first time you save a new drawing, the Save dialog offers DiaCraft’s own format, <code>.diacraft</code>, first. The file holds the drawing’s pages, shapes, styles and pictures, and keeps details that came from a VSDX or OpenDocument drawing without storing the original file. Opening an existing <code>.vsdx</code> or <code>.odg</code> and choosing Save keeps its file type.</p>
@@ -110,7 +120,7 @@
         <section id="downloads">
           <h2>Downloads for Windows, macOS and Linux</h2>
           <p>The release has fourteen downloads: an installer and an archive for each system, built for Intel/AMD (x64) and ARM64 processors, with separate Apple silicon and Intel builds for Macs.</p>
-          <div class="table-scroll" tabindex="0" role="group" aria-label="The downloads of 0.2.0">
+          <div class="table-scroll" tabindex="0" role="group" aria-label="The downloads">
             <table>
               <thead>
                 <tr><th scope="col">System</th><th scope="col">Installer</th><th scope="col">Archive</th><th scope="col">Processors</th></tr>
@@ -123,7 +133,7 @@
             </table>
           </div>
           <p>Each download holds the app and the command line tool, <code>diacraft-cli</code>, with the licences of DiaCraft and of the libraries it is built from. The Windows installer installs for you alone and needs no administrator rights: it adds a Start menu shortcut, puts <code>diacraft-cli</code> on your <code>PATH</code> and lists DiaCraft under “Open with” for <code>.diacraft</code>, <code>.vsdx</code> and <code>.odg</code> files. On Linux, install the <code>.deb</code> on Debian and Ubuntu, or make the AppImage executable and run it; the archive has an <code>install.sh</code> that adds DiaCraft to your application menu. On a Mac, open the disk image and drag DiaCraft.app onto Applications.</p>
-          <p>The downloads are not signed yet, so Windows may ask you to confirm the first time you open DiaCraft, and macOS asks. The release page has a <code>SHA256SUMS</code> file to check each download against. <a href="/#download">Go to the downloads</a></p>
+          <p>The downloads are not signed yet, so Windows may ask you to confirm the first time you open DiaCraft, and macOS asks. The release page has a <code>SHA256SUMS.txt</code> file to check each download against. <a href="/#download">Go to the downloads</a></p>
         </section>
         <section id="browser">
           <h2>DiaCraft in your browser</h2>
@@ -159,6 +169,7 @@
         <nav class="toc" aria-label="On this page">
           <p class="label">On this page</p>
           <ol>
+            <li><a href="#release-0-2-1"><span>New in 0.2.1</span></a></li>
             <li><a href="#native-default"><span>New drawings start in .diacraft</span></a></li>
             <li><a href="#exchange"><span>Save across VSDX and OpenDocument</span></a></li>
             <li><a href="#editor"><span>Inside the editor</span></a></li>

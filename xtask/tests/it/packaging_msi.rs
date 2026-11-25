@@ -58,7 +58,7 @@ fn the_wix_variable_of_a_windows_image_is_a_folder_and_not_the_program() {
         .env("WIX", dir.path().join("wix3-folder"))
         .env_remove("DIACRAFT_WIX")
         .arg(xtask::root().join("packaging/windows/make-msi.sh"))
-        .arg("v0.2.0")
+        .arg("0.2.0")
         .arg(dir.path().join("out"))
         .arg(dir.path().join("bin"));
     std::fs::create_dir(dir.path().join("wix3-folder")).unwrap();
@@ -85,12 +85,15 @@ fn recorded(dir: &TempDir) -> Vec<String> {
 
 #[test]
 fn an_installer_is_built_for_the_cpu_of_its_programs_with_the_version_of_its_name() {
+    // The installer's file name says the CPU as WiX does, x64 or arm64, and the name is the version with no `v`; a tag given all the same is named as its version.
     for (machine, arch, wix_arch) in [(0x8664, "x86_64", "x64"), (0xaa64, "arm64", "arm64")] {
-        for (name, version) in [("v0.2.0", "0.2.0"), ("v0.2.1-rc1", "0.2.1"), ("v1.10.3", "1.10.3")] {
+        for (name, named, version) in
+            [("0.2.0", "0.2.0", "0.2.0"), ("0.2.1-rc1", "0.2.1-rc1", "0.2.1"), ("1.10.3", "1.10.3", "1.10.3"), ("v0.2.1-rc1", "0.2.1-rc1", "0.2.1")]
+        {
             let (dir, wix) = setup(machine);
             let out = make_msi(&dir, name, Some(&wix));
             assert!(out.status.success(), "{arch} {name}: {}", say(&out));
-            let file = format!("diacraft-{name}-windows-{arch}.msi");
+            let file = format!("diacraft-{named}-windows-{wix_arch}.msi");
             assert_eq!(names(&dir.path().join("out")), [file.as_str()]);
             assert!(String::from_utf8_lossy(&out.stdout).trim_end().ends_with(&file), "{}", say(&out));
             let args = recorded(&dir);
@@ -121,7 +124,7 @@ fn a_label_that_is_no_tag_gives_the_installer_the_workspaces_version() {
 #[test]
 fn the_icon_is_the_icon_picture_in_an_ico_wrapper() {
     let (dir, wix) = setup(0x8664);
-    let out = make_msi(&dir, "v0.2.0", Some(&wix));
+    let out = make_msi(&dir, "0.2.0", Some(&wix));
     assert!(out.status.success(), "{}", say(&out));
     let ico = std::fs::read(dir.path().join("tools/icon.ico")).unwrap();
     let png = std::fs::read(xtask::root().join("assets/branding/diacraft-icon-256.png")).unwrap();
@@ -135,12 +138,12 @@ fn the_icon_is_the_icon_picture_in_an_ico_wrapper() {
 #[test]
 fn an_installer_needs_wix_and_programs_of_one_cpu() {
     let (dir, wix) = setup(0x8664);
-    let out = make_msi(&dir, "v0.2.0", Some(&dir.path().join("tools/missing")));
+    let out = make_msi(&dir, "0.2.0", Some(&dir.path().join("tools/missing")));
     assert!(!out.status.success() && say(&out).contains("wix is not here"), "{}", say(&out));
     dir.write_bytes("bin/diacraft-cli.exe", &pe(0xaa64));
-    let out = make_msi(&dir, "v0.2.0", Some(&wix));
+    let out = make_msi(&dir, "0.2.0", Some(&wix));
     assert!(!out.status.success() && say(&out).contains("one download holds one architecture"), "{}", say(&out));
-    assert!(!dir.path().join("out").join("diacraft-v0.2.0-windows-x86_64.msi").exists());
+    assert!(!dir.path().join("out").join("diacraft-0.2.0-windows-x64.msi").exists());
 }
 
 /// What the installer's source says, held as text: it installs for the person, never for the machine, and it never takes a person's file types.

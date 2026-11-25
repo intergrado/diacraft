@@ -7,18 +7,18 @@ fn read(rel: &str) -> String {
     std::fs::read_to_string(xtask::root().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
 }
 
-/// The `assets` of `site/site.json`: the id of each download, and the name of its file with `{tag}` for the release's tag.
+/// The `assets` of `site/site.json`: the id of each download, and the name of its file with `{version}` for the release's version (the tag without its `v`).
 fn assets() -> Vec<(String, String)> {
     let settings: serde_json::Value = serde_json::from_str(&read("site/site.json")).unwrap();
     settings["assets"].as_object().expect("site.json has assets").iter().map(|(id, name)| (id.clone(), name.as_str().unwrap().to_owned())).collect()
 }
 
-/// The list the release workflow's last job checks the release against: the `"diacraft-$NAME-...` words of its `expected=$(printf` command, with `{tag}` for the tag.
+/// The list the release workflow's last job checks the release against: the `"diacraft-$VERSION-...` words of its `expected=$(printf` command, with `{version}` for the version.
 fn listed_files() -> Vec<String> {
     let workflow = read(".github/workflows/release.yml");
     let start = workflow.find("expected=$(printf").expect("the checksums job has a list of the files");
     let list = &workflow[start..workflow[start..].find("| sort").map(|i| start + i).expect("the list is sorted")];
-    list.split('"').filter(|word| word.starts_with("diacraft-$NAME-")).map(|word| word.replace("$NAME", "{tag}")).collect()
+    list.split('"').filter(|word| word.starts_with("diacraft-$VERSION-")).map(|word| word.replace("$VERSION", "{version}")).collect()
 }
 
 #[test]
@@ -31,11 +31,13 @@ fn the_site_asks_for_the_files_the_release_workflow_lists_and_checks() {
     assert_eq!(listed, named, "the files the checksums job expects and the files the site asks for are the same");
     // The notes of the draft name every file too.
     for (id, name) in &assets {
-        let in_notes = name.replace("{tag}", "$TAG");
+        let in_notes = name.replace("{version}", "$VERSION");
         assert!(workflow.contains(&in_notes), "{id}: the draft's notes do not name {in_notes}");
     }
 }
 
+/// The id of a download is the site's own key: the system, the CPU as the site says it (`x86_64` or `arm64`), and the kind. The name of its file says the CPU in the words of the
+/// launchers: `aarch64` for Linux on ARM, `x64` for Windows on Intel or AMD, and for the Windows zip `-portable`.
 #[test]
 fn the_names_follow_one_pattern_system_cpu_and_kind() {
     for (id, name) in assets() {
@@ -47,10 +49,108 @@ fn the_names_follow_one_pattern_system_cpu_and_kind() {
             "targz" => "tar.gz",
             other => other,
         };
-        assert_eq!(name, format!("diacraft-{{tag}}-{system}-{cpu}.{extension}"), "{id}");
+        let in_name = match (system, cpu) {
+            ("linux", "arm64") => "aarch64",
+            ("windows", "x86_64") => "x64",
+            _ => cpu,
+        };
+        let portable = if (system, kind) == ("windows", "zip") { "-portable" } else { "" };
+        assert_eq!(name, format!("diacraft-{{version}}-{system}-{in_name}{portable}.{extension}"), "{id}");
         // There is no build for both CPUs at once (the owner, 2026-11-25: no universal macOS download): each download is for one CPU.
         assert!(["x86_64", "arm64"].contains(&cpu), "{id}");
     }
+}
+
+/// The names the launchers read, `diacraft-<version>-<system>-<cpu>[-portable].<extension>` with a version that starts with a digit, for one release of the example version 0.2.1:
+/// the fourteen files, written out, as the release workflow lists them. The git tag stays `v0.2.1`, and so does the folder of its release; no file name has the `v`.
+#[test]
+fn the_fourteen_files_of_a_release_are_named_as_the_launchers_read_them() {
+    let wanted = [
+        "diacraft-0.2.1-linux-x86_64.AppImage",
+        "diacraft-0.2.1-linux-x86_64.deb",
+        "diacraft-0.2.1-linux-x86_64.tar.gz",
+        "diacraft-0.2.1-linux-aarch64.AppImage",
+        "diacraft-0.2.1-linux-aarch64.deb",
+        "diacraft-0.2.1-linux-aarch64.tar.gz",
+        "diacraft-0.2.1-windows-x64.msi",
+        "diacraft-0.2.1-windows-x64-portable.zip",
+        "diacraft-0.2.1-windows-arm64.msi",
+        "diacraft-0.2.1-windows-arm64-portable.zip",
+        "diacraft-0.2.1-macos-arm64.dmg",
+        "diacraft-0.2.1-macos-arm64.zip",
+        "diacraft-0.2.1-macos-x86_64.dmg",
+        "diacraft-0.2.1-macos-x86_64.zip",
+    ];
+    let named = |names: Vec<String>| -> BTreeSet<String> { names.iter().map(|name| name.replace("{version}", "0.2.1")).collect() };
+    let in_workflow = named(listed_files());
+    let in_site = named(assets().into_iter().map(|(_, name)| name).collect());
+    let wanted: BTreeSet<String> = wanted.iter().map(|name| (*name).to_owned()).collect();
+    assert_eq!(in_workflow, wanted, "the workflow's list");
+    assert_eq!(in_site, wanted, "site.json's names");
+    for name in &wanted {
+        let rest = name.strip_prefix("diacraft-").expect(name);
+        let (version, rest) = rest.split_once('-').expect(name);
+        assert!(version.starts_with(|c: char| c.is_ascii_digit()), "{name}: the version starts with a digit");
+        let (system, rest) = rest.split_once('-').expect(name);
+        let (cpu, extension) = rest.split_once('.').expect(name);
+        let (cpu, portable) = cpu.split_once('-').map_or((cpu, false), |(cpu, word)| (cpu, word == "portable"));
+        let cpus: &[&str] = match system {
+            "linux" => &["x86_64", "aarch64"],
+            "windows" => &["x64", "arm64"],
+            "macos" => &["arm64", "x86_64"],
+            _ => &[],
+        };
+        assert!(cpus.contains(&cpu), "{name}: {system} has no CPU {cpu}");
+        let extensions: &[&str] = match system {
+            "linux" => &["AppImage", "deb", "tar.gz"],
+            "windows" => &["msi", "zip"],
+            _ => &["dmg", "zip"],
+        };
+        assert!(extensions.contains(&extension), "{name}");
+        // Only the Windows zip is `-portable`, and it always is: the installer and the zips of the other systems are not.
+        assert_eq!(portable, (system, extension) == ("windows", "zip"), "{name}");
+    }
+}
+
+/// The workflow gives the version, the tag without its `v`, to every file name, and the tag only to the release itself: no file the workflow makes, uploads, checks or lists is named
+/// by `$NAME`, and the checksums file is `SHA256SUMS.txt`.
+#[test]
+fn the_workflow_names_every_file_by_the_version_and_the_checksums_file_sha256sums_txt() {
+    let workflow = read(".github/workflows/release.yml");
+    let live: Vec<&str> = workflow.lines().filter(|l| !l.trim_start().starts_with('#')).collect();
+    for line in &live {
+        assert!(!line.contains("diacraft-$NAME-") && !line.contains("diacraft-$TAG-"), "a file named by the tag: {line}");
+        assert!(
+            !line.contains("windows-$ARCH") && !line.contains("linux-$ARCH"),
+            "a file named by the CPU of the matrix, which is not the CPU of the name: {line}"
+        );
+    }
+    assert!(workflow.contains("version=${tag#v}"), "the plan makes the version from the tag");
+    assert!(workflow.contains("version: ${{ steps.plan.outputs.version }}"), "the plan gives it to the jobs");
+    // The name of the sums file: the one the launchers check, in the upload, the check and the notes; the old one is nowhere.
+    for rel in [
+        ".github/workflows/release.yml",
+        "README.md",
+        "packaging/linux/README.txt",
+        "packaging/macos/README.txt",
+        "packaging/windows/README.txt",
+        "site/index.html",
+    ] {
+        let text = read(rel);
+        let mut bare = 0;
+        for (at, _) in text.match_indices("SHA256SUMS") {
+            if !text[at + "SHA256SUMS".len()..].starts_with(".txt") {
+                bare += 1;
+            }
+        }
+        assert_eq!(bare, 0, "{rel} names a checksums file `SHA256SUMS` with no `.txt`");
+    }
+    let checksums = job("checksums");
+    assert!(
+        checksums.contains(">SHA256SUMS.txt") && checksums.contains("downloads/SHA256SUMS.txt --repo"),
+        "the file is written and uploaded under its name"
+    );
+    assert!(checksums.contains("sha256sum --check --strict SHA256SUMS.txt"), "its lines are checked in sha256sum's own format");
 }
 
 /// The anchors of the home page that carry `data-download`, as (the start tag, the text up to `</a>`).
@@ -94,7 +194,7 @@ fn the_home_page_lists_each_download_once_in_the_cpu_rows_and_the_main_button_of
     let assets = assets();
     let version = xtask::version::read(&read("Cargo.toml")).unwrap();
     let repository = serde_json::from_str::<serde_json::Value>(&read("site/site.json")).unwrap()["repository"].as_str().unwrap().to_owned();
-    let in_the_release: BTreeSet<String> = listed_files().iter().map(|name| name.replace("{tag}", &format!("v{version}"))).collect();
+    let in_the_release: BTreeSet<String> = listed_files().iter().map(|name| name.replace("{version}", &version)).collect();
     let cards = cards(&page);
     assert_eq!(cards.len(), 3, "Linux, Windows and macOS");
     let in_rows: Vec<String> = cards.iter().flat_map(|card| ids_of(rows_of(card))).collect();
@@ -124,7 +224,7 @@ fn the_home_page_lists_each_download_once_in_the_cpu_rows_and_the_main_button_of
         let name = &assets.iter().find(|(i, _)| i == id).unwrap().1;
         assert_eq!(attribute(tag, "data-asset"), name, "{id}: the page names the file site.json names (cargo xtask site --write)");
         // With no script the link is the file of the release of the workspace's version: a click starts the download, and the file is one the release workflow lists.
-        let file = name.replace("{tag}", &format!("v{version}"));
+        let file = name.replace("{version}", &version);
         assert_eq!(attribute(tag, "href"), format!("https://github.com/{repository}/releases/download/v{version}/{file}"), "{id}: {tag}");
         assert!(tag.contains("data-repo=\"/releases/download\""), "{id}");
         assert!(in_the_release.contains(&file), "{id}: {file} is not one of the files the release workflow lists");
@@ -339,8 +439,8 @@ fn the_macos_job_makes_checks_and_uploads_a_download_for_each_cpu_and_no_univers
     assert_eq!(
         packagings,
         [
-            "bash packaging/package.sh macos \"$NAME\" dist target/aarch64-apple-darwin/release",
-            "bash packaging/package.sh macos \"$NAME\" dist target/x86_64-apple-darwin/release",
+            "bash packaging/package.sh macos \"$VERSION\" dist target/aarch64-apple-darwin/release",
+            "bash packaging/package.sh macos \"$VERSION\" dist target/x86_64-apple-darwin/release",
         ]
     );
     // Each is checked: the zip unpacked, the image attached read only, and the architectures that lipo shows are the ones of the download.
@@ -348,9 +448,9 @@ fn the_macos_job_makes_checks_and_uploads_a_download_for_each_cpu_and_no_univers
         assert!(mac.contains(call), "the check of a download is not run: {call}");
     }
     for needed in [
-        "ditto -x -k \"dist/diacraft-$NAME-macos-$cpu.zip\"",
+        "ditto -x -k \"dist/diacraft-$VERSION-macos-$cpu.zip\"",
         "hdiutil attach -nobrowse -readonly -noverify",
-        "dist/diacraft-$NAME-macos-$cpu.dmg",
+        "dist/diacraft-$VERSION-macos-$cpu.dmg",
         "lipo -archs",
         "packaging/smoke.sh --licences",
         "codesign --verify --strict",
@@ -365,7 +465,7 @@ fn the_macos_job_makes_checks_and_uploads_a_download_for_each_cpu_and_no_univers
     let upload = mac.split("gh release upload").nth(1).expect("the upload");
     for cpu in ["arm64", "x86_64"] {
         for kind in ["dmg", "zip"] {
-            assert!(upload.contains(&format!("dist/diacraft-$NAME-macos-{cpu}.{kind}")), "{cpu} {kind} is not uploaded");
+            assert!(upload.contains(&format!("dist/diacraft-$VERSION-macos-{cpu}.{kind}")), "{cpu} {kind} is not uploaded");
         }
     }
 }

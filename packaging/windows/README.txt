@@ -15,15 +15,15 @@ What is in this folder
 This zip needs no installer. Unpack the whole zip to a folder of your own (right-click the zip, Extract All) and
 double-click diacraft.exe. To open a drawing, drag the file onto diacraft.exe, or choose File, Open in the window.
 
-There is an installer too, diacraft-@NAME@-windows-@ARCH@.msi, on the release page. It installs DiaCraft for you alone
+There is an installer too, diacraft-@NAME@-windows-@FILEARCH@.msi, on the release page. It installs DiaCraft for you alone
 (no administrator rights) into %LocalAppData%\Programs\DiaCraft, with a Start menu shortcut and diacraft-cli on your
 PATH, and lists DiaCraft in Open with for .diacraft, .vsdx and .odg files, without making it the program they open
 with. A later installer replaces it, and Settings, Apps, Installed apps removes it.
 
 This download is not signed yet. The first time you start it, Windows may say "Windows protected your PC"
 (SmartScreen). Choose "More info", then "Run anyway". If you want to be sure the file is the one that was
-released, check it against SHA256SUMS on the release page. In PowerShell:
-  Get-FileHash .\diacraft-@NAME@-windows-@ARCH@.zip -Algorithm SHA256
+released, check it against SHA256SUMS.txt on the release page. In PowerShell:
+  Get-FileHash .\diacraft-@NAME@-windows-@FILEARCH@-portable.zip -Algorithm SHA256
 
 The command line
   Open a terminal in the folder and run  .\diacraft-cli.exe --help

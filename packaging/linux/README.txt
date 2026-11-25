@@ -35,5 +35,5 @@ What it needs
 If the window does not open, run ./diacraft in a terminal to see why, and attach the log file to a bug report:
   ~/.config/diacraft/logs/diacraft.log
 
-Check your download against SHA256SUMS on the release page:
-  sha256sum --check --ignore-missing SHA256SUMS
+Check your download against SHA256SUMS.txt on the release page:
+  sha256sum --check --ignore-missing SHA256SUMS.txt

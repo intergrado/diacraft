@@ -3,12 +3,13 @@
 #
 #   packaging/linux/make-deb.sh NAME OUT_DIR BIN_DIR
 #
-#   NAME     what goes in the file name: the release tag (v0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only.
+#   NAME     what goes in the file name: the release's version (0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only. A tag (v0.2.0) is named
+#            as its version, with no `v` in the file name.
 #   OUT_DIR  where the package is written; created when it is not there.
 #   BIN_DIR  a folder holding the release programs `diacraft` and `diacraft-cli`.
 #
-# Writes OUT_DIR/diacraft-NAME-linux-ARCH.deb (ARCH is x86_64 or arm64, read from the programs; the package's own architecture field says amd64 or arm64) and prints
-# its path. The name follows the downloads' (diacraft-<tag>-linux-<arch>), and not Debian's own (diacraft_<version>_<arch>.deb): apt and dpkg read the fields inside,
+# Writes OUT_DIR/diacraft-NAME-linux-CPU.deb (CPU is x86_64 or aarch64, read from the programs; the package's own architecture field says amd64 or arm64) and prints
+# its path. The name follows the downloads' (diacraft-<version>-linux-<cpu>), and not Debian's own (diacraft_<version>_<arch>.deb): apt and dpkg read the fields inside,
 # never the file name.
 #
 # What it installs:
@@ -37,6 +38,7 @@ name=$1
 out=$2
 bin=$3
 check_name "$name"
+name=$(file_version "$name")
 [ -d "$bin" ] || die "no such folder: $bin"
 bin=$(cd "$bin" && pwd)
 command -v dpkg-deb >/dev/null 2>&1 || die "dpkg-deb is not here: this script runs on Debian or Ubuntu (or in a container of one)"
@@ -199,7 +201,7 @@ installed_size=$(du -sk "$pkg/usr" | awk '{ print $1 }')
 } >"$pkg/DEBIAN/control"
 chmod 644 "$pkg/DEBIAN/control"
 
-deb=$out/diacraft-$name-linux-$arch.deb
+deb=$out/diacraft-$name-linux-$(file_arch linux "$arch").deb
 rm -f "$deb"
 # Owned by root in the package whoever builds it; xz, which every dpkg since Debian 8 reads (a newer compression is not read by an older apt).
 dpkg-deb --root-owner-group -Zxz --build "$pkg" "$deb" >/dev/null

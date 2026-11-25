@@ -28,9 +28,14 @@ pub(crate) fn pe(machine: u16) -> Vec<u8> {
 /// Runs `packaging/package.sh PLATFORM dev-test OUT BIN` and gives what it printed. A plain `PATH`: a machine's own `od` or `tar` ahead of the system's is not what
 /// the runners have.
 fn package(platform: &str, out: &Path, bin: &Path) -> Output {
+    package_named(platform, "dev-test", out, bin)
+}
+
+/// The same for the name `name`.
+fn package_named(platform: &str, name: &str, out: &Path, bin: &Path) -> Output {
     Command::new("bash")
         .env("PATH", "/usr/bin:/bin")
-        .args([xtask::root().join("packaging/package.sh").to_str().unwrap(), platform, "dev-test"])
+        .args([xtask::root().join("packaging/package.sh").to_str().unwrap(), platform, name])
         .arg(out)
         .arg(bin)
         .output()
@@ -55,18 +60,21 @@ pub(crate) fn programs(dir: &TempDir, program: &[u8], cli: &[u8], exe: &str) {
 
 #[test]
 fn a_linux_download_is_named_for_the_cpu_of_its_programs_and_says_what_it_needs() {
-    for (machine, arch, cpu, glibc) in [(0x3e, "x86_64", "Intel or AMD", "glibc 2.35"), (0xb7, "arm64", "ARM", "glibc 2.35")] {
+    // The file name says aarch64 for the ARM build, the word of the Linux kernel and the launchers; the README says the CPU in its own words.
+    for (machine, arch, in_names, cpu, glibc) in
+        [(0x3e, "x86_64", "x86_64", "Intel or AMD", "glibc 2.35"), (0xb7, "arm64", "aarch64", "ARM", "glibc 2.35")]
+    {
         let dir = TempDir::new("package-linux");
         programs(&dir, &elf(machine), &elf(machine), "");
         let out = package("linux", &dir.path().join("out"), &dir.path().join("bin"));
         assert!(out.status.success(), "{arch}: {}", say(&out));
-        let archive = format!("diacraft-dev-test-linux-{arch}.tar.gz");
+        let archive = format!("diacraft-dev-test-linux-{in_names}.tar.gz");
         assert_eq!(names(&dir.path().join("out")), [archive.as_str()], "the machine of the build is not what names it");
         assert!(String::from_utf8_lossy(&out.stdout).trim_end().ends_with(&archive), "the last line is the archive: {}", say(&out));
         let readme = Command::new("tar")
             .arg("-xzOf")
             .arg(dir.path().join("out").join(&archive))
-            .arg(format!("diacraft-dev-test-linux-{arch}/README.txt"))
+            .arg(format!("diacraft-dev-test-linux-{in_names}/README.txt"))
             .output()
             .unwrap();
         let readme = String::from_utf8(readme.stdout).unwrap();
@@ -81,22 +89,50 @@ fn a_windows_download_is_named_for_the_cpu_of_its_programs() {
         eprintln!("zip is not here: the Windows archive is not made");
         return;
     }
-    for (machine, arch, cpu) in [(0x8664, "x86_64", "Intel or AMD"), (0xaa64, "arm64", "ARM")] {
+    // The x64 build is `x64` in a file name and the ARM build `arm64`; the zip is `-portable`, which says that it needs no installer, and holds a folder named as the other
+    // downloads are.
+    for (machine, arch, in_names, cpu) in [(0x8664, "x86_64", "x64", "Intel or AMD"), (0xaa64, "arm64", "arm64", "ARM")] {
         let dir = TempDir::new("package-windows");
         programs(&dir, &pe(machine), &pe(machine), ".exe");
         let out = package("windows", &dir.path().join("out"), &dir.path().join("bin"));
         assert!(out.status.success(), "{arch}: {}", say(&out));
-        assert_eq!(names(&dir.path().join("out")), [format!("diacraft-dev-test-windows-{arch}.zip")]);
+        let archive = format!("diacraft-dev-test-windows-{in_names}-portable.zip");
+        assert_eq!(names(&dir.path().join("out")), [archive.as_str()]);
+        assert!(String::from_utf8_lossy(&out.stdout).trim_end().ends_with(&archive), "the last line is the archive: {}", say(&out));
         let listing = Command::new("unzip")
             .arg("-p")
-            .arg(dir.path().join("out").join(format!("diacraft-dev-test-windows-{arch}.zip")))
-            .arg(format!("diacraft-dev-test-windows-{arch}/README.txt"))
+            .arg(dir.path().join("out").join(&archive))
+            .arg(format!("diacraft-dev-test-windows-{in_names}/README.txt"))
             .output();
         if let Ok(listing) = listing {
             let readme = String::from_utf8_lossy(&listing.stdout);
             assert!(readme.contains(&format!("for Windows ({arch}: 64-bit {cpu})")), "{arch}: {readme}");
-            assert!(readme.contains(&format!("windows-{arch}.zip")) && !readme.contains('@'), "{arch}: {readme}");
+            // The README names the two files of the release as they are named there.
+            assert!(readme.contains(&format!("diacraft-dev-test-windows-{in_names}-portable.zip")) && !readme.contains('@'), "{arch}: {readme}");
+            assert!(readme.contains(&format!("diacraft-dev-test-windows-{in_names}.msi")), "{arch}: {readme}");
         }
+    }
+}
+
+/// What the launchers read is `diacraft-<version>-...` with a version that starts with a digit, so the tag's `v` is in no file name and not in what a download says of its own name
+/// The workflow gives the version, and the script leaves the `v` out of a tag it is given all the same. A label that is no tag is kept as it is.
+#[test]
+fn the_v_of_a_tag_is_in_no_file_name_and_a_label_is_kept() {
+    for (name, said) in [("v0.2.1", "0.2.1"), ("0.2.1", "0.2.1"), ("v0.3.0-rc.1", "0.3.0-rc.1"), ("dev-1a2b3c4", "dev-1a2b3c4"), ("vtest", "vtest")] {
+        let dir = TempDir::new("package-v");
+        programs(&dir, &elf(0xb7), &elf(0xb7), "");
+        let out = package_named("linux", name, &dir.path().join("out"), &dir.path().join("bin"));
+        assert!(out.status.success(), "{name}: {}", say(&out));
+        let archive = format!("diacraft-{said}-linux-aarch64.tar.gz");
+        assert_eq!(names(&dir.path().join("out")), [archive.as_str()], "{name}");
+        let readme = Command::new("tar")
+            .arg("-xzOf")
+            .arg(dir.path().join("out").join(&archive))
+            .arg(format!("diacraft-{said}-linux-aarch64/README.txt"))
+            .output()
+            .unwrap();
+        let readme = String::from_utf8(readme.stdout).unwrap();
+        assert!(readme.starts_with(&format!("DiaCraft {said} for Linux")), "{name}: {readme}");
     }
 }
 

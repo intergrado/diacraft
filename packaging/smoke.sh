@@ -55,7 +55,7 @@ fi
 bin=$(cd "$1" && pwd)
 expected_tag=${2:-}
 # The folder of an unpacked download, made absolute here as `bin` is: the script leaves the folder it was started in (below), and the workflows name this one by a path
-# relative to it (`unpacked/diacraft-<tag>-linux-x86_64`).
+# relative to it (`unpacked/diacraft-<version>-linux-x86_64`).
 package_dir=""
 if [ -n "${SMOKE_PACKAGE_DIR:-}" ]; then
     [ -d "$SMOKE_PACKAGE_DIR" ] || die "no such folder: $SMOKE_PACKAGE_DIR"
