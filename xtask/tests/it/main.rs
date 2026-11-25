@@ -8,6 +8,7 @@ mod assets;
 mod brands;
 mod ci;
 mod deny;
+mod deploy_site;
 mod docs_check;
 mod downloads;
 mod fuzzcheck;

@@ -156,5 +156,6 @@ else's name.
 ## CI workflows
 
 `.github/workflows/ci.yml` runs `cargo xtask ci` on Linux and builds and smoke tests the app and the command line on Windows and macOS;
-`.github/workflows/release.yml` builds the downloads of a pushed `v*` tag into a draft release (`docs/releasing.md`). Don't add or
-change CI in a feature or fix change.
+`.github/workflows/release.yml` builds the downloads of a pushed `v*` tag into a draft release and deploys the website and the web
+app (`docs/releasing.md`); `.github/workflows/deploy-site.yml` deploys the two sites by hand between releases. Don't add or change CI
+in a feature or fix change.

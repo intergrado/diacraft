@@ -1,11 +1,11 @@
-DiaCraft @NAME@ for macOS (Apple silicon and Intel)
+DiaCraft @NAME@ for macOS (@CPU@)
 
 DiaCraft is a free, open-source diagram editor. It opens and saves .diacraft, .vsdx and .odg drawings.
 This is an early release: expect rough edges, and keep copies of drawings that matter to you.
 Project page, documentation and bug reports: @REPO_URL@
 
 What is in this folder
-  DiaCraft.app                  the drawing application (one app for Apple silicon and Intel Macs)
+  DiaCraft.app                  the drawing application (built for @CPU@ Macs)
   diacraft-cli                  the command line: convert and export drawings, run commands, serve MCP
   LICENSE-MIT, LICENSE-APACHE   the two licences DiaCraft is offered under; you may choose either
   NOTICE, ATTRIBUTION.md        credits, and where the pictures and fonts come from
@@ -33,7 +33,11 @@ Opening an app that is not signed
        shasum -a 256 diacraft-@NAME@-macos-@ARCH@.dmg     (or the .zip)
 
 What it needs
-  macOS 11 or newer, on a Mac with an Apple silicon chip or an Intel chip.
+  macOS 11 or newer, on @CHIP@.
+
+Which download is for your Mac
+  There is a download for each chip: macos-arm64 for a Mac with an Apple silicon chip, and macos-x86_64 for a Mac with an Intel chip. Each runs on its own chip only.
+  To see which chip your Mac has, choose About This Mac in the Apple menu.
 
 The command line
   diacraft-cli --help lists what it does. diacraft-cli --version prints the version.

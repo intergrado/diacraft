@@ -740,9 +740,16 @@ fn a_link_in_the_apps_folder_is_refused() {
 
 // ------------------------------------------------------------------------------------------------------------------------------ assembling
 
+/// The release workflow as far as the pages' check reads it: the list of the files its last job expects, which here is the one file every download of [`site_json`] is.
+pub(super) const WORKFLOW: &str =
+    "jobs:\n  checksums:\n    steps:\n      - run: |\n          expected=$(printf '%s\\n' \"diacraft-$NAME-a.zip\" | sort)\n";
+
 /// A repository root with a `site/` folder (the pages) and a finished Trunk build in `dist/web`.
 pub(super) fn repo() -> Dir {
     let root = Dir::new("repo");
+    // What the pages are made for: the workspace's version, and the release workflow's list of the files (`downloads.rs`).
+    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.0\"\n");
+    root.write(".github/workflows/release.yml", WORKFLOW);
     root.write("site/index.html", PAGE);
     root.write("site/_headers", PAGES_HEADERS);
     root.write("site/guides/one.html", GUIDE);
@@ -808,13 +815,14 @@ fn settings(app_url: &str) -> super::settings::Settings {
         domain: "https://example.invalid".into(),
         app_url: app_url.into(),
         repository: "owner/drawing".into(),
-        assets: super::settings::DOWNLOADS.iter().map(|id| ((*id).to_owned(), "a".to_owned())).collect(),
+        assets: super::settings::DOWNLOADS.iter().map(|id| ((*id).to_owned(), "diacraft-{tag}-a.zip".to_owned())).collect(),
+        version: "0.2.0".into(),
     }
 }
 
 /// A `site.json` for the fixtures: the draft's addresses, and one asset name for every download.
 fn site_json() -> String {
-    let assets: Vec<String> = super::settings::DOWNLOADS.iter().map(|id| format!(r#""{id}":"a""#)).collect();
+    let assets: Vec<String> = super::settings::DOWNLOADS.iter().map(|id| format!(r#""{id}":"diacraft-{{tag}}-a.zip""#)).collect();
     format!(
         r#"{{"domain":"https://example.invalid","app_url":"https://app.example.invalid","repository":"owner/drawing","assets":{{{}}}}}"#,
         assets.join(",")
@@ -1136,4 +1144,58 @@ fn the_check_refuses_a_folder_whose_headers_would_keep_what_a_release_must_repla
     out.write("_headers", &nothing);
     let error = app::check(out.path()).unwrap_err();
     assert!(error.contains("a rule for /nothing/*") || error.contains("policy"), "{error}");
+}
+
+// ---------------------------------------------------------------------------------------------------------------- the download links
+
+#[test]
+fn the_site_command_makes_the_download_links_for_the_workspace_version_and_holds_them_to_the_release_workflow() {
+    let root = repo();
+    root.write("site/site.json", site_json());
+    let link = r#"<a data-repo="/releases/download" href="old" data-download="linux-x86_64-deb" data-asset="">Get</a>"#;
+    root.write("site/index.html", PAGE.replace("Open the app</a>", &format!("Open the app</a>{link}")));
+    let site = root.path().join("site");
+    let home = || fs::read_to_string(site.join("index.html")).unwrap();
+    let file = |version: &str| format!("https://github.com/owner/drawing/releases/download/v{version}/diacraft-v{version}-a.zip");
+    // `--write` makes the link the file of the release of `Cargo.toml`'s version, and the plain check holds it so.
+    super::run_with(&site, &["--write"], None).unwrap();
+    assert!(home().contains(&format!(r#"href="{}" data-download="linux-x86_64-deb""#, file("0.2.0"))), "{}", home());
+    super::run_with(&site, &[], None).unwrap();
+    // The version moves: the pages are stale until `--write` makes them again, and then they name the new release only.
+    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.1\"\n");
+    let error = super::run_with(&site, &[], None).unwrap_err();
+    assert!(error.contains("stale"), "{error}");
+    super::run_with(&site, &["--write"], None).unwrap();
+    assert!(home().contains(&file("0.2.1")) && !home().contains("v0.2.0"), "{}", home());
+    // A link that is a file of another release is stale, whoever wrote it.
+    root.write("site/index.html", home().replace("/v0.2.1/diacraft-v0.2.1-", "/v0.2.0/diacraft-v0.2.0-"));
+    assert!(super::run_with(&site, &[], None).is_err());
+    super::run_with(&site, &["--write"], None).unwrap();
+    // The release workflow no longer lists the file the links ask for: the release would not have it.
+    root.write(".github/workflows/release.yml", WORKFLOW.replace("a.zip", "b.zip"));
+    let error = super::run_with(&site, &[], None).unwrap_err();
+    assert!(error.contains("does not list"), "{error}");
+    root.write(".github/workflows/release.yml", WORKFLOW);
+    super::run_with(&site, &[], None).unwrap();
+    // No `Cargo.toml`, or one without a version, is an error that names it, and no page is made.
+    root.write("Cargo.toml", "[workspace.package]\nname = \"x\"\n");
+    let error = super::run_with(&site, &["--write"], None).unwrap_err();
+    assert!(error.contains("Cargo.toml"), "{error}");
+    fs::remove_file(root.path().join("Cargo.toml")).unwrap();
+    let error = super::run_with(&site, &[], None).unwrap_err();
+    assert!(error.contains("Cargo.toml"), "{error}");
+}
+
+#[test]
+fn the_copy_of_the_pages_for_a_preview_links_the_same_release() {
+    let root = repo();
+    root.write("site/site.json", site_json());
+    let link = r#"<a data-repo="/releases/download" href="old" data-download="linux-x86_64-deb" data-asset="">Get</a>"#;
+    root.write("site/index.html", PAGE.replace("Open the app</a>", &format!("Open the app</a>{link}")));
+    let site = root.path().join("site");
+    super::run_with(&site, &["--write"], None).unwrap();
+    let preview = settings("http://127.0.0.1:8100");
+    app::assemble_pages(root.path(), &site, &root.path().join("dist/preview"), &preview).unwrap();
+    let copy = fs::read_to_string(root.path().join("dist/preview/index.html")).unwrap();
+    assert!(copy.contains("/releases/download/v0.2.0/diacraft-v0.2.0-a.zip"), "{copy}");
 }

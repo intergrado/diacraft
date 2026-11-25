@@ -53,7 +53,8 @@ commands:
   deploy-check <BASE_URL> [<BASE_URL>]
                   after a deploy: for each site (the pages, then the app) fetch the start page, every file it loads and the pictures from BASE_URL with
                   `Accept-Encoding: br, gzip` (through curl), and say for each the status, Cache-Control, Content-Encoding and ETag, and whether a
-                  second request with If-None-Match gets 304. Fails on a status that is not 200 and on a wrong Cache-Control (a file named by its
+                  second request with If-None-Match gets 304. Fails on a status that is not 200 (but for the 308 Pages sends `/x.html` to `/x` with,
+                  which it follows once) and on a wrong Cache-Control (a file named by its
                   hash must be immutable for a year, any other must not be kept); warns when a .wasm part or another text file comes back
                   uncompressed, or has no ETag. BASE_URL is https://host, or http://host:port for a server of your own
   deny            cargo deny check licenses bans sources, then advisories (deny.toml; fails when cargo-deny is not installed; with no network

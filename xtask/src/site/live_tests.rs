@@ -20,6 +20,8 @@ struct Fake {
     asked: RefCell<Vec<String>>,
     /// Paths whose request fails, as a network failure does.
     broken: Vec<String>,
+    /// The address of the site itself (`https://host`), when the stand-in knows it.
+    origin: Option<String>,
 }
 
 const REVALIDATE: &str = "public, max-age=0, must-revalidate";
@@ -46,6 +48,10 @@ impl Fake {
 }
 
 impl Fetch for Fake {
+    fn origin(&self) -> Option<&str> {
+        self.origin.as_deref()
+    }
+
     fn get(&self, path: &str, if_none_match: Option<&str>, _body: bool) -> Result<Response, String> {
         self.asked.borrow_mut().push(format!("{path}{}", if if_none_match.is_some() { " (if-none-match)" } else { "" }));
         if self.broken.iter().any(|p| p == path) {
@@ -701,4 +707,225 @@ fn the_command_checks_each_site_it_is_given_with_curl() {
         assert_eq!(requests.iter().filter(|r| r.starts_with("/ ")).count(), 3, "{requests:?}");
         assert_eq!(requests.iter().filter(|r| r.starts_with("/a.png ")).count(), 1, "{requests:?}");
     }
+}
+
+// -------------------------------------------------------------------------------------------------------- the 308 of Pages
+
+/// What Cloudflare Pages does with a link to `from`, a page with its extension: a 308 to the same address without it.
+fn redirect(site: &mut Fake, from: &str, to: &str) {
+    site.put(from, "", REVALIDATE, None);
+    let served = site.files.get_mut(from).unwrap();
+    served.status = 308;
+    served.headers.push(("location".to_owned(), to.to_owned()));
+}
+
+/// The pages as Pages serves them: `/privacy.html` is a 308 to `/privacy`, which has the page.
+fn pages_with_redirect() -> Fake {
+    let mut site = site();
+    let page = String::from_utf8(site.files.get("/privacy.html").unwrap().body.clone()).unwrap();
+    redirect(&mut site, "/privacy.html", "/privacy");
+    site.put("/privacy", &page, REVALIDATE, Some("br"));
+    site
+}
+
+#[test]
+fn a_308_from_a_page_to_its_address_without_the_extension_is_what_pages_does_and_the_target_is_checked_as_a_file() {
+    let fake = pages_with_redirect();
+    let report = live::check(&fake).unwrap();
+    assert_eq!(report.failures(), 0, "{:#?}", report.lines());
+    assert_eq!(report.warnings(), 0, "{:#?}", report.lines());
+    // The page with its extension answered 308 and is said to go to the other; the other is a file like any, asked for and asked again with its ETag.
+    let page = entry(&report, "/privacy.html");
+    assert_eq!((page.status, page.redirect.as_deref()), (308, Some("/privacy")));
+    let target = entry(&report, "/privacy");
+    assert_eq!((target.status, target.conditional), (200, Some(304)));
+    assert!(report.lines().iter().any(|l| l.contains("/privacy.html -> /privacy")), "{:#?}", report.lines());
+    // What the target page loads is found too, as a page's pictures are.
+    assert!(paths(&report).contains(&"/assets/hashed/guide.aaaaaaaaaaaa.webp"), "{:?}", paths(&report));
+    // The target comes right after the page that was sent to it, and once.
+    let order = paths(&report);
+    let at = order.iter().position(|p| *p == "/privacy.html").unwrap();
+    assert_eq!(order[at + 1], "/privacy");
+    assert_eq!(order.iter().filter(|p| **p == "/privacy").count(), 1);
+}
+
+#[test]
+fn the_target_of_a_308_is_checked_as_any_file_is() {
+    // A target that is not there, and one that a browser would keep for a year though it is no file named by its hash: each a failure of the target.
+    let mut fake = pages_with_redirect();
+    fake.files.remove("/privacy");
+    let report = live::check(&fake).unwrap();
+    assert_eq!(said(&report, "/privacy", Level::Fail).len(), 1, "{:#?}", report.lines());
+    assert!(said(&report, "/privacy", Level::Fail)[0].contains("answered 404"));
+    assert!(said(&report, "/privacy.html", Level::Fail).is_empty(), "the redirect itself is right");
+    let mut fake = pages_with_redirect();
+    fake.header("/privacy", "cache-control", Some(KEEP));
+    let report = live::check(&fake).unwrap();
+    assert!(said(&report, "/privacy", Level::Fail)[0].contains("would hide the next release"), "{:#?}", report.lines());
+    // A target that sends on again is not followed twice: it is an answer that is not 200.
+    let mut fake = pages_with_redirect();
+    redirect(&mut fake, "/privacy", "/privacy/");
+    let report = live::check(&fake).unwrap();
+    assert!(said(&report, "/privacy", Level::Fail)[0].contains("answered 308"), "{:#?}", report.lines());
+    assert!(!paths(&report).contains(&"/privacy/"), "{:?}", paths(&report));
+}
+
+#[test]
+fn a_308_that_goes_anywhere_but_to_the_same_address_without_the_extension_is_a_failure() {
+    for (location, why) in [
+        (Some("/other"), "to `/other`"),
+        (Some("/privacy.html"), "to `/privacy.html`"),
+        (Some("/privacy?x=1"), "to `/privacy?x=1`"),
+        (Some("/privacy#top"), "to `/privacy#top`"),
+        (Some("//evil.example/privacy"), "to `//evil.example/privacy`"),
+        (Some("https://evil.example/privacy"), "to `https://evil.example/privacy`"),
+        (None, "no Location"),
+    ] {
+        let mut fake = pages_with_redirect();
+        fake.files.get_mut("/privacy.html").unwrap().headers.retain(|(n, _)| n != "location");
+        if let Some(location) = location {
+            fake.header("/privacy.html", "location", Some(location));
+        }
+        let report = live::check(&fake).unwrap();
+        let failures = said(&report, "/privacy.html", Level::Fail);
+        assert_eq!(failures.len(), 1, "{location:?}: {:#?}", report.lines());
+        assert!(failures[0].contains("answered 308") && failures[0].contains(why), "{location:?}: {failures:?}");
+        assert!(entry(&report, "/privacy.html").redirect.is_none(), "{location:?}: not followed");
+    }
+    // Other redirects, and a 308 for a path that is not a page, are answers that are not 200, as they were.
+    for (status, path) in [(301, "/privacy.html"), (302, "/privacy.html"), (307, "/privacy.html"), (308, "/styles.css"), (308, "/assets/paper.png")] {
+        let mut fake = pages_with_redirect();
+        if path != "/privacy.html" {
+            redirect(&mut fake, path, &path.replace(".css", ""));
+        }
+        fake.files.get_mut(path).unwrap().status = status;
+        let report = live::check(&fake).unwrap();
+        let failures = said(&report, path, Level::Fail);
+        assert_eq!(failures.len(), 1, "{status} {path}: {:#?}", report.lines());
+        assert!(failures[0].contains(&format!("answered {status}, and a file of the site is answered 200")), "{failures:?}");
+    }
+}
+
+#[test]
+fn a_location_with_the_address_of_the_site_itself_is_the_same_as_a_path_and_one_with_another_host_is_not() {
+    let mut fake = pages_with_redirect();
+    fake.origin = Some("https://example.invalid".to_owned());
+    fake.header("/privacy.html", "location", Some("https://example.invalid/privacy"));
+    let report = live::check(&fake).unwrap();
+    assert_eq!(report.failures(), 0, "{:#?}", report.lines());
+    assert_eq!(entry(&report, "/privacy.html").redirect.as_deref(), Some("/privacy"));
+    // The same path on another host, one that only starts like the site's, and another scheme.
+    for location in [
+        "https://evil.example/privacy",
+        "https://example.invalid.evil.example/privacy",
+        "http://example.invalid/privacy",
+        "https://example.invalid:8443/privacy",
+    ] {
+        fake.header("/privacy.html", "location", Some(location));
+        let report = live::check(&fake).unwrap();
+        assert_eq!(said(&report, "/privacy.html", Level::Fail).len(), 1, "{location}: {:#?}", report.lines());
+    }
+    // A check that does not know its site's address (a stand-in) takes paths only.
+    let mut fake = pages_with_redirect();
+    fake.header("/privacy.html", "location", Some("https://example.invalid/privacy"));
+    assert_eq!(said(&live::check(&fake).unwrap(), "/privacy.html", Level::Fail).len(), 1);
+}
+
+#[test]
+fn an_index_page_is_sent_to_its_folder_and_the_start_page_is_probed_once() {
+    // `/index.html` goes to `/`, which is the start page and is probed once; `/guides/index.html` to `/guides/` or `/guides`.
+    let mut fake = site();
+    fake.put("/guides/", "<html><body><!-- x --></body></html>", REVALIDATE, None);
+    redirect(&mut fake, "/index.html", "/");
+    redirect(&mut fake, "/guides/index.html", "/guides/");
+    let home = String::from_utf8(fake.files.get("/").unwrap().body.clone()).unwrap();
+    fake.put("/", &home.replace("</body>", "<a href=\"/index.html\">h</a><a href=\"/guides/index.html\">g</a></body>"), REVALIDATE, Some("br"));
+    let report = live::check(&fake).unwrap();
+    assert_eq!(report.failures(), 0, "{:#?}", report.lines());
+    assert_eq!(entry(&report, "/index.html").redirect.as_deref(), Some("/"));
+    assert_eq!(entry(&report, "/guides/index.html").redirect.as_deref(), Some("/guides/"));
+    assert_eq!(paths(&report).iter().filter(|p| **p == "/").count(), 1, "{:?}", paths(&report));
+    fake.header("/guides/index.html", "location", Some("/guides"));
+    fake.put("/guides", "<html><body><!-- x --></body></html>", REVALIDATE, None);
+    assert_eq!(live::check(&fake).unwrap().failures(), 0, "the folder with no slash is the same folder");
+    // A page with an extension that is itself a 200 is as it was, and so is the 308 of a path that has no extension to take away.
+    let fake = site();
+    let report = live::check(&fake).unwrap();
+    assert_eq!(entry(&report, "/privacy.html").redirect, None);
+}
+
+/// A server of the test's own that behaves as Pages does for one page: `/` links `/p.html`, which it answers with a 308 to `location` (`{port}` in it is the server's own), and `/p` is the page,
+/// with an ETag that it answers 304 to. It serves until `stop` is set and returns the paths asked for.
+fn serve_a_308(location: &'static str) -> (u16, std::sync::Arc<std::sync::atomic::AtomicBool>, std::thread::JoinHandle<Vec<String>>) {
+    use std::io::{BufRead, BufReader, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let handle = std::thread::spawn(move || {
+        let mut requests = Vec::new();
+        while !flag.load(Ordering::Relaxed) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                continue;
+            };
+            stream.set_nonblocking(false).unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let path = line.split_whitespace().nth(1).unwrap_or("").to_owned();
+            let mut conditional = false;
+            loop {
+                let mut header = String::new();
+                if reader.read_line(&mut header).unwrap() == 0 || header.trim().is_empty() {
+                    break;
+                }
+                conditional |= header.to_ascii_lowercase().starts_with("if-none-match:");
+            }
+            requests.push(path.clone());
+            let cache = "Cache-Control: public, max-age=0, must-revalidate";
+            let response = match (path.as_str(), conditional) {
+                ("/", false) => format!(
+                    "HTTP/1.1 200 OK\r\nETag: \"v1\"\r\n{cache}\r\nContent-Length: 29\r\nConnection: close\r\n\r\n<a href=\"/p.html\">the page</a>"
+                ),
+                ("/p.html", _) => format!(
+                    "HTTP/1.1 308 Permanent Redirect\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    location.replace("{port}", &port.to_string())
+                ),
+                ("/p", false) => {
+                    format!("HTTP/1.1 200 OK\r\nETag: \"v1\"\r\n{cache}\r\nContent-Length: 13\r\nConnection: close\r\n\r\n<html></html>")
+                }
+                ("/", true) | ("/p", true) => format!("HTTP/1.1 304 Not Modified\r\nETag: \"v1\"\r\n{cache}\r\nConnection: close\r\n\r\n"),
+                _ => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned(),
+            };
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+        requests
+    });
+    (port, stop, handle)
+}
+
+#[test]
+fn the_command_follows_the_308_pages_sends_a_page_with_its_extension_through_curl() {
+    if std::process::Command::new("curl").arg("--version").output().is_err() {
+        return;
+    }
+    // The path, and the address of the site itself: both are the site's own, and the page is found and checked at the address it is sent to.
+    for location in ["/p", "http://127.0.0.1:{port}/p"] {
+        let (port, stop, server) = serve_a_308(location);
+        let result = live::run(&[&format!("http://127.0.0.1:{port}")]);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let requests = server.join().unwrap();
+        assert!(result.is_ok(), "{location}: {result:?}");
+        assert!(requests.iter().any(|r| r == "/p"), "{location}: the target was asked for: {requests:?}");
+    }
+    // A 308 to another site is a failure, and the other site is not asked.
+    let (port, stop, server) = serve_a_308("http://localhost.invalid/p");
+    let result = live::run(&[&format!("http://127.0.0.1:{port}")]);
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let requests = server.join().unwrap();
+    assert!(result.unwrap_err().contains("1 file"), "a failure");
+    assert!(!requests.iter().any(|r| r == "/p"), "{requests:?}");
 }

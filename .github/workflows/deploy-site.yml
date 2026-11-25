@@ -1,0 +1,164 @@
+# Deploy the website, by hand (the owner, 2026-11-25). Run it (Actions, "Deploy the website", Run workflow) on `main` to put a fix of the pages or of the web app on the
+# live sites between releases, with no release made: it builds the two sites as the `site` job of release.yml does (`cargo xtask site --web`: the pages for diacraft.dev and the app for
+# diacraft.app) and deploys both to Cloudflare Pages as the `deploy` job of release.yml does. It never builds a download, and it does not touch a release.
+#
+# The links of the pages' download section are made from the version in Cargo.toml (`cargo xtask site`), so a site deployed from here points at the files of the release in Cargo.toml, as the
+# site of that release does. Run it on `main` only: any other branch stops at the first step.
+#
+# The rules of release.yml hold: no action but GitHub's own (`actions/checkout`, `upload-artifact` and `download-artifact`), each pinned by commit; the token can read the repository and
+# nothing else; wrangler, the Cloudflare tool, is installed from the lock in packaging/cloudflare and its version is the one release.yml has (a test holds them equal); the two secrets
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are read by the two deploy steps and by nothing else. The `deploy` job is in the concurrency group `deploy-site`, which release.yml's `deploy`
+# job names too, so that the two never deploy at once. The tools that build the app are installed by the script release.yml uses, from the same versions and checksums (a test holds them equal).
+# What the owner sets up in Cloudflare, once, is in docs/website.md ("Deploy to Cloudflare Pages") and docs/releasing.md.
+
+name: Deploy the website
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+  # The same release as the gate's, the CI jobs' and the release workflow's: move them together (docs/development.md).
+  RUST_VERSION: 1.100.0
+
+jobs:
+  site:
+    name: Build the website and the web app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      TRUNK_VERSION: 0.22.2
+      TRUNK_SHA256: 26fca8a9952e46cd7d8b8b9a2e2c1786c090fc14b8e10b6678ab4d0f9f1a385f
+      WASM_BINDGEN_VERSION: 0.2.130
+      WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+      BINARYEN_VERSION: version_133
+      BINARYEN_SHA256: 2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489
+    steps:
+      # Main only. A run on another branch stops here, with a word, and builds and deploys nothing.
+      - name: Stop unless this is main
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != refs/heads/main ]; then
+            echo "::error::this workflow deploys the live website and runs on main only; it was started on '$REF'"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The build's own identity (apps/diacraft/build_info.rs): `dev-` and the commit, and the year of the commit, as a run by hand of release.yml names a build.
+      - name: Name the build
+        run: |
+          set -euo pipefail
+          year=$(git log -1 --format=%cs | cut -c1-4)
+          case $year in [0-9][0-9][0-9][0-9]) ;; *) echo "::error::cannot read the year of the commit"; exit 1 ;; esac
+          {
+            echo "DIACRAFT_BUILD_GIT=dev-${GITHUB_SHA::7}"
+            echo "DIACRAFT_BUILD_YEAR=$year"
+          } >>"$GITHUB_ENV"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update --target wasm32-unknown-unknown
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      - name: Install trunk, wasm-bindgen and wasm-opt
+        run: bash packaging/install-site-tools.sh
+
+      - name: Check the pages
+        run: cargo xtask site
+
+      # The pages copied into site-dist (their links to the app are the address in site/site.json, and their download links the files of the release in Cargo.toml), trunk build
+      # --release --locked in apps/diacraft-web, the app made into app-dist, and the checks of what is there.
+      - name: Build the web app and make the two sites
+        run: cargo xtask site --web --out site-dist --app-out app-dist
+
+      - name: Keep the pages as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diacraft-site-by-hand
+          path: site-dist
+          if-no-files-found: error
+          retention-days: 7
+          # The deploy job takes this folder as it is: a file whose name starts with a dot (a `.well-known` folder) is kept, not left out as the action does by default.
+          include-hidden-files: true
+
+      - name: Keep the web app as an artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diacraft-app-by-hand
+          path: app-dist
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+
+  deploy:
+    name: Deploy the websites
+    needs: [site]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    # One deploy of the websites at a time, here and in release.yml, which names the same group: a run that waits is not cancelled, and neither deploys while the other does.
+    concurrency:
+      group: deploy-site
+      cancel-in-progress: false
+    env:
+      WRANGLER_VERSION: 4.166.0
+      # wrangler sends Cloudflare a report of each command unless told not to.
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Check out the repository, which holds the lock of wrangler
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the pages the site job made
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: diacraft-site-by-hand
+          path: site-dist
+
+      - name: Download the web app the site job made
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: diacraft-app-by-hand
+          path: app-dist
+
+      - name: Install wrangler, the Cloudflare Pages tool
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          npm ci --prefix packaging/cloudflare --ignore-scripts --engine-strict --no-audit --no-fund --no-update-notifier --fetch-retries 5
+          bin="$PWD/packaging/cloudflare/node_modules/.bin"
+          reported=$("$bin/wrangler" --version)
+          [ "$reported" = "$WRANGLER_VERSION" ] || { echo "::error::wrangler reports: $reported"; exit 1; }
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Deploy the pages to Cloudflare Pages
+        timeout-minutes: 15
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler pages deploy site-dist --project-name diacraft-site --branch main --commit-hash "$GITHUB_SHA" --commit-message "DiaCraft website, by hand" --commit-dirty=false
+
+      - name: Deploy the web app to Cloudflare Pages
+        timeout-minutes: 15
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler pages deploy app-dist --project-name diacraft-app --branch main --commit-hash "$GITHUB_SHA" --commit-message "DiaCraft website, by hand" --commit-dirty=false

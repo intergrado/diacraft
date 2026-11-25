@@ -64,7 +64,7 @@ pub(super) fn hosts(text: &str, origins: &Origins, name: &str) -> Result<(), Str
     Ok(())
 }
 
-fn percent_decode(input: &str) -> Result<String, String> {
+pub(super) fn percent_decode(input: &str) -> Result<String, String> {
     let mut bytes = input.bytes();
     let mut out = Vec::with_capacity(input.len());
     while let Some(byte) = bytes.next() {

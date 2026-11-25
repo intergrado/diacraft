@@ -207,3 +207,36 @@ fn open_diacraft_in_your_browser_goes_straight_to_the_app_and_the_details_page_i
     }
     assert!(read("site/privacy.html").contains("When you use DiaCraft in your browser"));
 }
+
+/// The owner's request (2026-11-25): the trademark paragraph of the footer runs the full width of the rule above it, on every page that has the footer, and not in a narrow column. Its small type
+/// and its colour stay. The width came from a right padding of `calc(100% - 90ch)`; nothing may hold the paragraph to a measure again.
+#[test]
+fn the_footers_trademark_paragraph_runs_the_full_width_of_the_rule_above_it_on_every_page() {
+    let css = read("site/styles.css");
+    let rule = css.lines().find(|l| l.starts_with(".foot-inner .legal {")).expect("the footer paragraph has a rule");
+    for held in ["max-width", "ch)", "ch;", "measure", "calc("] {
+        assert!(!rule.contains(held), "the paragraph is held to a width by `{held}`: {rule}");
+    }
+    assert!(rule.contains("grid-column: 1 / -1") && rule.contains("border-top"), "it spans the footer's grid under the rule: {rule}");
+    assert!(rule.contains("font-size: .8rem") && rule.contains("color: var(--ink-muted)"), "the type and the colour stay: {rule}");
+    // No other rule narrows it, and every page has the one paragraph, in the footer.
+    assert!(!css.lines().any(|l| l.contains(".legal") && !l.starts_with(".foot-inner .legal {")), "no other rule for the paragraph");
+    let mut pages = vec!["site/index.html".to_owned(), "site/404.html".to_owned()];
+    for dir in ["site", "site/guides"] {
+        for entry in std::fs::read_dir(xtask::root().join(dir)).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if name.ends_with(".html") {
+                pages.push(format!("{dir}/{name}"));
+            }
+        }
+    }
+    pages.sort();
+    pages.dedup();
+    assert_eq!(pages.len(), 10, "the pages, the guides and 404: {pages:?}");
+    for page in &pages {
+        let text = read(page);
+        assert_eq!(text.matches("<p class=\"legal\">").count(), 1, "{page}");
+        let (_, footer) = text.split_once("<footer").unwrap_or_else(|| panic!("{page} has a footer"));
+        assert!(footer.contains("<p class=\"legal\">"), "{page}: the paragraph is in the footer");
+    }
+}

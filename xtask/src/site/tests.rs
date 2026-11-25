@@ -138,19 +138,22 @@ fn markup_location_for_invalid_html_points_to_the_element() {
 
 #[test]
 fn markup_location_is_reported_by_the_site_command_before_generation() {
-    let site = Fixture::new();
+    // The site folder is in a repository root, which holds the workspace's version: the pages are made for that release.
+    let root = Fixture::new();
+    root.write("Cargo.toml", "[workspace.package]\nversion = \"0.2.0\"\n");
+    let site = root.0.join("site");
     // A draft: every download has a setting, and none has a name yet.
     let assets: Vec<String> = super::settings::DOWNLOADS.iter().map(|id| format!(r#""{id}":"""#)).collect();
-    site.write(
-        "site.json",
+    root.write(
+        "site/site.json",
         format!(
             r#"{{"domain":"https://example.invalid","app_url":"https://app.example.invalid","repository":"owner/repo","assets":{{{}}}}}"#,
             assets.join(",")
         ),
     );
-    site.write("index.html", HTML.replace("<link rel=\"canonical\"", "<link 2bad=\"y\""));
+    root.write("site/index.html", HTML.replace("<link rel=\"canonical\"", "<link 2bad=\"y\""));
     for args in [&[][..], &["--write"][..]] {
-        let error = super::run(&site.0, args).unwrap_err();
+        let error = super::run(&site, args).unwrap_err();
         assert!(error.contains("index.html: line 2: XML"), "{error}");
     }
 }

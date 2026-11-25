@@ -5,7 +5,7 @@ use std::path::Path;
 
 /// The downloads a page can link, as `data-download` names them: a system, a CPU and a kind of file. Each has a setting of its own in `site.json`, the name of its file in the
 /// release (`.github/workflows/release.yml` makes them, and `cargo xtask site --release` refuses a draft that leaves one without a name).
-pub(super) const DOWNLOADS: [&str; 12] = [
+pub(super) const DOWNLOADS: [&str; 14] = [
     "linux-x86_64-appimage",
     "linux-x86_64-deb",
     "linux-x86_64-targz",
@@ -16,8 +16,10 @@ pub(super) const DOWNLOADS: [&str; 12] = [
     "windows-x86_64-zip",
     "windows-arm64-msi",
     "windows-arm64-zip",
-    "macos-universal-dmg",
-    "macos-universal-zip",
+    "macos-arm64-dmg",
+    "macos-arm64-zip",
+    "macos-x86_64-dmg",
+    "macos-x86_64-zip",
 ];
 
 #[derive(Debug, Clone)]
@@ -30,13 +32,54 @@ pub(super) struct Settings {
     pub(super) repository: String,
     /// The release asset name (or pattern) of each of [`DOWNLOADS`].
     pub(super) assets: BTreeMap<String, String>,
+    /// The version of `[workspace.package]` in the root `Cargo.toml`, `0.2.0`: the release these pages are made for. Its tag is `v0.2.0`, and each download link of a page is the address of that
+    /// release's file ([`direct_address`]).
+    pub(super) version: String,
 }
 
 impl Settings {
     /// The release asset name (or pattern) of a download, or `None` for a name that is not one of [`DOWNLOADS`].
-    fn asset(&self, download: &str) -> Option<&str> {
+    pub(super) fn asset(&self, download: &str) -> Option<&str> {
         self.assets.get(download).map(String::as_str)
     }
+
+    /// The tag of the release these pages are made for: `v` and the version.
+    pub(super) fn tag(&self) -> String {
+        format!("v{}", self.version)
+    }
+
+    /// The file name of an asset pattern in the release these pages are made for: `{tag}` is the tag and `{version}` the version.
+    pub(super) fn file_name(&self, pattern: &str) -> String {
+        pattern.replace("{tag}", &self.tag()).replace("{version}", &self.version)
+    }
+}
+
+/// `text` with every byte but a letter, a digit, `-`, `.`, `_` and `~` written as `%` and two hexadecimal digits: one segment of a URL's path.
+fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            // Writing to a `String` cannot fail.
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
+/// The start of the address of every file of the release these pages are made for: `https://github.com/<owner>/<name>/releases/download/v<version>/`.
+pub(super) fn download_folder(settings: &Settings) -> String {
+    format!("https://github.com/{}/releases/download/{}/", settings.repository, percent_encode(&settings.tag()))
+}
+
+/// The address of a download for the release of the pages' own version: the file itself, so that a click starts the download, with no page of the release and no script
+/// in between. An asset with no name yet (a draft of `site.json`; `--release` refuses it) goes to the page of the release.
+pub(super) fn direct_address(settings: &Settings, asset: &str) -> String {
+    if asset.is_empty() {
+        return format!("https://github.com/{}/releases/tag/{}", settings.repository, percent_encode(&settings.tag()));
+    }
+    format!("{}{}", download_folder(settings), percent_encode(&settings.file_name(asset)))
 }
 
 /// An asset name or pattern: a filename, optionally using `{tag}` or `{version}`. Empty is the draft's value.
@@ -91,7 +134,9 @@ pub(super) fn app_override(raw: &str) -> Result<String, String> {
     https_origin("the app's address", origin).map_err(|e| format!("`{raw}`: {e}"))
 }
 
-pub(super) fn load(dir: &Path) -> Result<Settings, String> {
+/// The settings of `site.json` in `dir`, for the release of `version` (the workspace's, which the caller read from the root `Cargo.toml`).
+pub(super) fn load(dir: &Path, version: &str) -> Result<Settings, String> {
+    xtask::version::validate(version).map_err(|e| format!("Cargo.toml: {e}"))?;
     let path = dir.join("site.json");
     let data = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let json: serde_json::Value = serde_json::from_str(&data).map_err(|e| format!("site.json: {e}"))?;
@@ -122,7 +167,7 @@ pub(super) fn load(dir: &Path) -> Result<Settings, String> {
         valid_asset(&key, asset)?;
         assets.insert(id.to_owned(), asset.to_owned());
     }
-    Ok(Settings { domain, app_url, repository: repository.into(), assets })
+    Ok(Settings { domain, app_url, repository: repository.into(), assets, version: version.to_owned() })
 }
 
 fn valid_filename(s: &str) -> bool {
@@ -160,6 +205,10 @@ fn set_value(html: &mut String, prefix: &str, value: &str) -> Result<(), String>
     Ok(())
 }
 
+/// What a download link's `data-repo` says: the address is a file of a release (`<a data-repo="/releases/download" href="..." data-download="linux-x86_64-appimage" data-asset="...">`), which
+/// `--write` makes from `site.json` and the workspace's version.
+pub(super) const DOWNLOAD_SUFFIX: &str = "/releases/download";
+
 fn render_page(mut source: String, settings: &Settings, url: &str) -> Result<String, String> {
     set_value(&mut source, r#"<link rel="canonical" href=""#, url)?;
     set_value(&mut source, r#"<meta property="og:url" content=""#, url)?;
@@ -176,18 +225,21 @@ fn render_page(mut source: String, settings: &Settings, url: &str) -> Result<Str
         let (_, after_href) = attrs.split_once('"').filter(|(v, _)| !v.contains(['<', '>'])).ok_or("unterminated repository href")?;
         let (extra, tail) = after_href.split_once('>').ok_or("unterminated repository link")?;
         let mut extra = extra.to_owned();
+        let mut href = format!("https://github.com/{}{suffix}", settings.repository);
         if let Some((_, after)) = extra.split_once(r#" data-download=""#) {
             let download = after.split_once('"').map_or("", |(name, _)| name);
-            let asset = settings.asset(download).filter(|_| suffix == "/releases/latest");
+            let asset = settings.asset(download).filter(|_| suffix == DOWNLOAD_SUFFIX);
             let Some(asset) = asset else {
                 return Err(format!(
-                    "download links must go to the latest release and name one of the downloads (found {download:?} and {suffix:?})"
+                    "download links must be marked `data-repo=\"{DOWNLOAD_SUFFIX}\"` and name one of the downloads (found {download:?} and {suffix:?})"
                 ));
             };
+            // The link is the file of the release the pages are made for; the percent signs and the letters of the address need no escape in the attribute.
+            href = direct_address(settings, asset);
             let asset = asset.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;");
             set_value(&mut extra, r#" data-asset=""#, &asset)?;
         }
-        write!(output, r#"{before}{LINK}{suffix}" href="https://github.com/{}{suffix}"{extra}>"#, settings.repository).map_err(|e| e.to_string())?;
+        write!(output, r#"{before}{LINK}{suffix}" href="{href}"{extra}>"#).map_err(|e| e.to_string())?;
         rest = tail;
     }
     output.push_str(rest);
@@ -291,7 +343,7 @@ pub(super) fn apply(dir: &Path, settings: &Settings, write: bool) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use super::{DOWNLOADS, Settings, app_override, apply, load, release};
+    use super::{DOWNLOADS, Settings, app_override, apply, direct_address, download_folder, load, release};
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
@@ -301,10 +353,13 @@ mod tests {
 <meta property="og:image" content="old" /></head><body>
 <a data-repo="" href="old" class="link">Source</a><a data-repo="/issues" href="old">Issues</a>
 <a data-app="" href="old" class="btn">Open DiaCraft in your browser</a><div class="frame-address" data-app-host="">old</div>
-<a data-repo="/releases/latest" href="old" data-download="linux-x86_64-appimage" data-asset="" class="button">Linux</a>
-<a data-repo="/releases/latest" href="old" data-download="windows-arm64-msi" data-asset="stale" class="button">Windows</a>
-<a data-repo="/releases/latest" href="old" data-download="macos-universal-dmg" data-asset="" class="button">macOS</a>
+<a data-repo="/releases/download" href="old" data-download="linux-x86_64-appimage" data-asset="" class="button">Linux</a>
+<a data-repo="/releases/download" href="old" data-download="windows-arm64-msi" data-asset="stale" class="button">Windows</a>
+<a data-repo="/releases/download" href="old" data-download="macos-arm64-dmg" data-asset="" class="button">macOS</a>
 </body></html>"#;
+
+    /// The version of the workspace the settings are for.
+    const VERSION: &str = "0.2.0";
 
     struct Site(PathBuf);
 
@@ -335,6 +390,7 @@ mod tests {
             app_url: "https://app.example".into(),
             repository: "owner/drawing".into(),
             assets: DOWNLOADS.iter().map(|id| ((*id).to_owned(), format!("{id}-{{tag}}.bin"))).collect(),
+            version: VERSION.into(),
         }
     }
 
@@ -346,7 +402,7 @@ mod tests {
             let app = if domain.ends_with(".invalid") { "https://app.invalid" } else { "https://app.example" };
             let input = format!(r#"{{"domain":"{domain}","app_url":"{app}","repository":"{repo}",{}}}"#, assets_json(|_| asset.to_owned()));
             fs::write(site.0.join("site.json"), input).unwrap();
-            load(&site.0)
+            load(&site.0, VERSION)
         };
         let draft = config("https://diacraft.invalid", "PUBLIC-OWNER/PUBLIC-REPO", "").unwrap();
         assert!(release(&draft).is_err());
@@ -366,9 +422,13 @@ mod tests {
                 format!(r#"{{"domain":"https://host.example","app_url":"https://app.example","repository":"owner/drawing",{assets}}}"#),
             )
             .unwrap();
-            load(&site.0)
+            load(&site.0, VERSION)
         };
-        assert_eq!(DOWNLOADS.len(), 12, "three systems: six Linux files, four Windows files, two macOS files");
+        assert_eq!(
+            DOWNLOADS.len(),
+            14,
+            "three systems: six Linux files, four Windows files, four macOS files (Apple silicon and Intel, no universal build)"
+        );
         let loaded = load_assets(&assets_json(|id| format!("x-{id}.{{tag}}"))).unwrap();
         for id in DOWNLOADS {
             assert_eq!(loaded.asset(id), Some(format!("x-{id}.{{tag}}").as_str()), "{id}");
@@ -385,8 +445,8 @@ mod tests {
         assert!(load_assets(&extra).unwrap_err().contains("freebsd-x86_64-tgz"));
         let bad = assets_json(|id| if id == "windows-arm64-msi" { "w/{tag}.msi".into() } else { "a".into() });
         assert!(load_assets(&bad).unwrap_err().contains("windows-arm64-msi"));
-        let not_text = assets_json(|_| "a".into()).replace(r#""macos-universal-dmg":"a""#, r#""macos-universal-dmg":7"#);
-        assert!(load_assets(&not_text).unwrap_err().contains("macos-universal-dmg"));
+        let not_text = assets_json(|_| "a".into()).replace(r#""macos-arm64-dmg":"a""#, r#""macos-arm64-dmg":7"#);
+        assert!(load_assets(&not_text).unwrap_err().contains("macos-arm64-dmg"));
         assert!(load_assets(r#""linux_asset":"a""#).unwrap_err().contains("assets"));
     }
 
@@ -413,17 +473,19 @@ mod tests {
     fn a_download_link_for_an_unknown_download_or_another_page_is_refused() {
         let site = Site::new("cards");
         for bad in [
-            r#"<a data-repo="/releases/latest" href="old" data-download="freebsd-x86_64-tgz" data-asset="">x</a>"#,
-            r#"<a data-repo="/releases/latest" href="old" data-download="linux" data-asset="">x</a>"#,
+            r#"<a data-repo="/releases/download" href="old" data-download="freebsd-x86_64-tgz" data-asset="">x</a>"#,
+            r#"<a data-repo="/releases/download" href="old" data-download="linux" data-asset="">x</a>"#,
             r#"<a data-repo="/issues" href="old" data-download="linux-x86_64-appimage" data-asset="">x</a>"#,
+            // The page of the latest release was the link before a change: a click on it opened a page and not a download.
+            r#"<a data-repo="/releases/latest" href="old" data-download="linux-x86_64-appimage" data-asset="">x</a>"#,
         ] {
             let page = PAGE.replace(
-                r#"<a data-repo="/releases/latest" href="old" data-download="linux-x86_64-appimage" data-asset="" class="button">Linux</a>"#,
+                r#"<a data-repo="/releases/download" href="old" data-download="linux-x86_64-appimage" data-asset="" class="button">Linux</a>"#,
                 bad,
             );
             fs::write(site.0.join("index.html"), page).unwrap();
             let error = apply(&site.0, &configured(), true).unwrap_err();
-            assert!(error.contains("download links must go to the latest release and name one of the downloads"), "{error}");
+            assert!(error.contains("download links must be marked") && error.contains("name one of the downloads"), "{error}");
         }
     }
 
@@ -448,9 +510,10 @@ mod tests {
             r#"property="og:image" content="https://drawing.example/assets/social.jpg""#,
             r#"data-repo="" href="https://github.com/owner/drawing" class="link""#,
             r#"data-repo="/issues" href="https://github.com/owner/drawing/issues""#,
-            r#"href="https://github.com/owner/drawing/releases/latest" data-download="linux-x86_64-appimage" data-asset="linux-x86_64-appimage-{tag}.bin" class="button""#,
-            r#"href="https://github.com/owner/drawing/releases/latest" data-download="windows-arm64-msi" data-asset="windows-arm64-msi-{tag}.bin" class="button""#,
-            r#"href="https://github.com/owner/drawing/releases/latest" data-download="macos-universal-dmg" data-asset="macos-universal-dmg-{tag}.bin" class="button""#,
+            // Each download is the file of the release of the version, as an address: the click starts the download.
+            r#"href="https://github.com/owner/drawing/releases/download/v0.2.0/linux-x86_64-appimage-v0.2.0.bin" data-download="linux-x86_64-appimage" data-asset="linux-x86_64-appimage-{tag}.bin" class="button""#,
+            r#"href="https://github.com/owner/drawing/releases/download/v0.2.0/windows-arm64-msi-v0.2.0.bin" data-download="windows-arm64-msi" data-asset="windows-arm64-msi-{tag}.bin" class="button""#,
+            r#"href="https://github.com/owner/drawing/releases/download/v0.2.0/macos-arm64-dmg-v0.2.0.bin" data-download="macos-arm64-dmg" data-asset="macos-arm64-dmg-{tag}.bin" class="button""#,
         ] {
             assert!(page.contains(expected), "{expected}");
         }
@@ -461,7 +524,15 @@ mod tests {
         let mut changed = configured();
         changed.assets.insert("linux-x86_64-appimage".into(), "a & b.AppImage".into());
         apply(&site.0, &changed, true).unwrap();
-        assert!(fs::read_to_string(site.0.join("index.html")).unwrap().contains(r#"data-asset="a &amp; b.AppImage""#));
+        let home = fs::read_to_string(site.0.join("index.html")).unwrap();
+        assert!(home.contains(r#"data-asset="a &amp; b.AppImage""#));
+        // The name in the address is escaped as a path segment is: no ampersand or space is left in it.
+        assert!(
+            home.contains(
+                r#"href="https://github.com/owner/drawing/releases/download/v0.2.0/a%20%26%20b.AppImage" data-download="linux-x86_64-appimage""#
+            ),
+            "{home}"
+        );
         fs::write(site.0.join("guides/start.html"), PAGE.replace(r#"rel="canonical""#, r#"rel="other""#)).unwrap();
         assert!(apply(&site.0, &settings, true).is_err());
     }
@@ -473,7 +544,7 @@ mod tests {
             |extra: &str| format!(r#"{{"domain":"https://host.example",{extra}"repository":"owner/drawing",{}}}"#, assets_json(|_| "a".into()));
         let load_with = |extra: &str| {
             fs::write(site.0.join("site.json"), json(extra)).unwrap();
-            load(&site.0)
+            load(&site.0, VERSION)
         };
         let loaded = load_with(r#""app_url":"https://app.example/","#).unwrap();
         assert_eq!((loaded.domain.as_str(), loaded.app_url.as_str()), ("https://host.example", "https://app.example"), "a trailing slash is dropped");
@@ -543,5 +614,65 @@ mod tests {
         }
         fs::write(site.0.join("index.html"), PAGE.replace(r#">old</div>"#, r#"><b>old</b></div>"#)).unwrap();
         assert!(apply(&site.0, &configured(), true).unwrap_err().contains("only text"));
+    }
+    #[test]
+    fn a_download_link_is_the_file_of_the_release_of_the_workspace_version_and_not_a_page() {
+        let settings = configured();
+        assert_eq!(
+            direct_address(&settings, "diacraft-{tag}-linux-x86_64.AppImage"),
+            "https://github.com/owner/drawing/releases/download/v0.2.0/diacraft-v0.2.0-linux-x86_64.AppImage"
+        );
+        // `{version}` is the tag without its `v`, and a name with no pattern is the name.
+        assert_eq!(direct_address(&settings, "drawing-{version}.zip"), "https://github.com/owner/drawing/releases/download/v0.2.0/drawing-0.2.0.zip");
+        assert_eq!(direct_address(&settings, "plain.zip"), "https://github.com/owner/drawing/releases/download/v0.2.0/plain.zip");
+        // A pre-release has its suffix in the tag, which is a file name's character too.
+        let pre = Settings { version: "0.3.0-rc.1".into(), ..settings.clone() };
+        assert_eq!(
+            direct_address(&pre, "diacraft-{tag}-macos-arm64.dmg"),
+            "https://github.com/owner/drawing/releases/download/v0.3.0-rc.1/diacraft-v0.3.0-rc.1-macos-arm64.dmg"
+        );
+        // Every byte that is not a letter, a digit or one of `-._~` is a percent escape, so that the address is one segment and nothing in it is markup.
+        assert_eq!(
+            direct_address(&settings, "a & b/c?d#e\"<f>\u{e9}.zip"),
+            "https://github.com/owner/drawing/releases/download/v0.2.0/a%20%26%20b%2Fc%3Fd%23e%22%3Cf%3E%C3%A9.zip"
+        );
+        // A draft that has no name for a file yet links the page of the release.
+        assert_eq!(direct_address(&settings, ""), "https://github.com/owner/drawing/releases/tag/v0.2.0");
+        assert_eq!(download_folder(&settings), "https://github.com/owner/drawing/releases/download/v0.2.0/");
+    }
+
+    #[test]
+    fn the_links_follow_the_version_and_a_version_that_moved_makes_the_pages_stale() {
+        let site = Site::new("version");
+        fs::write(site.0.join("index.html"), PAGE).unwrap();
+        apply(&site.0, &configured(), true).unwrap();
+        apply(&site.0, &configured(), false).unwrap();
+        let moved = Settings { version: "0.2.1".into(), ..configured() };
+        // `cargo xtask version set` moves the version; the check says what is left to do, and `--write` does it.
+        assert!(apply(&site.0, &moved, false).unwrap_err().contains("stale"));
+        apply(&site.0, &moved, true).unwrap();
+        let home = fs::read_to_string(site.0.join("index.html")).unwrap();
+        assert!(home.contains("/releases/download/v0.2.1/linux-x86_64-appimage-v0.2.1.bin"), "{home}");
+        assert!(!home.contains("v0.2.0"), "{home}");
+        apply(&site.0, &moved, false).unwrap();
+    }
+
+    #[test]
+    fn the_version_the_settings_are_for_is_a_version() {
+        let site = Site::new("version-load");
+        fs::write(
+            site.0.join("site.json"),
+            format!(
+                r#"{{"domain":"https://host.example","app_url":"https://app.example","repository":"owner/drawing",{}}}"#,
+                assets_json(|_| "a".into())
+            ),
+        )
+        .unwrap();
+        assert_eq!(load(&site.0, "0.2.0").unwrap().tag(), "v0.2.0");
+        assert_eq!(load(&site.0, "1.0.0-rc.2").unwrap().file_name("d-{tag}-{version}"), "d-v1.0.0-rc.2-1.0.0-rc.2");
+        for bad in ["", "v0.2.0", "0.2", "0.2.0+build", "0.2.0/../x", "0.2.0 ", "latest"] {
+            let error = load(&site.0, bad).unwrap_err();
+            assert!(error.contains("Cargo.toml"), "{bad:?}: {error}");
+        }
     }
 }

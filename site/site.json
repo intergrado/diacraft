@@ -13,7 +13,9 @@
     "windows-x86_64-zip": "diacraft-{tag}-windows-x86_64.zip",
     "windows-arm64-msi": "diacraft-{tag}-windows-arm64.msi",
     "windows-arm64-zip": "diacraft-{tag}-windows-arm64.zip",
-    "macos-universal-dmg": "diacraft-{tag}-macos-universal.dmg",
-    "macos-universal-zip": "diacraft-{tag}-macos-universal.zip"
+    "macos-arm64-dmg": "diacraft-{tag}-macos-arm64.dmg",
+    "macos-arm64-zip": "diacraft-{tag}-macos-arm64.zip",
+    "macos-x86_64-dmg": "diacraft-{tag}-macos-x86_64.dmg",
+    "macos-x86_64-zip": "diacraft-{tag}-macos-x86_64.zip"
   }
 }

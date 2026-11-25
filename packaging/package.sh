@@ -7,8 +7,8 @@
 #   PLATFORM  linux, windows or macos.
 #   NAME      what goes in the file name: the release tag (v0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only.
 #   OUT_DIR   where the archive is written; created when it is not there.
-#   BIN_DIR   a folder holding the release binaries `diacraft` and `diacraft-cli` (with `.exe` on Windows). macOS takes one folder for each
-#             architecture and joins them into universal binaries with lipo; the other platforms take one.
+#   BIN_DIR   a folder holding the release binaries `diacraft` and `diacraft-cli` (with `.exe` on Windows): one folder, of one architecture. There is no
+#             universal macOS download (the owner, 2026-11-25): each architecture's programs are packaged on their own.
 #
 # Writes (the last line printed is the archive's path; macOS also writes a disk image, and prints its path before it):
 #   Linux    diacraft-NAME-linux-ARCH.tar.gz     a folder holding both programs, the launcher entry, the icon, an install script, the licences (LICENSE-MIT,
@@ -18,7 +18,6 @@
 #                                                files, a README
 #            diacraft-NAME-macos-ARCH.dmg        a disk image of that same folder, with a link to Applications beside the app
 #            ARCH is x86_64 or arm64, read from the header of the program (never from the machine the script runs on, which may be a cross build's).
-#            For macOS it is universal for two or more BIN_DIRs, else the architecture of the binary (arm64 or x86_64).
 #
 # Environment (all optional):
 #   DIACRAFT_REPOSITORY  owner/name of the GitHub repository, for the link in the README.
@@ -56,16 +55,17 @@ stage=$(mktemp -d "${TMPDIR:-/tmp}/diacraft-package.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 
 # The README of the platform, with the release's name and the repository's address filled in, and what it says of the CPU its download is for: @ARCH@ (x86_64 or
-# arm64), @CPU@ (Intel or AMD, or ARM), and for Linux @GLIBC@ (the oldest C library the programs run on) and @DISTROS@ (distributions that have one that new). A platform
-# sets those once it has read the architecture of the programs.
+# arm64), @CPU@ (Intel or AMD, or ARM; for macOS Apple silicon and Intel, Apple silicon, or Intel), for macOS @CHIP@ (the Macs the download runs on), and for Linux @GLIBC@ (the oldest
+# C library the programs run on) and @DISTROS@ (distributions that have one that new). A platform sets those once it has read the architecture of the programs.
 set_repo_url
 arch=""
 cpu=""
 glibc=""
 distros=""
+chip=""
 render_readme() { # render_readme SOURCE DEST
     [ -f "$1" ] || die "missing $1"
-    sed -e "s|@NAME@|$name|g" -e "s|@REPO_URL@|$repo_url|g" -e "s|@ARCH@|$arch|g" -e "s|@CPU@|$cpu|g" -e "s|@GLIBC@|$glibc|g" \
+    sed -e "s|@NAME@|$name|g" -e "s|@REPO_URL@|$repo_url|g" -e "s|@ARCH@|$arch|g" -e "s|@CPU@|$cpu|g" -e "s|@CHIP@|$chip|g" -e "s|@GLIBC@|$glibc|g" \
         -e "s|@DISTROS@|$distros|g" "$1" >"$2"
 }
 
@@ -138,31 +138,32 @@ windows)
     ;;
 
 macos)
-    [ ${#bin_dirs[@]} -ge 1 ] || die "macos takes a BIN_DIR for each architecture"
+    [ ${#bin_dirs[@]} -eq 1 ] || die "macos takes one BIN_DIR: a download is for one architecture"
     base_bins=$(find_bin diacraft)
-    if [ ${#bin_dirs[@]} -ge 2 ]; then
-        arch=universal
-    else
-        arch=$(lipo -archs "$base_bins")
-        case $arch in
-        arm64 | x86_64) ;;
-        *) die "expected one architecture in $base_bins, found: $arch" ;;
-        esac
-    fi
+    arch=$(lipo -archs "$base_bins")
+    case $arch in
+    arm64 | x86_64) ;;
+    *) die "expected one architecture in $base_bins, found: $arch" ;;
+    esac
+    # What the README says of the Macs the download is for.
+    case $arch in
+    arm64)
+        cpu="Apple silicon"
+        chip="a Mac with an Apple silicon chip (M1 or later)"
+        ;;
+    *)
+        cpu="Intel"
+        chip="a Mac with an Intel chip"
+        ;;
+    esac
     base="diacraft-$name-macos-$arch"
     dir=$stage/$base
     app=$dir/DiaCraft.app
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
-    # One architecture: the binary as it is. Several: one universal binary joined from them.
+    # The program as it is, one architecture.
     join_bin() { # join_bin NAME DEST
-        if [ ${#bin_dirs[@]} -eq 1 ]; then
-            cp "$(find_bin "$1")" "$2"
-        else
-            inputs=()
-            for d in "${bin_dirs[@]}"; do inputs+=("$(find_bin "$1" "$d")"); done
-            lipo -create -output "$2" "${inputs[@]}"
-        fi
+        cp "$(find_bin "$1")" "$2"
         chmod 755 "$2"
     }
     # The program in the app is named as the app, DiaCraft, the CFBundleExecutable of Info.plist: the app menu names its items after the
@@ -183,7 +184,7 @@ macos)
     done
     iconutil -c icns "$iconset" -o "$app/Contents/Resources/DiaCraft.icns"
 
-    # Signing: ad hoc unless an identity is given. An arm64 program must carry a signature to run at all, and joining slices with lipo drops the linker's.
+    # Signing: ad hoc unless an identity is given. An arm64 program must carry a signature to run at all.
     identity=${MACOS_SIGN_IDENTITY:--}
     sign_options=()
     if [ "$identity" != "-" ]; then

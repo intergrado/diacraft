@@ -515,14 +515,18 @@ a:hover > .arrow-out { translate: .14em -.14em; }
 .spec > div { display: grid; grid-template-columns: var(--spec-label, 4.4rem) minmax(0, 1fr); gap: .75rem; align-items: baseline; padding: .6rem 0; border-top: 1px solid var(--line); }
 .spec dt { color: var(--ink-muted); font: 500 .66rem/1.7 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
 .spec dd { color: var(--ink-body); font-size: .97rem; line-height: 1.5; }
-/* The main download is a button with the CPU it is for beside it; the others are smaller links, a row for each CPU, under it. */
+/* The main download is a button alone; the other downloads are smaller links, a row for each CPU, under it. */
 .get-main { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
-.get-cpu { color: var(--ink-muted); font: 500 var(--text-xs)/1.5 var(--font-mono); letter-spacing: .04em; }
 .cpus { align-self: stretch; display: grid; }
-.cpus > div { display: grid; grid-template-columns: 7.3rem minmax(0, 1fr); gap: .75rem; align-items: baseline; padding: .35rem 0; border-top: 1px solid var(--line); }
+.cpus > div { display: grid; grid-template-columns: 6.8rem minmax(0, 1fr); gap: .75rem; align-items: baseline; padding: .35rem 0; border-top: 1px solid var(--line); }
 .cpus dt { color: var(--ink-muted); font: 500 .66rem/1.9 var(--font-mono); letter-spacing: .04em; }
-.cpus dd { display: flex; flex-wrap: wrap; gap: 0 1rem; font: 600 .84rem/1.9 var(--font-mono); }
+.cpus dd { display: flex; flex-wrap: wrap; gap: 0 .8rem; font: 600 .84rem/1.9 var(--font-mono); }
 .cpus a { display: inline-block; min-height: 1.5rem; }
+/* The three cards share four rows (the name, the facts, the button, the other downloads), so that the buttons stand at one height whatever the length of the facts above them. */
+@supports (grid-template-rows: subgrid) {
+  .platform { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 1.25rem; align-items: start; justify-items: start; }
+  .platform .spec, .platform .cpus { justify-self: stretch; }
+}
 .platform-browser { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem 2.5rem; padding: clamp(1.25rem, 2.5vw, 1.75rem) var(--cell-pad); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-m) var(--radius-m); background: var(--teal-wash); }
 .platform-browser h3 { font-size: 1.3rem; }
 .platform-browser p { max-width: 46rem; margin-top: .3rem; color: var(--ink-body); font-size: .97rem; line-height: 1.55; }
@@ -585,7 +589,7 @@ footer .ruler { border-top: 0; }
 .foot-inner nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .25rem 1.75rem; }
 .foot-inner nav a { padding-block: .5rem; color: var(--ink); font: 500 var(--text-xs)/1.4 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; text-decoration: none; }
 .foot-inner nav a:hover { color: var(--teal); text-decoration: underline; text-underline-offset: .5em; }
-.foot-inner .legal { grid-column: 1 / -1; margin: 0; padding: 1.25rem max(0px, calc(100% - 90ch)) 0 0; border-top: 1px solid var(--line); color: var(--ink-muted); font-size: .8rem; line-height: 1.6; }
+.foot-inner .legal { grid-column: 1 / -1; margin: 0; padding: 1.25rem 0 0; border-top: 1px solid var(--line); color: var(--ink-muted); font-size: .8rem; line-height: 1.6; }
 /* The home page's footer: the name and what it is, then three lists. */
 .foot-block { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: start; gap: 2.5rem var(--split-gap); padding-block: clamp(2.5rem, 5vw, 4rem) 2.5rem; }
 .foot-brand .brand { font-size: 1.6rem; }
@@ -768,7 +772,7 @@ footer .ruler { border-top: 0; }
   .extras { grid-template-columns: minmax(0, 1fr); }
   .slab-top, .slab-text { grid-template-columns: minmax(0, 1fr); }
   .platforms { grid-template-columns: minmax(0, 1fr); }
-  .platform { display: grid; grid-template: auto 1fr / 11rem minmax(0, 1fr); gap: 1rem 1.5rem; align-items: start; justify-items: start; }
+  .platform { display: grid; grid-row: auto; grid-template: auto 1fr / 11rem minmax(0, 1fr); gap: 1rem 1.5rem; align-items: start; justify-items: start; }
   .platform + .platform { border-left: 0; border-top: 1px solid var(--line); }
   .platform .spec { grid-area: 1 / 2 / 3 / 3; justify-self: stretch; }
   .platform .get-main { grid-area: 2 / 1; flex-direction: column; align-items: flex-start; }
@@ -810,7 +814,7 @@ footer .ruler { border-top: 0; }
   .legend { grid-template-columns: minmax(0, 1fr); }
   .extra { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
   .get-head { grid-template-columns: minmax(0, 1fr); }
-  .platform { display: flex; }
+  .platform { display: flex; grid-row: auto; }
   .platform .spec > div:first-child { border-top: 1px solid var(--line); padding-top: .6rem; }
   .stop { grid-template: auto / minmax(0, 1fr); }
   .stop-name { grid-area: 2 / 1; }

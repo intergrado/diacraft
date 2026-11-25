@@ -11,6 +11,11 @@
 //! the module and the data. A link to another site (the pages' to the app) is not followed: that is the other site's check. Each is fetched once with
 //! `Accept-Encoding: br, gzip`, as a browser asks (the answer is not decoded: what comes is what a browser is sent), and again with `If-None-Match` and the `ETag` it was given.
 //!
+//! **What Pages does to a link with an extension.** The pages link each other as `/privacy.html`, so that they also work on a plain file server, and Cloudflare Pages answers such a link
+//! with a 308 to the same address without the extension (`/privacy`), which it serves. That answer is right: a page whose address ends in `.html` and that answers 308 to its own address without it
+//! (`/index.html` to `/`, `/dir/index.html` to `/dir/`), as a path or as the site's own address, is not a failure; the check follows it once and checks the target as it checks any file, and finds
+//! what the target loads. Any other 308, any other redirect and a redirect of a path that is not a page are answers that are not 200, as they were.
+//!
 //! **What it says.** For each: the status, `Cache-Control`, `Content-Encoding`, `ETag`, whether the second request got `304`, and the bytes that came. It **fails** on a status that is not 200
 //! and on a wrong `Cache-Control` (a file named by its hash must be `immutable` for a year; any other must not be kept at all) and **warns** when a text or WebAssembly file of 1 KiB
 //! or more comes back uncompressed, when there is no `ETag` or the second request does not get `304`, and when a file that must be asked about says nothing about it.
@@ -55,6 +60,12 @@ impl Response {
 /// compressed forms asked for).
 pub(super) trait Fetch {
     fn get(&self, path: &str, if_none_match: Option<&str>, body: bool) -> Result<Response, String>;
+
+    /// The address of the site itself, `https://host` (or `http://host:port`), with no slash at the end: a redirect to it is a redirect within the site. A fetcher that does not know it says
+    /// so, and then only a path is taken for the site's own.
+    fn origin(&self) -> Option<&str> {
+        None
+    }
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------------ curl
@@ -90,6 +101,10 @@ impl Curl {
 const SINK: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
 impl Fetch for Curl {
+    fn origin(&self) -> Option<&str> {
+        Some(&self.base)
+    }
+
     fn get(&self, path: &str, if_none_match: Option<&str>, body: bool) -> Result<Response, String> {
         if !path.starts_with('/') || path.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return Err(format!("`{path}` is not a path of the site"));
@@ -382,6 +397,8 @@ pub(super) struct Entry {
     pub(super) size: u64,
     /// The status of the request that carried the `ETag`, when there was one.
     pub(super) conditional: Option<u16>,
+    /// The path a 308 of Pages sent this page to (`/privacy.html` to `/privacy`), which is probed as a file of its own.
+    pub(super) redirect: Option<String>,
     pub(super) findings: Vec<Finding>,
 }
 
@@ -418,7 +435,7 @@ impl Report {
                 entry.encoding.as_deref().unwrap_or("-"),
                 entry.etag.as_deref().unwrap_or("-"),
                 entry.size,
-                entry.path
+                entry.redirect.as_deref().map_or_else(|| entry.path.clone(), |to| format!("{} -> {to}", entry.path))
             ));
             for finding in &entry.findings {
                 lines.push(format!("       {}: {}", if finding.level == Level::Fail { "FAIL" } else { "warn" }, finding.text));
@@ -476,6 +493,49 @@ fn judge(path: &str, response: &Response, conditional: Option<u16>) -> Vec<Findi
     findings
 }
 
+/// The addresses without the extension that Pages sends the page at `path` to: `/x.html` to `/x`, `/index.html` to `/`, and `/dir/index.html` to `/dir/` (or `/dir`). Nothing for a path that is
+/// not a page with an extension.
+fn extensionless(path: &str) -> Vec<String> {
+    let Some(stem) = path.strip_suffix(".html").filter(|stem| !stem.is_empty() && !stem.ends_with('/')) else { return Vec::new() };
+    match stem.strip_suffix("/index") {
+        Some("") => vec!["/".to_owned()],
+        Some(folder) => vec![format!("{folder}/"), folder.to_owned()],
+        None => vec![stem.to_owned()],
+    }
+}
+
+/// The path of a `Location` that is the site's own: a path (not `//host`), or an address that starts with the site's own `origin`. A query, a fragment or anything that is not a plain address is
+/// not taken.
+fn own_path(fetch: &dyn Fetch, location: &str) -> Option<String> {
+    if location.is_empty() || location.chars().any(|c| c.is_control() || c.is_whitespace()) || location.contains(['?', '#']) {
+        return None;
+    }
+    if location.starts_with('/') {
+        return (!location.starts_with("//")).then(|| location.to_owned());
+    }
+    let rest = location.strip_prefix(fetch.origin()?)?;
+    if rest.is_empty() { Some("/".to_owned()) } else { rest.starts_with('/').then(|| rest.to_owned()) }
+}
+
+/// Where the 308 of `response` sends the page at `path`, if that is where Pages sends a page: its own address without the extension. The other case says what was wrong.
+fn pages_redirect(fetch: &dyn Fetch, path: &str, response: &Response) -> Result<String, String> {
+    let location = response.header("location");
+    let wanted = extensionless(path);
+    let went = location.and_then(|location| own_path(fetch, location));
+    match went {
+        Some(went) if wanted.contains(&went) => Ok(went),
+        _ => Err(format!(
+            "answered 308 {}, and a page with its extension is sent to its own address without it ({})",
+            location.map_or("with no Location".to_owned(), |location| format!("to `{location}`")),
+            if wanted.is_empty() {
+                "this path is not a page".to_owned()
+            } else {
+                wanted.iter().map(|w| format!("`{w}`")).collect::<Vec<_>>().join(" or ")
+            }
+        )),
+    }
+}
+
 /// The text of a response, as far as it is text (what `curl` gave is already at most [`MAX_BODY`] and a head).
 fn text_of(response: &Response) -> String {
     String::from_utf8_lossy(&response.body).into_owned()
@@ -494,7 +554,7 @@ pub(super) fn check(fetch: &dyn Fetch) -> Result<Report, String> {
         let text = match known {
             Some(text) => Some(text),
             // A kind of file with references in it: its text, when it is there. A file that is not is reported when it is probed.
-            None if has_references(&path) => fetch.get(&path, None, true).ok().filter(|r| r.status == 200).map(|r| text_of(&r)),
+            None if has_references(&path) => read_text(fetch, &path),
             None => None,
         };
         for (reference, link) in text.map(|text| discover(&path, &text)).unwrap_or_default() {
@@ -513,25 +573,72 @@ pub(super) fn check(fetch: &dyn Fetch) -> Result<Report, String> {
             }
         }
     }
+    // Each file once. A page that Pages sends on is followed once, and its target is probed right after it, as a file of its own that is not sent on again.
     let mut entries = Vec::new();
+    let mut probed: BTreeSet<String> = BTreeSet::new();
     for path in seen {
-        entries.push(probe(fetch, &path));
+        if !probed.insert(path.clone()) {
+            continue;
+        }
+        let (entry, target) = probe(fetch, &path, true);
+        entries.push(entry);
+        if let Some(target) = target
+            && probed.insert(target.clone())
+        {
+            entries.push(probe(fetch, &target, false).0);
+        }
     }
     Ok(Report { entries })
 }
 
-/// One file: asked for as a browser asks, and again with its `ETag`.
-fn probe(fetch: &dyn Fetch, path: &str) -> Entry {
-    let mut entry =
-        Entry { path: path.to_owned(), status: 0, cache_control: None, encoding: None, etag: None, size: 0, conditional: None, findings: Vec::new() };
+/// The text of a file that has references in it, when it is there: a page that Pages sends on (its address with the extension) is read at the address it is sent to.
+fn read_text(fetch: &dyn Fetch, path: &str) -> Option<String> {
+    let response = fetch.get(path, None, true).ok()?;
+    match response.status {
+        200 => Some(text_of(&response)),
+        308 => {
+            let target = pages_redirect(fetch, path, &response).ok()?;
+            fetch.get(&target, None, true).ok().filter(|r| r.status == 200).map(|r| text_of(&r))
+        }
+        _ => None,
+    }
+}
+
+/// One file: asked for as a browser asks, and again with its `ETag`. With `follow`, a page that Pages sends to its address without the extension is not a failure: the entry says where, and the
+/// path it is sent to comes back, to be probed as a file of its own (without `follow`, so that a redirect of a redirect is an answer that is not 200).
+fn probe(fetch: &dyn Fetch, path: &str, follow: bool) -> (Entry, Option<String>) {
+    let mut entry = Entry {
+        path: path.to_owned(),
+        status: 0,
+        cache_control: None,
+        encoding: None,
+        etag: None,
+        size: 0,
+        conditional: None,
+        redirect: None,
+        findings: Vec::new(),
+    };
     let response = match fetch.get(path, None, false) {
         Ok(response) => response,
         Err(e) => {
             entry.findings.push(Finding { level: Level::Fail, text: format!("the request failed: {e}") });
-            return entry;
+            return (entry, None);
         }
     };
     entry.status = response.status;
+    if follow && response.status == 308 && path.ends_with(".html") {
+        entry.size = response.size;
+        return match pages_redirect(fetch, path, &response) {
+            Ok(target) => {
+                entry.redirect = Some(target.clone());
+                (entry, Some(target))
+            }
+            Err(why) => {
+                entry.findings.push(Finding { level: Level::Fail, text: why });
+                (entry, None)
+            }
+        };
+    }
     entry.cache_control = response.header("cache-control").map(str::to_owned);
     entry.encoding = response.header("content-encoding").map(str::to_owned);
     entry.etag = response.header("etag").map(str::to_owned);
@@ -545,7 +652,7 @@ fn probe(fetch: &dyn Fetch, path: &str) -> Entry {
         }
     }
     entry.findings.extend(judge(path, &response, entry.conditional));
-    entry
+    (entry, None)
 }
 
 /// `cargo xtask deploy-check <BASE_URL> [<BASE_URL>]`: each site given is checked on its own, in the order given, and the run fails if any of them has a failure.

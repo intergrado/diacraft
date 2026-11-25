@@ -10,6 +10,7 @@ mod app_tests;
 mod cache;
 #[cfg(test)]
 mod cache_tests;
+mod downloads;
 mod headers;
 mod html;
 mod links;
@@ -97,6 +98,13 @@ pub(super) fn deploy_check(args: &[&str]) -> Result<(), String> {
     live::run(args)
 }
 
+/// The version in `[workspace.package]` of the root `Cargo.toml` of the repository at `root`: the release the pages are made for.
+fn workspace_version(root: &Path) -> Result<String, String> {
+    let path = root.join("Cargo.toml");
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    xtask::version::read(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// What a build for a preview names as the app's address when `--app-url` is not given: `DIACRAFT_APP_URL`.
 const APP_URL_ENV: &str = "DIACRAFT_APP_URL";
 
@@ -116,7 +124,9 @@ fn run_with(dir: &Path, args: &[&str], env_app_url: Option<&str>) -> Result<(), 
     }
     // Inspect the deployment tree before following or writing any generated path.
     let files = inventory(dir)?;
-    let settings = settings::load(dir)?;
+    // The pages are made for the release of the workspace's version: each download link is a file of that release.
+    let root = dir.parent().ok_or_else(|| format!("{}: the site folder has no parent", dir.display()))?;
+    let settings = settings::load(dir, &workspace_version(root)?)?;
     if mode == Mode::Release {
         settings::release(&settings)?;
     }
@@ -140,6 +150,9 @@ fn run_with(dir: &Path, args: &[&str], env_app_url: Option<&str>) -> Result<(), 
     if !write {
         settings::apply(dir, &settings, false)?;
     }
+    // Every download link is a file that the release workflow uploads and lists, and `site.json` names no other.
+    let pages: Vec<String> = inventory(dir)?.into_iter().filter(|name| name.ends_with(".html")).collect();
+    downloads::check(root, dir, &settings, &pages)?;
     println!("site: {count} pages checked, each within {PAGE_BUDGET} bytes");
     println!("{}", caching.line());
     if let Mode::Web(web) = &mode {

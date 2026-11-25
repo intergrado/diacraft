@@ -8,7 +8,8 @@
 #   diacraft-<tag>-linux-x86_64.AppImage   diacraft-<tag>-linux-arm64.AppImage
 #   diacraft-<tag>-windows-x86_64.zip      diacraft-<tag>-windows-arm64.zip
 #   diacraft-<tag>-windows-x86_64.msi      diacraft-<tag>-windows-arm64.msi
-#   diacraft-<tag>-macos-universal.dmg     diacraft-<tag>-macos-universal.zip
+#   diacraft-<tag>-macos-arm64.dmg         diacraft-<tag>-macos-arm64.zip
+#   diacraft-<tag>-macos-x86_64.dmg        diacraft-<tag>-macos-x86_64.zip
 #
 # The release stays a draft: the owner reads the notes and the files, then presses Publish. Running the workflow by hand (workflow_dispatch) on a
 # branch builds and tests every download but uploads nothing to a release; run on a tag, it does what the tag's push does. Every program is smoke tested
@@ -133,7 +134,8 @@ jobs:
           - Linux, ARM (arm64): diacraft-$TAG-linux-arm64.AppImage, diacraft-$TAG-linux-arm64.deb and diacraft-$TAG-linux-arm64.tar.gz
           - Windows, Intel or AMD (x64): diacraft-$TAG-windows-x86_64.msi and diacraft-$TAG-windows-x86_64.zip
           - Windows, ARM (ARM64): diacraft-$TAG-windows-arm64.msi and diacraft-$TAG-windows-arm64.zip
-          - macOS (Apple silicon and Intel): diacraft-$TAG-macos-universal.dmg and diacraft-$TAG-macos-universal.zip
+          - macOS, Apple silicon (arm64): diacraft-$TAG-macos-arm64.dmg and diacraft-$TAG-macos-arm64.zip
+          - macOS, Intel (x86_64): diacraft-$TAG-macos-x86_64.dmg and diacraft-$TAG-macos-x86_64.zip
 
           Check a download against SHA256SUMS. These downloads are not signed yet: the README in each one says how to open them.
 
@@ -497,9 +499,10 @@ jobs:
         run: gh release upload "$NAME" "dist/diacraft-$NAME-windows-$ARCH.msi" "dist/diacraft-$NAME-windows-$ARCH.zip" --repo "$REPO" --clobber
 
   macos:
-    name: macOS (universal)
+    name: macOS
     needs: [plan, draft]
-    # Apple silicon. The Intel half is built on the same machine (a cross build, for the Intel Macs) and joined with the Apple silicon half into one program.
+    # Apple silicon. The Intel build is made on the same machine (a cross build, for the Intel Macs). Each build is packaged on its own, as a zip and a disk image (the owner,
+    # 2026-11-25: there is no universal download, one program for both chips).
     runs-on: macos-15
     timeout-minutes: 120
     permissions:
@@ -544,7 +547,7 @@ jobs:
       #   MACOS_SIGN_IDENTITY          the certificate's name, as in: Developer ID Application: Your Name (TEAMID)
       #   APPLE_ID, APPLE_TEAM_ID      the Apple ID that notarises, and its team
       #   APPLE_APP_PASSWORD           an app-specific password of that Apple ID
-      # 1. Import the certificate into a keychain of its own, before "Make the download":
+      # 1. Import the certificate into a keychain of its own, before "Make the downloads":
       #
       # - name: Import the signing certificate
       #   env:
@@ -563,44 +566,53 @@ jobs:
       #     security list-keychains -d user -s "$keychain" login.keychain-db
       #     rm "$RUNNER_TEMP/signing.p12"
       #
-      # 2. Give packaging/package.sh the identity: add this line to the `env:` of "Make the download" (the script then signs the CLI, the app's program and
+      # 2. Give packaging/package.sh the identity: add this line to the `env:` of "Make the downloads" (the script then signs the CLI, the app's program and
       #    the app with the hardened runtime and a timestamp, where it signs ad hoc without it):
       #      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
       #    The script also signs the disk image with the identity, which is what a disk image is notarised and stapled as.
-      # 3. Notarise the disk image, right after "Make the download", and staple the ticket to it, so that a person who opens it with no network gets no question. The
+      # 3. Notarise each of the two disk images, right after "Make the downloads", and staple the ticket to it, so that a person who opens it with no network gets no question. The
       #    zip has no place for a ticket, and the app in it is notarised with the image's (the ticket is for the app's own signature): the Mac checks it online.
       #
-      # - name: Notarise the disk image
+      # - name: Notarise the disk images
       #   env:
       #     APPLE_ID: ${{ secrets.APPLE_ID }}
       #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
       #   run: |
       #     set -euo pipefail
-      #     xcrun notarytool submit "dist/diacraft-$NAME-macos-universal.dmg" \
-      #       --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-      #     xcrun stapler staple "dist/diacraft-$NAME-macos-universal.dmg"
+      #     for cpu in arm64 x86_64; do
+      #       xcrun notarytool submit "dist/diacraft-$NAME-macos-$cpu.dmg" \
+      #         --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+      #       xcrun stapler staple "dist/diacraft-$NAME-macos-$cpu.dmg"
+      #     done
       # ---- end of the signing hook
 
-      - name: Make the download
-        run: bash packaging/package.sh macos "$NAME" dist target/aarch64-apple-darwin/release target/x86_64-apple-darwin/release
+      # One download for each architecture: package.sh reads the architecture of the programs, so the two are diacraft-<tag>-macos-arm64 and -x86_64, each a zip and a disk image.
+      - name: Make the downloads
+        run: |
+          set -euo pipefail
+          bash packaging/package.sh macos "$NAME" dist target/aarch64-apple-darwin/release
+          bash packaging/package.sh macos "$NAME" dist target/x86_64-apple-darwin/release
+          ls -l dist
 
-      # The folder of a download is checked twice, as the zip unpacks it and as the disk image mounts it. The image is attached read only and with no window (-nobrowse),
-      # looked at, run from, and detached; it is detached again, whatever happens, when the step ends.
+      # The folder of each download is checked twice, as the zip unpacks it and as the disk image mounts it. The image is attached read only and with no window (-nobrowse),
+      # looked at, run from, and detached; it is detached again, whatever happens, when the step ends. Each holds its own architecture in both programs, and no other. The Intel
+      # programs run on this Apple silicon machine only under Rosetta: they are run when it is there (`arch -x86_64`), and
+      # when it is not their headers are all that is checked (lipo), and the step says which it did.
       - name: Check what is in the downloads
         run: |
           set -euo pipefail
-          check_folder() { # check_folder DIR
+          if arch -x86_64 /usr/bin/true >/dev/null 2>&1; then rosetta=yes; else rosetta=no; fi
+          echo "Rosetta (can run the Intel programs here): $rosetta"
+          check_folder() { # check_folder DIR ARCH (the one architecture of each program, in the words of lipo -archs)
             dir=$1
+            want=$2
             app="$dir/DiaCraft.app"
-            # Both architectures in both programs.
+            # Exactly the architecture of this download, in both programs.
             for program in "$app/Contents/MacOS/DiaCraft" "$dir/diacraft-cli"; do
               archs=$(lipo -archs "$program")
               echo "$program: $archs"
-              case $archs in
-              *arm64*x86_64* | *x86_64*arm64*) ;;
-              *) echo "::error::$program holds '$archs', not both architectures"; exit 1 ;;
-              esac
+              if [ "$archs" != "$want" ]; then echo "::error::$program holds '$archs', not '$want'"; exit 1; fi
             done
             plutil -lint "$app/Contents/Info.plist"
             test -f "$app/Contents/Resources/DiaCraft.icns"
@@ -610,32 +622,48 @@ jobs:
             # The signature (ad hoc, or the identity) is whole.
             codesign --verify --strict --verbose=2 "$app"
             codesign --verify --strict --verbose=2 "$dir/diacraft-cli"
-            # The programs of the download start.
-            "$dir/diacraft-cli" --version
-            "$app/Contents/MacOS/DiaCraft" --version
+            # The programs of the download start. An Intel program is one this machine runs only under Rosetta.
+            if [ "$want" = x86_64 ]; then
+              if [ "$rosetta" = yes ]; then
+                arch -x86_64 "$dir/diacraft-cli" --version
+                arch -x86_64 "$app/Contents/MacOS/DiaCraft" --version
+                echo "::notice::the Intel programs in $dir were run under Rosetta"
+              else
+                echo "::notice::Rosetta is not installed here: the Intel programs in $dir were not run, and their headers (lipo) were checked"
+              fi
+            else
+              "$dir/diacraft-cli" --version
+              "$app/Contents/MacOS/DiaCraft" --version
+            fi
           }
-          ditto -x -k "dist/diacraft-$NAME-macos-universal.zip" unpacked
-          check_folder "unpacked/diacraft-$NAME-macos-universal"
+          check_download() { # check_download CPU ARCH: the zip unpacked, and the disk image attached
+            cpu=$1
+            want=$2
+            ditto -x -k "dist/diacraft-$NAME-macos-$cpu.zip" "unpacked-$cpu"
+            check_folder "unpacked-$cpu/diacraft-$NAME-macos-$cpu" "$want"
 
-          mount="$RUNNER_TEMP/diacraft-image"
-          mkdir -p "$mount"
-          trap 'hdiutil detach "$mount" -force >/dev/null 2>&1 || true' EXIT
-          hdiutil attach -nobrowse -readonly -noverify -mountpoint "$mount" "dist/diacraft-$NAME-macos-universal.dmg"
-          check_folder "$mount"
-          # The link that the app is dragged onto, and the README.
-          [ "$(readlink "$mount/Applications")" = /Applications ]
-          test -s "$mount/README.txt"
-          for _ in 1 2 3; do
-            hdiutil detach "$mount" && break
-            sleep 3
-          done
-          if [ -e "$mount/DiaCraft.app" ]; then echo "::error::the disk image is still attached"; exit 1; fi
+            mount="$RUNNER_TEMP/diacraft-image-$cpu"
+            mkdir -p "$mount"
+            hdiutil attach -nobrowse -readonly -noverify -mountpoint "$mount" "dist/diacraft-$NAME-macos-$cpu.dmg"
+            check_folder "$mount" "$want"
+            # The link that the app is dragged onto, and the README.
+            [ "$(readlink "$mount/Applications")" = /Applications ]
+            test -s "$mount/README.txt"
+            for _ in 1 2 3; do
+              hdiutil detach "$mount" && break
+              sleep 3
+            done
+            if [ -e "$mount/DiaCraft.app" ]; then echo "::error::the disk image of $cpu is still attached"; exit 1; fi
+          }
+          trap 'for image in "$RUNNER_TEMP"/diacraft-image-*; do hdiutil detach "$image" -force >/dev/null 2>&1 || true; done' EXIT
+          check_download arm64 arm64
+          check_download x86_64 x86_64
 
       # Every package of the run is kept for a week, so that a run by hand can be downloaded and tried before a tag is pushed. Nothing goes to a release without a tag.
       - name: Keep the packages as an artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: diacraft-${{ needs.plan.outputs.name }}-macos-universal
+          name: diacraft-${{ needs.plan.outputs.name }}-macos
           path: dist
           retention-days: 7
           if-no-files-found: error
@@ -645,7 +673,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: gh release upload "$NAME" "dist/diacraft-$NAME-macos-universal.dmg" "dist/diacraft-$NAME-macos-universal.zip" --repo "$REPO" --clobber
+        run: |
+          gh release upload "$NAME" \
+            "dist/diacraft-$NAME-macos-arm64.dmg" "dist/diacraft-$NAME-macos-arm64.zip" \
+            "dist/diacraft-$NAME-macos-x86_64.dmg" "dist/diacraft-$NAME-macos-x86_64.zip" \
+            --repo "$REPO" --clobber
 
   # The website and the web app, two sites. Built with trunk, `wasm-bindgen` and binaryen's `wasm-opt`: the release archives of each, checked against the
   # SHA-256 written here, as ci.yml does for its tools. To move a version, change the version and its checksum together; `wasm-bindgen` must be the version of the
@@ -680,34 +712,9 @@ jobs:
           rustup default "$RUST_VERSION"
           rustc --version
 
+      # The same script installs them in deploy-site.yml (the website by hand), from the versions and checksums of the `env:` above and of that workflow's job, which a test holds equal.
       - name: Install trunk, wasm-bindgen and wasm-opt
-        run: |
-          set -euo pipefail
-          bin="$RUNNER_TEMP/tools/bin"
-          downloads="$RUNNER_TEMP/tools/downloads"
-          mkdir -p "$bin" "$downloads"
-          fetch() { # fetch <url> <sha256> <file>
-            curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-              --retry 5 --retry-all-errors --output "$3" "$1"
-            echo "$2  $3" | sha256sum --check --strict -
-          }
-          trunk="trunk-x86_64-unknown-linux-gnu.tar.gz"
-          fetch "https://github.com/trunk-rs/trunk/releases/download/v$TRUNK_VERSION/$trunk" "$TRUNK_SHA256" "$downloads/$trunk"
-          tar -xzf "$downloads/$trunk" -C "$bin" trunk
-          bindgen="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
-          fetch "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$bindgen.tar.gz" "$WASM_BINDGEN_SHA256" "$downloads/$bindgen.tar.gz"
-          tar -xzf "$downloads/$bindgen.tar.gz" -C "$bin" --strip-components=1 "$bindgen/wasm-bindgen"
-          binaryen="binaryen-$BINARYEN_VERSION-x86_64-linux"
-          fetch "https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/$binaryen.tar.gz" "$BINARYEN_SHA256" "$downloads/$binaryen.tar.gz"
-          tar -xzf "$downloads/$binaryen.tar.gz" -C "$bin" --strip-components=2 "binaryen-$BINARYEN_VERSION/bin/wasm-opt"
-          echo "$bin" >> "$GITHUB_PATH"
-          # The version each tool reports is the one asked for: trunk uses a program of the PATH only at exactly the version it expects.
-          reported=$("$bin/trunk" --version)
-          [ "$reported" = "trunk $TRUNK_VERSION" ] || { echo "::error::trunk reports: $reported"; exit 1; }
-          reported=$("$bin/wasm-bindgen" --version)
-          [ "$reported" = "wasm-bindgen $WASM_BINDGEN_VERSION" ] || { echo "::error::wasm-bindgen reports: $reported"; exit 1; }
-          reported=$("$bin/wasm-opt" --version)
-          case $reported in "wasm-opt version "*"($BINARYEN_VERSION)") ;; *) echo "::error::wasm-opt reports: $reported"; exit 1 ;; esac
+        run: bash packaging/install-site-tools.sh
 
       - name: Check the pages
         run: cargo xtask site
@@ -761,7 +768,8 @@ jobs:
             "diacraft-$NAME-linux-x86_64.AppImage" "diacraft-$NAME-linux-arm64.AppImage" \
             "diacraft-$NAME-windows-x86_64.zip" "diacraft-$NAME-windows-arm64.zip" \
             "diacraft-$NAME-windows-x86_64.msi" "diacraft-$NAME-windows-arm64.msi" \
-            "diacraft-$NAME-macos-universal.dmg" "diacraft-$NAME-macos-universal.zip" | sort | tr '\n' ' ' | sed 's/ $//')
+            "diacraft-$NAME-macos-arm64.dmg" "diacraft-$NAME-macos-arm64.zip" \
+            "diacraft-$NAME-macos-x86_64.dmg" "diacraft-$NAME-macos-x86_64.zip" | sort | tr '\n' ' ' | sed 's/ $//')
           found=$(cd downloads && ls | sort | tr '\n' ' ' | sed 's/ $//')
           if [ "$found" != "$expected" ]; then
             echo "::error::the release holds '$found', expected '$expected'"
@@ -796,6 +804,10 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    # One deploy of the websites at a time, here and in deploy-site.yml (the website by hand), which names the same group: a run that waits is not cancelled, and neither deploys while the other does.
+    concurrency:
+      group: deploy-site
+      cancel-in-progress: false
     env:
       NAME: ${{ needs.plan.outputs.name }}
       WRANGLER_VERSION: 4.166.0
