@@ -15,7 +15,7 @@ use std::process::ExitCode;
 
 use xtask::ci::{Outcome, Step, run_steps};
 use xtask::{
-    assets, brands, cargo, deny, docs_check, fuzzcheck, has_cargo_tool, kani, layers, licenses, metadata, parity, root, run, stats, version,
+    assets, brands, cargo, deny, docs_check, fuzzcheck, has_cargo_tool, kani, layers, licenses, mcp, metadata, parity, root, run, stats, version,
 };
 
 const USAGE: &str = "\
@@ -49,14 +49,20 @@ commands:
                   --app-url / DIACRAFT_APP_URL for a preview on this machine) in the pages' folder (--out, dist/site when none), and the web app
                   (`trunk build --release` in apps/diacraft-web, or the finished build in DIR) at the root of a folder of its own (--app-out, dist/app when
                   none) with its own _headers; and checks that: every file and link of the app, each file under the 25 MiB Cloudflare Pages
-                  allows and the budget below it, no inline script or style, no shared memory, no network call in the glue, and each folder's _headers
+                  allows and the budget below it, no inline script or style, no shared memory, no network call in the glue, the registry's proof of the domain
+                  at .well-known/mcp-registry-auth, and each folder's _headers
   deploy-check <BASE_URL> [<BASE_URL>]
                   after a deploy: for each site (the pages, then the app) fetch the start page, every file it loads and the pictures from BASE_URL with
                   `Accept-Encoding: br, gzip` (through curl), and say for each the status, Cache-Control, Content-Encoding and ETag, and whether a
                   second request with If-None-Match gets 304. Fails on a status that is not 200 (but for the 308 Pages sends `/x.html` to `/x` with,
                   which it follows once) and on a wrong Cache-Control (a file named by its
-                  hash must be immutable for a year, any other must not be kept); warns when a .wasm part or another text file comes back
+                  hash must be immutable for a year, any other must not be kept; for the app's site also the proof at /.well-known/mcp-registry-auth: 200, text/plain,
+                  a record); warns when a .wasm part or another text file comes back
                   uncompressed, or has no ETag. BASE_URL is https://host, or http://host:port for a server of your own
+  web-dpr [DIR]   the built web app (DIR, or dist/app from `site --web`) in a headless Chrome or Chromium (the program on the PATH, or CHROME; extra
+                  arguments in CHROME_ARGS) at device scale factors of 1, 1.5, 2 and 3, a phone-sized page at 3, and a running app that is resized: serves
+                  DIR on a loopback port, drives the browser over the DevTools protocol (`Emulation.setDeviceMetricsOverride`), and fails when the canvas
+                  has not its CSS size times the ratio in pixels, which is a window laid out for part of the page. Needs the browser, so it is no step of ci
   deny            cargo deny check licenses bans sources, then advisories (deny.toml; fails when cargo-deny is not installed; with no network
                   the advisories run against the copy of the database on the machine, and fail when there is none)
   licenses [--check]
@@ -66,6 +72,12 @@ commands:
                   on wasm32-unknown-unknown), which the web app's window shows; --check fails when a crate has no text, a licence or a licence file is
                   outside deny.toml's list, a crate compiles C code that xtask/src/licenses/policy.rs does not name, or a file is out of date. Needs
                   the sources of every platform's crates, which cargo fetches (a network, once)
+  mcp-server-json <SHA256SUMS.txt> [--out <server.json>]
+                  write the entry of the MCP server in the official MCP Registry (name app.diacraft/diacraft): one mcpb package for each of the six
+                  bundles of the release (`diacraft-mcp-<version>-<system>-<cpu>.mcpb`), by its address in the release and its SHA-256, read from the
+                  release's SHA256SUMS.txt; to the file --out names, or to the standard output. Run it on the checkout of the release's tag, after
+                  the release is published, then `mcp-publisher publish` (docs/releasing.md). Fails on sums that miss a bundle, name one twice or
+                  are of another release. It publishes nothing
   parity [--check]
                   recompute the summary in docs/parity-checklist.md; --check fails when it is out of date, when the
                   file does not exist, when a line under `## Rows` (to the next `#` or `##` heading) that holds a `|`
@@ -91,8 +103,10 @@ fn main() -> ExitCode {
         Some("docs") => docs_check::run(&root()),
         Some("site") => site::run(&root().join("site"), &rest),
         Some("deploy-check") => site::deploy_check(&rest),
+        Some("web-dpr") => site::web_dpr(&root(), &rest),
         Some("deny") => report("deny", deny::run()),
         Some("licenses") => licenses::run(&root(), &rest),
+        Some("mcp-server-json") => mcp::run(&root(), &rest),
         Some("parity") => cmd_parity(&rest),
         Some("wasm") => report("wasm", cmd_wasm()),
         Some("stats") => cmd_stats(&rest),

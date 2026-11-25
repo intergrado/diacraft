@@ -44,6 +44,11 @@ const ALL: &str = "/*";
 /// They are paths of the app's own site (the app is at its root), where they were under `/app/` while the app was a folder of the pages.
 pub(super) const APP_CACHE_ROUTES: [&str; 5] = ["/parts/*", "/assets/*", "/diacraft-web-*.js", "/page-*.css", "/diacraft-icon-256-*.png"];
 
+/// The route of the registry's proof of the domain (`app.rs`), a file with no extension that Pages would send as a type of its own picking, and what it is sent as: text, since the registry asks
+/// for `text/plain` and reads the record as the body.
+pub(super) const PROOF_ROUTE: &str = "/.well-known/mcp-registry-auth";
+const PROOF_TYPE: &str = "text/plain; charset=utf-8";
+
 /// What every file of either site is sent with besides what a rule of its own says.
 const SECURITY: &[&str] = &["content-security-policy", "x-content-type-options", "referrer-policy", "permissions-policy"];
 
@@ -199,11 +204,13 @@ pub(super) fn check_pages(text: &str, hashed: bool) -> Result<Found, String> {
 }
 
 /// The app's file (`apps/diacraft-web/_headers`, put in the app's folder by `cargo xtask site --web`): under `/*` the app's own policy and the three headers every page has, each once and no other
-/// (the app needs no cross-origin isolation: it uses no threads), and one rule for each of [`APP_CACHE_ROUTES`], setting a cache header and nothing else, that keeps the file for good. No other route:
+/// (the app needs no cross-origin isolation: it uses no threads), one rule for each of [`APP_CACHE_ROUTES`], setting a cache header and nothing else, that keeps the file for good, and one rule for
+/// [`PROOF_ROUTE`], setting the type of the registry's proof as text and nothing else. No other route:
 /// the policy and the caching of the app are frozen by this, and a rule for another path is a change of this check.
 pub(super) fn check_app(text: &str) -> Result<(), String> {
     let mut global = BTreeSet::new();
     let mut cache = BTreeMap::new();
+    let mut proof_type = false;
     for (route, name, value) in lines(text)? {
         if route == ALL {
             if !SECURITY.contains(&name.as_str()) {
@@ -215,6 +222,14 @@ pub(super) fn check_app(text: &str) -> Result<(), String> {
             if !global.insert(name.clone()) {
                 return Err(format!("duplicate {name} under {ALL}"));
             }
+        } else if route == PROOF_ROUTE {
+            if name != "content-type" {
+                return Err(format!("{route} sets {name}: the rule for the registry's proof of the domain sets a content type and nothing else"));
+            }
+            if value != PROOF_TYPE {
+                return Err(format!("{route}: the proof is served as `{PROOF_TYPE}`, and the rule says `{value}`"));
+            }
+            proof_type = true;
         } else if APP_CACHE_ROUTES.contains(&route.as_str()) {
             if name != "cache-control" {
                 return Err(format!("{route} sets {name}: the rule for the app's hashed files sets a cache header and nothing else"));
@@ -234,6 +249,11 @@ pub(super) fn check_app(text: &str) -> Result<(), String> {
         if !global.contains(*name) {
             return Err(format!("{ALL} is missing {name}: the app runs under its own policy, which this file must set"));
         }
+    }
+    if !proof_type {
+        return Err(format!(
+            "there is no rule for {PROOF_ROUTE}: the registry's proof of the domain must be served as text (`{PROOF_TYPE}`), and not as the type Pages picks for a file with no extension"
+        ));
     }
     if let Some(route) = APP_CACHE_ROUTES.iter().find(|route| !cache.contains_key(**route)) {
         return Err(format!(

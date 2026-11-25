@@ -1,0 +1,43 @@
+{
+  "manifest_version": "0.3",
+  "name": "diacraft",
+  "display_name": "DiaCraft",
+  "version": "@VERSION@",
+  "description": "Draw and edit diagrams from an agent: flowcharts, org charts and architecture diagrams, in VSDX, ODG and DiaCraft files.",
+  "long_description": "DiaCraft is a free, open-source diagram editor. This bundle runs its MCP server (`diacraft-cli mcp`), so an agent can make and change drawings through DiaCraft's commands, and open and save VSDX, ODG and DiaCraft files.\n\nThe server starts with no document: ask for a new drawing, or give it the path of a file to open. If the DiaCraft app is running with its control channel on (`diacraft --control 7997`), the server drives that window instead, so what the agent does is what you see. Install the app from https://diacraft.dev to see a drawing in a window.\n\nThe bundle holds the DiaCraft command line for this system and CPU. The server can open and write any file the agent names, so give it only to an agent you trust with your files. It connects to nothing but the DiaCraft app on this computer.",
+  "author": {
+    "name": "DiaCraft",
+    "url": "https://diacraft.dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "@REPO_URL@"
+  },
+  "homepage": "https://diacraft.dev",
+  "documentation": "https://diacraft.dev/guides/agents.html",
+  "support": "@REPO_URL@/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/@PROGRAM@",
+    "mcp_config": {
+      "command": "${__dirname}/server/@PROGRAM@",
+      "args": ["mcp"],
+      "env": {}
+    }
+  },
+  "tools": [
+    { "name": "command_list", "description": "List DiaCraft's commands with their parameters and whether each can run now." },
+    { "name": "command_run", "description": "Run one command by id with its parameters." },
+    { "name": "command_batch", "description": "Run up to 256 commands in order as one undo step, all or nothing." },
+    { "name": "doc_inspect", "description": "The open document: title, pages, and the undo and redo depth." },
+    { "name": "ui_inspect", "description": "The state of the DiaCraft window. Needs the app running." },
+    { "name": "ui_screenshot", "description": "Save the next frame of the DiaCraft window as a PNG. Needs the app running." }
+  ],
+  "tools_generated": false,
+  "keywords": ["diagram", "flowchart", "org chart", "architecture", "vsdx", "odg", "drawing"],
+  "license": "MIT OR Apache-2.0",
+  "compatibility": {
+    "platforms": ["@PLATFORM@"]
+  }
+}

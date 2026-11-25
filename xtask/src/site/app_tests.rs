@@ -50,7 +50,10 @@ pub(super) const GLUE: &str =
 pub(super) const PAGES_HEADERS: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'self' https://api.github.com; img-src 'self'; style-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()\n";
 
 /// The app's `_headers` (`apps/diacraft-web/_headers`), in short: its own policy and the three headers under `/*`, and the rules that cache the app's hashed files for good.
-pub(super) const HEADERS: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self'; style-src 'self'; manifest-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()\n\n/parts/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/diacraft-web-*.js\n  Cache-Control: public, max-age=31536000, immutable\n\n/page-*.css\n  Cache-Control: public, max-age=31536000, immutable\n\n/diacraft-icon-256-*.png\n  Cache-Control: public, max-age=31536000, immutable\n";
+pub(super) const HEADERS: &str = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self'; style-src 'self'; manifest-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()\n\n/parts/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n\n/diacraft-web-*.js\n  Cache-Control: public, max-age=31536000, immutable\n\n/page-*.css\n  Cache-Control: public, max-age=31536000, immutable\n\n/diacraft-icon-256-*.png\n  Cache-Control: public, max-age=31536000, immutable\n\n/.well-known/mcp-registry-auth\n  Content-Type: text/plain; charset=utf-8\n";
+
+/// The registry's proof of the domain (`apps/diacraft-web/mcp-registry-auth`), as a record of its form with a made-up key: 32 bytes of zeros.
+pub(super) const PROOF: &str = "v=MCPv1; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n";
 
 /// A WebAssembly module with only a header: valid, and no memory at all.
 pub(super) const EMPTY_WASM: &[u8] = b"\0asm\x01\0\0\0";
@@ -306,6 +309,138 @@ fn the_apps_file_sets_its_policy_and_three_headers_for_every_path_and_a_cache_he
     assert!(headers::check_app("/*\n  not a header\n").is_err());
 }
 
+// ------------------------------------------------------------------------------------------------------------- the registry's proof of the domain
+
+/// The route and the one header of the rule that serves the proof as text.
+const PROOF_ROUTE: &str = "/.well-known/mcp-registry-auth";
+
+#[test]
+fn the_apps_file_has_one_rule_for_the_proof_of_the_domain_that_sets_its_type_as_text_and_nothing_else() {
+    headers::check_app(HEADERS).unwrap();
+    // The rule is there: the registry is sent a file that says it is text.
+    let without = HEADERS.replace(&format!("\n{PROOF_ROUTE}\n  Content-Type: text/plain; charset=utf-8\n"), "");
+    assert_ne!(without, HEADERS);
+    let error = headers::check_app(&without).unwrap_err();
+    assert!(error.contains(PROOF_ROUTE) && error.contains("text"), "{error}");
+    // It sets that type and no other header, and not another type.
+    for (extra, said) in [
+        ("Cache-Control: public, max-age=31536000, immutable", "sets a content type and nothing else"),
+        ("Content-Security-Policy: default-src 'self'", "sets a content type and nothing else"),
+        ("Access-Control-Allow-Origin: *", "sets a content type and nothing else"),
+    ] {
+        let error = headers::check_app(&format!("{HEADERS}  {extra}\n")).unwrap_err();
+        assert!(error.contains(PROOF_ROUTE) && error.contains(said), "{extra}: {error}");
+    }
+    for wrong in ["application/json", "text/html", "application/octet-stream", "text/plain"] {
+        let error = headers::check_app(&HEADERS.replace("text/plain; charset=utf-8", wrong)).unwrap_err();
+        assert!(error.contains(PROOF_ROUTE) && error.contains("text/plain; charset=utf-8"), "{wrong}: {error}");
+    }
+    // No other path of the well-known folder: a rule is for this file.
+    let error = headers::check_app(&HEADERS.replace(PROOF_ROUTE, "/.well-known/*")).unwrap_err();
+    assert!(error.contains("a rule for /.well-known/*"), "{error}");
+}
+
+#[test]
+fn assembling_puts_the_proof_of_the_domain_at_its_well_known_path_as_a_file_of_its_own() {
+    let root = repo();
+    assemble(&root, "dist/app").unwrap();
+    let out = root.path().join("dist/app");
+    // A real file at the address the registry fetches, with the repository's record in it as it is; the folder is not skipped as the dot-named files of a build are.
+    assert_eq!(fs::read_to_string(out.join(".well-known/mcp-registry-auth")).unwrap(), PROOF);
+    app::check(&out).unwrap();
+    assert!(app::check(&out).unwrap().files.iter().any(|(name, _)| name == ".well-known/mcp-registry-auth"));
+}
+
+/// The record of the repository (`apps/diacraft-web/mcp-registry-auth`) is what a build puts at the well-known path: the public key of the pair the registry's login uses, a
+/// 32-byte Ed25519 key in base64, and the build of a site that holds it passes the check.
+#[test]
+fn the_record_of_the_repository_is_a_record_and_a_build_of_it_passes() {
+    let record = fs::read_to_string(xtask::root().join("apps/diacraft-web/mcp-registry-auth")).unwrap();
+    app::registry_record(&record).unwrap();
+    let root = repo();
+    root.write("apps/diacraft-web/mcp-registry-auth", &record);
+    assemble(&root, "dist/app").unwrap();
+    assert_eq!(fs::read_to_string(root.path().join("dist/app/.well-known/mcp-registry-auth")).unwrap(), record);
+    app::check(&root.path().join("dist/app")).unwrap();
+}
+
+/// The repository's own `_headers` and record, which a release sends, make an app folder that passes the check, and Pages, reading that file, sends the proof as text and keeps it
+/// for no time (it is no file named by its hash).
+#[test]
+fn the_repositorys_own_headers_and_record_make_an_app_folder_that_passes_the_check() {
+    let root = repo();
+    for file in ["apps/diacraft-web/_headers", "apps/diacraft-web/mcp-registry-auth"] {
+        root.write(file, fs::read(xtask::root().join(file)).unwrap());
+    }
+    headers::check_app(&fs::read_to_string(root.path().join("apps/diacraft-web/_headers")).unwrap()).unwrap();
+    assemble(&root, "dist/app").unwrap();
+    let out = root.path().join("dist/app");
+    app::check(&out).unwrap();
+    let rules = super::cache::Headers::parse(&fs::read_to_string(out.join("_headers")).unwrap()).unwrap();
+    let sent = rules.resolve("/.well-known/mcp-registry-auth");
+    assert_eq!(sent.get("content-type").map(Vec::as_slice), Some(&["text/plain; charset=utf-8".to_owned()][..]), "{sent:?}");
+    assert!(!sent.contains_key("cache-control"), "{sent:?}");
+}
+
+#[test]
+fn a_record_is_one_or_more_lines_of_the_registrys_form_and_nothing_the_catch_all_page_would_be() {
+    for good in [
+        PROOF,
+        "v=MCPv1; k=ed25519; p=FUSp7HzadpegVqLbcCIUMjHYPfOn/XOAHGwY2Ct2VL4=",
+        "  v=MCPv1; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=  \n",
+    ] {
+        app::registry_record(good).unwrap_or_else(|e| panic!("{good:?}: {e}"));
+    }
+    app::registry_record(&format!("{PROOF}{PROOF}")).unwrap();
+    for (bad, said) in [
+        ("", "empty"),
+        ("\n\n", "empty"),
+        ("<!DOCTYPE html><html></html>", "not a record"),
+        ("v=MCPv2; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "not a record"),
+        ("v=MCPv1; k=rsa; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "not a record"),
+        ("v=MCPv1; k=ed25519; p=AAAA", "32-byte"),
+        ("v=MCPv1; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "32-byte"),
+        ("v=MCPv1; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!=", "base64"),
+        ("v=MCPv1; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nhello", "not a record"),
+        ("v=MCPv1; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\0", "control character"),
+    ] {
+        let error = app::registry_record(bad).unwrap_err();
+        assert!(error.contains(said), "{bad:?}: {error}");
+    }
+    // The registry reads at most 4096 bytes of it.
+    let long = PROOF.repeat(80);
+    assert!(long.len() > 4096);
+    assert!(app::registry_record(&long).unwrap_err().contains("4096"));
+}
+
+#[test]
+fn the_check_refuses_a_folder_with_no_proof_a_catch_all_page_or_a_proof_of_another_name() {
+    refuses(|o| fs::remove_file(o.path().join(".well-known/mcp-registry-auth")).unwrap(), ".well-known/mcp-registry-auth");
+    // Any missing path of a site that is a web app answers its page: that page is no record, and a file that holds it is refused.
+    refuses(|o| o.write(".well-known/mcp-registry-auth", "<!DOCTYPE html><html></html>"), "not a record");
+    refuses(|o| o.write(".well-known/mcp-registry-auth", ""), "empty");
+    // Another file of the folder is a file the app does not use, and so is the proof with an extension, which the registry does not fetch.
+    refuses(|o| o.write(".well-known/other", PROOF), "a file of a kind the app does not use");
+    refuses(|o| o.write(".well-known/mcp-registry-auth.txt", PROOF), "a file of a kind the app does not use");
+}
+
+#[test]
+fn a_dot_named_folder_of_the_build_is_not_copied_and_a_missing_or_bad_record_in_the_repository_is_refused_by_name() {
+    let root = repo();
+    root.write("dist/web/.well-known/mcp-registry-auth", "from the build");
+    // Trunk's own dot-named files are not part of the site, and a folder of one is not copied: the proof is the repository's, and only that.
+    assemble(&root, "dist/app").unwrap();
+    assert_eq!(fs::read_to_string(root.path().join("dist/app/.well-known/mcp-registry-auth")).unwrap(), PROOF);
+    let root = repo();
+    fs::remove_file(root.path().join("apps/diacraft-web/mcp-registry-auth")).unwrap();
+    let error = assemble(&root, "dist/app").unwrap_err();
+    assert!(error.contains("mcp-registry-auth"), "{error}");
+    let root = repo();
+    root.write("apps/diacraft-web/mcp-registry-auth", "not a record");
+    let error = assemble(&root, "dist/app").unwrap_err();
+    assert!(error.contains("mcp-registry-auth") && error.contains("not a record"), "{error}");
+}
+
 // -------------------------------------------------------------------------------------------------------------------------------- arguments
 
 #[test]
@@ -484,8 +619,9 @@ fn a_finished_app_folder_passes_and_reports_each_file_with_its_size() {
     let report = app::check(out.path()).unwrap();
     let names: Vec<&str> = report.files.iter().map(|(n, _)| n.as_str()).collect();
     // The names with a hash in them are told by their shape: the module is one part (it is a header), and the data is three files; the search files are the three beside the page.
-    assert_eq!(names.len(), 18, "{names:?}");
+    assert_eq!(names.len(), 19, "{names:?}");
     for plain in [
+        ".well-known/mcp-registry-auth",
         "_headers",
         "diacraft.webmanifest",
         "icon-192.png",
@@ -514,6 +650,7 @@ fn a_finished_app_folder_passes_and_reports_each_file_with_its_size() {
     }
     for name in names.iter().filter(|n| {
         ![
+            ".well-known/mcp-registry-auth",
             "_headers",
             "diacraft.webmanifest",
             "icon-192.png",
@@ -539,7 +676,7 @@ fn a_finished_app_folder_passes_and_reports_each_file_with_its_size() {
     let lines = report.lines();
     assert!(lines.iter().any(|l| l.starts_with("site: app/parts/diacraft-web-1-") && l.ends_with("0.00 MiB (8 bytes)")), "{lines:?}");
     assert!(lines.iter().any(|l| l.contains("the module is 0.00 MiB (8 bytes) in 1 parts, none over 8.00 MiB")), "{lines:?}");
-    assert!(lines.iter().any(|l| l.starts_with("site: app: 18 files")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.starts_with("site: app: 19 files")), "{lines:?}");
     assert!(lines.last().unwrap().starts_with("site: caching: "), "{lines:?}");
 }
 
@@ -799,13 +936,13 @@ fn the_check_refuses_names_kinds_and_headers_it_does_not_expect() {
     refuses(|o| o.write("_headers", HEADERS.replace("'wasm-unsafe-eval'", "'unsafe-eval'")), "script-src");
     refuses(|o| o.write("_headers", HEADERS.replace("/*\n", "/app/*\n")), "a rule for /app/*");
     refuses(|o| fs::remove_file(o.path().join("_headers")).unwrap(), "_headers");
-    // Too many files: the folder is a handful (the finished one here has eighteen), and 64 is all it may hold.
+    // Too many files: the folder is a handful (the finished one here has nineteen), and 64 is all it may hold.
     let out = out_dir();
-    for n in 0..46 {
+    for n in 0..45 {
         out.write(&format!("extra{n}.png"), "x");
     }
     app::check(out.path()).unwrap();
-    out.write("extra46.png", "x");
+    out.write("extra45.png", "x");
     assert!(app::check(out.path()).unwrap_err().contains("more than 64 files"));
 }
 
@@ -847,6 +984,7 @@ pub(super) fn repo() -> Dir {
     // What the repository gives the app besides Trunk's build: the loader and the data the module does not carry.
     root.write("apps/diacraft-web/loader.js", LOADER);
     root.write("apps/diacraft-web/_headers", HEADERS);
+    root.write("apps/diacraft-web/mcp-registry-auth", PROOF);
     root.write("assets/branding/diacraft-splash.png", b"splash picture");
     root.write("assets/branding/diacraft-cover.png", b"cover picture");
     root.write("THIRD-PARTY-LICENSES-WEB.txt", "DiaCraft: third-party licences (the web build)\n");
@@ -1193,9 +1331,9 @@ fn a_finished_folder_reports_what_is_kept_for_good_and_what_is_asked_about() {
     let out = out_dir();
     let report = app::check(out.path()).unwrap();
     // The module's one part, the three assets, the glue, the style and the icon are named by their hash; the page, the loader, the manifests, their icons, the snippet, `robots.txt`, `sitemap.xml` and the share picture are not.
-    assert_eq!(report.caching, super::cache::Summary { kept: 7, revalidated: 10, pages: 1 }, "{report:?}");
+    assert_eq!(report.caching, super::cache::Summary { kept: 7, revalidated: 11, pages: 1 }, "{report:?}");
     assert!(
-        report.lines().iter().any(|l| l.contains("7 files named by their own hash are kept for a year, 10 are asked about")),
+        report.lines().iter().any(|l| l.contains("7 files named by their own hash are kept for a year, 11 are asked about")),
         "{:?}",
         report.lines()
     );

@@ -41,6 +41,17 @@ pub(super) const APP_DIR: &str = "app";
 /// The file in the repository that is the app's `_headers`: the app's policy and its cache rules, for the Pages project of the app's own site.
 pub(super) const HEADERS_SOURCE: &str = "apps/diacraft-web/_headers";
 
+/// The file in the repository that is the MCP Registry's proof that the owner of `diacraft.app` publishes the server named `app.diacraft/...`: one record, `v=MCPv1; k=ed25519; p=<the
+/// public key>`, of the key pair that `mcp-publisher login http --domain diacraft.app` signs with. Only the public key is in the repository.
+pub(super) const REGISTRY_AUTH_SOURCE: &str = "apps/diacraft-web/mcp-registry-auth";
+
+/// Where the app's site serves it, from the root of the site: the registry fetches `https://diacraft.app/.well-known/mcp-registry-auth` and wants the record as the body of a `200`, with no
+/// redirect. The web app answers every path with its page, so without a file here the registry would be sent the page (docs/website.md, "The registry's proof of the domain").
+pub(super) const REGISTRY_AUTH_PATH: &str = ".well-known/mcp-registry-auth";
+
+/// The most of the record the registry reads, in bytes.
+const REGISTRY_AUTH_MAX: usize = 4096;
+
 /// Cloudflare Pages refuses a file over 25 MiB.
 pub(super) const PAGES_FILE_LIMIT: u64 = 25 * 1024 * 1024;
 
@@ -250,6 +261,49 @@ pub(super) fn assemble(root: &Path, dist: &Path, app: &Path, settings: &Settings
     }
     let text = parts::read_bounded(&root.join(HEADERS_SOURCE), MAX_TEXT)?;
     fs::write(&headers, text).map_err(|e| format!("{}: {e}", headers.display()))?;
+    registry_auth(root, app)
+}
+
+/// Puts the registry's proof of the domain in the app's folder, at [`REGISTRY_AUTH_PATH`]: the repository's record ([`REGISTRY_AUTH_SOURCE`]), as it is, once it has been read as the registry reads it. The
+/// folder is made here: the copy of the build leaves out every name that starts with a dot, so nothing of the build's is in the way.
+fn registry_auth(root: &Path, app: &Path) -> Result<(), String> {
+    let proof = app.join(REGISTRY_AUTH_PATH);
+    if fs::symlink_metadata(&proof).is_ok() {
+        return Err(format!("{}: the build already has a file of that name", proof.display()));
+    }
+    let bytes = parts::read_bounded(&root.join(REGISTRY_AUTH_SOURCE), MAX_TEXT)?;
+    let text = String::from_utf8(bytes).map_err(|_| format!("{REGISTRY_AUTH_SOURCE}: expected UTF-8"))?;
+    registry_record(&text).map_err(|e| format!("{REGISTRY_AUTH_SOURCE}: {e}"))?;
+    let folder = proof.parent().ok_or("the proof has no folder")?;
+    fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    fs::write(&proof, text).map_err(|e| format!("{}: {e}", proof.display()))
+}
+
+/// Whether `text` is what the registry reads at [`REGISTRY_AUTH_PATH`]: one or more lines, each `v=MCPv1; k=ed25519; p=<key>` with the key as 32 bytes in base64 (44 characters, the last `=`), at most
+/// 4096 bytes in all, and no control character (the registry does not follow a redirect and is not sent a page: a web app's page, which answers any path that has no file, is what this refuses).
+pub(super) fn registry_record(text: &str) -> Result<(), String> {
+    if text.len() > REGISTRY_AUTH_MAX {
+        return Err(format!("{} bytes: the registry reads at most {REGISTRY_AUTH_MAX}", text.len()));
+    }
+    if text.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t')) {
+        return Err("holds a control character: it is not a record".into());
+    }
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    if lines.is_empty() {
+        return Err("empty: the registry wants a record, `v=MCPv1; k=ed25519; p=<key>`".into());
+    }
+    for line in lines {
+        let key = line
+            .strip_prefix("v=MCPv1; k=ed25519; p=")
+            .ok_or_else(|| format!("`{}` is not a record of the form `v=MCPv1; k=ed25519; p=<key>`", line.chars().take(60).collect::<String>()))?;
+        let digits = key.strip_suffix('=').filter(|digits| digits.len() == 43);
+        let Some(digits) = digits else {
+            return Err(format!("the key is not a 32-byte Ed25519 key in base64 (44 characters, the last `=`): {} characters", key.chars().count()));
+        };
+        if !digits.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/') {
+            return Err("the key is not base64 (letters, digits, `+` and `/`)".into());
+        }
+    }
     Ok(())
 }
 
@@ -511,6 +565,11 @@ pub(super) fn check(app: &Path) -> Result<Report, String> {
         super::brands(name, &[], xtask::brands::DENY).map_err(|e| format!("app/{name}: {e}"))?;
     }
     let names: Vec<&str> = files.iter().map(|(name, _)| name.as_str()).collect();
+    if !names.contains(&REGISTRY_AUTH_PATH) {
+        return Err(format!(
+            "app/{REGISTRY_AUTH_PATH}: the registry's proof of the domain is not there: without it the site answers the registry with the app's page (docs/website.md, \"The registry's proof of the domain\")"
+        ));
+    }
     let page = read_text(&app.join("index.html"))?;
     check_page(&page, &names).map_err(|e| format!("app/index.html: {e}"))?;
     // The web app manifest: the page links it, and it is the one file of its kind.
@@ -546,6 +605,10 @@ pub(super) fn check(app: &Path) -> Result<Report, String> {
             }
             Some("png" | "ico" | "webp" | "jpg" | "jpeg") => {}
             _ if name == "index.html" || name == "_headers" => {}
+            _ if name == REGISTRY_AUTH_PATH => {
+                let text = read_text(&path)?;
+                registry_record(&text).map_err(|e| format!("app/{name}: {e}"))?;
+            }
             _ => return Err(format!("app/{name}: a file of a kind the app does not use: say so here if it is one")),
         }
     }

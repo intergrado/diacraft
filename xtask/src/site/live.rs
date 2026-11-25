@@ -16,6 +16,11 @@
 //! (`/index.html` to `/`, `/dir/index.html` to `/dir/`), as a path or as the site's own address, is not a failure; the check follows it once and checks the target as it checks any file, and finds
 //! what the target loads. Any other 308, any other redirect and a redirect of a path that is not a page are answers that are not 200, as they were.
 //!
+//! **The registry's proof of the domain.** On the app's site (the start page that has the app's canvas) the check also asks for `/.well-known/mcp-registry-auth`, the file the official MCP
+//! Registry fetches to see that the owner of the domain publishes the server `app.diacraft/diacraft`. Nothing links it, and the web app answers every path that has no file with its page, so a file that a
+//! deploy left out (Cloudflare Pages might leave out a name that starts with a dot) would be an answer of `200` and HTML, which the registry refuses. It **fails** unless the answer is a `200` with no redirect,
+//! a type of `text/plain`, and a body that is a record (`app::registry_record`).
+//!
 //! **What it says.** For each: the status, `Cache-Control`, `Content-Encoding`, `ETag`, whether the second request got `304`, and the bytes that came. It **fails** on a status that is not 200
 //! and on a wrong `Cache-Control` (a file named by its hash must be `immutable` for a year; any other must not be kept at all) and **warns** when a text or WebAssembly file of 1 KiB
 //! or more comes back uncompressed, when there is no `ETag` or the second request does not get `304`, and when a file that must be asked about says nothing about it.
@@ -588,7 +593,44 @@ pub(super) fn check(fetch: &dyn Fetch) -> Result<Report, String> {
             entries.push(probe(fetch, &target, false).0);
         }
     }
+    // The app's site holds the registry's proof of the domain at a path nothing links.
+    if text_of(&home).contains("id=\"diacraft_canvas\"") {
+        entries.push(registry_proof(fetch));
+    }
     Ok(Report { entries })
+}
+
+/// The registry's proof of the domain, asked for as the registry asks: a plain request, no redirect followed. It is probed as any file is (a status that is not 200 is a failure), and its type and body are
+/// held to what the registry reads.
+fn registry_proof(fetch: &dyn Fetch) -> Entry {
+    let path = format!("/{}", app::REGISTRY_AUTH_PATH);
+    let (mut entry, _) = probe(fetch, &path, false);
+    if entry.status == 200 {
+        match fetch.get(&path, None, true) {
+            Ok(response) => {
+                let kind = response.header("content-type").unwrap_or("");
+                if !kind.to_ascii_lowercase().starts_with("text/plain") {
+                    entry.findings.push(Finding {
+                        level: Level::Fail,
+                        text: format!(
+                            "the content type is `{}`, and the registry asks for text/plain",
+                            if kind.is_empty() { "not given" } else { kind }
+                        ),
+                    });
+                }
+                if let Err(why) = app::registry_record(&text_of(&response)) {
+                    entry.findings.push(Finding {
+                        level: Level::Fail,
+                        text: format!(
+                            "the body is not a record the registry reads (is it the app's page, which answers every path that has no file?): {why}"
+                        ),
+                    });
+                }
+            }
+            Err(e) => entry.findings.push(Finding { level: Level::Fail, text: format!("the request for the body failed: {e}") }),
+        }
+    }
+    entry
 }
 
 /// The text of a file that has references in it, when it is there: a page that Pages sends on (its address with the extension) is read at the address it is sent to.

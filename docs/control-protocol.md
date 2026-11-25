@@ -22,7 +22,7 @@ One JSON object per line, in and out, ended by `\n` (`\r\n` also works; blank li
 
 ```
 {"id": 7, "method": "ui.inspect", "params": {}}
-{"id":7,"ok":true,"result":{"app":"diacraft","version":"0.2.1","frames":4,...}}
+{"id":7,"ok":true,"result":{"app":"diacraft","version":"0.2.2","frames":4,...}}
 {"id":8,"ok":false,"error":"unknown method `engine.explode`; the methods are: engine.execute, ..."}
 ```
 
@@ -139,7 +139,7 @@ error (`no document open`) when there is none.
 The state of the window:
 
 ```
-{"app":"diacraft","version":"0.2.1","frames":4,"window":[1280.0,720.0],"revision":1,
+{"app":"diacraft","version":"0.2.2","frames":4,"window":[1280.0,720.0],"revision":1,
  "status":"Untitled · 1 page","document":{"title":"Untitled","pages":1},"notice":null,
  "panics":{"engine":0,"ui":0},"screenshotPending":false,"quitRequested":false}
 ```
@@ -333,6 +333,7 @@ levels (`debug`, `warn,diacraft_engine=trace`); the default is `info` for DiaCra
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-25 | minor | The two examples of the answer of `ui.inspect` show the version 0.2.2 |
 | 2026-11-25 | minor | The two examples of the answer of `ui.inspect` show the version 0.2.1 |
 | 2026-11-25 | trivial | `splash.trademark` names the notes on ArchiMate, UML and BPMN too |
 | 2026-11-23 | trivial | Sentences reworded so that each reads whole on its own; nothing they say changes |

@@ -157,7 +157,7 @@ $ diacraft-cli commands | head -12
 
 ## `mcp`
 
-Runs the [MCP server](mcp.md) on standard input and output, until the client closes its end.
+Runs the [MCP server](mcp.md) on standard input and output, until the client closes its end. A release also holds it as an MCP bundle (`diacraft-mcp-<version>-<system>-<cpu>.mcpb`) that an app which installs MCP servers starts as `diacraft-cli mcp`: [Installing it from a bundle or a directory](mcp.md).
 
 | Option | Backend |
 |---|---|
@@ -439,6 +439,7 @@ escaped first, so that a control character in it does not reach a terminal.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-25 | trivial | The `mcp` section points to the MCP bundles of a release |
 | 2026-11-23 | trivial | Sentences reworded so that each reads whole on its own; nothing they say changes |
 | 2026-11-23 | minor | `app.version`'s `git` is the build line (the plain version for a build of its tag, `<version>-dev+<commit>` before the tag exists), and the version is 0.2.0 |
 | 2026-11-23 | minor | The reference product is named only in the format lists ("the reference app" or VSDX elsewhere), and the page keeps to the words of the public tree |

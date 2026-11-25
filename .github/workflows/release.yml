@@ -11,6 +11,13 @@
 #   diacraft-<version>-macos-arm64.dmg         diacraft-<version>-macos-arm64.zip
 #   diacraft-<version>-macos-x86_64.dmg        diacraft-<version>-macos-x86_64.zip
 #
+# and six MCP bundles, `diacraft-mcp-<version>-<system>-<cpu>.mcpb`, one for each of the six builds above: the command line with a manifest, which an MCP directory or an app
+# that installs MCP servers takes, and which the entry of the official MCP Registry points at (docs/releasing.md, "Publish the MCP server to the registry"):
+#
+#   diacraft-mcp-<version>-linux-x86_64.mcpb     diacraft-mcp-<version>-linux-aarch64.mcpb
+#   diacraft-mcp-<version>-windows-x64.mcpb      diacraft-mcp-<version>-windows-arm64.mcpb
+#   diacraft-mcp-<version>-macos-arm64.mcpb      diacraft-mcp-<version>-macos-x86_64.mcpb
+#
 # The names are those an app launcher reads: <version> is the tag without its `v` (0.2.1 for v0.2.1), so that it starts with a digit, and the CPU is
 # written as the launchers write it (aarch64 for Linux on ARM, x64 for Windows on Intel or AMD). The tag itself, and the release's address, keep the `v`. The jobs
 # below hold the tag in NAME, the version in VERSION and the CPU of a file name in FILE_ARCH (the CPU of the matrix, `arch`, is the one the job's name says).
@@ -147,6 +154,9 @@ jobs:
           - Windows, ARM (ARM64): diacraft-$VERSION-windows-arm64.msi and diacraft-$VERSION-windows-arm64-portable.zip
           - macOS, Apple silicon (arm64): diacraft-$VERSION-macos-arm64.dmg and diacraft-$VERSION-macos-arm64.zip
           - macOS, Intel (x86_64): diacraft-$VERSION-macos-x86_64.dmg and diacraft-$VERSION-macos-x86_64.zip
+
+          MCP bundles (.mcpb files), DiaCraft's MCP server for an agent, one for each system and CPU: diacraft-mcp-$VERSION-linux-x86_64.mcpb, diacraft-mcp-$VERSION-linux-aarch64.mcpb,
+          diacraft-mcp-$VERSION-windows-x64.mcpb, diacraft-mcp-$VERSION-windows-arm64.mcpb, diacraft-mcp-$VERSION-macos-arm64.mcpb and diacraft-mcp-$VERSION-macos-x86_64.mcpb.
 
           Check a download against SHA256SUMS.txt. These downloads are not signed yet: the README in each one says how to open them.
 
@@ -331,6 +341,17 @@ jobs:
           test -x "$root/AppRun" && test -f "$root/app.diacraft.desktop" && test -f "$root/app.diacraft.png"
           SMOKE_PACKAGE_DIR="$root/usr/share/doc/diacraft" bash packaging/smoke.sh "$root/usr/bin" $expected
 
+      # The MCP bundle: the command line with a manifest, as an `.mcpb` file that an MCP directory takes. It is unpacked and its server started as the manifest says,
+      # and asked for its tools (packaging/mcp-bundle-check.sh), before anything is uploaded.
+      - name: Make the MCP bundle
+        run: bash packaging/mcp-bundle.sh linux "$VERSION" dist "target/$TARGET/release"
+
+      - name: Smoke test the MCP bundle
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          bash packaging/mcp-bundle-check.sh "dist/diacraft-mcp-$VERSION-linux-$FILE_ARCH.mcpb" $expected
+
       # Every package of the run is kept for a week, so that a run by hand can be downloaded and tried before a tag is pushed. Nothing goes to a release without a tag.
       - name: Keep the packages as an artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -347,7 +368,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           gh release upload "$NAME" "dist/diacraft-$VERSION-linux-$FILE_ARCH.tar.gz" "dist/diacraft-$VERSION-linux-$FILE_ARCH.deb" "dist/diacraft-$VERSION-linux-$FILE_ARCH.AppImage" \
-            --repo "$REPO" --clobber
+            "dist/diacraft-mcp-$VERSION-linux-$FILE_ARCH.mcpb" --repo "$REPO" --clobber
 
   # Windows, for each CPU, each built on a runner of its own CPU.
   windows:
@@ -499,6 +520,17 @@ jobs:
           if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
           bash packaging/windows/check-msi.sh "dist/diacraft-$VERSION-windows-$FILE_ARCH.msi" $expected
 
+      # The MCP bundle, made of the program the signing hook above signs, when it is on: unpacked, and its server started as the manifest says. The runner's Git Bash has no
+      # zip or unzip, so the scripts use PowerShell for the archive.
+      - name: Make the MCP bundle
+        run: bash packaging/mcp-bundle.sh windows "$VERSION" dist "target/$TARGET/release"
+
+      - name: Smoke test the MCP bundle
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          bash packaging/mcp-bundle-check.sh "dist/diacraft-mcp-$VERSION-windows-$FILE_ARCH.mcpb" $expected
+
       # Every package of the run is kept for a week, so that a run by hand can be downloaded and tried before a tag is pushed. Nothing goes to a release without a tag.
       - name: Keep the packages as an artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -513,7 +545,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: gh release upload "$NAME" "dist/diacraft-$VERSION-windows-$FILE_ARCH.msi" "dist/diacraft-$VERSION-windows-$FILE_ARCH-portable.zip" --repo "$REPO" --clobber
+        run: gh release upload "$NAME" "dist/diacraft-$VERSION-windows-$FILE_ARCH.msi" "dist/diacraft-$VERSION-windows-$FILE_ARCH-portable.zip" "dist/diacraft-mcp-$VERSION-windows-$FILE_ARCH.mcpb" --repo "$REPO" --clobber
 
   macos:
     name: macOS
@@ -584,8 +616,8 @@ jobs:
       #     security list-keychains -d user -s "$keychain" login.keychain-db
       #     rm "$RUNNER_TEMP/signing.p12"
       #
-      # 2. Give packaging/package.sh the identity: add this line to the `env:` of "Make the downloads" (the script then signs the CLI, the app's program and
-      #    the app with the hardened runtime and a timestamp, where it signs ad hoc without it):
+      # 2. Give packaging/package.sh the identity: add this line to the `env:` of "Make the downloads" and of "Make and check the MCP bundles" (the scripts then sign the CLI, the
+      #    app's program and the app, and the bundles' program, with the hardened runtime and a timestamp, where they sign ad hoc without it):
       #      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
       #    The script also signs the disk image with the identity, which is what a disk image is notarised and stapled as.
       # 3. Notarise each of the two disk images, right after "Make the downloads", and staple the ticket to it, so that a person who opens it with no network gets no question. The
@@ -677,6 +709,24 @@ jobs:
           check_download arm64 arm64
           check_download x86_64 x86_64
 
+      # The MCP bundles, one for each architecture, made of the same programs (signed as the downloads' are: ad hoc, or by the identity of the signing hook, which
+      # needs the same MACOS_SIGN_IDENTITY line in the environment of this step). Each is unpacked and its server started as the manifest says; the Intel one runs under Rosetta where
+      # it is there, and where it is not only its files are looked at, and the step says which it did.
+      - name: Make and check the MCP bundles
+        run: |
+          set -euo pipefail
+          bash packaging/mcp-bundle.sh macos "$VERSION" dist target/aarch64-apple-darwin/release
+          bash packaging/mcp-bundle.sh macos "$VERSION" dist target/x86_64-apple-darwin/release
+          if [ "$PUBLISH" = true ]; then expected=$NAME; else expected=""; fi
+          bash packaging/mcp-bundle-check.sh "dist/diacraft-mcp-$VERSION-macos-arm64.mcpb" $expected
+          if arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+            RUN_WITH="arch -x86_64" bash packaging/mcp-bundle-check.sh "dist/diacraft-mcp-$VERSION-macos-x86_64.mcpb" $expected
+            echo "::notice::the Intel MCP bundle's server was run under Rosetta"
+          else
+            bash packaging/mcp-bundle-check.sh --no-run "dist/diacraft-mcp-$VERSION-macos-x86_64.mcpb" $expected
+            echo "::notice::Rosetta is not installed here: the Intel MCP bundle's server was not run, and its files were checked"
+          fi
+
       # Every package of the run is kept for a week, so that a run by hand can be downloaded and tried before a tag is pushed. Nothing goes to a release without a tag.
       - name: Keep the packages as an artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -695,6 +745,7 @@ jobs:
           gh release upload "$NAME" \
             "dist/diacraft-$VERSION-macos-arm64.dmg" "dist/diacraft-$VERSION-macos-arm64.zip" \
             "dist/diacraft-$VERSION-macos-x86_64.dmg" "dist/diacraft-$VERSION-macos-x86_64.zip" \
+            "dist/diacraft-mcp-$VERSION-macos-arm64.mcpb" "dist/diacraft-mcp-$VERSION-macos-x86_64.mcpb" \
             --repo "$REPO" --clobber
 
   # The website and the web app, two sites. Built with trunk, `wasm-bindgen` and binaryen's `wasm-opt`: the release archives of each, checked against the
@@ -759,8 +810,9 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
 
-  # SHA256SUMS.txt over every download, uploaded last, once all of them are there. The file is named as a launcher that checks a download looks for it, and its lines are
-  # `sha256sum`'s own (<hex>, two spaces, the file's name), one for each of the fourteen downloads.
+  # SHA256SUMS.txt over every download and every MCP bundle, uploaded last, once all of them are there. The file is named as a launcher that checks a download looks for it, and its
+  # lines are `sha256sum`'s own (<hex>, two spaces, the file's name), one for each of the fourteen downloads and the six bundles. The registry's entry of the bundles
+  # (`cargo xtask mcp-server-json`) is made from this file.
   checksums:
     name: SHA256SUMS.txt
     needs: [plan, linux, windows, macos]
@@ -789,16 +841,19 @@ jobs:
             "diacraft-$VERSION-windows-x64-portable.zip" "diacraft-$VERSION-windows-arm64-portable.zip" \
             "diacraft-$VERSION-windows-x64.msi" "diacraft-$VERSION-windows-arm64.msi" \
             "diacraft-$VERSION-macos-arm64.dmg" "diacraft-$VERSION-macos-arm64.zip" \
-            "diacraft-$VERSION-macos-x86_64.dmg" "diacraft-$VERSION-macos-x86_64.zip" | sort | tr '\n' ' ' | sed 's/ $//')
+            "diacraft-$VERSION-macos-x86_64.dmg" "diacraft-$VERSION-macos-x86_64.zip" \
+            "diacraft-mcp-$VERSION-linux-x86_64.mcpb" "diacraft-mcp-$VERSION-linux-aarch64.mcpb" \
+            "diacraft-mcp-$VERSION-windows-x64.mcpb" "diacraft-mcp-$VERSION-windows-arm64.mcpb" \
+            "diacraft-mcp-$VERSION-macos-arm64.mcpb" "diacraft-mcp-$VERSION-macos-x86_64.mcpb" | sort | tr '\n' ' ' | sed 's/ $//')
           found=$(cd downloads && ls | sort | tr '\n' ' ' | sed 's/ $//')
           if [ "$found" != "$expected" ]; then
             echo "::error::the release holds '$found', expected '$expected'"
             exit 1
           fi
-          # One line of `sha256sum` for each of the fourteen files, and the file checks out against them in that same format.
+          # One line of `sha256sum` for each of the twenty files (fourteen downloads and six MCP bundles), and the file checks out against them in that same format.
           (cd downloads && sha256sum diacraft-* >SHA256SUMS.txt)
           cat downloads/SHA256SUMS.txt
-          [ "$(wc -l <downloads/SHA256SUMS.txt | tr -d ' ')" = 14 ] || { echo "::error::SHA256SUMS.txt must have a line for each of the fourteen downloads"; exit 1; }
+          [ "$(wc -l <downloads/SHA256SUMS.txt | tr -d ' ')" = 20 ] || { echo "::error::SHA256SUMS.txt must have a line for each of the twenty files: the 14 downloads and the 6 MCP bundles"; exit 1; }
           (cd downloads && sha256sum --check --strict SHA256SUMS.txt)
           gh release upload "$NAME" downloads/SHA256SUMS.txt --repo "$REPO" --clobber
           {

@@ -3,21 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Changelog: release notes for 0.2.1 · DiaCraft</title>
-  <meta name="description" content="Release notes for DiaCraft 0.2.1, with new download file names, and 0.2.0, the first public release: the .diacraft format and saving as VSDX or OpenDocument." />
+  <title>Changelog: release notes for 0.2.2 · DiaCraft</title>
+  <meta name="description" content="Release notes for DiaCraft 0.2.2, with MCP server bundles for AI apps and a web app canvas fix, and for 0.2.1 and 0.2.0, the first public release." />
   <link rel="canonical" href="https://diacraft.dev/changelog" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="DiaCraft" />
-  <meta property="og:title" content="Changelog: release notes for 0.2.1 · DiaCraft" />
-  <meta property="og:description" content="Release notes for DiaCraft 0.2.1, with new download file names, and 0.2.0, the first public release: the .diacraft format and saving as VSDX or OpenDocument." />
+  <meta property="og:title" content="Changelog: release notes for 0.2.2 · DiaCraft" />
+  <meta property="og:description" content="Release notes for DiaCraft 0.2.2, with MCP server bundles for AI apps and a web app canvas fix, and for 0.2.1 and 0.2.0, the first public release." />
   <meta property="og:url" content="https://diacraft.dev/changelog" />
   <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Changelog: release notes for 0.2.1 · DiaCraft" />
-  <meta name="twitter:description" content="Release notes for DiaCraft 0.2.1, with new download file names, and 0.2.0, the first public release: the .diacraft format and saving as VSDX or OpenDocument." />
+  <meta name="twitter:title" content="Changelog: release notes for 0.2.2 · DiaCraft" />
+  <meta name="twitter:description" content="Release notes for DiaCraft 0.2.2, with MCP server bundles for AI apps and a web app canvas fix, and for 0.2.1 and 0.2.0, the first public release." />
   <meta name="twitter:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta name="twitter:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
@@ -31,14 +31,14 @@
     {
       "@context": "https://schema.org",
       "@type": "WebPage",
-      "description": "Release notes for DiaCraft 0.2.1, with new download file names, and 0.2.0, the first public release: the .diacraft format and saving as VSDX or OpenDocument.",
+      "description": "Release notes for DiaCraft 0.2.2, with MCP server bundles for AI apps and a web app canvas fix, and for 0.2.1 and 0.2.0, the first public release.",
       "inLanguage": "en",
       "isPartOf": {
         "@type": "WebSite",
         "name": "DiaCraft",
         "url": "https://diacraft.dev/"
       },
-      "name": "Changelog: release notes for 0.2.1",
+      "name": "Changelog: release notes for 0.2.2",
       "url": "https://diacraft.dev/changelog"
     }
   </script>
@@ -63,11 +63,11 @@
         <div class="page-title">
           <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Changelog</span></p>
           <h1>Changelog</h1>
-          <p class="lead">DiaCraft 0.2.1 gives the download files names that an app launcher can read. DiaCraft 0.2.0 was the first public release, and 0.2.1 keeps all of it: a free, open-source diagram editor for Linux, Windows, macOS and the browser. It opens, edits and saves VSDX and OpenDocument drawings, and keeps new drawings in its own <code>.diacraft</code> format.</p>
+          <p class="lead">DiaCraft 0.2.2 makes the MCP server installable from a bundle and fixes the size of the browser version’s canvas on an emulated high-density screen. DiaCraft 0.2.0 was the first public release, and 0.2.2 keeps all of it: a free, open-source diagram editor for Linux, Windows, macOS and the browser. It opens, edits and saves VSDX and OpenDocument drawings, and keeps new drawings in its own <code>.diacraft</code> format.</p>
         </div>
         <div class="title-block">
           <dl class="spec">
-            <div><dt>Release</dt><dd><b>0.2.1</b></dd></div>
+            <div><dt>Release</dt><dd><b>0.2.2</b></dd></div>
             <div><dt>Date</dt><dd><time datetime="2026-11-25">25 November 2026</time></dd></div>
             <div><dt>Platforms</dt><dd>Linux · Windows · macOS · Browser</dd></div>
           </dl>
@@ -76,6 +76,16 @@
     </header>
     <div class="wrap doc">
       <article class="prose">
+        <section id="release-0-2-2">
+          <h2>New in 0.2.2</h2>
+          <p>The editor, the command line and the drawing files are as they were in 0.2.1. What changed is how the MCP server is installed, one fix in the browser version, and some text on this website and in the documentation.</p>
+          <ul>
+            <li><strong>MCP bundles.</strong> A release now holds six MCP bundles, <code>diacraft-mcp-&lt;version&gt;-&lt;system&gt;-&lt;processor&gt;.mcpb</code>, one for each system and processor the downloads are built for, for example <code>diacraft-mcp-0.2.2-linux-x86_64.mcpb</code>. An app that installs MCP servers can open the file, and a directory of MCP servers can list it, so there is no configuration to write. A bundle holds the command line program, whose server is <code>diacraft-cli mcp</code>, and not the window: install the app to see a drawing. The server’s name in the official MCP Registry is <code>app.diacraft/diacraft</code>, and the registry’s entry names the six files by address and checksum. <code>SHA256SUMS.txt</code> now lists twenty files, the fourteen downloads and the six bundles. The bundles are not signed. The project ran the program in each one as its manifest says, but has not installed a bundle in an app that installs them.</li>
+            <li><strong>The browser version keeps its canvas the size of its page.</strong> In a browser that reports the canvas’s size in CSS pixels instead of device pixels, such as the device emulation of a browser’s developer tools at a scale above 1, the window was laid out for a part of the page: half of it at a scale of 2. The app now holds the canvas to the page’s size times the device pixel ratio. <strong>Real high-density screens were not affected.</strong> Chrome 158 and Firefox 160 on Linux, set to scales of 1.5, 2 and 3, report the size correctly. A Mac’s screen, a phone and Safari were not tried.</li>
+            <li><strong>The home page answers “How is DiaCraft made?”</strong> AI coding agents write most of the code and documentation, and a human maintainer decides what is built, in what order, and what ships. <a href="/#faq">Read the answer</a></li>
+            <li><strong>The roadmap names what comes next.</strong> After the 0.3 items, four features are scheduled, in this order: connectors that route around shapes and are routed again when a shape moves; a window that shows and edits a shape’s formulas, with a command that sets any cell; opening <code>.drawio</code> files; and more stencils of DiaCraft’s own. None of them is started. <a data-repo="/blob/HEAD/ROADMAP.md" href="https://github.com/intergrado/diacraft/blob/HEAD/ROADMAP.md">Read the roadmap</a></li>
+          </ul>
+        </section>
         <section id="release-0-2-1">
           <h2>New in 0.2.1</h2>
           <p>The editor and the drawing files are as they were in 0.2.0. What changed is how the downloads are named and checked, and a few lines of text.</p>
@@ -169,6 +179,7 @@
         <nav class="toc" aria-label="On this page">
           <p class="label">On this page</p>
           <ol>
+            <li><a href="#release-0-2-2"><span>New in 0.2.2</span></a></li>
             <li><a href="#release-0-2-1"><span>New in 0.2.1</span></a></li>
             <li><a href="#native-default"><span>New drawings start in .diacraft</span></a></li>
             <li><a href="#exchange"><span>Save across VSDX and OpenDocument</span></a></li>

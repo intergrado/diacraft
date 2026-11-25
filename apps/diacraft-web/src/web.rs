@@ -33,6 +33,8 @@ async fn run(canvas: HtmlCanvasElement) {
             canvas,
             eframe::WebOptions::default(),
             Box::new(|cc| {
+                // The canvas's pixels are held to the page's size times the device pixel ratio before every frame.
+                crate::web_canvas::install(&cc.egui_ctx);
                 // Files dropped on the page are taken from now on, and the window is asked for a frame when one has been read.
                 crate::web_files::install(&cc.egui_ctx);
                 // The keys a browser would act on are taken from now on, and the window is told when the browser offers a window of its own or goes to full screen.
@@ -60,7 +62,7 @@ async fn run(canvas: HtmlCanvasElement) {
 }
 
 /// The page's canvas, if it has one.
-fn canvas() -> Option<HtmlCanvasElement> {
+pub(crate) fn canvas() -> Option<HtmlCanvasElement> {
     // `Err` holds the element back when the id belongs to something that is not a `<canvas>`. Dropping it is right:
     // there is then no canvas to draw on, and the caller says so on the page and in the console.
     element(CANVAS_ID)?.dyn_into::<HtmlCanvasElement>().ok()

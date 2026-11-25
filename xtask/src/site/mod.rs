@@ -10,7 +10,13 @@ mod app_tests;
 mod cache;
 #[cfg(test)]
 mod cache_tests;
+mod cdp;
+#[cfg(test)]
+mod cdp_tests;
 mod downloads;
+mod dpr;
+#[cfg(test)]
+mod dpr_tests;
 mod headers;
 mod html;
 mod links;
@@ -94,6 +100,11 @@ fn parse(args: &[&str]) -> Result<Mode, String> {
         }
         _ => Err(USAGE.into()),
     }
+}
+
+/// `cargo xtask web-dpr [DIR]`: the web app in a headless Chrome at device scale factors of 1, 1.5, 2 and 3, and a phone-sized page at 3 (`dpr.rs`).
+pub(super) fn web_dpr(root: &Path, args: &[&str]) -> Result<(), String> {
+    dpr::run(root, args)
 }
 
 /// `cargo xtask deploy-check <BASE_URL>`: what a deployed site sends, against what `_headers` says (`live.rs`).

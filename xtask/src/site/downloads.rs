@@ -14,7 +14,8 @@ pub(super) const WORKFLOW: &str = ".github/workflows/release.yml";
 const MAX_WORKFLOW: u64 = 512 * 1024;
 
 /// The files the release workflow's checksums job expects in the release, as patterns with `{version}` for the version (the tag without its `v`): each `"diacraft-$VERSION-..."` word of its
-/// `expected=$(printf ... | sort` command.
+/// `expected=$(printf ... | sort` command. **The MCP bundles are not in it**: their words start `"diacraft-mcp-$VERSION-..."`, they are files of the release and no download of the
+/// site (the site shows no button for one), and `xtask::mcp::BUNDLES` and a test of the workflow hold them to the same list.
 pub(super) fn listed(workflow: &str) -> Result<Vec<String>, String> {
     let start =
         workflow.find("expected=$(printf").ok_or("the checksums job of the release workflow has no list of the files (`expected=$(printf`)")?;
@@ -94,7 +95,8 @@ mod tests {
       - run: |
           expected=$(printf '%s\n' \
             "diacraft-$VERSION-linux-x86_64.tar.gz" "diacraft-$VERSION-linux-aarch64.tar.gz" \
-            "diacraft-$VERSION-macos-arm64.dmg" "diacraft-$VERSION-macos-x86_64.dmg" | sort | tr '\n' ' ' | sed 's/ $//')
+            "diacraft-$VERSION-macos-arm64.dmg" "diacraft-$VERSION-macos-x86_64.dmg" \
+            "diacraft-mcp-$VERSION-linux-x86_64.mcpb" | sort | tr '\n' ' ' | sed 's/ $//')
           found=$(cd downloads && ls | sort)
 "#;
 
@@ -160,6 +162,8 @@ mod tests {
                 "diacraft-{version}-macos-x86_64.dmg"
             ]
         );
+        // An MCP bundle of the list is a file of the release and no download of the site: the four are all the list gives.
+        assert!(!listed(WORKFLOW).unwrap().iter().any(|name| name.contains("mcp")));
         // A word named by the tag (`$NAME`, which the file names were made of before a change) is no file of the list.
         for bad in [
             "",

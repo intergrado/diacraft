@@ -38,6 +38,7 @@ Ideas the owner has asked for that the reference app does not have. Each needs a
 | Idea | What it is | Builds on | State |
 |---|---|---|---|
 | AI agent integration (owner, 2026-11-07) | Agents working inside the app. A chat pane, probably on the right, where a person talks to an agent, and the agent reads and changes the document model through the app's commands, so it can draw or edit anything in the drawing from the person's prompts | The command registry every edit goes through, the MCP server and the control channel (M0, M3), undo for every command | Idea, not designed or scheduled |
+| MCP directories (owner, 2026-11-25) | The MCP server (`diacraft-cli mcp`) installable from MCP directories and from apps that install MCP servers, and listed in the official MCP Registry as `app.diacraft/diacraft` | The MCP server, the release workflow, the web app's site | Built: six `.mcpb` bundles in a release, the registry's entry made from the release's checksums, the proof of the domain on `diacraft.app`; the owner publishes the entry by hand after a release ([Releasing](releasing.md)); not yet tried in a host |
 
 ## Shared libraries (carves into craft-libs)
 
@@ -83,6 +84,7 @@ Decisions not to follow the reference app, with the reason. Each still keeps a f
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-25 | minor | A row for the MCP directories (the bundles, the registry's entry, the proof of the domain) among the additions |
 | 2026-11-25 | minor | Current focus lists the four features scheduled next after the 0.3 items, in the order the owner listed them (owner, 2026-11-25): connectors that route around shapes and are routed again when a shape moves, the ShapeSheet window with a command that sets any cell, opening draw.io files and their compressed form, and DiaCraft's own UML, BPMN, C4, network and database stencils; the M3, M4, M5 and M6 rows say which of their parts is scheduled next, and nothing is marked done |
 | 2026-11-25 | minor | Current focus says 0.2 is out (0.2.0, the first public release, and 0.2.1, the current one) and 0.3 is next; the 0.2 row is released, its version is 0.2.1, the release workflow has run on GitHub by hand and on the tags and deployed the sites on the tags of 0.2.0 (it said nothing had run there and the tag was not made), and the changelog holds the notes of both releases; the M9 row says the workflow has run on GitHub |
 | 2026-11-25 | minor | The 0.2 row says the site is settled for the release: the changelog holds the notes of 0.2.0, dated 25 November 2026, and the home page's release state says the version and its day |

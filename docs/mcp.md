@@ -46,6 +46,30 @@ from earlier. The server does not do that for the agent: it cannot tell a restar
 The control channel has no password: use `--control` only while an agent is driving, as
 [its page](control-protocol.md) says.
 
+## Installing it from a bundle or a directory
+
+A release holds six **MCP bundles** (`.mcpb` files, the [MCP Bundle format](https://github.com/modelcontextprotocol/mcpb)), one for each system and CPU the downloads are built for:
+`diacraft-mcp-<version>-linux-x86_64.mcpb`, `-linux-aarch64`, `-windows-x64`, `-windows-arm64`, `-macos-arm64` and `-macos-x86_64`. The format names the system a bundle is for and has no word
+for a CPU, so each CPU has a file of its own: take the one that says yours. An app that installs MCP servers takes the file (open it with the app), and a directory of MCP servers lists it;
+either way the person writes no configuration, and the app starts the server as the bundle's manifest says.
+
+A bundle is a zip. It holds `manifest.json` (format 0.3: the name `diacraft`, the version, a `binary` server whose command is `${__dirname}/server/diacraft-cli` with the argument `mcp`, the one system it
+is for, the six tools below, the licence `MIT OR Apache-2.0`, the home page and the repository), `icon.png`, the program `server/diacraft-cli` (`.exe` on Windows) and the five licence files that every
+download holds. It holds the command line and nothing else: not the window. The server it starts is `diacraft-cli mcp`, in the default mode (above): a session of its own with no document, or the
+running app's window if the app was started with `--control` and answers at `127.0.0.1:7997`. Install the app from the site to see a drawing in a window.
+
+- **What an agent given the bundle can do.** Everything this page says the server can do: `file.open`, `file.save` and the rest read and write any path the server may reach (gaps A2 and A5). Give a
+  bundle only to an agent that you trust with your files. The server connects to nothing but the DiaCraft app on the same computer.
+- **The files are not signed.** The macOS program inside is signed ad hoc, as the macOS download's is; the Windows program is not signed. Check a bundle against `SHA256SUMS.txt` of its release
+  (`sha256sum --check --ignore-missing SHA256SUMS.txt`), which also holds what the registry's entry below names.
+- **The official MCP Registry** (registry.modelcontextprotocol.io) lists the server as `app.diacraft/diacraft`, the reverse of the domain `diacraft.app`, which the file
+  `https://diacraft.app/.well-known/mcp-registry-auth` proves ([Website](website.md), "The registry's proof of the domain"). The entry is made from a release's `SHA256SUMS.txt` by
+  `cargo xtask mcp-server-json` and sent by `mcp-publisher publish` after the release is published, by hand, once for each release ([Releasing](releasing.md), "Publish the MCP server to the
+  registry"). It lists the six bundles as six packages of type `mcpb`, each by the address of its file in the release and its SHA-256; the registry's entry has no field for a system or a CPU, so a
+  client tells them by the file's name.
+- **What was tried.** The project ran the program of a bundle as its manifest says (`packaging/mcp-bundle-check.sh`: unpacked, `--version`, `initialize` and `tools/list` on its standard input) and read
+  the manifest against the format's published schema. It has not installed a bundle in an app that installs them, or published to the registry.
+
 ## The protocol
 
 Newline-delimited JSON-RPC 2.0: a message is a line, and so is a reply. The revision is `2025-06-18`; a client that asks for
@@ -216,6 +240,7 @@ written and the drawing in the session is as it was, so the agent can take the c
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-25 | minor | "Installing it from a bundle or a directory": the six `.mcpb` bundles of a release (one for each system and CPU), what a bundle holds and starts, the files being unsigned, the registry's entry `app.diacraft/diacraft` and what was tried |
 | 2026-11-23 | minor | The reference product is named only in the format lists ("the reference app" or VSDX elsewhere), and the page keeps to the words of the public tree |
 | 2026-11-23 | minor | The trip of an `.odg` through `.diacraft` writes the last leg from the drawing (it said an `isError` until a later change), a drawing of another type is saved as an `.odg` and an `.odg` as another type (it said never), an `.otg` opens (it said not yet), and the open of an `.odg` names what the drawing does not hold |
 | 2026-11-23 | minor | `checked` covers a drawing made from a template file of another format. |

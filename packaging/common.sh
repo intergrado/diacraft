@@ -85,6 +85,12 @@ workspace_version() {
     awk '/^\[/ { in_package = ($0 == "[workspace.package]") } in_package && /^version[ \t]*=/ { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); print v; exit }' "$root/Cargo.toml"
 }
 
+# The repository the workspace says DiaCraft is in: `repository` of [workspace.package], the public address (https://github.com/<owner>/<name>). A package that is a public file of
+# its own (an MCP bundle) names it, and not the repository the build happened to run in (`repo_url`, which a README says).
+workspace_repository() {
+    awk '/^\[/ { in_package = ($0 == "[workspace.package]") } in_package && /^repository[ \t]*=/ { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); print v; exit }' "$root/Cargo.toml"
+}
+
 # `version`: the plain MAJOR.MINOR.PATCH of a package that wants numbers only (a macOS bundle's, a Windows installer's): the tag's (v0.2.0, and v0.2.0-rc1 is 0.2.0), and for a
 # name that holds none (a test build's label, a rehearsal's dev-<commit>) the workspace's own.
 set_version_from_name() { # set_version_from_name NAME

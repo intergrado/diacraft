@@ -245,3 +245,52 @@ fn the_footers_trademark_paragraph_runs_the_full_width_of_the_rule_above_it_on_e
         assert!(footer.contains("<p class=\"legal\">"), "{page}: the paragraph is in the footer");
     }
 }
+
+/// The owner's ruling (2026-11-25): the official MCP Registry proves that the owner of `diacraft.app` publishes the server `app.diacraft/diacraft` by fetching
+/// `https://diacraft.app/.well-known/mcp-registry-auth`, and the web app answers every path that has no file with its page (a `200` of HTML, which the registry refuses). So the app's site
+/// has the file: the record (the public key only) is in the repository, `cargo xtask site --web` puts it at that path (the unit tests of `site/app.rs` build it and check it), the headers
+/// serve it as text, and both workflows that send the app's folder keep what is hidden in it (`.well-known` starts with a dot).
+#[test]
+fn the_app_serves_the_registrys_proof_of_the_domain_as_text_from_a_file_of_the_repository() {
+    let record = read("apps/diacraft-web/mcp-registry-auth");
+    assert_eq!(record.lines().count(), 1, "one record: {record:?}");
+    let key = record.strip_prefix("v=MCPv1; k=ed25519; p=").and_then(|rest| rest.strip_suffix("=\n")).unwrap_or_else(|| panic!("{record:?}"));
+    assert_eq!(key.len(), 43, "a 32-byte key is 44 characters of base64, the last of them `=`");
+    assert!(key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/'), "{key}");
+    let headers = read("apps/diacraft-web/_headers");
+    assert!(headers.contains("\n/.well-known/mcp-registry-auth\n  Content-Type: text/plain; charset=utf-8\n"), "the proof is sent as text");
+    // The server's name in the registry is the reverse of the domain the proof is on.
+    let domain: serde_json::Value = serde_json::from_str(&read("site/site.json")).unwrap();
+    assert_eq!(domain["app_url"], "https://diacraft.app");
+    assert!(xtask::mcp::REGISTRY_NAME.starts_with("app.diacraft/"));
+    // The artifact of the app's folder keeps the files whose names start with a dot, in the release workflow and in the workflow that deploys by hand: the action leaves them out otherwise.
+    for workflow in [".github/workflows/release.yml", ".github/workflows/deploy-site.yml"] {
+        let text = read(workflow);
+        let step = text.split("Keep the web app as an artifact").nth(1).unwrap_or_else(|| panic!("{workflow}: no step that keeps the app"));
+        let step = step.lines().take(9).collect::<Vec<_>>().join("\n");
+        assert!(step.contains("path: app-dist") && step.contains("include-hidden-files: true"), "{workflow}: {step}");
+    }
+}
+
+/// The private key of the registry's key pair is kept outside the repository (the owner's rule: only the public value is committed). No file of the tree holds a private key, and none is
+/// named like one.
+#[test]
+fn no_file_of_the_tree_holds_a_private_key() {
+    let root = xtask::root();
+    let marker = format!("-----BEGIN {} KEY-----", "PRIVATE");
+    let other_markers = [
+        format!("-----BEGIN {} PRIVATE KEY-----", "RSA"),
+        format!("-----BEGIN {} PRIVATE KEY-----", "OPENSSH"),
+        format!("-----BEGIN {} PRIVATE KEY-----", "EC"),
+    ];
+    for file in xtask::repo_files(&root).unwrap() {
+        assert!(!file.ends_with(".pem") && !file.ends_with(".key"), "{file} is named like a key");
+        let path = root.join(&file);
+        let meta = std::fs::metadata(&path).unwrap();
+        if !meta.is_file() || meta.len() > 2 * 1024 * 1024 {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        assert!(!text.contains(&marker) && !other_markers.iter().any(|m| text.contains(m)), "{file} holds a private key");
+    }
+}

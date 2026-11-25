@@ -30,3 +30,8 @@
 
 /diacraft-icon-256-*.png
   Cache-Control: public, max-age=31536000, immutable
+
+# The registry's proof of the domain (docs/website.md, "The registry's proof of the domain"): the official MCP Registry fetches this file to see that the owner of diacraft.app publishes the server
+# named app.diacraft/diacraft. It has no extension, which Pages would send as a type it picks itself, and the registry asks for text: it is sent as text. It is no hashed file, so it is not kept.
+/.well-known/mcp-registry-auth
+  Content-Type: text/plain; charset=utf-8

@@ -511,3 +511,76 @@ fn there_is_no_universal_macos_download_in_the_release_the_site_or_the_packaging
         assert!(!read(rel).to_lowercase().contains("universal"), "{rel} names a universal download");
     }
 }
+
+// ------------------------------------------------------------------------------------------------------------------------- the MCP bundles
+
+/// The bundles the release workflow's checksums job expects: the words of its list that start with `diacraft-mcp-$VERSION-`, with `{version}` for the version.
+fn listed_bundles() -> Vec<String> {
+    let workflow = read(".github/workflows/release.yml");
+    let start = workflow.find("expected=$(printf").expect("the checksums job has a list of the files");
+    let list = &workflow[start..workflow[start..].find("| sort").map(|i| start + i).expect("the list is sorted")];
+    list.split('"').filter(|word| word.starts_with("diacraft-mcp-$VERSION-")).map(|word| word.replace("$VERSION", "{version}")).collect()
+}
+
+/// The owner's ruling (2026-11-25): the release also holds the MCP bundles, one for each system and CPU the downloads are built for (`xtask::mcp::BUNDLES`: the registry's entry
+/// names those six and no other). The checksums job lists exactly those, beside the fourteen downloads, and counts all twenty; the site's buttons and the site's list of files stay the
+/// fourteen downloads (the bundles are no download of the site).
+#[test]
+fn the_checksums_job_lists_the_six_bundles_beside_the_fourteen_downloads_and_counts_twenty() {
+    let wanted: BTreeSet<String> = xtask::mcp::BUNDLES.iter().map(xtask::mcp::bundle_pattern).collect();
+    let listed: BTreeSet<String> = listed_bundles().into_iter().collect();
+    assert_eq!(listed.len(), 6);
+    assert_eq!(listed, wanted, "the bundles the workflow lists and the bundles of xtask/src/mcp.rs");
+    assert_eq!(listed_files().len(), 14, "the downloads: the bundles are not among them");
+    assert!(listed_files().iter().all(|name| !name.contains("mcp")), "a bundle in the downloads' list is a button the site would have to show");
+    assert!(assets().iter().all(|(_, name)| !name.contains("mcp")), "site.json names no bundle");
+    let checksums = job("checksums");
+    assert!(checksums.contains("= 20 ]"), "the line count of SHA256SUMS.txt is twenty: the fourteen downloads and the six bundles");
+    assert!(checksums.contains("twenty files"), "{checksums}");
+    assert!(!checksums.contains("fourteen") && !checksums.contains("= 14 ]"), "no count of fourteen is left in the checksums job");
+}
+
+/// Every build job makes the bundles of its own CPUs after its downloads, runs what is in each (`packaging/mcp-bundle-check.sh`), and uploads them with the downloads of that job.
+#[test]
+fn each_build_job_makes_checks_and_uploads_the_bundles_of_its_cpu() {
+    let linux = job("linux");
+    assert!(linux.contains("bash packaging/mcp-bundle.sh linux \"$VERSION\" dist \"target/$TARGET/release\""));
+    assert!(linux.contains("bash packaging/mcp-bundle-check.sh \"dist/diacraft-mcp-$VERSION-linux-$FILE_ARCH.mcpb\" $expected"));
+    assert!(
+        linux.split("gh release upload").nth(1).unwrap().contains("\"dist/diacraft-mcp-$VERSION-linux-$FILE_ARCH.mcpb\""),
+        "the Linux bundle is uploaded"
+    );
+    let windows = job("windows");
+    assert!(windows.contains("bash packaging/mcp-bundle.sh windows \"$VERSION\" dist \"target/$TARGET/release\""));
+    assert!(windows.contains("bash packaging/mcp-bundle-check.sh \"dist/diacraft-mcp-$VERSION-windows-$FILE_ARCH.mcpb\" $expected"));
+    assert!(windows.split("gh release upload").nth(1).unwrap().contains("\"dist/diacraft-mcp-$VERSION-windows-$FILE_ARCH.mcpb\""));
+    let mac = job("macos");
+    for cpu_folder in ["aarch64-apple-darwin", "x86_64-apple-darwin"] {
+        assert!(mac.contains(&format!("bash packaging/mcp-bundle.sh macos \"$VERSION\" dist target/{cpu_folder}/release")), "{cpu_folder}");
+    }
+    // The Apple silicon bundle runs here; the Intel one under Rosetta where it is there, and its files are looked at where it is not, and the step says which.
+    assert!(mac.contains("bash packaging/mcp-bundle-check.sh \"dist/diacraft-mcp-$VERSION-macos-arm64.mcpb\" $expected"));
+    assert!(mac.contains("RUN_WITH=\"arch -x86_64\" bash packaging/mcp-bundle-check.sh \"dist/diacraft-mcp-$VERSION-macos-x86_64.mcpb\" $expected"));
+    assert!(mac.contains("bash packaging/mcp-bundle-check.sh --no-run \"dist/diacraft-mcp-$VERSION-macos-x86_64.mcpb\" $expected"));
+    let upload = mac.split("gh release upload").nth(1).unwrap();
+    for cpu in ["arm64", "x86_64"] {
+        assert!(upload.contains(&format!("\"dist/diacraft-mcp-$VERSION-macos-{cpu}.mcpb\"")), "{cpu}");
+    }
+    // The bundle's program is the one of the download: it is made from the same folder of programs, after the signing hooks (a signed program is bundled signed).
+    for (name, text) in [("linux", &linux), ("windows", &windows), ("macos", &mac)] {
+        let make = text.find("packaging/mcp-bundle.sh").unwrap_or_else(|| panic!("{name} makes no bundle"));
+        assert!(text[..make].contains("packaging/package.sh"), "{name}: the bundle is made after the download");
+    }
+}
+
+/// The notes of the draft name the bundles, and say what they are.
+#[test]
+fn the_draft_notes_name_the_six_bundles_and_say_what_they_are_for() {
+    let workflow = read(".github/workflows/release.yml");
+    for bundle in &xtask::mcp::BUNDLES {
+        let name = format!("diacraft-mcp-$VERSION-{}-{}.mcpb", bundle.os, bundle.cpu);
+        assert!(workflow.contains(&name), "{name}");
+    }
+    let draft = job("draft");
+    assert!(draft.contains("MCP bundle") && draft.contains(".mcpb files") && !draft.contains('`'), "{draft}");
+}

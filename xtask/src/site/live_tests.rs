@@ -929,3 +929,59 @@ fn the_command_follows_the_308_pages_sends_a_page_with_its_extension_through_cur
     assert!(result.unwrap_err().contains("1 file"), "a failure");
     assert!(!requests.iter().any(|r| r == "/p"), "{requests:?}");
 }
+
+// ----------------------------------------------------------------------------------------------------------------- the registry's proof of the domain
+
+const PROOF_PATH: &str = "/.well-known/mcp-registry-auth";
+
+/// An app's site as the check finds it: the start page has the app's canvas, and the proof is served as given.
+fn proof_site(proof: Option<(&str, &str)>) -> Fake {
+    let mut site = Fake::default();
+    site.put("/", "<!DOCTYPE html><html><body><canvas id=\"diacraft_canvas\"></canvas></body></html>", REVALIDATE, None);
+    if let Some((kind, body)) = proof {
+        site.put(PROOF_PATH, body, REVALIDATE, None);
+        site.header(PROOF_PATH, "content-type", Some(kind));
+    }
+    site
+}
+
+fn failures_of(report: &Report, path: &str) -> Vec<String> {
+    let entry = report.entries.iter().find(|e| e.path == path).unwrap_or_else(|| panic!("{path} was not asked for: {:?}", report.entries));
+    entry.findings.iter().filter(|f| f.level == Level::Fail).map(|f| f.text.clone()).collect()
+}
+
+#[test]
+fn the_apps_site_is_asked_for_the_proof_and_a_text_record_passes() {
+    let record = "v=MCPv1; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n";
+    let report = live::check(&proof_site(Some(("text/plain; charset=utf-8", record)))).unwrap();
+    assert_eq!(failures_of(&report, PROOF_PATH), Vec::<String>::new());
+    assert_eq!(report.failures(), 0, "{:?}", report.lines());
+}
+
+#[test]
+fn a_proof_that_is_the_apps_page_the_wrong_type_or_not_there_is_a_failure_that_says_so() {
+    // The web app answers every path that has no file with its page, a 200 of HTML: the registry would read that.
+    let report = live::check(&proof_site(Some(("text/html; charset=utf-8", "<!DOCTYPE html><html></html>")))).unwrap();
+    let failures = failures_of(&report, PROOF_PATH);
+    assert!(failures.iter().any(|f| f.contains("text/plain")) && failures.iter().any(|f| f.contains("not a record")), "{failures:?}");
+    // A record sent as a type the registry did not ask for.
+    let record = "v=MCPv1; k=ed25519; p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n";
+    let failures = failures_of(&live::check(&proof_site(Some(("application/octet-stream", record)))).unwrap(), PROOF_PATH);
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("application/octet-stream") && failures[0].contains("text/plain"), "{failures:?}");
+    // No file at all, and a redirect (the registry follows none).
+    let failures = failures_of(&live::check(&proof_site(None)).unwrap(), PROOF_PATH);
+    assert!(failures.iter().any(|f| f.contains("404")), "{failures:?}");
+    let mut moved = proof_site(Some(("text/plain", record)));
+    moved.files.get_mut(PROOF_PATH).unwrap().status = 308;
+    let failures = failures_of(&live::check(&moved).unwrap(), PROOF_PATH);
+    assert!(failures.iter().any(|f| f.contains("308")), "{failures:?}");
+}
+
+#[test]
+fn a_site_that_is_not_the_app_is_not_asked_for_the_proof() {
+    let mut pages = Fake::default();
+    pages.put("/", "<html><body><p>The pages</p></body></html>", REVALIDATE, None);
+    live::check(&pages).unwrap();
+    assert!(!pages.asked.borrow().iter().any(|path| path.contains("well-known")), "{:?}", pages.asked.borrow());
+}

@@ -52,6 +52,7 @@ web-sys = { workspace = true, features = [
     "BlobPropertyBag",
     "DataTransfer",
     "Document",
+    "DomRect",
     "DragEvent",
     "Element",
     "Event",

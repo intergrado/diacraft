@@ -15,6 +15,7 @@ pub mod fuzzcheck;
 pub mod kani;
 pub mod layers;
 pub mod licenses;
+pub mod mcp;
 pub mod parity;
 pub mod stats;
 pub mod version;
