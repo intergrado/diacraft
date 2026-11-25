@@ -52,9 +52,11 @@ pub fn denied_in(path: &str) -> Vec<&'static str> {
 const ALLOW: &str = "brand-ok";
 
 /// The notice, the same words wherever it is: NOTICE, the About box and the footer of the site's pages. Its first sentence is the trademark line it began with (an allowed use of the
-/// product's name); the sentences after it say that OpenDocument Format is an OASIS Standard, that LibreOffice and OpenOffice are registered trademarks of their owners and that
-/// DiaCraft is not affiliated with or endorsed by the four owners (owner, 2026-11-23). The whole of it is the allowed text, in one line of each file, so that the export's allowlist keeps it.
-pub const TRADEMARK: &str = "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.";
+/// product's name); the sentences after it say that OpenDocument Format is an OASIS Standard, that LibreOffice and OpenOffice are registered trademarks of their owners (owner, 2026-11-23),
+/// whose marks ArchiMate (owner, 2026-11-25), UML and BPMN are (the architecture page names the three), and that DiaCraft is not affiliated with or endorsed by the six owners. None of the
+/// names after the first sentence is in [`DENY`]: they pass anywhere, and the notice says whose they are. The whole of it is the allowed text, in one line of each file, so that the export's
+/// allowlist keeps it.
+pub const TRADEMARK: &str = "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.";
 
 /// The Save dialog's kinds (the desktop's own dialog, the browser's chooser and the window's name card take their labels from it).
 const SAVE_KINDS: &str = "crates/ui-egui/src/save_kinds.rs";
@@ -66,7 +68,7 @@ const CLI_HELP: &str = "apps/diacraft-cli/src/args.rs";
 const ABOUT: &str = "crates/ui-egui/src/splash.rs";
 
 /// The website's pages, each of which has the trademark line in its footer.
-pub const SITE_PAGES: [&str; 14] = [
+pub const SITE_PAGES: [&str; 15] = [
     "site/404.html",
     "site/architecture-diagrams.html",
     "site/browser.html",
@@ -79,6 +81,7 @@ pub const SITE_PAGES: [&str; 14] = [
     "site/guides/index.html",
     "site/guides/native-format.html",
     "site/index.html",
+    "site/org-charts.html",
     "site/privacy.html",
     "site/vsdx-editor.html",
 ];
@@ -123,6 +126,7 @@ pub const PRODUCT_USES: &[(&str, &str)] = &[
     (SITE_PAGES[11], TRADEMARK),
     (SITE_PAGES[12], TRADEMARK),
     (SITE_PAGES[13], TRADEMARK),
+    (SITE_PAGES[14], TRADEMARK),
 ];
 
 /// The texts of [`PRODUCT_USES`] that `path` may hold.

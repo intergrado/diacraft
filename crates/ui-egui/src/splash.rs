@@ -26,10 +26,10 @@
 //!
 //! **What is ours.** The words and their order (the version, the git release, the © line, the licence line with its two links) are the owner's brief; no reference is read. The
 //! link under them, Third-party licences, is ours: it runs `app.licenses`, which hands the screen over to the window of `licenses.rs`. **About adds the
-//! notice** ([`TRADEMARK`], owner 2026-11-23: the trademark line, that OpenDocument Format is an OASIS Standard, the marks of LibreOffice and OpenOffice, and who DiaCraft is not
-//! affiliated with), whole, in a zone of its own ([`LEGAL_ZONE`]): the clear corner over the picture's title, apart from the rows above, so it takes no room from them. Its text is
-//! laid out at `LEGAL_SIZE` and, if the interface face is so wide that it would not fit the corner, smaller (`fit_size`); it is never cut and never leaves the corner. The start
-//! splash, which is the same panel on a timer, does not show it.
+//! notice** ([`TRADEMARK`], owner 2026-11-23: the trademark line, that OpenDocument Format is an OASIS Standard, the marks of LibreOffice and OpenOffice, since 2026-11-25 those of
+//! ArchiMate, UML and BPMN, and who DiaCraft is not affiliated with), whole, in a zone of its own ([`LEGAL_ZONE`]): the clear corner over the picture's title, apart from the rows
+//! above, so it takes no room from them. Its text is laid out at `LEGAL_SIZE` and, if the face is so wide that it would not fit the corner, smaller (`fit_size`); it is never cut and
+//! never leaves the corner. The start splash, which is the same panel on a timer, does not show it.
 
 use std::time::Duration;
 
@@ -70,8 +70,9 @@ pub const ART_SIZE: Vec2 = Vec2::new(SPLASH_WIDTH as f32, SPLASH_HEIGHT as f32);
 pub const TEXT_ZONE: [f32; 4] = [24.0, 336.0, 232.0, 446.0];
 
 /// The notice About DiaCraft says (owner, 2026-11-23: in NOTICE, the About box and the site's footer, the same words in each): the trademark line, that OpenDocument Format is an
-/// OASIS Standard, the marks of LibreOffice and OpenOffice, and that DiaCraft is not affiliated with or endorsed by their owners. Its first sentence is the one the notice began with.
-pub const TRADEMARK: &str = "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.";
+/// OASIS Standard, the marks of LibreOffice and OpenOffice, those of ArchiMate, UML and BPMN (owner, 2026-11-25: the site names them), and that DiaCraft is not affiliated with or
+/// endorsed by their owners. Its first sentence is the one the notice began with.
+pub const TRADEMARK: &str = "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.";
 
 /// Where the notice goes on the picture, in the picture's pixels (left, top, right, bottom): the clear corner over the title, as far from the picture's top and left
 /// edges as the text zone is from its left edge, and left of the flowchart's line (x 376) and box. A test holds the picture clear of art here.
@@ -105,7 +106,8 @@ pub(crate) fn block_gaps(k: f32) -> f32 {
 
 /// The size for a text to be laid out at, from `start` down to `least` in steps of a twentieth: the first at which `height_at(size)` is at most `room`, or `least` when none of
 /// them is (or `start` when that is smaller than `least`). It never returns more than `start` or less than the smaller of the two, and a height that is not a number fits nothing.
-/// The notice is laid out at [`LEGAL_SIZE`] when its corner holds it, which it does with the fonts of the tests and of the desktop; a wider interface face makes it smaller
+/// The notice is laid out at [`LEGAL_SIZE`] when its corner holds it. Since it names the marks of ArchiMate, UML and BPMN too (2026-11-25) it is one step smaller with the
+/// fonts of the tests (10.45 of the picture's pixels: 130 pixels tall at 11, in a corner of 112, measured at the six sizes of the tests); a wider face makes it smaller still
 /// rather than longer than its corner, which would put it over the picture's title.
 pub(crate) fn fit_size(start: f32, least: f32, room: f32, mut height_at: impl FnMut(f32) -> f32) -> f32 {
     let least = least.min(start);

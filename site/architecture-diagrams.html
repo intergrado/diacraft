@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Enterprise and integration architecture diagrams · DiaCraft</title>
-  <meta name="description" content="Draw enterprise and integration architecture diagrams with shapes, containers, labelled connectors, layers and Shape Data in DiaCraft, free and open source." />
+  <meta name="description" content="Draw enterprise and integration architecture diagrams with containers, labelled connectors and layers. No ArchiMate stencil yet. Free and open source." />
   <link rel="canonical" href="https://diacraft.dev/architecture-diagrams" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="DiaCraft" />
   <meta property="og:title" content="Enterprise and integration architecture diagrams · DiaCraft" />
-  <meta property="og:description" content="Draw enterprise and integration architecture diagrams with shapes, containers, labelled connectors, layers and Shape Data in DiaCraft, free and open source." />
+  <meta property="og:description" content="Draw enterprise and integration architecture diagrams with containers, labelled connectors and layers. No ArchiMate stencil yet. Free and open source." />
   <meta property="og:url" content="https://diacraft.dev/architecture-diagrams" />
   <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
@@ -17,7 +17,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Enterprise and integration architecture diagrams · DiaCraft" />
-  <meta name="twitter:description" content="Draw enterprise and integration architecture diagrams with shapes, containers, labelled connectors, layers and Shape Data in DiaCraft, free and open source." />
+  <meta name="twitter:description" content="Draw enterprise and integration architecture diagrams with containers, labelled connectors and layers. No ArchiMate stencil yet. Free and open source." />
   <meta name="twitter:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta name="twitter:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
@@ -31,7 +31,7 @@
     {
       "@context": "https://schema.org",
       "@type": "WebPage",
-      "description": "Draw enterprise and integration architecture diagrams with shapes, containers, labelled connectors, layers and Shape Data in DiaCraft, free and open source.",
+      "description": "Draw enterprise and integration architecture diagrams with containers, labelled connectors and layers. No ArchiMate stencil yet. Free and open source.",
       "inLanguage": "en",
       "isPartOf": {
         "@type": "WebSite",
@@ -64,7 +64,7 @@
           <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Architecture diagrams</span></p>
           <h1>Enterprise and integration <em>architecture diagrams.</em></h1>
           <p class="lead">Show how systems, applications and data connect, with the shapes DiaCraft has today: boxes and other basic shapes in containers, connectors with labels and arrowheads, layers for each view and Shape Data on each system.</p>
-          <p class="sub">DiaCraft has no stencil for a modelling notation, such as an enterprise architecture language, UML or BPMN, and no icon sets for cloud services or integration patterns. This page says what you can draw with the general shapes.</p>
+          <p class="sub">DiaCraft has no stencil for a modelling notation such as ArchiMate, UML or BPMN, and no icon sets for cloud services or integration patterns. This page says what you can draw with the general shapes.</p>
           <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
         </div>
         <div class="title-block">
@@ -91,6 +91,12 @@
         <section id="containers">
           <h2>Group systems in containers</h2>
           <p>Select the shapes of a domain, a zone or a team and choose <strong>Insert → Container</strong>: one of 14 styles puts a frame with a heading round them. The members move, copy and delete with their container, and a shape you drop into it joins it. The Container Format tab sets the margins, fits the container to its contents or resizes it as they change, locks it, selects its contents, or disbands it.</p>
+          <figure class="sheet-fig sheet-fig-wide">
+            <div class="sheet-scroll" tabindex="0" role="group" aria-label="Integration architecture drawn in DiaCraft">
+              <img class="sheet-paper" src="/assets/hashed/sheet-integration.510e0bf5cf01.webp" alt="An integration architecture in three containers. Applications holds Web shop and Warehouse app, Integration layer holds API gateway and Message broker, and Systems of record holds ERP and an Orders database. Arrows run from Web shop to API gateway, labelled HTTPS; from Warehouse app to Message broker, labelled Stock events; from API gateway to Message broker, labelled Order events; from Message broker to ERP, labelled Orders, stock; and from ERP to Orders database, labelled SQL." width="1280" height="541" loading="lazy" />
+            </div>
+            <figcaption>An integration architecture: five rectangles of Basic Shapes and the Database shape in three containers, joined by labelled connectors, with the Tidepool theme. It was drawn with DiaCraft’s command line, and the picture is the part of the page with the shapes, from <code>diacraft-cli export</code>.<span class="sheet-hint"> Scroll the picture sideways to see all of it.</span></figcaption>
+          </figure>
         </section>
         <section id="flows">
           <h2>Connections and data flows</h2>
@@ -101,6 +107,16 @@
           <h2>Layers and pages for each view</h2>
           <p>Put shapes on layers, such as applications, integrations and infrastructure. Layer Properties shows, hides, locks or prints each layer, or gives it a colour, so one drawing can hold several views.</p>
           <p>Use one page for a context view and further pages for the detail. Link a shape to the page that details it with <strong>Insert → Link</strong>, and Ctrl+click the shape to go there. A background page holds a frame and a title block for every page that uses it.</p>
+        </section>
+        <section id="archimate">
+          <h2>ArchiMate views with the general shapes</h2>
+          <p>DiaCraft has no ArchiMate stencil yet: none of the notation’s element shapes, icons or relationship line styles. You can still sketch a view of a model with what it has:</p>
+          <ul>
+            <li><strong>A container for each layer of the model,</strong> such as business, application and technology, with the layer’s name as its heading. Put its shapes on a layer of the drawing as well, to show, hide or lock that layer.</li>
+            <li><strong>A shape for each element,</strong> with its name as its text and its type in a Shape Data field you define.</li>
+            <li><strong>A connector for each relationship,</strong> labelled with its name, with the line end you choose from 46.</li>
+          </ul>
+          <p>Such a drawing is a picture of the model and not the model: DiaCraft does not check it against the notation’s rules and cannot exchange it with a modelling tool.</p>
         </section>
         <section id="data">
           <h2>Data on each shape</h2>
@@ -114,7 +130,7 @@
         <section id="limits">
           <h2>What it does not have yet</h2>
           <ul>
-            <li><strong>Notations and icons.</strong> No stencil for a modelling notation, and no icon sets for cloud services, networks or integration patterns.</li>
+            <li><strong>Notations and icons.</strong> No stencil for a modelling notation such as ArchiMate, UML or BPMN, and no icon sets for cloud services, networks or integration patterns.</li>
             <li><strong>External data.</strong> A shape cannot be linked to a spreadsheet or a database: its Shape Data is typed in.</li>
             <li><strong>An early release.</strong> Many controls of the window are shown but do not work yet.</li>
           </ul>
@@ -128,6 +144,7 @@
             <li><a href="#containers"><span>Containers</span></a></li>
             <li><a href="#flows"><span>Connections and data flows</span></a></li>
             <li><a href="#views"><span>Layers and pages</span></a></li>
+            <li><a href="#archimate"><span>ArchiMate views</span></a></li>
             <li><a href="#data"><span>Data on each shape</span></a></li>
             <li><a href="#share"><span>Lay it out and share it</span></a></li>
             <li><a href="#limits"><span>What it does not have yet</span></a></li>
@@ -161,11 +178,11 @@
       </div>
       <nav aria-label="Footer">
         <div><p class="label">Product</p><a href="/#features">Features</a><a href="/vsdx-editor.html">Visio alternative</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
-        <div><p class="label">Diagrams</p><a href="/flowcharts.html">Flowcharts</a><a href="/architecture-diagrams.html">Architecture</a></div>
+        <div><p class="label">Diagrams</p><a href="/flowcharts.html">Flowcharts</a><a href="/org-charts.html">Org charts</a><a href="/architecture-diagrams.html">Architecture</a></div>
         <div><p class="label">Guides</p><a href="/guides/">All guides</a><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
         <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
       </nav>
-      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.</p>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.</p>
     </div>
   </footer>
 </body>

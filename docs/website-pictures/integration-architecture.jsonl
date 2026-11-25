@@ -1,0 +1,38 @@
+{"command":"file.new"}
+{"command":"page.size","params":{"width":8.9,"height":4.6}}
+{"command":"theme.apply","params":{"theme":"tidepool"}}
+{"command":"shape.drop","params":{"master":"rectangle","stencil":"basic","page":1,"x":1.25,"y":3.0}}
+{"command":"shape.drop","params":{"master":"rectangle","stencil":"basic","page":1,"x":1.25,"y":1.3}}
+{"command":"shape.drop","params":{"master":"rectangle","stencil":"basic","page":1,"x":4.45,"y":3.0}}
+{"command":"shape.drop","params":{"master":"rectangle","stencil":"basic","page":1,"x":4.45,"y":1.3}}
+{"command":"shape.drop","params":{"master":"rectangle","stencil":"basic","page":1,"x":7.65,"y":1.3}}
+{"command":"shape.drop","params":{"master":"database","stencil":"flowchart","page":1,"x":7.65,"y":3.0}}
+{"command":"shape.resize","params":{"id":1,"x":0.5,"y":2.625,"width":1.5,"height":0.75}}
+{"command":"shape.resize","params":{"id":2,"x":0.5,"y":0.925,"width":1.5,"height":0.75}}
+{"command":"shape.resize","params":{"id":3,"x":3.7,"y":2.625,"width":1.5,"height":0.75}}
+{"command":"shape.resize","params":{"id":4,"x":3.7,"y":0.925,"width":1.5,"height":0.75}}
+{"command":"shape.resize","params":{"id":5,"x":6.9,"y":0.925,"width":1.5,"height":0.75}}
+{"command":"shape.resize","params":{"id":6,"x":7.05,"y":2.5,"width":1.2,"height":1.0}}
+{"command":"shape.set_text","params":{"id":1,"text":"Web shop"}}
+{"command":"shape.set_text","params":{"id":2,"text":"Warehouse app"}}
+{"command":"shape.set_text","params":{"id":3,"text":"API gateway"}}
+{"command":"shape.set_text","params":{"id":4,"text":"Message broker"}}
+{"command":"shape.set_text","params":{"id":5,"text":"ERP"}}
+{"command":"shape.set_text","params":{"id":6,"text":"Orders database"}}
+{"command":"connector.add","params":{"from":{"id":1},"to":{"id":3}}}
+{"command":"connector.add","params":{"from":{"id":2},"to":{"id":4}}}
+{"command":"connector.add","params":{"from":{"id":3},"to":{"id":4}}}
+{"command":"connector.add","params":{"from":{"id":4},"to":{"id":5}}}
+{"command":"connector.add","params":{"from":{"id":5},"to":{"id":6}}}
+{"command":"shape.set_text","params":{"id":7,"text":"HTTPS"}}
+{"command":"shape.set_text","params":{"id":8,"text":"Stock events"}}
+{"command":"shape.set_text","params":{"id":9,"text":"Order events"}}
+{"command":"shape.set_text","params":{"id":10,"text":"Orders, stock"}}
+{"command":"shape.set_text","params":{"id":11,"text":"SQL"}}
+{"command":"container.add","params":{"style":"tint-strip","heading":"Applications","ids":[1,2]}}
+{"command":"container.add","params":{"style":"tint-strip","heading":"Integration layer","ids":[3,4]}}
+{"command":"container.add","params":{"style":"tint-strip","heading":"Systems of record","ids":[5,6]}}
+{"command":"shape.resize","params":{"id":12,"x":0.25,"y":0.675,"width":2.0,"height":3.375}}
+{"command":"shape.resize","params":{"id":13,"x":3.45,"y":0.675,"width":2.0,"height":3.375}}
+{"command":"shape.resize","params":{"id":14,"x":6.65,"y":0.675,"width":2.0,"height":3.375}}
+{"command":"file.save_as","params":{"path":"integration-architecture.diacraft"}}

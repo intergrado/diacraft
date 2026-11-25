@@ -1,0 +1,30 @@
+{"command":"file.new","params":{"template":"organization_chart"}}
+{"command":"shape.drop","params":{"master":"orgchart.manager","stencil":"orgchart","page":1,"x":1.5,"y":1.0}}
+{"command":"shape.drop","params":{"master":"orgchart.manager","stencil":"orgchart","page":1,"x":4.0,"y":1.0}}
+{"command":"shape.drop","params":{"master":"orgchart.position","stencil":"orgchart","page":1,"x":6.5,"y":1.0}}
+{"command":"shape.drop","params":{"master":"orgchart.position","stencil":"orgchart","page":1,"x":9.0,"y":1.0}}
+{"command":"shape.drop","params":{"master":"orgchart.position","stencil":"orgchart","page":1,"x":1.5,"y":2.5}}
+{"command":"shape.drop","params":{"master":"orgchart.vacancy","stencil":"orgchart","page":1,"x":4.0,"y":2.5}}
+{"command":"shapedata.set","params":{"id":1,"row":"Name","value":"Ana Ribeiro"}}
+{"command":"shapedata.set","params":{"id":1,"row":"Title","value":"Chief executive"}}
+{"command":"shapedata.set","params":{"id":2,"row":"Name","value":"Sam Okafor"}}
+{"command":"shapedata.set","params":{"id":2,"row":"Title","value":"Head of operations"}}
+{"command":"shapedata.set","params":{"id":3,"row":"Name","value":"Lena Fischer"}}
+{"command":"shapedata.set","params":{"id":3,"row":"Title","value":"Head of engineering"}}
+{"command":"shapedata.set","params":{"id":4,"row":"Name","value":"Priya Nair"}}
+{"command":"shapedata.set","params":{"id":4,"row":"Title","value":"Logistics lead"}}
+{"command":"shapedata.set","params":{"id":5,"row":"Name","value":"Tom Byrne"}}
+{"command":"shapedata.set","params":{"id":5,"row":"Title","value":"Facilities lead"}}
+{"command":"shapedata.set","params":{"id":6,"row":"Name","value":"Mei Chen"}}
+{"command":"shapedata.set","params":{"id":6,"row":"Title","value":"Platform engineer"}}
+{"command":"shapedata.set","params":{"id":7,"row":"Title","value":"Data engineer"}}
+{"command":"orgchart.link","params":{"id":2,"manager":1}}
+{"command":"orgchart.link","params":{"id":3,"manager":1}}
+{"command":"orgchart.link","params":{"id":4,"manager":2}}
+{"command":"orgchart.link","params":{"id":5,"manager":2}}
+{"command":"orgchart.link","params":{"id":6,"manager":3}}
+{"command":"orgchart.link","params":{"id":7,"manager":3}}
+{"command":"orgchart.layout","params":{"layout":"top_to_bottom","spacing":0.25}}
+{"command":"orgchart.arrange","params":{"id":2,"arrangement":"vertical_right"}}
+{"command":"orgchart.arrange","params":{"id":3,"arrangement":"vertical_right"}}
+{"command":"file.save_as","params":{"path":"org-chart.diacraft"}}

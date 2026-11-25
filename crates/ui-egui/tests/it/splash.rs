@@ -269,15 +269,17 @@ const SIX_SIZES: [([f32; 2], f32); 6] =
     [([1280.0, 800.0], 1.0), ([900.0, 600.0], 1.0), ([480.0, 320.0], 1.0), ([1280.0, 800.0], 2.0), ([640.0, 400.0], 1.5), ([800.0, 300.0], 1.0)];
 
 /// The notice (owner, 2026-11-23): the first sentence is the one the notice has always had; the others say that OpenDocument is an OASIS Standard, whose
-/// marks LibreOffice and OpenOffice are, and that DiaCraft is not affiliated with or endorsed by any of the four owners.
+/// marks LibreOffice and OpenOffice are, whose marks ArchiMate (owner, 2026-11-25), UML and BPMN are (the site names the three), and that DiaCraft is not
+/// affiliated with or endorsed by any of the six owners.
 #[test]
 fn the_notice_keeps_its_first_sentence_and_names_the_owners_of_the_other_marks() {
     assert!(TRADEMARK.starts_with("Visio is a trademark of the Microsoft group of companies. "), "{TRADEMARK}");
     assert_eq!(
         TRADEMARK,
         "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The \
-         Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. DiaCraft is not affiliated with or \
-         endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation."
+         Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark \
+         of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The \
+         Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group."
     );
 }
 

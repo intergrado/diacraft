@@ -690,8 +690,10 @@ footer .ruler { border-top: 0; }
 /* A capture of the editor: the whole window on a wide screen, and on a narrow one the part with the drawing, at a size its words can be read at. */
 .shot picture, .shot img { display: block; width: 100%; height: auto; border-radius: var(--radius-m); }
 .shot img { box-shadow: var(--shadow-plate); }
-/* One sheet of a drawing, on its paper. */
+/* One sheet of a drawing, on its paper. A wide one (a chart, an architecture) takes the text's whole width, and on a narrow screen keeps a size its words can be read at and scrolls sideways. */
 .sheet-fig .sheet-paper { max-width: 34rem; }
+.sheet-fig-wide .sheet-paper { display: block; max-width: none; }
+.sheet-hint { display: none; }
 
 /* A table: lettered heads, hairline rows. */
 .table-scroll { overflow-x: auto; }
@@ -734,9 +736,8 @@ footer .ruler { border-top: 0; }
 .unglued .node-missing { border-style: dashed; border-color: var(--line-strong); background: none; color: var(--ink-muted); }
 .lost-way { padding-block: clamp(2.75rem, 5vw, 4.5rem) var(--band); }
 .lost-way h2 { margin-bottom: clamp(2rem, 4vw, 3rem); }
+/* A route of four stops: the page that is not found, and on the guides' index the pages about kinds of diagram and file, after the route of the five guides. */
 .route-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-/* The guides' index: the route of the five guides, then a shorter one of the pages about kinds of diagram and file. */
-.route-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .lost-way + .lost-way { padding-top: 0; }
 
 /* Widths */
@@ -793,6 +794,9 @@ footer .ruler { border-top: 0; }
   .plate-scroll { direction: rtl; margin: -1rem calc(var(--gutter) * -1) -1.75rem; padding: 1rem var(--gutter) 1.75rem; overflow-x: auto; }
   .plate-stage { direction: ltr; min-width: 44rem; box-shadow: 0 0 0 1px var(--line-strong), 0 12px 18px -12px rgb(0 0 0 / .5); }
   .plate-hint { display: block; }
+  .sheet-scroll { margin: -.75rem calc(var(--gutter) * -1) -1rem; padding: .75rem var(--gutter) 1rem; overflow-x: auto; }
+  .sheet-scroll .sheet-paper { width: 36rem; }
+  .sheet-hint { display: inline; }
 }
 @media (max-width: 40rem) {
   .mast-inner { flex-wrap: wrap; gap: 0 .8rem; min-height: 0; padding: .8rem 0 .25rem; }

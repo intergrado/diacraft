@@ -540,8 +540,9 @@ fn the_trademark_line_passes_where_it_is_listed_and_nowhere_else() {
 }
 
 /// The notice (owner, 2026-11-23: "a note about the OASIS OpenDocument format and that we are not affiliated with OASIS, LibreOffice or OpenOffice"): its first sentence is the one it has always
-/// had (the allowed use of the product's name); it says that OpenDocument Format is an OASIS Standard, whose marks LibreOffice and OpenOffice are, and that DiaCraft is not affiliated with or
-/// endorsed by the four owners. The text is one paragraph, in NOTICE, the About box and every page's footer (`the_tree_holds_every_use_the_list_names` holds each place to it).
+/// had (the allowed use of the product's name); it says that OpenDocument Format is an OASIS Standard, whose marks LibreOffice and OpenOffice are, whose marks ArchiMate (owner, 2026-11-25: the
+/// architecture page names it, and the notice says whose it is), UML and BPMN are (that page names them too), and that DiaCraft is not affiliated with or endorsed by the six owners. The text
+/// is one paragraph, in NOTICE, the About box and every page's footer (`the_tree_holds_every_use_the_list_names` holds each place to it).
 #[test]
 fn the_notice_keeps_its_first_sentence_and_names_the_owners_of_the_other_marks() {
     assert!(TRADEMARK.starts_with("Visio is a trademark of the Microsoft group of companies. "), "{TRADEMARK}");
@@ -549,18 +550,22 @@ fn the_notice_keeps_its_first_sentence_and_names_the_owners_of_the_other_marks()
         "OpenDocument Format (ODF) is an OASIS Standard.",
         "LibreOffice is a registered trademark of The Document Foundation.",
         "OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation.",
-        "DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation.",
+        "ArchiMate is a registered trademark of The Open Group.",
+        "UML and BPMN are trademarks of the Object Management Group.",
+        "DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.",
     ] {
         assert!(TRADEMARK.contains(sentence), "{sentence}");
     }
     assert!(
-        TRADEMARK.ends_with("endorsed by Microsoft, OASIS, The Document Foundation or The Apache Software Foundation."),
+        TRADEMARK.ends_with(
+            "endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group."
+        ),
         "it ends with who it is not affiliated with"
     );
     assert!(!TRADEMARK.contains('\n') && TRADEMARK.is_ascii(), "one line of plain text, which the allowlist keeps whole");
     // Only the first and the last sentence hold a name of the deny list, and both are inside the allowed text; the others hold none, so they pass in a Rust literal anywhere.
     let others = "OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered \
-                  trademarks of The Apache Software Foundation.";
+                  trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group.";
     assert!(TRADEMARK.contains(others));
     assert!(hits(RUST, &format!("const T: &str = \"{others}\";\n")).is_empty());
     // The first sentence of the notice alone is not the allowed text: the use is the whole notice, in the files it is listed for.
