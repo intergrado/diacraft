@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "craft-print",
  "craft-window",
@@ -1070,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-calc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-calc",
  "diacraft-color",
@@ -1087,7 +1087,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "craft-atomic",
  "diacraft-calc",
@@ -1114,14 +1114,14 @@ dependencies = [
 
 [[package]]
 name = "diacraft-color"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "diacraft-container"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crc32fast",
  "diacraft-container",
@@ -1132,7 +1132,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-doc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-color",
  "diacraft-doc",
@@ -1145,7 +1145,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-engine"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "craft-atomic",
  "craft-pathops",
@@ -1181,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-fonts"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-fonts",
  "epaint_default_fonts",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-formula"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-units",
  "proptest",
@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-geom"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "proptest",
@@ -1211,14 +1211,14 @@ dependencies = [
 
 [[package]]
 name = "diacraft-layout"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proptest",
 ]
 
 [[package]]
 name = "diacraft-mcp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-engine",
  "diacraft-testkit",
@@ -1230,7 +1230,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-metafile"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-metafile",
  "proptest",
@@ -1238,7 +1238,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-native"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crc32fast",
  "diacraft-container",
@@ -1252,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-odg"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crc32fast",
  "diacraft-container",
@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-opc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crc32fast",
  "diacraft-container",
@@ -1279,7 +1279,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-pdf"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "craft-pdf",
  "diacraft-color",
@@ -1294,7 +1294,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-render"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-calc",
  "diacraft-color",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-sheetxml"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-container",
  "diacraft-doc",
@@ -1327,7 +1327,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-svg"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-color",
  "diacraft-doc",
@@ -1340,7 +1340,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-testkit"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crc32fast",
  "diacraft-doc",
@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-text"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-color",
  "diacraft-fonts",
@@ -1367,7 +1367,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-ui-egui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "craft-atomic",
  "craft-window",
@@ -1393,11 +1393,11 @@ dependencies = [
 
 [[package]]
 name = "diacraft-units"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "diacraft-vsdx"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "crc32fast",
  "diacraft-color",
@@ -1416,7 +1416,7 @@ dependencies = [
 
 [[package]]
 name = "diacraft-web"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "diacraft-container",
  "diacraft-engine",
@@ -6541,7 +6541,7 @@ checksum = "9440ea3e5aeabb0ac63af70daf835274065238cdd0cec83418f417eae38bacee"
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "jiff",
  "roxmltree",

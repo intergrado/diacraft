@@ -207,7 +207,7 @@ jobs:
         run: |
           set -euo pipefail
           bash packaging/windows/make-msi.sh ci dist target/x86_64-pc-windows-msvc/release
-          bash packaging/windows/check-msi.sh dist/diacraft-ci-windows-x86_64.msi
+          bash packaging/windows/check-msi.sh dist/diacraft-ci-windows-x64.msi
 
   macos:
     name: macOS build and smoke test

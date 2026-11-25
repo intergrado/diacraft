@@ -820,7 +820,7 @@ fn a_link_in_the_apps_folder_is_refused() {
 
 /// The release workflow as far as the pages' check reads it: the list of the files its last job expects, which here is the one file every download of [`site_json`] is.
 pub(super) const WORKFLOW: &str =
-    "jobs:\n  checksums:\n    steps:\n      - run: |\n          expected=$(printf '%s\\n' \"diacraft-$NAME-a.zip\" | sort)\n";
+    "jobs:\n  checksums:\n    steps:\n      - run: |\n          expected=$(printf '%s\\n' \"diacraft-$VERSION-a.zip\" | sort)\n";
 
 /// A repository root with a `site/` folder (the pages) and a finished Trunk build in `dist/web`.
 pub(super) fn repo() -> Dir {
@@ -895,7 +895,7 @@ pub(super) fn settings(app_url: &str) -> super::settings::Settings {
         domain: "https://example.invalid".into(),
         app_url: app_url.into(),
         repository: "owner/drawing".into(),
-        assets: super::settings::DOWNLOADS.iter().map(|id| ((*id).to_owned(), "diacraft-{tag}-a.zip".to_owned())).collect(),
+        assets: super::settings::DOWNLOADS.iter().map(|id| ((*id).to_owned(), "diacraft-{version}-a.zip".to_owned())).collect(),
         version: "0.2.0".into(),
         licences: vec!["LICENSE-MIT".into(), "LICENSE-APACHE".into()],
     }
@@ -903,7 +903,7 @@ pub(super) fn settings(app_url: &str) -> super::settings::Settings {
 
 /// A `site.json` for the fixtures: the draft's addresses, and one asset name for every download.
 fn site_json() -> String {
-    let assets: Vec<String> = super::settings::DOWNLOADS.iter().map(|id| format!(r#""{id}":"diacraft-{{tag}}-a.zip""#)).collect();
+    let assets: Vec<String> = super::settings::DOWNLOADS.iter().map(|id| format!(r#""{id}":"diacraft-{{version}}-a.zip""#)).collect();
     format!(
         r#"{{"domain":"https://example.invalid","app_url":"https://app.example.invalid","repository":"owner/drawing","assets":{{{}}}}}"#,
         assets.join(",")
@@ -1237,7 +1237,7 @@ fn the_site_command_makes_the_download_links_for_the_workspace_version_and_holds
     root.write("site/index.html", PAGE.replace("Open the app</a>", &format!("Open the app</a>{link}")));
     let site = root.path().join("site");
     let home = || fs::read_to_string(site.join("index.html")).unwrap();
-    let file = |version: &str| format!("https://github.com/owner/drawing/releases/download/v{version}/diacraft-v{version}-a.zip");
+    let file = |version: &str| format!("https://github.com/owner/drawing/releases/download/v{version}/diacraft-{version}-a.zip");
     // `--write` makes the link the file of the release of `Cargo.toml`'s version, and the plain check holds it so.
     super::run_with(&site, &["--write"], None).unwrap();
     assert!(home().contains(&format!(r#"href="{}" data-download="linux-x86_64-deb""#, file("0.2.0"))), "{}", home());
@@ -1249,7 +1249,7 @@ fn the_site_command_makes_the_download_links_for_the_workspace_version_and_holds
     super::run_with(&site, &["--write"], None).unwrap();
     assert!(home().contains(&file("0.2.1")) && !home().contains("v0.2.0"), "{}", home());
     // A link that is a file of another release is stale, whoever wrote it.
-    root.write("site/index.html", home().replace("/v0.2.1/diacraft-v0.2.1-", "/v0.2.0/diacraft-v0.2.0-"));
+    root.write("site/index.html", home().replace("/v0.2.1/diacraft-0.2.1-", "/v0.2.0/diacraft-0.2.0-"));
     assert!(super::run_with(&site, &[], None).is_err());
     super::run_with(&site, &["--write"], None).unwrap();
     // The release workflow no longer lists the file the links ask for: the release would not have it.
@@ -1317,5 +1317,5 @@ fn the_copy_of_the_pages_for_a_preview_links_the_same_release() {
     let preview = settings("http://127.0.0.1:8100");
     app::assemble_pages(root.path(), &site, &root.path().join("dist/preview"), &preview).unwrap();
     let copy = fs::read_to_string(root.path().join("dist/preview/index.html")).unwrap();
-    assert!(copy.contains("/releases/download/v0.2.0/diacraft-v0.2.0-a.zip"), "{copy}");
+    assert!(copy.contains("/releases/download/v0.2.0/diacraft-0.2.0-a.zip"), "{copy}");
 }

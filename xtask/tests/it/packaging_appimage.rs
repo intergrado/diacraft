@@ -60,11 +60,12 @@ fn setup(machine: u8) -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
 
 #[test]
 fn an_appimage_is_made_for_the_cpu_of_its_programs_with_the_runtime_it_was_given() {
+    // The ARM build is aarch64 in the file's name as well as for the tool.
     for (machine, arch, tool_arch) in [(0x3e, "x86_64", "x86_64"), (0xb7, "arm64", "aarch64")] {
         let (dir, tool, runtime) = setup(machine);
-        let out = run(&dir, "v0.2.0", Some(&tool), Some(&runtime));
+        let out = run(&dir, "0.2.0", Some(&tool), Some(&runtime));
         assert!(out.status.success(), "{arch}: {}", say(&out));
-        let file = format!("diacraft-v0.2.0-linux-{arch}.AppImage");
+        let file = format!("diacraft-0.2.0-linux-{tool_arch}.AppImage");
         assert_eq!(names(&dir.path().join("out")), [file.as_str()]);
         assert!(String::from_utf8_lossy(&out.stdout).trim_end().ends_with(&file), "the last line is the file: {}", say(&out));
         let record = std::fs::read_to_string(dir.path().join("tools/record")).unwrap();
@@ -79,10 +80,21 @@ fn an_appimage_is_made_for_the_cpu_of_its_programs_with_the_runtime_it_was_given
     }
 }
 
+/// The name of a file is `diacraft-<version>-...` with no `v`: the workflow gives the version, and a tag given all the same is named as its version.
+#[test]
+fn the_v_of_a_tag_is_in_no_file_name_and_a_label_is_kept() {
+    for (name, said) in [("v0.2.1", "0.2.1"), ("v0.3.0-rc.1", "0.3.0-rc.1"), ("dev-1a2b3c4", "dev-1a2b3c4")] {
+        let (dir, tool, runtime) = setup(0xb7);
+        let out = run(&dir, name, Some(&tool), Some(&runtime));
+        assert!(out.status.success(), "{name}: {}", say(&out));
+        assert_eq!(names(&dir.path().join("out")), [format!("diacraft-{said}-linux-aarch64.AppImage")], "{name}");
+    }
+}
+
 #[test]
 fn the_appdir_holds_both_programs_the_entry_the_icon_the_licences_and_an_apprun_that_can_start_the_command_line() {
     let (dir, tool, runtime) = setup(0x3e);
-    let out = run(&dir, "v0.2.0", Some(&tool), Some(&runtime));
+    let out = run(&dir, "0.2.0", Some(&tool), Some(&runtime));
     assert!(out.status.success(), "{}", say(&out));
     let record = std::fs::read_to_string(dir.path().join("tools/record")).unwrap();
     for path in [
@@ -138,18 +150,18 @@ fn an_appimage_needs_the_tool_and_the_runtime_that_the_workflow_checked() {
         (Some(&tool), None, "APPIMAGE_RUNTIME must be the path of the type 2 runtime"),
         (Some(&dir.path().join("tools/missing")), Some(&runtime), "APPIMAGETOOL must be the path of appimagetool"),
     ] {
-        let out = run(&dir, "v0.2.0", given_tool.map(|p| p.as_path()), given_runtime.map(|p| p.as_path()));
+        let out = run(&dir, "0.2.0", given_tool.map(|p| p.as_path()), given_runtime.map(|p| p.as_path()));
         assert!(!out.status.success(), "{}", say(&out));
         assert!(say(&out).contains(said), "{}", say(&out));
     }
-    assert!(!dir.path().join("out").join("diacraft-v0.2.0-linux-x86_64.AppImage").exists());
+    assert!(!dir.path().join("out").join("diacraft-0.2.0-linux-x86_64.AppImage").exists());
 }
 
 #[test]
 fn programs_of_two_kinds_are_not_one_appimage() {
     let (dir, tool, runtime) = setup(0x3e);
     dir.write_bytes("bin/diacraft-cli", &elf(0xb7));
-    let out = run(&dir, "v0.2.0", Some(&tool), Some(&runtime));
+    let out = run(&dir, "0.2.0", Some(&tool), Some(&runtime));
     assert!(!out.status.success(), "{}", say(&out));
     assert!(say(&out).contains("one download holds one architecture"), "{}", say(&out));
 }
@@ -199,12 +211,12 @@ fn the_tool_and_the_runtime_given_by_relative_paths_are_passed_on_as_absolute_on
         .env("APPIMAGETOOL", "tools/appimagetool")
         .env("APPIMAGE_RUNTIME", "tools/runtime")
         .arg(xtask::root().join("packaging/linux/make-appimage.sh"))
-        .args(["v0.2.0", "out", "bin"])
+        .args(["0.2.0", "out", "bin"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", say(&out));
     let record = std::fs::read_to_string(dir.path().join("tools/record")).unwrap();
     let runtime = dir.path().join("tools/runtime");
     assert!(record.contains(&format!("--runtime-file {}", runtime.display())), "the runtime is an absolute path: {record}");
-    assert!(dir.path().join("out/diacraft-v0.2.0-linux-x86_64.AppImage").is_file());
+    assert!(dir.path().join("out/diacraft-0.2.0-linux-x86_64.AppImage").is_file());
 }

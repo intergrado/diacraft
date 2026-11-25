@@ -708,8 +708,8 @@ mod tests {
     fn a_download_link_is_the_file_of_the_release_of_the_workspace_version_and_not_a_page() {
         let settings = configured();
         assert_eq!(
-            direct_address(&settings, "diacraft-{tag}-linux-x86_64.AppImage"),
-            "https://github.com/owner/drawing/releases/download/v0.2.0/diacraft-v0.2.0-linux-x86_64.AppImage"
+            direct_address(&settings, "diacraft-{version}-linux-x86_64.AppImage"),
+            "https://github.com/owner/drawing/releases/download/v0.2.0/diacraft-0.2.0-linux-x86_64.AppImage"
         );
         // `{version}` is the tag without its `v`, and a name with no pattern is the name.
         assert_eq!(direct_address(&settings, "drawing-{version}.zip"), "https://github.com/owner/drawing/releases/download/v0.2.0/drawing-0.2.0.zip");
@@ -717,8 +717,8 @@ mod tests {
         // A pre-release has its suffix in the tag, which is a file name's character too.
         let pre = Settings { version: "0.3.0-rc.1".into(), ..settings.clone() };
         assert_eq!(
-            direct_address(&pre, "diacraft-{tag}-macos-arm64.dmg"),
-            "https://github.com/owner/drawing/releases/download/v0.3.0-rc.1/diacraft-v0.3.0-rc.1-macos-arm64.dmg"
+            direct_address(&pre, "diacraft-{version}-macos-arm64.dmg"),
+            "https://github.com/owner/drawing/releases/download/v0.3.0-rc.1/diacraft-0.3.0-rc.1-macos-arm64.dmg"
         );
         // Every byte that is not a letter, a digit or one of `-._~` is a percent escape, so that the address is one segment and nothing in it is markup.
         assert_eq!(

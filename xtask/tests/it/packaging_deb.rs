@@ -1,6 +1,7 @@
 //! The .deb (`packaging/linux/make-deb.sh`): the CPU and the version it says, where it puts the files, and what it refuses. It needs `dpkg-deb`, which Debian and Ubuntu
 //! have (the gate's runner is one); a machine without it skips these tests.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -63,13 +64,22 @@ fn a_deb_says_the_cpu_and_the_version_of_its_programs() {
     if !has_dpkg_deb() {
         return;
     }
-    for (machine, arch, deb_arch, glibc) in [(0x3e, "x86_64", "amd64", "libc6 (>= 2.35)"), (0xb7, "arm64", "arm64", "libc6 (>= 2.35)")] {
-        for (name, version) in [("v0.2.0", "0.2.0"), ("v0.2.0-rc1", "0.2.0~rc1"), ("v0.2.0-rc.2-x", "0.2.0~rc.2.x")] {
+    // The ARM build is aarch64 in the file's name and arm64 in the package's own architecture field. A name is the version, with no `v`, and a tag given all the
+    // same is named as its version.
+    for (machine, arch, in_names, deb_arch, glibc) in
+        [(0x3e, "x86_64", "x86_64", "amd64", "libc6 (>= 2.35)"), (0xb7, "arm64", "aarch64", "arm64", "libc6 (>= 2.35)")]
+    {
+        for (name, named, version) in [
+            ("0.2.0", "0.2.0", "0.2.0"),
+            ("0.2.0-rc1", "0.2.0-rc1", "0.2.0~rc1"),
+            ("0.2.0-rc.2-x", "0.2.0-rc.2-x", "0.2.0~rc.2.x"),
+            ("v0.2.0-rc1", "0.2.0-rc1", "0.2.0~rc1"),
+        ] {
             let dir = TempDir::new("make-deb");
             programs(&dir, &program(machine), &program(machine), "");
             let out = make_deb(name, &dir.path().join("out"), &dir.path().join("bin"));
             assert!(out.status.success(), "{arch} {name}: {}", say(&out));
-            let file = format!("diacraft-{name}-linux-{arch}.deb");
+            let file = format!("diacraft-{named}-linux-{in_names}.deb");
             assert_eq!(names(&dir.path().join("out")), [file.as_str()]);
             let deb = dir.path().join("out").join(&file);
             assert_eq!(field(&deb, "Architecture"), deb_arch, "{arch}");
@@ -78,6 +88,34 @@ fn a_deb_says_the_cpu_and_the_version_of_its_programs() {
             assert!(depends.contains(glibc), "{arch}: {depends}");
             assert!(depends.contains("libxkbcommon0"), "both window systems need the keyboard library: {depends}");
         }
+    }
+}
+
+/// What the file is called, with a stand-in for `dpkg-deb` that only writes the file it is asked for, so that the name is checked on a machine that has no dpkg (the programs are
+/// those of the CPU this machine is not, which the script leaves as they are): the version with no `v`, and aarch64 or x86_64 for the CPU.
+#[test]
+fn a_deb_is_named_for_the_version_and_the_cpu_with_no_dpkg_on_the_machine() {
+    let (other, in_names) = match std::env::consts::ARCH {
+        "x86_64" => (0xb7, "aarch64"),
+        _ => (0x3e, "x86_64"),
+    };
+    for (name, said) in [("0.2.1", "0.2.1"), ("v0.2.1", "0.2.1"), ("v0.3.0-rc.1", "0.3.0-rc.1"), ("dev-1a2b3c4", "dev-1a2b3c4")] {
+        let dir = TempDir::new("make-deb-name");
+        programs(&dir, &elf(other), &elf(other), "");
+        dir.write("tools/dpkg-deb", "#!/bin/sh\nfor last in \"$@\"; do :; done\necho \"a package\" >\"$last\"\n");
+        std::fs::set_permissions(dir.path().join("tools/dpkg-deb"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = Command::new("bash")
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().join("tools").display()))
+            .arg(xtask::root().join("packaging/linux/make-deb.sh"))
+            .arg(name)
+            .arg(dir.path().join("out"))
+            .arg(dir.path().join("bin"))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{name}: {}", say(&out));
+        let file = format!("diacraft-{said}-linux-{in_names}.deb");
+        assert_eq!(names(&dir.path().join("out")), [file.as_str()], "{name}");
+        assert!(String::from_utf8_lossy(&out.stdout).trim_end().ends_with(&file), "the last line is the file: {}", say(&out));
     }
 }
 
@@ -101,9 +139,9 @@ fn a_deb_puts_the_programs_the_entry_the_icon_and_the_licences_where_the_system_
     }
     let dir = TempDir::new("make-deb-files");
     programs(&dir, &program(0x3e), &program(0x3e), "");
-    let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
     assert!(out.status.success(), "{}", say(&out));
-    let deb = dir.path().join("out").join("diacraft-v0.2.0-linux-x86_64.deb");
+    let deb = dir.path().join("out").join("diacraft-0.2.0-linux-x86_64.deb");
     let listing = Command::new("dpkg-deb").arg("--contents").arg(&deb).output().unwrap();
     let listing = String::from_utf8(listing.stdout).unwrap();
     let paths: Vec<&str> = listing.lines().filter_map(|l| l.split_whitespace().last()).collect();
@@ -133,7 +171,7 @@ fn a_deb_is_refused_for_programs_that_name_a_library_it_does_not_cover() {
     let mut program = elf(0x3e);
     program.extend(b"libnotknown.so.9\0");
     programs(&dir, &program, &elf(0x3e), "");
-    let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
     assert!(!out.status.success(), "{}", say(&out));
     assert!(say(&out).contains("diacraft names the library libnotknown.so.9, which this script does not know"), "{}", say(&out));
 }
@@ -154,20 +192,20 @@ fn a_program_of_this_cpu_is_stripped_one_strip_refuses_stops_the_script_and_one_
     // This CPU's, real: made.
     let dir = TempDir::new("make-deb-own");
     programs(&dir, &program(own), &program(own), "");
-    let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
     assert!(out.status.success(), "{}", say(&out));
     // The other CPU's, as the first bytes of a program: made, as it is.
     let dir = TempDir::new("make-deb-other");
     programs(&dir, &elf(other), &elf(other), "");
-    let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
     assert!(out.status.success(), "{}", say(&out));
     // This CPU's, and no program: strip refuses it, and the script says whose.
     let dir = TempDir::new("make-deb-refused");
     programs(&dir, &elf(own), &elf(own), "");
-    let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
     assert!(!out.status.success(), "{}", say(&out));
     assert!(say(&out).contains("strip could not read diacraft"), "{}", say(&out));
-    assert!(!dir.path().join("out").join("diacraft-v0.2.0-linux-x86_64.deb").exists());
+    assert!(!dir.path().join("out").join("diacraft-0.2.0-linux-x86_64.deb").exists());
 }
 
 /// The libraries the programs load by name when they start, each with the package that holds it, as `make-deb.sh` knows them. The names are the ones the crates that load
@@ -202,15 +240,15 @@ fn every_library_the_programs_load_by_name_is_known_with_its_package_and_libxcb_
         "x86_64" => 0xb7,
         _ => 0x3e,
     };
-    let arch = if other == 0xb7 { "arm64" } else { "x86_64" };
+    let arch = if other == 0xb7 { "aarch64" } else { "x86_64" };
     for (library, package) in LIBRARIES.into_iter().chain([("libdbus-1.so.3", "libdbus-1-3")]) {
         let dir = TempDir::new("make-deb-libraries");
         let mut named = elf(other);
         named.extend(format!("{library}\0").bytes());
         programs(&dir, &named, &named, "");
-        let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+        let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
         assert!(out.status.success(), "{library}: {}", say(&out));
-        let deb = dir.path().join("out").join(format!("diacraft-v0.2.0-linux-{arch}.deb"));
+        let deb = dir.path().join("out").join(format!("diacraft-0.2.0-linux-{arch}.deb"));
         let wanted = format!("{} {}", field(&deb, "Depends"), field(&deb, "Recommends"));
         let words: Vec<&str> = wanted.split(|c: char| !(c.is_ascii_alphanumeric() || "+-.".contains(c))).collect();
         assert!(words.contains(&package), "{library}: {package} is neither depended on nor recommended: {wanted}");
@@ -220,9 +258,9 @@ fn every_library_the_programs_load_by_name_is_known_with_its_package_and_libxcb_
     let depends = {
         let dir = TempDir::new("make-deb-xcb");
         programs(&dir, &elf(other), &elf(other), "");
-        let out = make_deb("v0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+        let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
         assert!(out.status.success(), "{}", say(&out));
-        field(&dir.path().join("out").join(format!("diacraft-v0.2.0-linux-{arch}.deb")), "Depends")
+        field(&dir.path().join("out").join(format!("diacraft-0.2.0-linux-{arch}.deb")), "Depends")
     };
     assert!(depends.split(", ").any(|d| d == "libxcb1"), "Depends: {depends}");
 }

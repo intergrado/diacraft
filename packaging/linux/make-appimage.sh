@@ -4,7 +4,8 @@
 #
 #   packaging/linux/make-appimage.sh NAME OUT_DIR BIN_DIR
 #
-#   NAME     what goes in the file name: the release tag (v0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only.
+#   NAME     what goes in the file name: the release's version (0.2.0), or a label for a test build. Letters, digits, `.`, `_` and `-` only. A tag (v0.2.0) is named
+#            as its version, with no `v` in the file name.
 #   OUT_DIR  where the file is written; created when it is not there.
 #   BIN_DIR  a folder holding the release programs `diacraft` and `diacraft-cli`.
 #
@@ -13,8 +14,8 @@
 #   APPIMAGE_RUNTIME  the path of the type 2 runtime file of the same CPU (`runtime-x86_64` or `runtime-aarch64`). appimagetool fetches a runtime from the internet when it
 #                     is not given one, and the one it fetches changes from day to day: this one is pinned and checked too.
 #
-# Writes OUT_DIR/diacraft-NAME-linux-ARCH.AppImage (ARCH is x86_64 or arm64, read from the programs) and prints its path. The name follows the downloads' (diacraft-<tag>-
-# linux-<arch>), and not the AppImage convention (Name-Version-arch.AppImage): nothing reads the file name.
+# Writes OUT_DIR/diacraft-NAME-linux-CPU.AppImage (CPU is x86_64 or aarch64, read from the programs) and prints its path. The name follows the downloads' (diacraft-<version>-
+# linux-<cpu>), and not the AppImage convention (Name-Version-arch.AppImage): nothing reads the file name.
 #
 # What is in it (the AppDir): both programs under usr/bin, the launcher entry and the icon (at the top, as appimagetool wants them, and under usr/share, where a
 # desktop looks), the licence files under usr/share/doc/diacraft, and AppRun, which starts the window program, or the command line:
@@ -37,6 +38,7 @@ name=$1
 out=$2
 bin=$3
 check_name "$name"
+name=$(file_version "$name")
 [ -d "$bin" ] || die "no such folder: $bin"
 bin=$(cd "$bin" && pwd)
 [ -n "${APPIMAGETOOL:-}" ] && [ -f "$APPIMAGETOOL" ] || die "APPIMAGETOOL must be the path of appimagetool"
@@ -90,7 +92,7 @@ APPRUN
 chmod 755 "$dir/AppRun"
 need "$dir/AppRun" "$dir/app.diacraft.desktop" "$dir/app.diacraft.png" "$dir/usr/bin/diacraft" "$dir/usr/bin/diacraft-cli"
 
-file=$out/diacraft-$name-linux-$arch.AppImage
+file=$out/diacraft-$name-linux-$(file_arch linux "$arch").AppImage
 rm -f "$file"
 # --appimage-extract-and-run: appimagetool is an AppImage itself, and a build machine has no FUSE to mount it. --no-appstream: the package has no AppStream data to check.
 # VERSION names the version in the entry the file carries.

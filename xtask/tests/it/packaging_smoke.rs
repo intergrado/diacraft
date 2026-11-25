@@ -1,4 +1,4 @@
-//! `packaging/smoke.sh` and the paths the workflows hand to the packaging scripts. The workflows give relative paths (`unpacked/diacraft-<tag>-linux-x86_64`), and a script
+//! `packaging/smoke.sh` and the paths the workflows hand to the packaging scripts. The workflows give relative paths (`unpacked/diacraft-<version>-linux-x86_64`), and a script
 //! that changes folder before it reads one finds nothing there: the release workflow's first run stopped on it, in every job that unpacks an archive. The programs here are
 //! stand-ins that say nothing a smoke test could use, so the runs stop at the programs' versions, which is after the step these tests are about.
 
