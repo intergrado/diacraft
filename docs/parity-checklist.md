@@ -22,6 +22,13 @@ The first additional stencil batch (2026-11-12) moved the Gane-Sarson notation r
 
 The accepted stencil presentation is a compact chooser, fixed square icon cards and name-only tooltips. Its filter covers only the current stencil, and Enter in the box (or its magnifier) searches every stencil, which is what the Search for shapes row scores: that row and Quick Shapes are D, and Shape search options is P.
 
+**Scheduled next** (owner, 2026-11-25), after the 0.3 items, in the order the owner listed them ([roadmap](roadmap.md#current-focus)). None is designed or started, and each row keeps its score until the work lands:
+
+1. Connectors that route around shapes, and are routed again when a shape moves: under Connectors: Routing, Automatic reroute on moving shapes (P0, P, the one open P0 item) and Route around placeable shapes (P1, M).
+2. The ShapeSheet window, with a command that sets any cell: the rows under ShapeSheet: Opening a sheet, Reading a sheet and Editing formulas (all M).
+3. Opening draw.io files and their compressed form: no row of the inventories names it, and the Common diagram formats row of [`file-format-parity.md`](file-format-parity.md) tracks it.
+4. DiaCraft's own UML, BPMN, C4, network and database stencils, drawn by the project with no copied art: they give shapes to the rows under Diagram kinds: UML, Networks and cloud and Database diagrams and to the BPMN rows under Diagram kinds: Flowcharts (all M but the Gane-Sarson row, which is P), and a stencil alone makes none of those rows done; no row names C4.
+
 <!-- SUMMARY -->
 **Weighted breadth parity: 34%** over 977 features.
 
@@ -1486,6 +1493,7 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-25 | minor | A paragraph above the summary names the rows of the four features scheduled next after the 0.3 items, in the order the owner listed them (owner, 2026-11-25); no row's score changes |
 | 2026-11-23 | trivial | Sentences reworded so that each reads whole on its own; nothing they say changes |
 | 2026-11-23 | minor | The reference product is named only in the format lists ("the reference app" or VSDX elsewhere), and the page keeps to the words of the public tree |
 | 2026-11-23 | minor | The Organization Chart template and Re-layout an org chart score D, and Drop a shape on its manager, Org chart layout for a whole chart, Arrange one manager's subordinates and Org chart picture on a shape score P; weighted breadth 34% weighted (P0 99%, P1 45%, P2 6%) beside the swimlane and shape-search rows, Diagram kinds 11% |

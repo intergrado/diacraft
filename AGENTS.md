@@ -125,7 +125,8 @@ item exists. Scores err low and each number is marked measured or estimated.
   real-time checks behind `#[ignore]`. A refusal test asserts the words, not only `is_err()`.
 - **Before asking to merge,** run: the build, `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and the
   tests of the changed crates and of the crates that depend on them (`cargo tree -i <crate> -e normal --workspace`).
-  `cargo xtask ci` runs the whole gate; CI runs it on every pull request.
+  `cargo xtask ci` runs the whole gate; CI runs it on every pull request, and the maintainer runs it in full before anything is
+  pushed to `main`.
 - **Kani** (`cargo xtask kani`) proves properties wherever it can handle the code: integer code, byte code, and small functions of 1
   to 3 floats. Harnesses live in a crate's `src/kani_proofs.rs`, behind `#[cfg(kani)]`. A proof that fails on our code is a bug.
 - New or changed fuzz targets get a run of 10 minutes before they merge (`docs/development.md`, "Fuzzing").

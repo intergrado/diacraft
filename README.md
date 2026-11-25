@@ -32,6 +32,14 @@ To build from source instead: `cargo build --release --locked -p diacraft -p dia
 
 ## How it is built
 
+Most of DiaCraft's code and documentation is written by AI coding agents, and the human maintainer decides what is built, in
+what order, and what ships. The agents follow the rules in [`AGENTS.md`](AGENTS.md): behaviour comes only from public
+documentation and public sample files, never from running or taking apart the proprietary apps whose files DiaCraft opens;
+lints refuse `unsafe`, `unwrap`, `expect` and `panic` in shipped code; the file readers are fuzzed; more than 260 properties
+are proved with Kani; and a full gate of more than 12,000 tests passes before anything is pushed. Code copied from
+other projects is listed in [`docs/provenance.md`](docs/provenance.md) and every asset in [`ATTRIBUTION.md`](ATTRIBUTION.md);
+the branding art is AI-assisted, as [`NOTICE`](NOTICE) says.
+
 DiaCraft is written from public information only. Nothing from another vendor's program is used (no binaries, stencils,
 templates, fonts or help files), and no code under a copyleft licence is copied. The desktop application whose files DiaCraft
 opens and saves, which the docs call the reference app, is not run by the project, so **it has not been inspected, and our
