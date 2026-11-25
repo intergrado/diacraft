@@ -30,7 +30,7 @@ mod web_manifest;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use links::Origins;
 
@@ -101,18 +101,27 @@ pub(super) fn deploy_check(args: &[&str]) -> Result<(), String> {
     live::run(args)
 }
 
+/// The most of the root `Cargo.toml` that is read, in bytes: the workspace's own is some 14 thousand, and a manifest of two megabytes is not one.
+const MAX_MANIFEST: u64 = app::MAX_TEXT;
+
+/// The root `Cargo.toml` of the repository at `root`, with its path: a regular file of at most [`MAX_MANIFEST`] bytes (`parts::read_bounded` looks at its size before a byte is read), as UTF-8.
+fn read_manifest(root: &Path) -> Result<(PathBuf, String), String> {
+    let path = root.join("Cargo.toml");
+    let bytes = parts::read_bounded(&path, MAX_MANIFEST)?;
+    let text = String::from_utf8(bytes).map_err(|_| format!("{}: expected UTF-8", path.display()))?;
+    Ok((path, text))
+}
+
 /// The version in `[workspace.package]` of the root `Cargo.toml` of the repository at `root`: the release the pages are made for.
 fn workspace_version(root: &Path) -> Result<String, String> {
-    let path = root.join("Cargo.toml");
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (path, text) = read_manifest(root)?;
     xtask::version::read(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The files of the repository that hold the licences of the code, from `license` in `[workspace.package]` of the root `Cargo.toml` of the repository at `root` (`seo::LICENSE_FILES`): each is a file of
 /// `root`, and a licence with no such file is an error, so that the pages never name a file that is not there.
 fn workspace_licences(root: &Path) -> Result<Vec<String>, String> {
-    let path = root.join("Cargo.toml");
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (path, text) = read_manifest(root)?;
     let manifest: toml::Table = text.parse().map_err(|e| format!("{}: {e}", path.display()))?;
     let expression = manifest
         .get("workspace")
@@ -222,26 +231,33 @@ fn inventory(dir: &Path) -> Result<Vec<String>, String> {
     Ok(files)
 }
 
-/// The texts the repository's brands check allows in the site's file `name` (`site/<name>` in the repository): the format lists and the
-/// trademark line the owner allows (`xtask::brands::PRODUCT_USES`).
+/// The texts the repository's brands check allows in the site's file `name` (`site/<name>` in the repository): the trademark line the owner
+/// allows (`xtask::brands::PRODUCT_USES`).
 fn allowed(name: &str) -> Vec<&'static str> {
     xtask::brands::allowed_in(&format!("site/{name}"))
 }
 
-/// The banned names and the vendor names in `text`, but a vendor name inside an occurrence of one of the `allowed` texts.
-fn brands(text: &str, allowed: &[&str]) -> Result<(), String> {
+/// The vendor names that are refused in the content of the site's file `name`: every one, but the product's name in a page (the owner, 2026-11-25:
+/// `xtask::brands::SITE_PAGE_NAMES`).
+fn denied(name: &str) -> Vec<&'static str> {
+    xtask::brands::denied_in(&format!("site/{name}"))
+}
+
+/// The banned names and the `denied` vendor names in `text`, but a vendor name inside an occurrence of one of the `allowed` texts.
+fn brands(text: &str, allowed: &[&str], denied: &[&str]) -> Result<(), String> {
     let lower = xtask::brands::without_allowed(text, allowed).to_ascii_lowercase();
     if let Some(term) = xtask::brands::BANNED_NAMES.iter().find(|term| lower.contains(**term)) {
         return Err(format!("banned name {term}"));
     }
-    if let Some(term) = lower.split(|c: char| !c.is_ascii_alphanumeric()).find(|word| xtask::brands::DENY.contains(word)) {
+    if let Some(term) = lower.split(|c: char| !c.is_ascii_alphanumeric()).find(|word| denied.contains(word)) {
         return Err(format!("banned name {term}"));
     }
     Ok(())
 }
 
 fn inspect_file(dir: &Path, name: &str, origins: &Origins, hashed: bool) -> Result<File, String> {
-    brands(name, &[])?;
+    // A file's name is held to every name, a page's too: the address of a page is not one of its words.
+    brands(name, &[], xtask::brands::DENY)?;
     let path = dir.join(name);
     let size = path.metadata().map_err(|e| e.to_string())?.len();
     // Bound reads, including photos whose embedded metadata is also public.
@@ -250,7 +266,7 @@ fn inspect_file(dir: &Path, name: &str, origins: &Origins, hashed: bool) -> Resu
     }
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
     let mut file = File { bytes: size, ..File::default() };
-    brands(&String::from_utf8_lossy(&bytes), &allowed(name))?;
+    brands(&String::from_utf8_lossy(&bytes), &allowed(name), &denied(name))?;
     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
     if matches!(extension, "png" | "jpg" | "jpeg" | "webp" | "ico" | "avif" | "gif") {
         return Ok(file);

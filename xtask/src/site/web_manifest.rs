@@ -56,7 +56,7 @@ pub(super) fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
 
 /// Checks the manifest `text`. `names` are the files of the app's folder, and `folder` is where they are (an icon's header is read to see its size).
 pub(super) fn check(text_of_file: &str, names: &[&str], folder: &Path) -> Result<(), String> {
-    super::brands(text_of_file, &[])?;
+    super::brands(text_of_file, &[], xtask::brands::DENY)?;
     let value: Value = serde_json::from_str(text_of_file).map_err(|e| format!("it is not JSON: {e}"))?;
     let Value::Object(manifest) = &value else { return Err("it is not a JSON object".into()) };
     if let Some(key) = manifest.keys().find(|k| !KEYS.contains(&k.as_str())) {

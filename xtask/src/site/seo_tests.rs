@@ -99,6 +99,39 @@ fn a_value_with_markup_characters_is_escaped_in_the_tag_and_not_changed() {
     assert!(script.contains("\\u0026") && script.contains("\\u003c"), "{script}");
 }
 
+/// A line break, a carriage return or a tab in a value (`&#10;`, `&#13;`, `&#9;` in the `og:` tag, which a reader of the page turns into the character) is written back as the reference: raw, the
+/// tag would run over two lines, and a page made again would take away the first line of it only.
+#[test]
+fn a_line_break_or_a_tab_in_a_value_is_written_as_a_reference_and_the_page_is_made_the_same_every_time() {
+    let source = page("A&#10;B&#9;C", "D&#13;E&#10;F");
+    let url = "https://drawing.example/guides/one";
+    let once = seo::render(&source, &settings(), "guides/one.html", url).unwrap();
+    for tag in [r#"<meta name="twitter:title" content="A&#10;B&#9;C" />"#, r#"<meta name="twitter:description" content="D&#13;E&#10;F" />"#] {
+        assert!(once.lines().any(|line| line.trim() == tag), "{tag} is not a line of {once}");
+    }
+    // Each tag is one line: five `twitter:` tags, and nothing of a value on a line of its own.
+    assert_eq!(once.lines().filter(|line| line.contains("twitter:")).count(), 5, "{once}");
+    assert!(once.lines().all(|line| !line.contains('\r')) && once.lines().all(|line| line.trim() != "B\" />"), "{once}");
+    // The page is well-formed and the data holds the characters.
+    let head: Head = html::head(&once).unwrap();
+    assert_eq!((head.og_title.as_str(), head.og_description.as_str()), ("A\nB\tC", "D\rE\nF"));
+    assert_eq!(blocks(&once)[0]["headline"], "A\nB\tC");
+    // Made again, it is the same page: nothing of the first making is left over.
+    assert_eq!(seo::render(&once, &settings(), "guides/one.html", url).unwrap(), once);
+}
+
+/// The same, as the command's two modes: `--write` makes the page, and the check that follows finds nothing stale.
+#[test]
+fn a_page_written_with_a_line_break_in_a_value_passes_the_check_that_follows() {
+    let dir = Dir::new("breaks");
+    dir.write("site/index.html", page("A&#10;B&#9;C", "D&#13;E&#10;F"));
+    let site = dir.path().join("site");
+    settings::apply(&site, &settings(), true).unwrap();
+    settings::apply(&site, &settings(), false).unwrap();
+    let written = fs::read_to_string(site.join("index.html")).unwrap();
+    assert!(written.contains(r#"<meta name="twitter:title" content="A&#10;B&#9;C" />"#), "{written}");
+}
+
 #[test]
 fn making_a_page_again_changes_nothing_and_replaces_what_was_there() {
     let once = rendered("guides/one.html");
@@ -148,6 +181,9 @@ fn a_page_without_a_place_for_the_tags_or_the_data_is_refused() {
 fn the_kind_of_a_page_is_its_place_in_the_site() {
     assert_eq!(seo::kind("index.html"), Kind::Home);
     assert_eq!(seo::kind("guides/agents.html"), Kind::Guide);
+    // The guides' own index is a page that lists them, not a guide.
+    assert_eq!(seo::kind("guides/index.html"), Kind::Index);
+    assert_eq!(seo::kind("flowcharts.html"), Kind::Page);
     assert_eq!(seo::kind("changelog.html"), Kind::Page);
     assert_eq!(seo::kind("privacy.html"), Kind::Page);
     assert_eq!(seo::kind("browser.html"), Kind::Page);
@@ -218,6 +254,20 @@ fn a_guide_is_a_tech_article_and_another_page_a_web_page_and_the_missing_page_ha
     assert_eq!(plain.len(), 1);
     assert_eq!(plain[0]["@type"], "WebPage");
     assert_eq!(plain[0]["name"], "Draw your first diagram");
+    // The index of the guides is a collection of them, with the properties a page has.
+    let index = blocks(&rendered("guides/index.html"));
+    assert_eq!(
+        index,
+        [json!({
+            "@context": "https://schema.org",
+            "@type": "CollectionPage",
+            "name": "Draw your first diagram",
+            "description": "Build and label a two-step flowchart.",
+            "url": "https://drawing.example/guides/one",
+            "inLanguage": "en",
+            "isPartOf": {"@type": "WebSite", "name": "DiaCraft", "url": "https://drawing.example/"},
+        })]
+    );
     let missing = rendered("404.html");
     assert!(blocks(&missing).is_empty() && !missing.contains("ld+json"));
     assert!(missing.contains("twitter:card"), "the missing page has the social tags");
@@ -690,4 +740,246 @@ fn the_apps_page_is_read_as_text_with_its_tags_found_whatever_their_case_and_a_l
     let html = "<HTML><HEAD><TITLE> A &amp; B </TITLE><META NAME=\"description\" CONTENT=\"x &lt; y\"><metadata name=\"description\" content=\"no\"><meta\nname=\"theme-color\" content=\"#fff\"></HEAD></HTML>";
     assert_eq!(super::seo::app_page(html, &app_settings("https://a.example")).unwrap().matches("og:title\" content=\"A &amp; B\"").count(), 1);
     assert!(super::seo::check_app("<title>x</title>", "", "", &[]).is_err());
+}
+
+/// The app's page as Trunk writes it, as far as the tags go, with `tag` as the one that holds the description.
+fn app_html_with(tag: &str) -> String {
+    format!("<!DOCTYPE html><html><head><title>DiaCraft: a title</title>{tag}</head><body></body></html>")
+}
+
+/// What the check of the app's folder reads of `page`, made by `app_page`: `Ok` when the page, its robots file and its sitemap pass.
+fn app_page_checked(page: &str) -> Result<(), String> {
+    let settings = app_settings("https://app.example.invalid");
+    seo::check_app(page, &seo::app_robots(&settings), &seo::app_sitemap(&settings), &[seo::APP_SOCIAL])
+}
+
+/// A `>` between the quotes of a value does not end the tag (as an HTML reader reads it): the description of `content="A > B"` is read whole, the page is made, and the check of what was made passes.
+#[test]
+fn a_greater_than_sign_inside_the_quotes_of_a_value_does_not_end_the_tag() {
+    for (tag, as_written) in [
+        (r#"<meta name="description" content="A > B">"#, "A &gt; B"),
+        (r#"<meta name="description" content='A > B'>"#, "A &gt; B"),
+        (r#"<meta name="description" content="it's > that">"#, "it's &gt; that"),
+        (r#"<meta name='description' content='say "a > b"'>"#, "say &quot;a &gt; b&quot;"),
+        (r#"<meta name = "description" content = "A > B" >"#, "A &gt; B"),
+        (r#"<meta content="A > B" name="description">"#, "A &gt; B"),
+        (r#"<meta name="description" data-note="1 > 0" content="A > B">"#, "A &gt; B"),
+        ("<meta\nname=\"description\"\ncontent=\"A > B\"\n>", "A &gt; B"),
+    ] {
+        let page = seo::app_page(&app_html_with(tag), &app_settings("https://app.example.invalid")).unwrap_or_else(|e| panic!("{tag}: {e}"));
+        for line in [
+            format!("<meta property=\"og:description\" content=\"{as_written}\">"),
+            format!("<meta name=\"twitter:description\" content=\"{as_written}\">"),
+        ] {
+            assert!(page.contains(&line), "{tag}: {line} is not in {page}");
+        }
+        assert!(page.contains(&format!("\"description\": \"{}\"", as_written.replace("&gt;", "\\u003e").replace("&quot;", "\\\""))), "{tag}: {page}");
+        app_page_checked(&page).unwrap_or_else(|e| panic!("{tag}: {e}"));
+    }
+}
+
+/// The tag is what its quotes say: a `<meta` inside a value is a part of the value, an unclosed quote ends the reading and no tag is found after it, and a quote that no `=` opens is a letter.
+#[test]
+fn a_tag_inside_a_quoted_value_is_no_tag_and_an_unclosed_quote_ends_the_reading() {
+    let settings = app_settings("https://app.example.invalid");
+    // A description that holds what looks like a tag: it is the value, whole.
+    let inner = r##"<meta name="theme-color" data-x="<meta name=&quot;description&quot; content=&quot;no&quot;>" content="#fff"><meta name="description" content="yes">"##;
+    let page = seo::app_page(&app_html_with(inner), &settings).unwrap();
+    assert!(page.contains("<meta property=\"og:description\" content=\"yes\">"), "{page}");
+    // The tag that the quote never closes, and the ones after it that its value would swallow, are not read: no description.
+    for open in [r#"<meta name="description" content="A > B"#, r#"<meta name="description" content='A > B"#, r#"<meta name="description" content="A"#]
+    {
+        let error = seo::app_page(&app_html_with(&format!("{open}<meta name=description content=later>")), &settings).unwrap_err();
+        assert!(error.contains("<meta name=\"description\">"), "{open}: {error}");
+    }
+    // A quote that is not the start of a value (no `=` before it) does not open one.
+    let page = seo::app_page(&app_html_with(r#"<meta x"y name="description" content="A > B">"#), &settings).unwrap();
+    assert!(page.contains("<meta property=\"og:description\" content=\"A &gt; B\">"), "{page}");
+}
+
+/// A page of two megabytes of open tags and unclosed quotes is read in one pass (a pass that looked for the end of each tag from its start would need minutes). The test is a guard against a hang,
+/// not a stopwatch: it fails only if the work is not done within twenty seconds.
+#[test]
+fn a_page_of_tags_that_are_never_closed_is_read_in_one_pass() {
+    let settings = app_settings("https://app.example.invalid");
+    for unit in ["<meta a=\"", "<meta ", "<meta a='b' c=\"", "<link rel=\"canonical"] {
+        let page = format!("<title>x</title>{}", unit.repeat((app::MAX_TEXT as usize - 64) / unit.len()));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let for_thread = settings.clone();
+        std::thread::spawn(move || {
+            let made = seo::app_page(&page, &for_thread);
+            let checked = seo::check_app(&page, "", "", &[]);
+            // `Err` only if the test has stopped waiting, which it has then failed.
+            let _ = sender.send((made.is_err(), checked.is_err()));
+        });
+        let (made_failed, check_failed) =
+            receiver.recv_timeout(std::time::Duration::from_secs(20)).unwrap_or_else(|_| panic!("{unit:?}: read in one pass"));
+        assert!(made_failed && check_failed, "{unit:?}: a page with no description is refused");
+    }
+}
+
+/// The app's page with `title` and `description` written as they are in the source (references and all), made by `app_page`.
+fn app_page_of(title: &str, description: &str) -> Result<String, String> {
+    let html =
+        format!("<!DOCTYPE html><html><head><title>{title}</title><meta name=\"description\" content=\"{description}\"></head><body></body></html>");
+    seo::app_page(&html, &app_settings("https://app.example.invalid"))
+}
+
+/// The references of a title and a description are the characters they stand for, in the social tags and in the data: `Tom &#38; Jerry` is `Tom & Jerry`, which the tags write as `Tom &amp; Jerry`
+/// and the data as `Tom & Jerry`, and not `Tom &amp;#38; Jerry` in the tags and `&#38;` in the data.
+#[test]
+fn numeric_references_in_the_apps_title_and_description_are_decoded_as_the_named_ones_are() {
+    // (as the source writes it, as a tag of the social cards writes it, as the data writes it)
+    for (written, tag, data) in [
+        ("Tom &#38; Jerry", "Tom &amp; Jerry", "Tom \\u0026 Jerry"),
+        ("Tom &#x26; Jerry", "Tom &amp; Jerry", "Tom \\u0026 Jerry"),
+        ("Tom &#X26; Jerry", "Tom &amp; Jerry", "Tom \\u0026 Jerry"),
+        ("Tom &#0000038; Jerry", "Tom &amp; Jerry", "Tom \\u0026 Jerry"),
+        ("Tom &amp; Jerry", "Tom &amp; Jerry", "Tom \\u0026 Jerry"),
+        ("&#60;b&#62; &#x3c;i&#x3E;", "&lt;b&gt; &lt;i&gt;", "\\u003cb\\u003e \\u003ci\\u003e"),
+        ("say &#34;hi&#34; &#x22;", "say &quot;hi&quot; &quot;", "say \\\"hi\\\" \\\""),
+        ("it&#39;s &#x27;it&apos;", "it's 'it'", "it's 'it'"),
+        ("caf&#233; &#x1F600; &#x10FFFF;", "café 😀 \u{10FFFF}", "café 😀 \u{10FFFF}"),
+        // A reference is decoded once: what it stands for is not read as another.
+        ("&#38;lt; &#38;#38;", "&amp;lt; &amp;#38;", "\\u0026lt; \\u0026#38;"),
+        ("&amp;#38; &amp;lt;", "&amp;#38; &amp;lt;", "\\u0026#38; \\u0026lt;"),
+        // A line break, a carriage return and a tab stay references in a tag (one line to a tag), and are the characters in the data.
+        ("a&#10;b&#9;c&#13;d", "a&#10;b&#9;c&#13;d", "a\\nb\\tc\\rd"),
+        // What is not a reference of ours stays as it is: a named reference that is not one of the five, a lone `&`, a `;` that no reference ends.
+        ("&hellip; & R&D;", "&amp;hellip; &amp; R&amp;D;", "\\u0026hellip; \\u0026 R\\u0026D;"),
+    ] {
+        let page = app_page_of("T", written).unwrap_or_else(|e| panic!("{written}: {e}"));
+        for line in
+            [format!("<meta property=\"og:description\" content=\"{tag}\">"), format!("<meta name=\"twitter:description\" content=\"{tag}\">")]
+        {
+            assert!(page.contains(&line), "{written}: {line} is not in {page}");
+        }
+        assert!(page.contains(&format!("\"description\": \"{data}\"")), "{written}: {page}");
+        app_page_checked(&page).unwrap_or_else(|e| panic!("{written}: {e}"));
+        let page = app_page_of(written, "D").unwrap_or_else(|e| panic!("{written}: {e}"));
+        for line in [format!("<meta property=\"og:title\" content=\"{tag}\">"), format!("<meta name=\"twitter:title\" content=\"{tag}\">")] {
+            assert!(page.contains(&line), "{written}: {line} is not in {page}");
+        }
+        app_page_checked(&page).unwrap_or_else(|e| panic!("{written}: {e}"));
+    }
+}
+
+/// A reference that is not a character is an error that names it, in a title and in a description, in the page that is made and in the one that is checked: the code point 0, a surrogate, a number past
+/// U+10FFFF or past what a number of 32 bits holds, a control character that a browser reads as another (U+0080 to U+009F), a number with no digit or with a letter, a sign or a space in it, one that
+/// the `;` does not close, and one that is longer than a reference may be.
+#[test]
+fn a_numeric_reference_that_is_not_a_character_is_an_error_in_the_title_and_in_the_description() {
+    let long = format!("&#{}65;", "0".repeat(40));
+    let bad = [
+        "&#0;",
+        "&#x0;",
+        "&#00000000;",
+        "&#xD800;",
+        "&#xdfff;",
+        "&#55296;",
+        "&#57343;",
+        "&#x110000;",
+        "&#1114112;",
+        "&#4294967296;",
+        "&#99999999999999999999999;",
+        "&#xFFFFFFFFFF;",
+        "&#x80;",
+        "&#128;",
+        "&#x9F;",
+        "&#159;",
+        "&#;",
+        "&#x;",
+        "&#X;",
+        "&#12a;",
+        "&#xZ;",
+        "&#+65;",
+        "&#-65;",
+        "&# 65;",
+        "&#65 ;",
+        "&#65",
+        "&#65 and the text goes on",
+        "&#x41",
+        "&#",
+        long.as_str(),
+    ];
+    for written in bad {
+        let error = app_page_of("T", &format!("a {written} b")).unwrap_err();
+        assert!(error.contains("description") && error.contains("character reference"), "{written}: {error}");
+        let error = app_page_of(&format!("a {written} b"), "D").unwrap_err();
+        assert!(error.contains("title") && error.contains("character reference"), "{written}: {error}");
+        // In a tag of a page that was made, the check says so.
+        let made = app_page_of("T", "D").unwrap();
+        for (tag, key) in [("og:description", "property"), ("twitter:description", "name")] {
+            let page = made.replace(&format!("<meta {key}=\"{tag}\" content=\"D\">"), &format!("<meta {key}=\"{tag}\" content=\"{written}\">"));
+            assert_ne!(page, made);
+            let error = app_page_checked(&page).unwrap_err();
+            assert!(error.contains(tag) && error.contains("character reference"), "{written}: {error}");
+        }
+    }
+    // The numbers just inside what is a character are not refused.
+    for (written, text) in [
+        ("&#1;", "\u{1}"),
+        ("&#x7F;", "\u{7f}"),
+        ("&#xA0;", "\u{a0}"),
+        ("&#55295;", "\u{d7ff}"),
+        ("&#xE000;", "\u{e000}"),
+        ("&#1114111;", "\u{10ffff}"),
+    ] {
+        let page = app_page_of("T", written).unwrap_or_else(|e| panic!("{written}: {e}"));
+        assert!(page.contains(&format!("<meta property=\"og:description\" content=\"{text}\">")), "{written}: {page}");
+    }
+}
+
+/// A description of a million references is read in the time its size asks, and a million `&` with no reference is no more than text: each reference is looked for in a few bytes after its `&`.
+#[test]
+fn a_long_run_of_ampersands_is_read_in_one_pass_whatever_follows_them() {
+    let many = "&#38;".repeat(200_000);
+    let page = app_page_of("T", &many).unwrap();
+    assert!(page.contains(&format!("content=\"{}\"", "&amp;".repeat(200_000))));
+    let lone = "&".repeat(1_000_000);
+    let page = app_page_of("T", &lone).unwrap();
+    assert!(page.contains(&format!("content=\"{}\"", "&amp;".repeat(1_000_000))));
+    // The first reference that is not one is the error, wherever it is: a million of them cost no more than one.
+    assert!(app_page_of("T", &"&#".repeat(500_000)).is_err());
+    assert!(app_page_of("T", &format!("{lone}&#{}", "9".repeat(1_000_000))).is_err());
+}
+
+/// `unescape` on its own: the five names (in lower case only), the numbers, text that holds more than one byte to a character, a reference read once, and the length a reference may have.
+#[test]
+fn the_references_of_an_attribute_are_decoded_once_and_a_reference_has_the_most_length_it_may() {
+    for (text, plain) in [
+        ("", ""),
+        ("plain", "plain"),
+        ("a &lt;&gt;&quot;&apos;&amp; b", "a <>\"'& b"),
+        ("&", "&"),
+        ("&&amp;", "&&"),
+        ("&amp&amp;", "&amp&"),
+        ("&AMP; &Lt; &amp ;", "&AMP; &Lt; &amp ;"),
+        ("é&#38;é &#x672C;日本 &#X1f600;", "é&é 本日本 😀"),
+        ("&#38;amp; &#x26;#38;", "&amp; &#38;"),
+        ("x;&;y&#59;", "x;&;y;"),
+    ] {
+        assert_eq!(seo::unescape(text).unwrap(), plain, "{text:?}");
+    }
+    // A reference of the most bytes (32, with the zeros before its number) is read, and one byte more is not a reference that is closed.
+    let longest = format!("&#{}65;", "0".repeat(29));
+    assert_eq!(longest.len(), 1 + 32 + 1);
+    assert_eq!(seo::unescape(&longest).unwrap(), "A");
+    let too_long = format!("&#{}65;", "0".repeat(30));
+    assert!(seo::unescape(&too_long).unwrap_err().contains("character reference"));
+    // A reference that the text ends in the middle of is an error too, and a name that is long is only text.
+    assert!(seo::unescape("&#").is_err() && seo::unescape("&#x4").is_err() && seo::unescape("&#x4;&#4").is_err());
+    assert_eq!(seo::unescape(&format!("&{};", "a".repeat(100))).unwrap(), format!("&{};", "a".repeat(100)));
+}
+
+/// `code_point` for every number that matters: a character from 1 to U+10FFFF, but the control characters U+0080 to U+009F and the surrogates, and the character is the number.
+#[test]
+fn a_code_point_is_a_character_but_zero_the_surrogates_the_c1_controls_and_what_is_past_the_last() {
+    for value in 0..0x12_0000u32 {
+        let valid = value != 0 && !(0x80..=0x9f).contains(&value) && !(0xd800..=0xdfff).contains(&value) && value <= 0x10_ffff;
+        assert_eq!(seo::code_point(value).map(u32::from), valid.then_some(value), "{value:#x}");
+    }
+    for value in [0x11_0000, 0x7fff_ffff, 0x8000_0000, u32::MAX] {
+        assert_eq!(seo::code_point(value), None, "{value:#x}");
+    }
 }

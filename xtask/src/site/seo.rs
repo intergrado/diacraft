@@ -6,7 +6,8 @@
 //!
 //! **Structured data.** A page has JSON-LD (`<script type="application/ld+json" data-generated="">`, a block of data that a browser does not run and a content security policy does not see) of the kind its
 //! place in the site gives it ([`Kind`]): the home page is a `SoftwareApplication` (the version, the release page, the licences and the share picture are the workspace's and `site.json`'s
-//! own, so they are true on every release) and a `WebSite`; a guide is a `TechArticle`; any other page that is for people to read is a `WebPage`; the page for a missing address has none.
+//! own, so they are true on every release) and a `WebSite`; a guide is a `TechArticle`, and the guides' own index (`guides/index.html`) a `CollectionPage`; any other page that is for people
+//! to read is a `WebPage`; the page for a missing address has none.
 //! Nothing is in them that the site does not say elsewhere: no rating, no review and no author. **No date of change** is in a page: the last commit that touched a page would be a commit
 //! of the page, which holds the date, and the two would never settle. The dates are in `sitemap.xml`, which is another file (`lastmod`, below).
 //!
@@ -66,6 +67,8 @@ pub(super) enum Kind {
     Home,
     /// A guide (`guides/`).
     Guide,
+    /// The index of the guides (`guides/index.html`): a page that lists them.
+    Index,
     /// Any other page that is for people to read.
     Page,
     /// The page for an address that is not there: it has no structured data.
@@ -78,6 +81,8 @@ pub(super) fn kind(name: &str) -> Kind {
         Kind::Home
     } else if name == "404.html" {
         Kind::NotFound
+    } else if name == "guides/index.html" {
+        Kind::Index
     } else if name.starts_with("guides/") {
         Kind::Guide
     } else {
@@ -104,9 +109,24 @@ fn blob(settings: &Settings, path: &str) -> String {
     format!("https://github.com/{}/blob/HEAD/{path}", settings.repository)
 }
 
-/// `text` as the value of an attribute in double quotes.
+/// `text` as the value of an attribute in double quotes, on one line: the markup characters are their named references, and a line break, a carriage return and a tab are their numeric ones
+/// (`&#10;`, `&#13;`, `&#9;`). A value that came from a reference to one of them (`og:title` content `A&#10;B`) is written as it was, and not as a character that ends the line of the tag, which
+/// `without_generated` could not take away whole.
 fn attribute(text: &str) -> String {
-    text.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;")
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '\n' => out.push_str("&#10;"),
+            '\r' => out.push_str("&#13;"),
+            '\t' => out.push_str("&#9;"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// The `twitter:*` lines of a page's head, from its `og:*` values.
@@ -175,9 +195,9 @@ pub(super) fn documents(kind: Kind, head: &Head, settings: &Settings, url: &str)
             "inLanguage": "en",
             "isPartOf": site(settings),
         })],
-        Kind::Page => vec![json!({
+        Kind::Page | Kind::Index => vec![json!({
             "@context": CONTEXT,
-            "@type": "WebPage",
+            "@type": if kind == Kind::Index { "CollectionPage" } else { "WebPage" },
             "name": name_of(&head.title),
             "description": head.description,
             "url": url,
@@ -313,7 +333,34 @@ pub(super) const APP_SOCIAL: &str = "social.jpg";
 /// What the app needs of a browser, in words, from what the page about the app says of the browsers (`site/browser.html`, "Which browsers work").
 const BROWSER_REQUIREMENTS: &str = "Requires a recent desktop browser with WebAssembly and WebGPU or WebGL 2.";
 
-/// The start tags `<name ...>` of `html`, each from its `<` to its `>`. The web app's page is HTML as Trunk writes it, with tags that are not closed, so it is read as text and not as XML.
+/// The place of the `>` that ends the start tag whose name ends just before `from` in `html`, with the quotes of the values in mind: a `>` between the quotes of a value (`content="A > B"`,
+/// `content='A > B'`) is a part of the value. A quote opens a value only straight after `=` (white space may come between), as an HTML reader takes it; anywhere else it is a letter. `None` when the tag
+/// is not closed: no `>` follows, or a quote is not closed.
+fn tag_end(html: &str, from: usize) -> Option<usize> {
+    let mut quote: Option<u8> = None;
+    // The last byte that was not white space was `=`.
+    let mut after_equals = false;
+    for (n, byte) in html.as_bytes().get(from..)?.iter().enumerate() {
+        if let Some(open) = quote {
+            if *byte == open {
+                quote = None;
+            }
+        } else if *byte == b'>' {
+            return from.checked_add(n);
+        } else if matches!(byte, b'"' | b'\'') && after_equals {
+            quote = Some(*byte);
+            after_equals = false;
+        } else if !byte.is_ascii_whitespace() {
+            after_equals = *byte == b'=';
+        }
+    }
+    None
+}
+
+/// The start tags `<name ...>` of `html`, each from its `<` to its `>` (`tag_end`). The web app's page is HTML as Trunk writes it, with tags that are not closed, so it is read as text and not as XML.
+///
+/// The page is read in one pass: a tag is read to its end and the next is looked for after it, so what a tag holds in its quotes (`<meta` in a value) is no tag, and a page that is all open tags is read
+/// in the time its size asks, and not its size times its tags. A tag that is not closed leaves nothing after it to read.
 fn tags<'a>(html: &'a str, name: &str) -> Vec<&'a str> {
     let lower = html.to_ascii_lowercase();
     let open = format!("<{name}");
@@ -323,11 +370,13 @@ fn tags<'a>(html: &'a str, name: &str) -> Vec<&'a str> {
         let start = from + at;
         let after = start + open.len();
         let named = lower.get(after..).and_then(|rest| rest.chars().next()).is_some_and(|c| c.is_ascii_whitespace() || c == '>' || c == '/');
-        let end = lower.get(start..).and_then(|rest| rest.find('>')).map(|n| start + n);
-        if named && let Some(end) = end.and_then(|end| html.get(start..=end)) {
-            found.push(end);
+        if !named {
+            from = after;
+            continue;
         }
-        from = after;
+        let Some(tag) = tag_end(html, after).and_then(|end| html.get(start..=end)) else { break };
+        found.push(tag);
+        from = start + tag.len();
     }
     found
 }
@@ -337,17 +386,99 @@ fn meta<'a>(html: &'a str, key: &str, value: &str) -> Option<&'a str> {
     tags(html, "meta").into_iter().find(|tag| super::app::attribute(tag, key) == Some(value)).and_then(|tag| super::app::attribute(tag, "content"))
 }
 
-/// `text` as the characters that the entities of an attribute stand for.
-fn unescape(text: &str) -> String {
-    text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'").replace("&amp;", "&")
+/// The longest reference [`unescape`] reads, from after the `&` to before the `;`, in bytes: `#x10FFFF` is eight, and zeros before a number are allowed up to this length. A reference that the
+/// `;` does not close within it is not read as one.
+const MAX_REFERENCE: usize = 32;
+
+/// The character of the code point `value`, when it is one a page may write as a reference: not 0, not a surrogate (U+D800 to U+DFFF), not past U+10FFFF, and not one of the control characters
+/// U+0080 to U+009F, which a browser reads as other characters (the Windows-1252 ones) and so would not mean what this reads.
+pub(super) fn code_point(value: u32) -> Option<char> {
+    if value == 0 || (0x80..=0x9f).contains(&value) { None } else { char::from_u32(value) }
 }
 
-/// The words of the page's `<title>`.
-fn title_of(html: &str) -> Option<String> {
+/// The character that the number of a reference stands for (`#38`, `#x26`, `#X26`: the text between the `&` and the `;`), if it is a number of digits, with no sign and no space, that is a character
+/// ([`code_point`]).
+fn numeric(body: &str) -> Option<char> {
+    let digits = body.strip_prefix('#')?;
+    let (digits, radix) = match digits.strip_prefix(['x', 'X']) {
+        Some(hex) => (hex, 16),
+        None => (digits, 10),
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    let mut value = 0u32;
+    for digit in digits.chars() {
+        value = value.checked_mul(radix)?.checked_add(digit.to_digit(radix)?)?;
+    }
+    code_point(value)
+}
+
+/// The character of the named reference `name` (the text between the `&` and the `;`): the five that an attribute needs.
+fn named(name: &str) -> Option<char> {
+    match name {
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        "amp" => Some('&'),
+        _ => None,
+    }
+}
+
+/// `text` as the characters that the references of an attribute stand for: the five named ones (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`) and the numeric ones, in decimal (`&#38;`) and in
+/// hexadecimal (`&#x26;`, `&#X26;`), with zeros before the number allowed. A reference is read once: what it stands for is not read as another (`&#38;lt;` is the four characters `&lt;`). Another named
+/// reference, and a `&` that starts none, is text as it is.
+///
+/// A `&#` that is not a reference of a character is an error: a number that is no character ([`code_point`]: 0, a surrogate, past U+10FFFF, U+0080 to U+009F, or past what 32 bits hold), one with no digit or
+/// with something else than digits, and one that no `;` closes within [`MAX_REFERENCE`] bytes. Each `&` is looked at in at most [`MAX_REFERENCE`] bytes after it, so that the work is that of the size of `text`.
+pub(super) fn unescape(text: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(rest.get(..at).unwrap_or_default());
+        let after = rest.get(at + 1..).unwrap_or_default();
+        // The text of a reference is what comes before a `;` in the first bytes after the `&`, and `used` is how far the reference goes (its `;` too).
+        let closed = after.bytes().take(MAX_REFERENCE + 1).position(|byte| byte == b';').and_then(|end| Some((after.get(..end)?, end + 1)));
+        let decoded = match closed {
+            Some((body, used)) if body.starts_with('#') => {
+                Some((numeric(body).ok_or_else(|| format!("the character reference `&{body};` is not a character"))?, used))
+            }
+            Some((body, used)) => named(body).map(|c| (c, used)),
+            None if after.starts_with('#') => {
+                let shown: String = after.chars().take(16).collect();
+                return Err(format!("the character reference `&{shown}` is not closed by a `;` within {MAX_REFERENCE} bytes"));
+            }
+            None => None,
+        };
+        match decoded {
+            Some((c, used)) => {
+                out.push(c);
+                rest = after.get(used..).unwrap_or_default();
+            }
+            None => {
+                out.push('&');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// The words of the page's `<title>`, as the page writes them, with no white space around them (the references are not read: [`unescape`]).
+fn title_of(html: &str) -> Option<&str> {
     let lower = html.to_ascii_lowercase();
     let start = lower.find("<title>")? + "<title>".len();
     let end = start + lower.get(start..)?.find("</title>")?;
-    html.get(start..end).map(|title| unescape(title.trim()))
+    html.get(start..end).map(str::trim)
+}
+
+/// The text of `raw`, a title or the value of a tag as the page writes it: its references are the characters they stand for, and it is not empty. `what` names it in the error of a reference that is not a
+/// character, and `missing` is the error of a page that has none or an empty one.
+fn text_of(raw: Option<&str>, what: &str, missing: &str) -> Result<String, String> {
+    let text = unescape(raw.ok_or(missing)?).map_err(|e| format!("the page's {what}: {e}"))?;
+    if text.is_empty() { Err(missing.to_owned()) } else { Ok(text) }
 }
 
 /// The address of the web app's start page: its origin and a slash.
@@ -376,9 +507,8 @@ pub(super) fn app_document(description: &str, settings: &Settings) -> Value {
 /// `app_url`), `og:*`, `twitter:*` and a `WebApplication` block, put before `</head>`. A page that has any of them already is an error: Trunk's page is made fresh each time, and what is
 /// there would be said twice.
 pub(super) fn app_page(html: &str, settings: &Settings) -> Result<String, String> {
-    let title = title_of(html).filter(|title| !title.is_empty()).ok_or("the page has no title")?;
-    let description =
-        meta(html, "name", "description").map(unescape).filter(|d| !d.is_empty()).ok_or("the page has no <meta name=\"description\">")?;
+    let title = text_of(title_of(html), "title", "the page has no title")?;
+    let description = text_of(meta(html, "name", "description"), "description", "the page has no <meta name=\"description\">")?;
     let lower = html.to_ascii_lowercase();
     for held in ["rel=\"canonical\"", "property=\"og:", "name=\"twitter:", "application/ld+json"] {
         if lower.contains(held) {
@@ -435,8 +565,8 @@ pub(super) fn app_sitemap(settings: &Settings) -> String {
 /// a host, a slash), `og:*` and `twitter:*` tags that say what the page says and name the share picture the folder has, a `WebApplication` block that is free and says what it needs of a
 /// browser, and the folder has a `robots.txt` that lets every crawler in and names the sitemap, and a `sitemap.xml` of that one address. `names` are the files of the folder.
 pub(super) fn check_app(html: &str, robots: &str, sitemap: &str, names: &[&str]) -> Result<(), String> {
-    let title = title_of(html).filter(|title| !title.is_empty()).ok_or("no <title>")?;
-    let description = meta(html, "name", "description").map(unescape).filter(|d| !d.is_empty()).ok_or("no <meta name=\"description\">")?;
+    let title = text_of(title_of(html), "title", "no <title>")?;
+    let description = text_of(meta(html, "name", "description"), "description", "no <meta name=\"description\">")?;
     let canonical = tags(html, "link")
         .into_iter()
         .find(|tag| super::app::attribute(tag, "rel") == Some("canonical"))
@@ -461,7 +591,7 @@ pub(super) fn check_app(html: &str, robots: &str, sitemap: &str, names: &[&str])
         ("og:image", image.as_str()),
         ("og:image:alt", SOCIAL_ALT),
     ] {
-        let found = meta(html, "property", property).map(unescape);
+        let found = meta(html, "property", property).map(unescape).transpose().map_err(|e| format!("{property}: {e}"))?;
         if found.as_deref() != Some(want) {
             return Err(format!("{property} is {found:?} and must be `{want}`"));
         }
@@ -473,7 +603,7 @@ pub(super) fn check_app(html: &str, robots: &str, sitemap: &str, names: &[&str])
         ("twitter:image", image.as_str()),
         ("twitter:image:alt", SOCIAL_ALT),
     ] {
-        let found = meta(html, "name", name).map(unescape);
+        let found = meta(html, "name", name).map(unescape).transpose().map_err(|e| format!("{name}: {e}"))?;
         if found.as_deref() != Some(want) {
             return Err(format!("{name} is {found:?} and must be `{want}`"));
         }

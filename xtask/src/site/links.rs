@@ -154,7 +154,7 @@ pub(super) fn json(value: &Value, origins: &Origins, manifest: bool, file: &mut 
             }
         }
         Value::String(text) => {
-            super::brands(text, &[])?;
+            super::brands(text, &[], xtask::brands::DENY)?;
             hosts(text, origins, "")?;
         }
         _ => {}

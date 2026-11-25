@@ -3,8 +3,8 @@
 //! `tests/`, which the scanner skips.
 
 use xtask::brands::{
-    BANNED_NAMES, DENY, Hit, Kind, MARK_ABOVE, NAME_EXCEPTIONS, PRODUCT_USES, TRADEMARK, allowed_in, kind_of, run, scan, scan_names, scan_text,
-    scan_text_with, stale_uses,
+    BANNED_NAMES, DENY, Hit, Kind, MARK_ABOVE, NAME_EXCEPTIONS, PRODUCT_USES, SITE_PAGE_NAMES, TRADEMARK, allowed_in, denied_in, is_site_page,
+    kind_of, run, scan, scan_names, scan_text, scan_text_with, stale_uses,
 };
 
 fn hits(path: &str, text: &str) -> Vec<(usize, &'static str)> {
@@ -534,7 +534,8 @@ fn the_trademark_line_passes_where_it_is_listed_and_nowhere_else() {
     assert_eq!(hits(RUST, &format!("const T: &str = \"{TRADEMARK}\";\n")), [(1, "microsoft"), (1, "visio")]);
     for page in ["site/index.html", "site/privacy.html", "site/guides/agents.html", "site/404.html"] {
         assert!(hits(page, &format!("<footer><p class=\"legal\">{TRADEMARK}</p></footer>\n")).is_empty(), "{page}");
-        assert_eq!(hits(page, "<p>Works with Microsoft Visio.</p>\n").len(), 2, "{page}");
+        // A page may name the product anywhere (the site's pages, below), and the company only in the notice.
+        assert_eq!(hits(page, &format!("<p>Works with Microsoft {}.</p>\n", product())), [(1, DENY[0])], "{page}");
     }
 }
 
@@ -585,9 +586,72 @@ fn the_sites_text_files_are_scanned_and_its_pictures_are_not() {
     for path in ["site/assets/social.jpg", "site/assets/icon-32.png", "site/assets/hashed/octopus.4c9f9c16802f.webp"] {
         assert_eq!(kind_of(path), None, "{path}");
     }
-    let list = allowed_in("site/index.html")[0];
-    assert!(hits("site/index.html", &format!("<dd>{list} (<code>.vsdx</code>)</dd>\n")).is_empty());
-    assert_eq!(hits("site/changelog.html", &format!("<dd>{list}</dd>\n")), [(1, "visio")], "the home page's list is the home page's");
+    // The pages may name the product (the site's pages, below); the site's other text files may not.
+    assert!(hits("site/changelog.html", &format!("<dd>{} drawings</dd>\n", product())).is_empty());
+    assert_eq!(hits("site/styles.css", &format!("/* {} */\n", product())), [(1, DENY[1])]);
+}
+
+// ---------- the site's pages (owner, 2026-11-25: "Yes use it for SEO with no restrictions", for the site's pages only) ----------
+
+/// The product's name, put together from pieces (as the export's tests do), so that the lines of this section need no entry in the export's allowlist. It is built here and not by
+/// `crate::export::product()`: the published tree has no `export` test module, and this file is kept there.
+fn product() -> String {
+    ["Vis", "io"].concat()
+}
+
+/// A page of the website may name the product anywhere and in any words: its name is no hit in an `.html` file under `site/`. The company's name and the other vendors' are hits in a page
+/// outside the trademark notice, as before, and the product's name is a hit in every file that is not a page: the site's style, script and data, a text file of the docs or of the
+/// packaging, a string of the program.
+#[test]
+fn a_site_page_may_name_the_product_anywhere_and_no_other_file_may() {
+    let name = product();
+    let [company, product_term] = [DENY[0], DENY[1]];
+    assert_eq!(SITE_PAGE_NAMES, [product_term], "the product's name, and no other");
+    let free = format!("<h1>A free {name} alternative</h1>\n<p>Open {} files on Linux. {} for Mac.</p>\n", name.to_lowercase(), name.to_uppercase());
+    for page in ["site/index.html", "site/vsdx-editor.html", "site/guides/file-formats.html", "site/guides/index.html", "site/404.html"] {
+        assert!(is_site_page(page), "{page}");
+        assert_eq!(denied_in(page), [company, "lucidchart", "lucid"], "{page}");
+        assert!(hits(page, &free).is_empty(), "{page}");
+        assert_eq!(hits(page, &format!("<p>{name} by Microsoft, or Lucidchart</p>\n")), [(1, company), (1, "lucidchart")], "{page}");
+        // The notice, which names the company, passes on a page the gate lists, and only there.
+        let listed = xtask::brands::SITE_PAGES.contains(&page);
+        assert_eq!(hits(page, &format!("<p class=\"legal\">{TRADEMARK}</p>\n")).is_empty(), listed, "{page}");
+    }
+    assert!(!hits("site/unlisted.html", &format!("<p class=\"legal\">{TRADEMARK}</p>\n")).is_empty());
+    for path in [
+        "site/styles.css",
+        "site/download.js",
+        "site/site.json",
+        "site/site.webmanifest",
+        "site/sitemap.xml",
+        "site/robots.txt",
+        "site/_headers",
+        "site/guides/notes.txt",
+        "docs/site/page.html",
+        "packaging/site/page.html",
+    ] {
+        assert!(!is_site_page(path), "{path}");
+        assert_eq!(denied_in(path), DENY, "{path}");
+        assert_eq!(hits(path, &format!("A free {name} alternative\n")), [(1, product_term)], "{path}");
+    }
+    assert!(!is_site_page(RUST) && !is_site_page("site.html") && !is_site_page("site/page.htm"));
+    assert_eq!(hits(RUST, &format!("const L: &str = \"A free {name} alternative\";\n")), [(1, product_term)]);
+}
+
+/// The repository's own pages hold the product's name in their words (the ruling is used), and the gate passes on them.
+#[test]
+fn the_sites_pages_name_the_product_and_pass() {
+    let root = xtask::root();
+    let files = xtask::repo_files(&root).unwrap();
+    let pages: Vec<&String> = files.iter().filter(|f| is_site_page(f)).collect();
+    assert_eq!(pages.len(), xtask::brands::SITE_PAGES.len(), "{pages:?}");
+    let name = product();
+    for page in ["site/index.html", "site/guides/file-formats.html", "site/vsdx-editor.html"] {
+        let text = std::fs::read_to_string(root.join(page)).unwrap();
+        let outside_notice = text.replace(TRADEMARK, "");
+        assert!(outside_notice.contains(&name), "{page} does not name the product outside its notice");
+        assert!(hits(page, &text).is_empty(), "{page}");
+    }
 }
 
 /// An entry whose file is there and does not hold its text is stale, and fails the gate; one whose file is not there is not.
@@ -606,9 +670,10 @@ fn a_use_whose_file_does_not_hold_it_is_stale() {
     // The page with the line in its footer passes, and the name in other words of it does not.
     dir.write("site/privacy.html", &format!("<p>DiaCraft</p>\n<p class=\"legal\">{TRADEMARK}</p>\n"));
     run(dir.path()).unwrap();
-    dir.write("site/privacy.html", &format!("<p>DiaCraft for Visio</p>\n<p class=\"legal\">{TRADEMARK}</p>\n"));
+    // The company's name outside the notice is a hit on a page (the product's is not: the site's pages, above).
+    dir.write("site/privacy.html", &format!("<p>DiaCraft, not by Microsoft</p>\n<p class=\"legal\">{TRADEMARK}</p>\n"));
     let err = run(dir.path()).unwrap_err();
-    assert!(err.contains("site/privacy.html:1: \"visio\""), "{err}");
+    assert!(err.contains("site/privacy.html:1: \"microsoft\""), "{err}");
 }
 
 /// Every use the list names is in its file in this repository.

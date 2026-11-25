@@ -233,7 +233,7 @@ pub(super) fn check(app: &Path, files: &[(String, u64)], page: &str) -> Result<M
     let size_of = |name: &str| files.iter().find(|(n, _)| n == name).map(|(_, bytes)| *bytes);
     let text = String::from_utf8(read_bounded(&app.join(MANIFEST), MAX_MANIFEST).map_err(|e| format!("{MANIFEST}: {e}"))?)
         .map_err(|_| format!("{MANIFEST}: not UTF-8"))?;
-    super::brands(&text, &[]).map_err(|e| format!("{MANIFEST}: {e}"))?;
+    super::brands(&text, &[], xtask::brands::DENY).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let manifest: Value = serde_json::from_str(&text).map_err(|e| format!("{MANIFEST}: not JSON ({e})"))?;
     if manifest.get("version").and_then(Value::as_u64) != Some(1) {
         return Err(format!("{MANIFEST}: not the version (1) the loader reads"));
@@ -350,7 +350,7 @@ fn licence_names(text: &str) -> Result<(), String> {
         if xtask::brands::NAME_EXCEPTIONS.iter().any(|(file, kept)| *file == "THIRD-PARTY-LICENSES-WEB.txt" && line.contains(kept)) {
             continue;
         }
-        super::brands(line, &[])?;
+        super::brands(line, &[], xtask::brands::DENY)?;
     }
     Ok(())
 }

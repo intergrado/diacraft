@@ -212,6 +212,7 @@ pub(super) fn parse(name: &str, source: &str, origins: &Origins, file: &mut File
     let doc = document(source)?;
     let numeric_refs = check_numeric_references(&doc)?;
     let allowed = super::allowed(name);
+    let denied = super::denied(name);
     structure(&doc, Some(&canonical))?;
     for node in doc.descendants() {
         if node.is_element() {
@@ -220,7 +221,7 @@ pub(super) fn parse(name: &str, source: &str, origins: &Origins, file: &mut File
         if numeric_refs {
             let text = node.text().filter(|_| node.is_text()).into_iter().chain(node.attributes().map(|a| a.value()));
             for value in text {
-                super::brands(value, &allowed).and_then(|()| super::links::hosts(value, origins, name)).map_err(|e| at(node, &e))?;
+                super::brands(value, &allowed, &denied).and_then(|()| super::links::hosts(value, origins, name)).map_err(|e| at(node, &e))?;
             }
         }
     }

@@ -1267,6 +1267,45 @@ fn the_site_command_makes_the_download_links_for_the_workspace_version_and_holds
     assert!(error.contains("Cargo.toml"), "{error}");
 }
 
+/// The root manifest of [`repo`], padded with a comment to `size` bytes.
+fn manifest_of(size: u64) -> String {
+    let manifest = "[workspace.package]\nversion = \"0.2.0\"\nlicense = \"MIT OR Apache-2.0\"\n#";
+    let pad = usize::try_from(size).unwrap() - manifest.len() - 1;
+    format!("{manifest}{}\n", "x".repeat(pad))
+}
+
+#[test]
+fn the_root_manifest_is_read_within_a_limit_for_the_version_and_for_the_licences() {
+    let root = repo();
+    let limit = super::MAX_MANIFEST;
+    // A manifest of the limit's size is read.
+    root.write("Cargo.toml", manifest_of(limit));
+    assert_eq!(super::workspace_version(root.path()).unwrap(), "0.2.0");
+    assert_eq!(super::workspace_licences(root.path()).unwrap(), ["LICENSE-MIT", "LICENSE-APACHE"]);
+    // One byte more is refused before it is read, by both readers, and the error names the file and the limit.
+    root.write("Cargo.toml", manifest_of(limit + 1));
+    for error in [super::workspace_version(root.path()).unwrap_err(), super::workspace_licences(root.path()).unwrap_err()] {
+        assert!(error.contains("Cargo.toml") && error.contains(&format!("at most {limit} may be read")), "{error}");
+    }
+    // The command stops there, in each mode, and writes no page.
+    let site = root.path().join("site");
+    for args in [&[][..], &["--write"][..]] {
+        let error = super::run_with(&site, args, None).unwrap_err();
+        assert!(error.contains("Cargo.toml") && error.contains("may be read"), "{args:?}: {error}");
+    }
+    assert_eq!(fs::read_to_string(site.join("index.html")).unwrap(), PAGE);
+    // A manifest that is not text is an error, and so is one that is a link.
+    root.write("Cargo.toml", b"\xff\xfe[workspace.package]\n");
+    assert!(super::workspace_version(root.path()).unwrap_err().contains("UTF-8"));
+    #[cfg(unix)]
+    {
+        root.write("real.toml", manifest_of(128));
+        fs::remove_file(root.path().join("Cargo.toml")).unwrap();
+        std::os::unix::fs::symlink(root.path().join("real.toml"), root.path().join("Cargo.toml")).unwrap();
+        assert!(super::workspace_version(root.path()).unwrap_err().contains("not a regular file"));
+    }
+}
+
 #[test]
 fn the_copy_of_the_pages_for_a_preview_links_the_same_release() {
     let root = repo();

@@ -508,7 +508,7 @@ pub(super) fn check(app: &Path) -> Result<Report, String> {
                 size(PAGES_FILE_LIMIT)
             ));
         }
-        super::brands(name, &[]).map_err(|e| format!("app/{name}: {e}"))?;
+        super::brands(name, &[], xtask::brands::DENY).map_err(|e| format!("app/{name}: {e}"))?;
     }
     let names: Vec<&str> = files.iter().map(|(name, _)| name.as_str()).collect();
     let page = read_text(&app.join("index.html"))?;
@@ -553,11 +553,11 @@ pub(super) fn check(app: &Path) -> Result<Report, String> {
     // What a search engine and a social card read: the page's tags and data, and the files beside it.
     let robots = read_text(&app.join("robots.txt")).map_err(|e| format!("app/robots.txt: {e}"))?;
     let sitemap = read_text(&app.join("sitemap.xml")).map_err(|e| format!("app/sitemap.xml: {e}"))?;
-    super::brands(&robots, &[]).map_err(|e| format!("app/robots.txt: {e}"))?;
-    super::brands(&sitemap, &[]).map_err(|e| format!("app/sitemap.xml: {e}"))?;
+    super::brands(&robots, &[], xtask::brands::DENY).map_err(|e| format!("app/robots.txt: {e}"))?;
+    super::brands(&sitemap, &[], xtask::brands::DENY).map_err(|e| format!("app/sitemap.xml: {e}"))?;
     seo::check_app(&page, &robots, &sitemap, &names).map_err(|e| format!("app/index.html: {e}"))?;
     let headers = read_text(&app.join("_headers")).map_err(|e| format!("_headers: {e}"))?;
-    super::brands(&headers, &[]).map_err(|e| format!("_headers: {e}"))?;
+    super::brands(&headers, &[], xtask::brands::DENY).map_err(|e| format!("_headers: {e}"))?;
     headers::check_app(&headers).map_err(|e| format!("_headers: {e}"))?;
     // What Pages would send for every file of the app's folder: what is kept for a year is named by its hash and nothing else is, and every page has the app's policy.
     let caching = cache::check_dir(app, &super::inventory(app)?, cache::Kind::App)?;
@@ -598,7 +598,7 @@ fn list_into(folder: &Path, prefix: &str, depth: usize, files: &mut Vec<(String,
 
 /// What the start page may hold and must load. `names` are the files beside it.
 fn check_page(html: &str, names: &[&str]) -> Result<(), String> {
-    super::brands(html, &[])?;
+    super::brands(html, &[], xtask::brands::DENY)?;
     let lower = html.to_ascii_lowercase();
     // Every script tag of the page, not only the first, loads a file.
     let mut rest = html;
@@ -658,7 +658,7 @@ fn local_file(url: &str, names: &[&str]) -> Result<(), String> {
 /// The JavaScript: what Trunk makes (`wasm-bindgen`'s glue and the start script). It may not reach the network by any means of its own, and may not use
 /// `eval`, which the policy does not allow either. Every module it imports from the folder is a file of the build.
 fn check_script(text: &str, names: &[&str]) -> Result<(), String> {
-    super::brands(text, &[])?;
+    super::brands(text, &[], xtask::brands::DENY)?;
     for banned in
         ["XMLHttpRequest", "WebSocket", "sendBeacon", "EventSource", "importScripts", "new Function", "eval(", "RTCPeerConnection", "WebTransport"]
     {
@@ -700,7 +700,7 @@ fn check_script(text: &str, names: &[&str]) -> Result<(), String> {
 
 /// A stylesheet of the app: no import and no address.
 fn check_style(text: &str, names: &[&str]) -> Result<(), String> {
-    super::brands(text, &[])?;
+    super::brands(text, &[], xtask::brands::DENY)?;
     for url in super::links::css(text)? {
         local_file(&url, names)?;
     }

@@ -2,6 +2,8 @@
 //! (JSON-LD), the dates of the sitemap, the web app's title and description. The generator and its checks are `xtask/src/site/seo.rs` (and its tests); these hold the result, so that a page
 //! edited by hand and not made again, or a generator that drifts, is seen by the plain test run.
 
+use std::collections::BTreeSet;
+
 use serde_json::Value;
 
 fn read(rel: &str) -> String {
@@ -20,7 +22,7 @@ fn pages() -> Vec<String> {
         }
     }
     pages.sort();
-    assert_eq!(pages.len(), 10, "the pages, the guides and 404: {pages:?}");
+    assert_eq!(pages.len(), 14, "the pages, the guides, their index and 404: {pages:?}");
     pages
 }
 
@@ -45,7 +47,7 @@ fn workspace() -> (String, String) {
 }
 
 /// The properties schema.org lists for each type the site uses, with those it inherits (from <https://schema.org/SoftwareApplication>, `/WebApplication`, `/TechArticle`, `/WebPage`, `/WebSite`
-/// and `/Offer`, which were read when this was written): a key that is not here is a typo or a property of another type, and a search engine would ignore it.
+/// and `/Offer`, which were read when this was written; a `CollectionPage` is a `WebPage`, and the site gives it no property of its own): a key that is not here is a typo or a property of another type, and a search engine would ignore it.
 fn properties(kind: &str) -> &'static [&'static str] {
     match kind {
         "SoftwareApplication" => &[
@@ -78,7 +80,7 @@ fn properties(kind: &str) -> &'static [&'static str] {
         ],
         "WebSite" => &["@context", "@type", "name", "url"],
         "TechArticle" => &["@context", "@type", "description", "headline", "image", "inLanguage", "isPartOf", "url"],
-        "WebPage" => &["@context", "@type", "description", "inLanguage", "isPartOf", "name", "url"],
+        "WebPage" | "CollectionPage" => &["@context", "@type", "description", "inLanguage", "isPartOf", "name", "url"],
         "Offer" => &["@type", "price", "priceCurrency"],
         other => panic!("{other} is a type this test does not know: say which properties schema.org lists for it"),
     }
@@ -147,6 +149,7 @@ fn every_page_but_the_missing_one_has_structured_data_of_the_kind_its_place_give
         let expected: &[&str] = match page.as_str() {
             "site/index.html" => &["SoftwareApplication", "WebSite"],
             "site/404.html" => &[],
+            "site/guides/index.html" => &["CollectionPage"],
             p if p.starts_with("site/guides/") => &["TechArticle"],
             _ => &["WebPage"],
         };
@@ -245,7 +248,7 @@ fn the_sitemaps_dates_are_dates_that_exist_not_in_the_future_or_the_pages_are_li
             assert!(day <= today.tomorrow().unwrap(), "{loc}: {date} is in the future");
         }
     }
-    assert_eq!(urls, 9, "every page but 404");
+    assert_eq!(urls, 13, "every page but 404");
     // The robots file lets every crawler in and names the sitemap.
     assert_eq!(read("site/robots.txt"), "User-agent: *\nAllow: /\n\nSitemap: https://diacraft.dev/sitemap.xml\n");
 }
@@ -288,4 +291,26 @@ fn the_web_apps_page_has_one_main_landmark_that_holds_the_canvas_and_is_the_size
     let css = read("apps/diacraft-web/page.css");
     let rule = css.lines().find(|l| l.starts_with("main {")).expect("a rule for main");
     assert!(rule.contains("width: 100%") && rule.contains("height: 100%") && rule.contains("display: block"), "{rule}");
+}
+
+/// Each page has a title of at most 60 characters that leads with what the page is about, and a description of 140 to 160 characters, the lengths a result shows whole (the owner,
+/// 2026-11-25), and no two pages share either. The page for a missing address is not listed by a search engine and is left out.
+#[test]
+fn every_page_has_its_own_title_and_a_description_of_a_length_a_result_shows_whole() {
+    let (mut titles, mut descriptions) = (BTreeSet::new(), BTreeSet::new());
+    for page in pages().into_iter().filter(|page| page != "site/404.html") {
+        let html = read(&page);
+        let title = html.split("<title>").nth(1).and_then(|s| s.split("</title>").next()).unwrap().replace("&amp;", "&");
+        assert!(title.chars().count() <= 60, "{page}: a title of {} characters: {title}", title.chars().count());
+        assert_eq!(
+            meta(&html, "property", "og:title").map(|t| t.replace("&amp;", "&")).as_deref(),
+            Some(title.as_str()),
+            "{page}: og:title is the title"
+        );
+        let description = meta(&html, "name", "description").unwrap().replace("&amp;", "&");
+        let count = description.chars().count();
+        assert!((140..=160).contains(&count), "{page}: a description of {count} characters: {description}");
+        assert!(titles.insert(title.clone()), "{page}: the title {title} is another page's");
+        assert!(descriptions.insert(description.clone()), "{page}: the description is another page's");
+    }
 }

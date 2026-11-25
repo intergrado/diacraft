@@ -9,7 +9,9 @@
 //! * every text file under `packaging/`, and under `docs/` except Markdown pages. Markdown docs
 //!   (like `README.md`, `ROADMAP.md` and `docs/*.md`) may name the reference app and compare
 //!   against it, so no Markdown is scanned;
-//! * every text file of the website under `site/` (its pages, script, style and data; not its pictures).
+//! * every text file of the website under `site/` (its pages, script, style and data; not its pictures). A page (an `.html` file) may name the
+//!   product anywhere since the owner's ruling of 2026-11-25 ([`SITE_PAGE_NAMES`]); the company's name and the other vendors' are hits there
+//!   as elsewhere, and so is the product's name in the site's other files.
 //!
 //! A line that has to keep a name (a file type or MIME type that another project defines) says
 //! `brand-ok` in a comment on that line or, in a file listed in `MARK_ABOVE`, on a `#` comment line
@@ -30,6 +32,22 @@ use std::path::Path;
 /// Vendor product and company names, lowercase, matched case-insensitively as whole words.
 pub const DENY: &[&str] = &["microsoft", "visio", "lucidchart", "lucid"];
 
+/// The names of [`DENY`] that a page of the website may hold anywhere and in any words (owner, 2026-11-25: "Yes use it for SEO with no restrictions", a ruling for the site's pages
+/// only): the product's name. In a page ([`is_site_page`]) it is no hit; the company's name and the other vendors' still are, outside the trademark notice. The product's name stays
+/// a hit in every other file (the site's style, script and data, the docs' text files, the program) and in a file's name.
+pub const SITE_PAGE_NAMES: [&str; 1] = ["visio"];
+
+/// Whether `path` (from the repository's root) is a page of the website: an `.html` file under `site/`.
+pub fn is_site_page(path: &str) -> bool {
+    path.starts_with("site/") && path.ends_with(".html")
+}
+
+/// The names of [`DENY`] that are hits in the file `path`: every one, but the [`SITE_PAGE_NAMES`] in a page of the website.
+pub fn denied_in(path: &str) -> Vec<&'static str> {
+    let page = is_site_page(path);
+    DENY.iter().copied().filter(|name| !(page && SITE_PAGE_NAMES.contains(name))).collect()
+}
+
 /// Marks a line that keeps a name on purpose.
 const ALLOW: &str = "brand-ok";
 
@@ -48,17 +66,21 @@ const CLI_HELP: &str = "apps/diacraft-cli/src/args.rs";
 const ABOUT: &str = "crates/ui-egui/src/splash.rs";
 
 /// The website's pages, each of which has the trademark line in its footer.
-const SITE_PAGES: [&str; 10] = [
+pub const SITE_PAGES: [&str; 14] = [
     "site/404.html",
+    "site/architecture-diagrams.html",
     "site/browser.html",
     "site/changelog.html",
+    "site/flowcharts.html",
     "site/guides/agents.html",
     "site/guides/command-line.html",
     "site/guides/file-formats.html",
     "site/guides/getting-started.html",
+    "site/guides/index.html",
     "site/guides/native-format.html",
     "site/index.html",
     "site/privacy.html",
+    "site/vsdx-editor.html",
 ];
 
 /// The places that name the reference product on purpose, as (file, exact text): the owner's ruling of 2026-11-23 ("Labels + site/docs
@@ -66,8 +88,9 @@ const SITE_PAGES: [&str; 10] = [
 /// denied name that lies inside an occurrence of a text listed for its file is no hit; any other occurrence is one. The texts are
 /// case-sensitive and whole: a label is the label, a list is the list. An entry whose file is there and does not hold its text is stale.
 ///
-/// `cargo xtask site` lets a page hold its entries and nothing else, and the export's allowlist (`xtask/src/export/allowlist.txt`)
-/// keeps the lines that hold them in the public tree (a test holds the two lists together).
+/// `cargo xtask site` lets a page hold its entries and the [`SITE_PAGE_NAMES`] and nothing else, and the export's allowlist (`xtask/src/export/allowlist.txt`)
+/// keeps the lines that hold them in the public tree (a test holds the two lists together): a page of the site whole, by a `free` entry, and any other
+/// file's line by line.
 pub const PRODUCT_USES: &[(&str, &str)] = &[
     // The file-type labels: the Save dialog's kinds, the Open dialog's filter and the list of types in the command line's help.
     (SAVE_KINDS, "Visio Drawing (.vsdx)"),
@@ -78,16 +101,11 @@ pub const PRODUCT_USES: &[(&str, &str)] = &[
     (SAVE_KINDS, "Visio Macro-Enabled Template (.vstm)"),
     (OPEN_DIALOG, "Visio and OpenDocument drawings, stencils and templates"),
     (CLI_HELP, "the Visio types .vsdx, .vsdm, .vssx, .vssm, .vstx and .vstm"),
-    // The lists of the formats DiaCraft opens and saves. The site's are words with no markup in them, so that a page's text read through
-    // its character references (`cargo xtask site`) holds them as its source does.
+    // The lists of the formats DiaCraft opens and saves, in the docs. The site's pages need none since the owner's ruling of 2026-11-25
+    // ([`SITE_PAGE_NAMES`]): a page may name the product anywhere, and the notice in its footer, which names the company too, is the one
+    // entry a page has.
     ("README.md", "Visio drawings, stencils and templates (`.vsdx`, `.vsdm`, `.vssx`, `.vssm`, `.vstx`, `.vstm`)"),
     ("docs/file-format-parity.md", "Visio drawings, stencils and templates (`.vsdx`, `.vsdm`, `.vssx`, `.vssm`, `.vstx`, `.vstm`)"),
-    ("site/index.html", "Visio drawings, stencils and templates"),
-    // The home page's main message (the owner, 2026-11-23: the page leads with the formats, and names the product as a format statement): its title, its
-    // description, the same two in the social tags, and its heading all hold these words and no other use of the name.
-    ("site/index.html", "Visio and OpenDocument drawings"),
-    ("site/browser.html", "Visio drawings, stencils and templates"),
-    ("site/guides/file-formats.html", "Visio drawings, stencils and templates"),
     // The trademark line.
     ("NOTICE", TRADEMARK),
     (ABOUT, TRADEMARK),
@@ -101,6 +119,10 @@ pub const PRODUCT_USES: &[(&str, &str)] = &[
     (SITE_PAGES[7], TRADEMARK),
     (SITE_PAGES[8], TRADEMARK),
     (SITE_PAGES[9], TRADEMARK),
+    (SITE_PAGES[10], TRADEMARK),
+    (SITE_PAGES[11], TRADEMARK),
+    (SITE_PAGES[12], TRADEMARK),
+    (SITE_PAGES[13], TRADEMARK),
 ];
 
 /// The texts of [`PRODUCT_USES`] that `path` may hold.
@@ -312,10 +334,11 @@ pub fn scan_text(path: &str, text: &str) -> Vec<Hit> {
 /// (in a literal, or in a line) is no hit.
 pub fn scan_text_with(path: &str, text: &str, allowed: &[&str]) -> Vec<Hit> {
     let Some(kind) = kind_of(path) else { return vec![] };
+    let denied = denied_in(path);
     let found = match kind {
-        Kind::Rust => scan_rust(text, allowed),
-        Kind::Manifest => scan_lines(text, |l| l.trim_start().starts_with("description"), false, allowed),
-        Kind::Text => scan_lines(text, |_| true, MARK_ABOVE.contains(&path), allowed),
+        Kind::Rust => scan_rust(text, allowed, &denied),
+        Kind::Manifest => scan_lines(text, |l| l.trim_start().starts_with("description"), false, allowed, &denied),
+        Kind::Text => scan_lines(text, |_| true, MARK_ABOVE.contains(&path), allowed, &denied),
     };
     found.into_iter().map(|(line, term, context)| Hit { path: path.to_owned(), line, term, context }).collect()
 }
@@ -365,9 +388,15 @@ pub fn is_test_path(path: &str) -> bool {
         || parts.any(|d| d == "tests" || d == "benches")
 }
 
-/// (line, term, line text) for each denied name on the lines `keep` selects, but those marked
+/// (line, term, line text) for each name of `denied` on the lines `keep` selects, but those marked
 /// `brand-ok` on the line or, with `mark_above`, on a `#` comment line just above, and those inside an occurrence of an `allowed` text.
-fn scan_lines(text: &str, keep: impl Fn(&str) -> bool, mark_above: bool, allowed: &[&str]) -> Vec<(usize, &'static str, String)> {
+fn scan_lines(
+    text: &str,
+    keep: impl Fn(&str) -> bool,
+    mark_above: bool,
+    allowed: &[&str],
+    denied: &[&'static str],
+) -> Vec<(usize, &'static str, String)> {
     let lines: Vec<&str> = text.lines().collect();
     let marked_above =
         |i: usize| mark_above && i.checked_sub(1).and_then(|j| lines.get(j)).is_some_and(|l| l.trim_start().starts_with('#') && l.contains(ALLOW));
@@ -375,13 +404,13 @@ fn scan_lines(text: &str, keep: impl Fn(&str) -> bool, mark_above: bool, allowed
         .iter()
         .enumerate()
         .filter(|&(i, l)| keep(l) && !l.contains(ALLOW) && !marked_above(i))
-        .flat_map(|(i, l)| terms_in(&without_allowed(l, allowed), DENY).into_iter().map(move |t| (i + 1, t, l.trim().to_string())))
+        .flat_map(|(i, l)| terms_in(&without_allowed(l, allowed), denied).into_iter().map(move |t| (i + 1, t, l.trim().to_string())))
         .collect()
 }
 
-/// (first line, term, literal) for each denied name in a Rust string literal outside comments and
+/// (first line, term, literal) for each name of `denied` in a Rust string literal outside comments and
 /// test code, but inside an occurrence of an `allowed` text.
-fn scan_rust(src: &str, allowed: &[&str]) -> Vec<(usize, &'static str, String)> {
+fn scan_rust(src: &str, allowed: &[&str], denied: &[&'static str]) -> Vec<(usize, &'static str, String)> {
     let lines: Vec<&str> = src.lines().collect();
     let mut out = vec![];
     for lit in rust_literals(src) {
@@ -389,7 +418,7 @@ fn scan_rust(src: &str, allowed: &[&str]) -> Vec<(usize, &'static str, String)> 
         if covered.is_some_and(|ls| ls.iter().any(|l| l.contains(ALLOW))) {
             continue;
         }
-        for t in terms_in(&without_allowed(&lit.text, allowed), DENY) {
+        for t in terms_in(&without_allowed(&lit.text, allowed), denied) {
             out.push((lit.first, t, lit.text.clone()));
         }
     }

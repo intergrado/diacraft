@@ -216,35 +216,46 @@ fn vendor_and_suite_bans_apply_to_names_and_content() {
     site.rejects("-guide.txt");
 }
 
-/// The owner, 2026-11-23: a page may hold the uses the brands check allows it (its format list and the trademark line), and only
-/// those: the product's name in other words of the same page, in a page that is allowed none, or in a file name, is refused as before. Text
-/// read through its character references holds the same uses.
+/// The owner, 2026-11-25 ("Yes use it for SEO with no restrictions", for the site's pages only): a page may name the product anywhere, in its text, its
+/// attributes and its head, in any case and through character references. The company's name and the other vendors' are refused in a page outside the
+/// trademark line, as before, and the product's name is refused in the site's other files (its style, script and data) and in any file name.
 #[test]
-fn a_page_holds_the_format_list_and_the_trademark_line_it_is_allowed_and_no_other_name() {
+fn a_page_names_the_product_anywhere_and_the_company_only_in_the_trademark_line() {
     let site = Fixture::new();
-    let [list, trademark] = ["site/index.html", "site/privacy.html"].map(|page| xtask::brands::allowed_in(page)[0]);
-    assert_eq!(trademark, xtask::brands::TRADEMARK);
+    let trademark = xtask::brands::TRADEMARK;
+    assert_eq!(xtask::brands::allowed_in("site/privacy.html"), [trademark]);
+    let name = xtask::brands::SITE_PAGE_NAMES[0];
     let page =
         |body: &str| HTML.replace("<a href=\"/guides/g.html#open\">Open</a>", &format!("<a href=\"/guides/g.html#open\">Open</a><p>{body}</p>"));
-    site.write("index.html", page(&format!("{list} (<code>.vsdx</code>). {trademark}")));
+    let encoded: String = name.chars().map(|c| format!("&#{};", u32::from(c))).collect();
+    for body in [
+        format!("A free {name} alternative. {trademark}"),
+        format!("{} files (<code>.vsdx</code>) on Linux", name.to_uppercase()),
+        format!("<span title=\"{name} for Mac\">{encoded} files</span>"),
+    ] {
+        site.write("index.html", page(&body));
+        check(&site.0, DOMAIN).unwrap();
+    }
+    site.write("index.html", HTML.replace("<title>Drawing</title>", &format!("<title>Free {name} alternative</title>")));
     check(&site.0, DOMAIN).unwrap();
-    // The same words through a character reference elsewhere on the page: the text is read decoded, and still holds them.
-    site.write("index.html", page(&format!("{list} &#40;<code>.vsdx</code>&#41;. {trademark}")));
+    // A guide is a page too.
+    site.write("index.html", HTML);
+    let guide = HTML.replace("invalid/\"", "invalid/guides/g\"").replace("id=\"start\"", "id=\"open\"");
+    site.write("guides/g.html", guide.replace("<main id=\"open\">", &format!("<main id=\"open\"><p>Open {name} files</p>")));
     check(&site.0, DOMAIN).unwrap();
-    // The name in other words of the page.
-    let name = &list[..list.find(' ').unwrap()];
-    for other in [format!("{list}. Made for {name}."), format!("{} editor", name.to_lowercase()), format!("{trademark} {name} files")] {
+    // The company's name and another vendor's outside the trademark line, written out or through character references.
+    let company = xtask::brands::DENY[0];
+    let company_encoded: String = company.chars().map(|c| format!("&#{};", u32::from(c))).collect();
+    for other in [format!("{trademark} Made by {company}."), format!("{company_encoded} files"), "A Lucidchart import".to_owned()] {
         site.write("index.html", page(&other));
         site.rejects("banned name");
     }
-    // A use is allowed in its own page only: a guide that is not listed has none.
+    // The product's name in a file of the site that is not a page, and in a file name.
     site.write("index.html", HTML);
-    let guide = HTML.replace("invalid/\"", "invalid/guides/g\"").replace("id=\"start\"", "id=\"open\"");
-    site.write("guides/g.html", guide.replace("<main id=\"open\">", &format!("<main id=\"open\"><p>{list}</p>")));
+    site.write("style.css", format!("/* {name} */ body {{background-image:url('/paper.png')}}"));
     site.rejects("banned name");
-    // And never in a file name.
-    site.write("guides/g.html", &guide);
-    site.write(&format!("{list}.txt"), "example");
+    site.write("style.css", "body {background-image:url('/paper.png')}");
+    site.write(&format!("{name}-alternative.html"), page(""));
     site.rejects("banned name");
 }
 

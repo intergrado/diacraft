@@ -139,6 +139,10 @@ fn open_diacraft_in_your_browser_goes_straight_to_the_app_and_the_details_page_i
         "privacy.html",
         "changelog.html",
         "404.html",
+        "vsdx-editor.html",
+        "flowcharts.html",
+        "architecture-diagrams.html",
+        "guides/index.html",
         "guides/agents.html",
         "guides/command-line.html",
         "guides/file-formats.html",
@@ -232,7 +236,7 @@ fn the_footers_trademark_paragraph_runs_the_full_width_of_the_rule_above_it_on_e
     }
     pages.sort();
     pages.dedup();
-    assert_eq!(pages.len(), 10, "the pages, the guides and 404: {pages:?}");
+    assert_eq!(pages.len(), 14, "the pages, the guides, their index and 404: {pages:?}");
     for page in &pages {
         let text = read(page);
         assert_eq!(text.matches("<p class=\"legal\">").count(), 1, "{page}");

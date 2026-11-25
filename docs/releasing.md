@@ -155,6 +155,7 @@ bash packaging/windows/check-msi.sh dist/diacraft-v0.2.0-windows-x86_64.msi     
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-25 | minor | The publish section says that each page of the website has a `free` entry in the export's allowlist, since a page may name the product anywhere, and that a new page needs one |
 | 2026-11-25 | minor | The site's download cards list every file of the release in their CPU rows (each once), and each main button repeats one of them, so the test that held each download to one link holds each to one place in the rows |
 | 2026-11-25 | minor | The deploy by hand: the workflow `deploy-site.yml` deploys the website from `main` between releases (no download built; the release workflow's `site` job installs its tools with the script both use, and its `deploy` job is in the concurrency group `deploy-site` with the new one) |
 | 2026-11-25 | major | The macOS builds: the release is fourteen files, the macOS job packages each architecture on its own (`-macos-arm64`, `-macos-x86_64`), each a zip and a disk image, and makes no universal download (the owner, 2026-11-25; `package.sh macos` takes one folder of programs and joins nothing), checks each (the Intel programs are run under Rosetta where it is there and their headers checked where it is not, and the step says which), keeps both as the artifact `-macos`, and uploads the four; each macOS README says which Macs it is for |
