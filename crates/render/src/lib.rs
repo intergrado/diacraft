@@ -61,6 +61,7 @@ mod canvas;
 mod clip;
 mod clock;
 mod corners;
+mod custom_end;
 mod dash;
 mod ends;
 pub mod export;

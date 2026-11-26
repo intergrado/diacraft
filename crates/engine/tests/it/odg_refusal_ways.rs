@@ -201,7 +201,7 @@ fn opening_an_odg_after_a_template_has_the_built_in_stencils_as_a_drawing_has_th
     let mut s = Session::new();
     run(&mut s, "file.new", json!({ "template": "Basic Flowchart" }));
     let after_template: Vec<&str> = s.stencils().open_builtins().to_vec();
-    let default: Vec<&str> = diacraft_engine::stencil::stencils().iter().map(|st| st.id).collect();
+    let default: Vec<&str> = diacraft_engine::stencil::stencils().iter().filter(|st| st.default_open).map(|st| st.id).collect();
     assert_ne!(after_template, default, "the template opens them in an order of its own: {after_template:?}");
     let dir = Dir::new();
     let path = dir.write("a.odg", &four().bytes());

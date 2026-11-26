@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod allocator;
+mod check_before;
 mod convert;
 mod export;
 mod mcp;

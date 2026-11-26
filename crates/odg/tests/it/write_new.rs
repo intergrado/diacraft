@@ -493,7 +493,7 @@ fn a_new_shape_with_text_has_a_paragraph_for_each_line_and_its_white_space_as_el
 }
 
 /// A new connector that cannot be written is refused in words, each condition by itself, and a link of 0 or a route of another kind is no refusal. What a
-/// new connector holds that its markup cannot say (a layer, a master, a text, other sections) is tier 2.
+/// new connector holds that its markup cannot say (a layer, a master, a text, other sections, a route kind the standard's three types cannot say) is tier 2.
 #[test]
 fn a_new_connector_that_cannot_be_written_is_refused_in_words_and_nothing_is_written() {
     let base = open(&Drawing::a4().page(&custom("s1", "1cm")));
@@ -555,19 +555,27 @@ fn a_new_connector_that_cannot_be_written_is_refused_in_words_and_nothing_is_wri
             assert!(user.rows.iter().any(|row| row.name.as_deref() == Some("Other")));
         },
     );
-    refused(
+    // A route kind the standard's three types cannot say (it was refused, "a new connector of a route kind the writer does not write") is written as the default type, and
+    // the cells that say it are carried and read back; so is a shape with one of the two route cells (a connector: a line has neither), the other being gone.
+    carried(
         &|s| {
             Arc::make_mut(&mut s.sheet).cells.insert(CellName::new("ShapeRouteStyle"), cell(None, 3.0, None));
         },
-        "route kind",
+        &|r| {
+            let number = |name: &str| r.sheet.cell(name).and_then(|c| c.value.as_ref()?.number());
+            assert_eq!((number("ShapeRouteStyle"), number("ConLineRouteExt")), (Some(3.0), Some(1.0)));
+        },
     );
-    // A shape with one of the two route cells is a connector (a line has neither), and the one it has is not a route the writer writes.
     for gone in ["ShapeRouteStyle", "ConLineRouteExt"] {
-        refused(
+        carried(
             &|s| {
                 Arc::make_mut(&mut s.sheet).cells.remove(gone);
             },
-            "route kind",
+            &|r| {
+                assert!(r.sheet.cell(gone).is_none(), "{gone} is gone, as the drawing had it");
+                let other = if gone == "ShapeRouteStyle" { "ConLineRouteExt" } else { "ShapeRouteStyle" };
+                assert!(r.sheet.cell(other).is_some(), "{other} stays");
+            },
         );
     }
     // Links that are 0 are no links; and the routes that are lines and curves are written as the type they are.

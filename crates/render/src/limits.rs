@@ -114,6 +114,24 @@ pub const MAX_BLUR_PIXELS_PER_FRAME: u64 = 32 * 1024 * 1024;
 /// The most rings a line end or a hatch draws.
 pub const MAX_MARKS: usize = 4_096;
 
+/// The most `Geometry` sections a master that is drawn as a line end may hold, in all its shapes (the design's cap). A master past this, or past
+/// [`MAX_END_ROWS`], is drawn as number 4 and the frame says so ([`SkipKind::CustomLineEnd`](crate::SkipKind::CustomLineEnd)); nothing of it is built.
+pub const MAX_END_SECTIONS: usize = 16;
+
+/// The most rows of geometry a master that is drawn as a line end may hold, in all its shapes.
+pub const MAX_END_ROWS: usize = 256;
+
+/// The most shapes (a group's members, nested ones counted) a master that is drawn as a line end may hold: a pattern master is one shape or one group, and a group of more shapes than
+/// there can be sections is a hostile one. A project rule, as the two caps above are.
+pub const MAX_END_SHAPES: usize = 32;
+
+/// The deepest a group inside a line-end master may be nested (a project rule): a pattern master is one shape or one group.
+pub const MAX_END_DEPTH: usize = 4;
+
+/// The work of a row of a line-end master's geometry, charged before it is built (a custom line end is built again for every line that holds it, so a page of thousands of them is
+/// counted). The master's shapes are charged [`WORK_PER_DRAWN_SHAPE`] each.
+pub const WORK_PER_END_ROW: u64 = 2;
+
 /// What a frame may spend. [`Limits::default`] is for a window that pans; an export raises the times.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {

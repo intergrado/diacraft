@@ -169,6 +169,16 @@ pub struct Tokens {
     /// The AutoConnect arrow under the pointer: a deeper blue (the same pictures draw one on the arrow the pointer is near; no page gives either in words).
     pub auto_arrow_hot: Color32,
 
+    // ---- the ShapeSheet window (SHEETWIN): what a cell's colour says of where it comes from
+    /// The text of a cell the sheet holds itself (a formula, a value or `No Formula`): blue, with a dot at the cell's left edge so that the difference does not rest on colour (design 5.6).
+    pub sheet_local: Color32,
+    /// The text of a cell found nowhere, which reads its default.
+    pub sheet_default: Color32,
+    /// The text of an error value (`#DIV/0!`, `#REF!`), in the cell and in the bar.
+    pub sheet_error: Color32,
+    /// The background of a cell whose value the last commit changed, until the next commit (no timer).
+    pub sheet_changed: Color32,
+
     // ---- the File view (backstage)
     /// The File view's narrow rail.
     pub rail_fill: Color32,
@@ -279,6 +289,11 @@ impl Tokens {
             auto_arrow: Color32::from_rgb(64, 148, 232),
             auto_arrow_hot: Color32::from_rgb(28, 104, 206),
 
+            sheet_local: Color32::from_rgb(130, 190, 255),
+            sheet_default: Color32::from_gray(165),
+            sheet_error: Color32::from_rgb(255, 150, 140),
+            sheet_changed: Color32::from_rgb(70, 58, 20),
+
             rail_fill: Color32::from_rgb(20, 92, 104),
             rail_text: Color32::from_rgb(236, 247, 249),
             rail_text_disabled: Color32::from_rgb(120, 168, 178),
@@ -373,6 +388,11 @@ impl Tokens {
             snap_mark: Color32::from_rgb(214, 88, 30),
             auto_arrow: Color32::from_rgb(46, 130, 220),
             auto_arrow_hot: Color32::from_rgb(0, 84, 176),
+
+            sheet_local: Color32::from_rgb(0, 84, 166),
+            sheet_default: Color32::from_gray(100),
+            sheet_error: Color32::from_rgb(178, 34, 34),
+            sheet_changed: Color32::from_rgb(255, 242, 190),
 
             rail_fill: Color32::from_rgb(0, 106, 122),
             rail_text: Color32::from_rgb(240, 249, 250),

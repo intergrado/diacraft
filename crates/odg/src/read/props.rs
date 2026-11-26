@@ -485,6 +485,16 @@ pub(crate) fn spread(n: u32) -> Option<f64> {
 /// The base of each size class, in points: the 0 to 5, and class 6 at the 18 points (DiaCraft's own rule).
 pub(crate) const SIZE_BASES: [f64; 7] = [1.44, 1.8, 2.52, 3.24, 3.96, 9.0, 18.0];
 
+/// The number of DiaCraft's filled diamond, the custom end of UML composition: its marker is `DiaCraft_20_end_20_254`, the one marker whose number is not a line end of (the
+/// cell it stands for is 254, the master).
+pub(crate) const DIAMOND: u32 = 254;
+
+/// The width of the filled diamond's marker at a size class of `base` points and a line of `weight_pt` points: ten times the height of the alignment box, which is the
+/// weight times the unit at the class over the unit at Medium, both at that weight. 0 for a weight of 0: a box of no height draws nothing.
+pub(crate) fn diamond_width(base: f64, weight_pt: f64) -> f64 {
+    10.0 * weight_pt * (base + weight_pt) / (SIZE_BASES[2] + weight_pt)
+}
+
 /// How far a marker's width may be from a size class's, in points, for the class to be the marker's: over twice LibreOffice's largest rounding error
 /// (0.046 pt) and under half the smallest gap between two classes of one number (0.54 pt).
 pub(crate) const WIDTH_TOLERANCE: f64 = 0.1;
@@ -492,11 +502,19 @@ pub(crate) const WIDTH_TOLERANCE: f64 = 0.1;
 /// The size class whose width for number `n` at line weight `weight_pt` is nearest `width_pt`, when it is within [`WIDTH_TOLERANCE`] of it; `None` when
 /// no class is, or the number has no spread.
 pub(crate) fn size_class(n: u32, weight_pt: f64, width_pt: f64) -> Option<usize> {
-    let spread = spread(n)?;
+    // The filled diamond's width follows the weight in a way of its own; at a weight of 0 every class is as wide as another (none), so no class is read.
+    let diamond = n == DIAMOND;
+    if diamond && !(weight_pt.is_finite() && weight_pt > 0.0) {
+        return None;
+    }
+    let spread = if diamond { 0.0 } else { spread(n)? };
     let (class, off) = SIZE_BASES
         .iter()
         .enumerate()
-        .map(|(class, base)| (class, (spread * (base + weight_pt) - width_pt).abs()))
+        .map(|(class, base)| {
+            let width = if diamond { diamond_width(*base, weight_pt) } else { spread * (base + weight_pt) };
+            (class, (width - width_pt).abs())
+        })
         .min_by(|a, b| a.1.total_cmp(&b.1))?;
     (off <= WIDTH_TOLERANCE).then_some(class)
 }
@@ -525,11 +543,14 @@ fn plain_number(digits: &str, low: u32, high: u32) -> Option<u32> {
 }
 
 /// DiaCraft's own marker a name is: `DiaCraft_20_end_20_` and a number from 1 to 45 with no sign and no leading zero, then, optionally, `_20_t`
-/// and a band class from 1 to 99 written the same way. Any other spelling is no marker of DiaCraft's.
+/// and a band class from 1 to 99 written the same way; or [`DIAMOND`] alone, with no band (the filled diamond). Any other spelling is no marker of DiaCraft's.
 pub(crate) fn parse_marker(name: &str) -> Option<OwnMarker> {
     let rest = name.strip_prefix(MARKER_PREFIX)?;
     let at = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
     let (digits, tail) = rest.split_at(at);
+    if digits == "254" {
+        return tail.is_empty().then_some(OwnMarker { number: DIAMOND, band: None });
+    }
     let number = plain_number(digits, 1, 45)?;
     if tail.is_empty() {
         return Some(OwnMarker { number, band: None });
@@ -569,7 +590,9 @@ fn line_end(r: &mut Reader, view: &View<'_>, base: &Base, props: (P, P), cells_n
         }
         Marker::Own(n) => *n,
     };
-    out.direct.push((arrow, cells::plain(f64::from(n))));
+    // The filled diamond is the marker of a custom end (254), which the drawing's own data says: the markup says number 4 (the stand-in of every custom end) and the class its width
+    // gives, so that a file read without DiaCraft's data draws what a plain reader draws for a custom end, and a file read with it takes the cell back from tier 2.
+    out.direct.push((arrow, cells::plain(f64::from(if n == DIAMOND { 4 } else { n }))));
     let weight_pt = view.length(r, g, P::StrokeWidth).map_or(base.weight, |l| l.inches) * 72.0;
     let class = view.length(r, g, width).and_then(|w| size_class(n, weight_pt, w.inches * 72.0));
     match class {
@@ -879,7 +902,10 @@ mod tests {
 
     use diacraft_doc::{Cell, FormulaSlot, Value};
 
-    use super::{BAND_SUFFIX, MARKER_PREFIX, OwnMarker, Reader, SIZE_BASES, cells, own_marker, parse_marker, same_cell, size_class, spread};
+    use super::{
+        BAND_SUFFIX, DIAMOND, MARKER_PREFIX, OwnMarker, Reader, SIZE_BASES, cells, diamond_width, own_marker, parse_marker, same_cell, size_class,
+        spread,
+    };
     use crate::limits::Limits;
 
     /// A cell holding `text` as a value of its own allocation (not shared with any other cell's).
@@ -1034,5 +1060,40 @@ mod tests {
         assert_eq!(size_class(13, 0.75, 2.0 * (2.52 + 0.75) + 0.54 / 2.0), None);
         assert_eq!(size_class(99, 0.75, 6.54), None, "a number with no spread has no class");
         assert_eq!(size_class(13, 0.75, f64::NAN), None);
+    }
+
+    /// The filled diamond is the marker `DiaCraft_20_end_20_254` with no band, wide as ten boxes are tall, and its class is read back from that width at the line's weight.
+    #[test]
+    fn the_filled_diamond_is_marker_254_with_no_band_and_its_class_is_read_from_a_width_that_follows_the_weight() {
+        let own = |band: Option<u32>| Some(OwnMarker { number: DIAMOND, band });
+        assert_eq!(parse_marker("DiaCraft_20_end_20_254"), own(None));
+        assert_eq!(own_marker("DiaCraft_20_end_20_254"), Some(DIAMOND));
+        for bad in [
+            "DiaCraft_20_end_20_254_20_t23",
+            "DiaCraft_20_end_20_0254",
+            "DiaCraft_20_end_20_+254",
+            "DiaCraft_20_end_20_2540",
+            "DiaCraft_20_end_20_253",
+            "DiaCraft_20_end_20_255",
+            "DiaCraft_20_end_20_254_20_",
+        ] {
+            assert_eq!(parse_marker(bad), None, "{bad}");
+        }
+        // The width at Medium is ten weights (the box is as tall as the line is heavy), and at another class the weight times that class's unit over the Medium unit.
+        assert!((diamond_width(2.52, 0.75) - 7.5).abs() < 1e-12 && (diamond_width(2.52, 3.0) - 30.0).abs() < 1e-12);
+        assert!((diamond_width(3.96, 0.75) - 7.5 * (3.96 + 0.75) / (2.52 + 0.75)).abs() < 1e-12);
+        assert_eq!(diamond_width(18.0, 0.0), 0.0, "a box with no height has no width");
+        for weight in [0.25, 0.75, 1.5, 6.0, 40.0] {
+            for (class, base) in SIZE_BASES.iter().enumerate() {
+                let width = diamond_width(*base, weight);
+                assert_eq!(size_class(DIAMOND, weight, width), Some(class), "class {class} at {weight} pt");
+                assert_eq!(size_class(DIAMOND, weight, width + 0.05), Some(class));
+            }
+        }
+        // A weight of 0 has no width to tell a class by, and a width far from every class is none.
+        assert_eq!(size_class(DIAMOND, 0.0, 0.0), None);
+        assert_eq!(size_class(DIAMOND, f64::NAN, 7.5), None);
+        assert_eq!(size_class(DIAMOND, 0.75, 7.5 + 100.0), None);
+        assert_eq!(size_class(DIAMOND, 0.75, f64::NAN), None);
     }
 }

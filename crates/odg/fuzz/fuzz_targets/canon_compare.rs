@@ -13,8 +13,9 @@
 //! * the rule of empty containers: the drawing with its empty `office:font-face-decls`, `office:styles` and `office:automatic-styles` left out, and with
 //!   an empty `office:scripts` written in the package and not in the flat file, is the same content in each form and across them;
 //! * the count is symmetric: `count(a, b) == count(b, a)`, when neither is refused, for every pair of the four files, and in the raw modes for every pair where neither file
-//!   can hold DiaCraft's markup ([`may_carry`]). That markup is the one thing the check is oriented by (what only the second file holds of it counts as nothing), and
-//!   a raw input may write it: a flat file whose root holds an attribute of it counts one more against its own drawing than the other way round;
+//!   can hold what orients the check ([`may_carry`]): DiaCraft's markup (what only the second file holds of it counts as nothing), and, an `xml:id`
+//!   (`Rules::twinned`: one that only the second file has, beside an equal `draw:id`, counts as nothing). A raw input may write either: a flat file whose root holds an attribute of
+//!   DiaCraft's counts one more against its own drawing than the other way round, and a shape with a pair of ids counts one less against the shape with `draw:id` alone;
 //! * a flat file can never spell a marker of a package's joined root: the flat file of a drawing's pieces with `part-root-attribute-0` or
 //!   `part-name-clash-0` written by hand on its root is not the same as the package that has the marker, and is the same as itself;
 //! * a drawing laid out another way (white space between the shapes, a comment after the root) is the same;
@@ -272,7 +273,8 @@ fn symmetric(a: &[u8], b: &[u8]) {
     }
 }
 
-/// Whether `file` can hold DiaCraft's markup, so that the count of a pair with it need not be symmetric (orients the check by it). A package can: its entries are not
+/// Whether `file` can hold what orients the check, so that the count of a pair with it need not be symmetric: DiaCraft's markup or an `xml:id`, the attribute that counts as
+/// nothing when only the second file has it beside an equal `draw:id` (`Rules::twinned`). A package can: its entries are not
 /// looked into here (they may be compressed, and an entry under `DiaCraft/` is the carrier), and the structured modes hold packages to symmetry. So can a file that does not parse,
 /// which the check refuses in any case. A flat file can when one of its names, an element's or an attribute's, has a prefix that a declaration of the file binds to the namespace
 /// (for an element with no prefix, the default namespace), wherever the two stand: wider than the scope, so that nothing the check reads as the markup is missed.
@@ -301,7 +303,7 @@ fn may_carry(file: &[u8]) -> bool {
     let prefix = |name: &str| name.split_once(':').map(|(prefix, _)| prefix.to_owned());
     let element = |name: &&str| bound.contains(&prefix(name).unwrap_or_default().as_str());
     let attribute = |name: &&str| prefix(name).is_some_and(|p| bound.contains(&p.as_str()));
-    elements.iter().any(element) || attributes.iter().any(attribute)
+    elements.iter().any(element) || attributes.iter().any(attribute) || attributes.contains(&"xml:id")
 }
 
 fn echo(x: &[u8]) {

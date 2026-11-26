@@ -16,6 +16,9 @@
 //!   shape, a paragraph or a run is held with it, so a style that holds only what cells read is **kept as nothing** (a style of its own for each shape would be charged twice, by the
 //!   cells and by the element). The common graphic and paragraph styles are style sheets of the model: what they hold that no cell reads is in their own slot (`Style.ext.odf`), and
 //!   they are not kept here.
+//!   **An automatic style of those families that nothing names** (it has no name, no shape, paragraph or run found it, or it is the second of a name its container holds)
+//!   is kept **whole**, in the container `unused` (`content.xml`'s) or `unused-styles` (`styles.xml`'s), in the place its remainder had when there is one; the second of a name is held under
+//!   a name no style of the part holds (`StyleSet::hold_unused`, which runs once each part's pages are read).
 //!   **The family text** of a [`KeptStyle`] is `<container>:<kind>`: the container is `common` (`office:styles`), `master` (a master page of `office:master-styles` that holds no
 //!   shape, kept whole, `pages.rs`) or `auto` (an `office:automatic-styles` of either part: the same word for `styles.xml`'s and `content.xml`'s, so that a flat
 //!   drawing, which has one container of them, reads as the package that holds the same elements; `styles.xml`'s are held first), and the kind is the
@@ -40,11 +43,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_container::xml::El;
-use diacraft_doc::{DefFamily, Definition, KeptStyle, MAX_DEFINITIONS, RawElement};
+use diacraft_doc::{DefFamily, Definition, KeptStyle, MAX_DEFINITIONS, RawAttrs, RawElement, RawNode};
 
 use super::Reader;
 use super::names::{Names, Ns};
-use super::shapes::{element_cost, raw_element};
+use super::shapes::{element_cost, raw_element, raw_element_in};
 use super::styles::File;
 use crate::error::OdgError;
 use crate::package::Package;
@@ -62,6 +65,11 @@ pub(crate) enum Container {
     Auto,
     /// `office:master-styles`: a master page that holds no shape, kept whole.
     Master,
+    /// The automatic styles of `content.xml` of the graphic, paragraph and text families that **nothing names**, kept whole: a style with no name, one that no shape, paragraph
+    /// or run found, and the second of a name a container holds twice.
+    Unused,
+    /// The same of `styles.xml`.
+    UnusedStyles,
 }
 
 impl Container {
@@ -75,6 +83,8 @@ impl Container {
             Container::Common => "common",
             Container::Auto => "auto",
             Container::Master => "master",
+            Container::Unused => "unused",
+            Container::UnusedStyles => "unused-styles",
         }
     }
 }
@@ -88,6 +98,85 @@ const FAMILIES: [(&str, DefFamily, &str); 6] = [
     ("stroke-dash", DefFamily::StrokeDash, "stroke dash definitions"),
     ("fill-image", DefFamily::FillImage, "fill image definitions"),
 ];
+
+/// **Puts back what the writer carried in attributes of DiaCraft's own on the properties of a style kept whole** (`write::model::forms`): the style is held as a file of an
+/// earlier version of ODF had it, so that a read of the file a save made gives the model the read of the file that was saved gave.
+///
+/// * `diacraft:older-enable-numbering` on `style:paragraph-properties` is `text:enable-numbering` again, **in the place it stood**, where the prefix of that name means the standard's text
+///   namespace where the element is and the element holds no attribute of that name;
+/// * `diacraft:older-font-weight` and its four kin on `style:text-properties` give back the exact value of the attribute they stand for **while that attribute is the value the writer wrote
+///   for it** (`ext::odf14::carried_still`); a carrier another program outdated is taken out and the attribute stays as it is.
+///
+/// The declaration of the prefix on the element goes with the last carrier of it when it binds DiaCraft's namespace, the element holds no child and no other attribute that uses the prefix, as
+/// the writer made it. One look at each attribute of the properties elements that are children of the style, counted among the attributes seen, and nothing is copied but the attributes that
+/// change (the style was charged when it was copied).
+fn restore_forms<'t>(r: &mut Reader, names: &Names<'t>, style: &mut RawElement) {
+    use crate::ext::odf14;
+    for node in style.children.iter_mut() {
+        let RawNode::Element(props) = node else { continue };
+        let holder = props.name.rsplit(':').next().unwrap_or_default().to_owned();
+        if !matches!(holder.as_str(), "paragraph-properties" | "text-properties") {
+            continue;
+        }
+        r.saw_attrs(props.attrs.len());
+        // The element's own declarations, and the names it holds, by maps: every look below is one step, whatever the number of attributes.
+        let own: HashMap<&str, &str> = props.attrs.iter().filter_map(|(k, v)| Some((crate::write::kept::declared_by(k)?, v))).collect();
+        let uri = |prefix: &str| own.get(prefix).copied().or_else(|| names.uri_of_prefix(prefix));
+        // The local name of an attribute of DiaCraft's own that is a carrier.
+        let carrier_local = |name: &str| -> Option<String> {
+            let (prefix, local) = name.split_once(':')?;
+            let is_carrier =
+                super::names::ns_of_uri(uri(prefix)?) == Ns::Diacraft && (odf14::is_value_carrier(local) || odf14::is_move_carrier(local));
+            is_carrier.then(|| local.to_owned())
+        };
+        // The carriers, by their local name (the first of each).
+        let mut carried: HashMap<String, String> = HashMap::new();
+        for (k, v) in props.attrs.iter() {
+            if let Some(local) = carrier_local(k) {
+                carried.entry(local).or_insert_with(|| v.to_owned());
+            }
+        }
+        if carried.is_empty() {
+            continue;
+        }
+        let mut present: HashSet<String> = props.attrs.iter().map(|(k, _)| k.to_owned()).collect();
+        let mut out: Vec<(String, String)> = Vec::with_capacity(props.attrs.len());
+        for (k, v) in props.attrs.iter() {
+            if let Some(local) = carrier_local(k) {
+                // A carrier of an attribute the schemas have no place for: the attribute, in its place, when its name means what it did and the element holds none of it (a second carrier of
+                // the same attribute gives none either: the first has made it).
+                if let Some((qname, ns_uri)) = odf14::carried_on_properties(&holder, &local)
+                    && qname.split_once(':').and_then(|(prefix, _)| uri(prefix)) == Some(ns_uri)
+                    && present.insert(qname.to_owned())
+                {
+                    out.push((qname.to_owned(), v.to_owned()));
+                }
+                // (A carrier of a value is read with the attribute it stands for, below.)
+                continue;
+            }
+            // An attribute of the group `Style` whose exact value a carrier still gives.
+            let exact = k
+                .split_once(':')
+                .filter(|_| holder == "text-properties")
+                .and_then(|(prefix, local)| Some((odf14::space_of(uri(prefix)?)?, local)))
+                .and_then(|(space, local)| odf14::listed(space, local))
+                .and_then(|(kind, carrier)| odf14::carried_still(kind, carried.get(carrier)?, v));
+            out.push((k.to_owned(), exact.unwrap_or(v).to_owned()));
+        }
+        // The declaration the writer made for the carriers goes with them, when nothing else of the element needs it.
+        let declaration = props.attrs.iter().find_map(|(k, _)| carrier_local(k).and(k.split_once(':')).map(|(prefix, _)| format!("xmlns:{prefix}")));
+        if let Some(declaration) = declaration
+            && own.get(declaration.trim_start_matches("xmlns:")).is_some_and(|uri| diacraft_doc::is_diacraft_urn(uri))
+            && props.children.is_empty()
+        {
+            let prefix = declaration.trim_start_matches("xmlns:").to_owned();
+            if !out.iter().any(|(n, _)| n.split_once(':').is_some_and(|(p, _)| p == prefix)) {
+                out.retain(|(n, _)| *n != declaration);
+            }
+        }
+        props.attrs = RawAttrs::from_pairs(out);
+    }
+}
 
 /// The document's ODF data as the reader gathers it. See the module documentation.
 #[derive(Default)]
@@ -117,7 +206,9 @@ impl DocData {
         let family = format!("{}:{kind}", container.word());
         r.take_items(RECORD_ITEMS.saturating_add(element_cost(el)))?;
         r.take_bytes(family.len().saturating_add(name.len()))?;
-        let element = Arc::new(raw_element(el));
+        let mut whole = raw_element(el);
+        restore_forms(r, names, &mut whole);
+        let element = Arc::new(whole);
         if container == Container::Auto && kind == "drawing-page" && !name.is_empty() {
             self.drawing_pages.entry(name.to_owned()).or_insert_with(|| Arc::clone(&element));
         }
@@ -125,10 +216,48 @@ impl DocData {
         Ok(())
     }
 
-    /// Holds `element`, what an automatic style of the graphic, paragraph or text family holds that no cell reads, as a style of `container` and `kind` (already charged).
-    pub(crate) fn push_style(&mut self, container: Container, kind: &str, name: &str, element: RawElement) {
+    /// Holds `element`, what an automatic style of the graphic, paragraph or text family holds that no cell reads, as a style of `container` and `kind` (already charged). Gives its place among
+    /// the kept styles.
+    pub(crate) fn push_style(&mut self, container: Container, kind: &str, name: &str, element: RawElement) -> usize {
         let family = format!("{}:{kind}", container.word());
+        let at = self.styles.len();
         self.styles.push(KeptStyle { family: Arc::from(family), name: Arc::from(name), element: Arc::new(element) });
+        at
+    }
+
+    /// Holds `el`, an automatic style of the graphic, paragraph or text family (`kind`) that nothing names, **whole**, as a style of the container `unused` of its part (`file`), under `name` (the
+    /// name it has, or the one it is given when its container holds that name twice). `replace` is the place of the remainder the style was given when it was read, which the whole style
+    /// takes over (the style is then held once). Charged before it is copied.
+    #[allow(clippy::too_many_arguments)] // the pieces of one kept style, named where they come from
+    pub(crate) fn keep_unused<'t>(
+        &mut self,
+        r: &mut Reader,
+        names: &Names<'t>,
+        file: File,
+        kind: &str,
+        name: &str,
+        el: &'t El,
+        replace: Option<usize>,
+    ) -> Result<(), OdgError> {
+        let container = if file == File::Styles { Container::UnusedStyles } else { Container::Unused };
+        let family = format!("{}:{kind}", container.word());
+        r.take_items(RECORD_ITEMS.saturating_add(element_cost(el)))?;
+        r.take_bytes(family.len().saturating_add(name.len()))?;
+        let mut element = raw_element_in(r, names, el)?;
+        restore_forms(r, names, &mut element);
+        // The name the style is held under is written as its `style:name`, whatever the file spelled (the second of a name is given one of its own).
+        let attrs = names.attrs(el);
+        if let Some(own) = attrs.iter().find(|a| a.ns == Ns::Style && a.local == "name")
+            && own.value != name
+        {
+            element.attrs = RawAttrs::from_pairs(element.attrs.iter().map(|(k, v)| (k, if k == own.name { name } else { v })));
+        }
+        let kept = KeptStyle { family: Arc::from(family), name: Arc::from(name), element: Arc::new(element) };
+        match replace.and_then(|at| self.styles.get_mut(at)) {
+            Some(slot) => *slot = kept,
+            None => self.styles.push(kept),
+        }
+        Ok(())
     }
 
     /// The automatic drawing-page style called `name` in `content.xml`, as held.

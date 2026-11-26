@@ -340,6 +340,80 @@ pub const UI_COMMANDS: &[UiCommand] = &[
         shortcut: None,
         params: "on: true or false, and without it the tab is toggled",
     },
+    UiCommand {
+        id: "window.shapesheet",
+        label: "Show ShapeSheet",
+        menu: &["Developer", "Shape Design"],
+        shortcut: None,
+        params: "of: text, shape or page or document or style or master, and without it the sheet of the first shape selected, or of the page on view when none is; \
+                 id: whole number, the shape (of shape), or the shape of the master (of master); \
+                 page: whole number, the page of the shape, or the page itself (of page), default the page on view; \
+                 style: whole number, the style (of style); \
+                 master: whole number, the master (of master), whose page sheet opens unless id names a shape of it. \
+                 It opens the sheet in a tab of the sheet area, or brings forward the tab that shows that sheet already, and gives the sheet the focus",
+    },
+    UiCommand {
+        id: "window.sheetTab",
+        label: "Show a ShapeSheet Tab",
+        menu: &["Developer", "Shape Design"],
+        shortcut: None,
+        params: "tab: whole number from 0, or text, the title of the tab: the tab comes on top",
+    },
+    UiCommand {
+        id: "window.sheetClose",
+        label: "Close a ShapeSheet Tab",
+        menu: &["Developer", "Shape Design"],
+        shortcut: None,
+        params: "tab: whole number from 0, or text, the title of the tab, and without it the tab on top: the tab closes, and the sheet area goes with the last one",
+    },
+    UiCommand {
+        id: "window.sheetDock",
+        label: "Dock the ShapeSheet",
+        menu: &["Developer", "Shape Design"],
+        shortcut: None,
+        params: "at: text, below or beside or fill: where the sheet area sits (beside is shown below while the middle band is narrower than 640 points)",
+    },
+    UiCommand {
+        id: "window.sheetView",
+        label: "Formulas and Values",
+        menu: &["ShapeSheet Design", "View"],
+        shortcut: None,
+        params: "formulas: true or false, whether a cell box shows its formula; values: true or false, whether it shows its value (both are on at first, and at least one stays on)",
+    },
+    UiCommand {
+        id: "window.sheetSections",
+        label: "Show Sections",
+        menu: &["ShapeSheet Design", "View"],
+        shortcut: None,
+        params: "shown: array of text, the names of the sections to show, as the sheet names them (Shape Transform, Geometry1, User), the others being hidden, and without it every section shows",
+    },
+    UiCommand {
+        id: "window.sheetCollapse",
+        label: "Fold or Open a Section",
+        menu: &["ShapeSheet Design", "View"],
+        shortcut: None,
+        params: "section: text, the name of a section of the sheet on top, in any letter case; open: true or false, and without it the section is folded or opened the other way",
+    },
+    UiCommand {
+        id: "window.sheetSelect",
+        label: "Select a Cell of the ShapeSheet",
+        menu: &["ShapeSheet Design", "View"],
+        shortcut: None,
+        params: "cell: text, the reference of a cell as `sheet.read` gives it in `ref` (Width, Geometry1.X2, Prop.Cost.Value), or with section the name of a cell of it; \
+                 section: text, the name of a section of the sheet on top; \
+                 row: whole number or text, a row of the section as `sheet.read` gives it (a number, or a name), and with no cell the whole row is selected. \
+                 The selection is brought on view",
+    },
+    UiCommand {
+        id: "window.sheetEdit",
+        label: "Edit a ShapeSheet Cell",
+        menu: &["ShapeSheet Design", "Editing"],
+        shortcut: None,
+        params: "text: text, the formula to type in the selected cell: it begins an edit there, or replaces the text of the edit that is open; \
+                 commit: true, the edit is committed as the formula bar's accept does it (one sheet.set_cell, the selection stays); \
+                 cancel: true, the edit is given up and nothing is sent. \
+                 With none of them an edit begins on the formula's own text. What the engine answered is in the answer's sheet.last: a refused text is an answer, with its words and the fault marked, and the edit stays open",
+    },
     UiCommand { id: "page.select", label: "Go to Page", menu: &["Page"], shortcut: None, params: "id: whole number, the id of the page to show" },
     UiCommand { id: "tool.pointer", label: "Pointer Tool", menu: &["Home", "Tools"], shortcut: Some("Cmd+1"), params: "none" },
     UiCommand { id: "tool.connector", label: "Connector Tool", menu: &["Home", "Tools"], shortcut: Some("Cmd+3"), params: "none" },
@@ -527,7 +601,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
         label: "Page Setup",
         menu: &["Design", "Page Setup"],
         shortcut: None,
-        params: "tab: text, Print Setup, Page Size, Drawing Scale or Page Properties: the Page Setup dialog opens on it for the page on view (the dialog changes nothing until its OK); \
+        params: "tab: text, Print Setup, Page Size, Drawing Scale, Page Properties or Layout and Routing: the Page Setup dialog opens on it for the page on view (the dialog changes nothing until its OK); \
                  page: whole number, optional, the id of the page to set up instead of the page on view; \
                  close: true to close the dialog without sending anything",
     },
@@ -1038,6 +1112,16 @@ impl DiacraftApp {
             }
             // The dialog sends `snap.set`, which needs a document.
             "window.snapGlue" => self.command_enabled("snap.set"),
+            // The ShapeSheet window: a sheet opens on a drawing, and the rest act on a sheet that is open (`sheet/mod.rs`).
+            "window.shapesheet" => self.sheet_open_verdict("{}"),
+            "window.sheetTab"
+            | "window.sheetClose"
+            | "window.sheetDock"
+            | "window.sheetView"
+            | "window.sheetSections"
+            | "window.sheetCollapse"
+            | "window.sheetSelect"
+            | "window.sheetEdit" => self.sheet_acts_verdict(),
             // The Insert tab: a picture needs a document, Link the one shape selected, Field and Symbol a text box that is open or the one shape selected.
             "window.insertPicture" => self.command_enabled("insert.picture"),
             "window.callout" => self.callout_enabled(),
@@ -1401,6 +1485,15 @@ impl DiacraftApp {
                     self.open_licenses();
                 }
             }
+            "window.shapesheet"
+            | "window.sheetTab"
+            | "window.sheetClose"
+            | "window.sheetDock"
+            | "window.sheetView"
+            | "window.sheetSections"
+            | "window.sheetCollapse"
+            | "window.sheetSelect"
+            | "window.sheetEdit" => self.sheet_window_command(id, p)?,
             "window.pane" => self.pane_command(text(id, p, "pane")?, flag(id, p, "shown")?)?,
             "window.paneDock" => {
                 let with = match p.get("with") {
@@ -1690,7 +1783,11 @@ impl DiacraftApp {
             // Re-Layout Page: the style the Configure Layout dialog has (`null` when closed), whether Spacing Options is open, and the Page Breaks box.
             map.insert("relayoutDialog".to_owned(), json!(self.relayout_dialog_style()));
             map.insert("spacingDialog".to_owned(), json!(self.spacing_dialog_open()));
+            // The Page Setup dialog's Layout and Routing draft, its Spacing dialog and its preview (`null` while the dialog is closed; `page_setup/routing.rs`).
+            map.insert("pageSetupRouting".to_owned(), self.page_setup_routing_state());
             map.insert("pageBreaks".to_owned(), json!(self.page_breaks_box()));
+            // The ShapeSheet windows: tabs, dock, toggles, focus, the sections and lines of the tab on top (`sheet/mod.rs`).
+            map.insert("sheet".to_owned(), self.sheet_state_json());
         }
         state
     }
@@ -1766,6 +1863,7 @@ impl DiacraftApp {
             org_chart: self.org_chart_present(),
             container: self.container_selected(),
             swimlane: self.swimlane_present(),
+            sheet: self.sheet_tab_shown(),
         }
     }
 

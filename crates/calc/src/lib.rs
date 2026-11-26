@@ -35,6 +35,7 @@ mod commit;
 mod compare;
 mod convert;
 mod cycle;
+mod entry;
 mod eval;
 mod facts;
 mod field_text;
@@ -53,6 +54,7 @@ mod fn_path;
 mod fn_text;
 mod fn_trig;
 mod index;
+mod locate;
 mod names;
 mod ops;
 mod pathwalk;
@@ -79,14 +81,17 @@ mod kani_proofs;
 pub use cells::{CellEval, CellKind};
 pub use changes::{Changes, Since, changes_between, changes_between_with};
 pub use commit::{CommitReport, Scope, commit, commit_changed, commit_changed_with, commit_in, write_value};
+pub use entry::{EvalResult, Evaluated, evaluate_text, evaluate_text_with};
 pub use eval::{Budget, CellAddress, Clock, EvalCtx, EvalOptions, EvalStats, Evaluator, FileInfo, OperandMode};
 pub use field_text::{clock_at, field_picture, field_text, utc_iso};
 pub use fn_measure::Fonts;
 pub use index::{MAX_KEPT_BYTES, ReaderIndex};
+pub use locate::Locator;
 pub use recalc::{
     Calculator, Difference, DifferenceKind, FunctionScore, Native, NotFormulas, RecalcReport, SheetPlace, Skipped, ValueClass, class_of, recalc_all,
     recalc_all_salted, recalc_all_using, recalc_all_with,
 };
+pub use refs::{MAX_REFERENCE_BYTES, RefError, cell_address, reference_name};
 pub use registry::function_names;
 pub use salt::{MAX_MISSES_KEPT, RealSalt, SaltClass, SaltMiss, SaltPolicy, SaltTally};
 pub use store::{Encoded, decode, encode, iso_to_serial, serial_to_iso};

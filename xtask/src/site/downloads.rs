@@ -138,6 +138,7 @@ mod tests {
             assets,
             version: "0.2.0".into(),
             licences: Vec::new(),
+            comparison: None,
         }
     }
 

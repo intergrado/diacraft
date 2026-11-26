@@ -1,0 +1,5332 @@
+# DiaCraft feature comparison matrix: the data of the comparison page of the website.
+# How to read it, the rules and the sources are in docs/parity-matrix.md. Cells come from public documentation, not from
+# running the apps; LibreOffice was also run as a black box to read its file filters, Gallery themes and shape handles.
+
+version = 1
+checklist = "docs/parity-checklist.md"
+values = ["Full", "Partial", "Not yet", "unknown"]
+
+[rules]
+diacraft = "checklist: Full if every checklist row named is D, Not yet if every one is M, otherwise Partial; manual: the value given, re-read from its doc at each release"
+reference = "Full for a row of checklist rows (they are the reference app's desktop features); edition from the vendor's comparison of its plans; other rows say why"
+others = "from the product's public documentation; unknown where no source settles it; the page shows unknown as ?"
+only = "an item is listed as DiaCraft only when every published column lacks it (lacks = \"yes\")"
+
+[sources]
+inventory = "the checklist rows: features of the reference app's desktop edition, each from the vendor's public support pages, read 2026-10-31"
+compare-plans = "the vendor's public page comparing its versions and plans, read 2026-10-31"
+mcp-server-docs = "the vendor's public documentation of its desktop MCP server, read 2026-11-26"
+absent = "not found in the documentation read"
+
+[[area]]
+key = "drawing"
+label = "Drawing and editing"
+
+[[area]]
+key = "shapes"
+label = "Shapes and stencils"
+
+[[area]]
+key = "connectors"
+label = "Connectors"
+
+[[area]]
+key = "text"
+label = "Text"
+
+[[area]]
+key = "shapesheet"
+label = "ShapeSheet and formulas"
+
+[[area]]
+key = "layers-themes"
+label = "Layers, containers and themes"
+
+[[area]]
+key = "pages"
+label = "Pages"
+
+[[area]]
+key = "diagrams"
+label = "Diagram types"
+
+[[area]]
+key = "data"
+label = "Data"
+
+[[area]]
+key = "files"
+label = "Files and formats"
+
+[[area]]
+key = "export"
+label = "Export and print"
+
+[[area]]
+key = "review"
+label = "Collaboration and review"
+
+[[area]]
+key = "automation"
+label = "Automation and developer"
+
+[[area]]
+key = "platforms"
+label = "Platforms"
+
+[[row]]
+area = "drawing"
+id = "drawing-select"
+feature = "Select shapes by click, area, lasso or type"
+checklist = [
+  "Select a shape by clicking",
+  "Add to and remove from a selection",
+  "Primary shape in a multiple selection",
+  "Area selection",
+  "Lasso selection",
+  "Select partly enclosed shapes",
+  "Select all",
+  "Select by Type",
+  "Clear the selection",
+  "Keyboard focus and selection",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/18010000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/keyboard.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/guide/select_object.html",
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "click, Shift+click, a selection frame, Select All and Tab from object to object; the foundation's comparison lists no lasso; no select-by-type or partly-enclosed option documented"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/getting-started/basic-flowchart/",
+  "https://www.drawio.com/docs/manual/export/export-to-svg/",
+  "https://www.drawio.com/docs/reference/configure-diagram-editor/",
+]
+read = "2026-11-26"
+note = "click, Shift+click, Select All, Select Vertices and Select Edges (by type), and an intersecting rubber band as a configuration option; no lasso or primary shape documented"
+
+[[row]]
+area = "drawing"
+id = "drawing-move"
+feature = "Move and resize shapes by dragging, nudging or typed values"
+checklist = [
+  "Move by dragging",
+  "Nudge with arrow keys",
+  "Move Shapes by distance",
+  "Resize with handles",
+  "Resize a 1-D shape by its endpoints",
+  "Size & Position window",
+  "Units and arithmetic in Size & Position",
+  "Pin position",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "Move Shapes by distance is an add-on the vendor's page names up to the 2019 release" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05230000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/keyboard.html",
+]
+read = "2026-11-26"
+note = "drag, arrow keys by one grid unit, the Position and Size dialog (position, size, base point); no move by distance and angle"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/arrange-tab/",
+  "https://www.drawio.com/docs/manual/editor/alignment-tools/",
+]
+read = "2026-11-26"
+note = "drag, Shift+arrow by grid steps, exact Left, Top, Width and Height in the Arrange tab; no pin point or move by distance and angle"
+
+[[row]]
+area = "drawing"
+id = "drawing-rotate"
+feature = "Rotate and flip"
+checklist = [
+  "Rotate by handle",
+  "Rotate by typed angle",
+  "Rotate 90 and flip",
+  "Rotate or flip a whole diagram",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/rotate_object.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05240000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/menu/submenu_rotateflip.html",
+]
+read = "2026-11-26"
+note = "rotate by handle and by typed angle, flip both ways; no command that turns a whole diagram as one"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/arrange-tab/",
+]
+read = "2026-11-26"
+note = "rotate handle, typed angle, rotate by 90 degrees, flip; no command that turns a whole diagram as one"
+
+[[row]]
+area = "drawing"
+id = "drawing-clipboard"
+feature = "Cut, copy, paste, Paste Special, duplicate and delete"
+checklist = [
+  "Duplicate by Ctrl-drag",
+  "Cut, copy and paste",
+  "Duplicate command",
+  "Delete",
+  "Paste as hyperlink",
+  "Paste Special",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/02070000.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/duplicate_object.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/04/01020000.html",
+]
+read = "2026-11-26"
+note = "cut, copy, paste, Paste Special, the Duplicate dialog and Ctrl while dragging to copy; no paste as hyperlink"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/shape-duplicate/",
+  "https://www.drawio.com/docs/getting-started/basic-flowchart/",
+]
+read = "2026-11-26"
+note = "cut, copy, paste, Duplicate (Ctrl+D), Ctrl+drag to clone and delete; no Paste Special with a choice of formats"
+
+[[row]]
+area = "drawing"
+id = "drawing-undo"
+feature = "Multi-level undo and redo"
+checklist = [
+  "Multi-level undo and redo",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/02010000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/02020000.html",
+]
+read = "2026-11-26"
+note = "undo and redo with a list of steps"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/toolbars/",
+]
+read = "2026-11-26"
+note = "undo and redo of changes"
+
+[[row]]
+area = "drawing"
+id = "drawing-align"
+feature = "Align, distribute and space shapes"
+checklist = [
+  "Align shapes",
+  "Auto Align",
+  "Auto Align and Space",
+  "Auto Space and Spacing Options",
+  "Distribute shapes",
+  "Distribute with guides",
+  "Array shapes",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/align_arrange.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05070000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05360000.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/duplicate_object.html",
+]
+read = "2026-11-26"
+note = "align to each other or the page, Distribute Selection, and the Duplicate dialog for repeated copies; no auto align and space"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/alignment-tools/",
+  "https://www.drawio.com/docs/manual/editor/panels/arrange-tab/",
+]
+read = "2026-11-26"
+note = "align and distribute in the Arrange tab, spacing guides while dragging; no auto align and space or array command"
+
+[[row]]
+area = "drawing"
+id = "drawing-order"
+feature = "Bring to front and send to back"
+checklist = [
+  "Bring to front and send to back",
+  "Bring forward and send backward",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05250000.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/align_arrange.html",
+]
+read = "2026-11-26"
+note = "bring to front, forward, backward and send to back"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/move-shapes-forwards-backwards/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#bringForward",
+]
+read = "2026-11-26"
+note = "To Front, To Back, Bring Forward and Send Backward"
+
+[[row]]
+area = "drawing"
+id = "drawing-group"
+feature = "Group, ungroup and nested groups"
+checklist = [
+  "Group and ungroup",
+  "Add to and remove from a group",
+  "Nested groups",
+  "Convert to Group",
+  "Select a shape inside a group",
+  "Group behaviour settings",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/groups.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05290000.html",
+]
+read = "2026-11-26"
+note = "group, ungroup, groups within groups, Enter Group to edit a member and add or delete members; no group behaviour settings"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/group-shapes-connectors/",
+]
+read = "2026-11-26"
+note = "group, ungroup, nested groups and selecting a shape inside a group; no group behaviour settings documented"
+
+[[row]]
+area = "drawing"
+id = "drawing-tools"
+feature = "Rectangle, ellipse, line, arc and freeform tools"
+checklist = [
+  "Rectangle and ellipse tools",
+  "Line tool",
+  "Build a shape from segments",
+  "Pencil tool",
+  "Arc tool",
+  "Freeform tool",
+  "Close a path into a filled shape",
+  "1-D and 2-D shape behaviour",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10060000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10070000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10080000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10120000.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/draw_sector.html",
+]
+read = "2026-11-26"
+note = "rectangles, ellipses, lines, arcs and sectors, polygons, curves and freeform lines, filled or not"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/freehand-drawing/",
+  "https://www.drawio.com/docs/manual/insert/insert-polygon/",
+  "https://www.drawio.com/docs/manual/insert/insert-shapes/",
+]
+read = "2026-11-26"
+note = "shapes come from the libraries; a freehand tool and a polygon drawn on a grid; no line, arc or pencil drawing tools as such"
+
+[[row]]
+area = "drawing"
+id = "drawing-points"
+feature = "Edit points and curves"
+checklist = [
+  "Edit vertices",
+  "Fit Curve",
+  "Corner rounding",
+  "Update Alignment Box",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05270000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/main0227.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/eliminate_points.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/round_corner.html",
+]
+read = "2026-11-26"
+note = "edit points (move, add, delete, smooth, close), eliminate points and round corners; no update of an alignment box"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/shape-complex-create-edit/",
+  "https://www.drawio.com/docs/manual/connectors/waypoints-connectors/",
+]
+read = "2026-11-26"
+note = "rounded corners and connector waypoints; a shape outline is edited as stencil XML, not by dragging its vertices"
+
+[[row]]
+area = "drawing"
+id = "drawing-shape-ops"
+feature = "Union, combine, fragment, intersect and subtract"
+checklist = [
+  "Union",
+  "Combine",
+  "Fragment",
+  "Intersect",
+  "Subtract",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/combine_etc.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/13140000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/13180100.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/13180200.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/13180300.html",
+]
+read = "2026-11-26"
+note = "Merge (union), Subtract, Intersect and Combine; no Fragment"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt",
+  "https://www.drawio.com/docs/manual/shapes/",
+]
+read = "2026-11-26"
+note = "no union, intersect or subtract command in the documentation or the editor's strings"
+
+[[row]]
+area = "drawing"
+id = "drawing-shape-ops-more"
+feature = "Join, trim and offset"
+checklist = [
+  "Join",
+  "Trim",
+  "Offset",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/13160000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/13170000.html",
+]
+read = "2026-11-26"
+note = "Connect joins lines into one and Break splits them; no trim or offset"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt",
+]
+read = "2026-11-26"
+note = "no join, trim or offset command found"
+
+[[row]]
+area = "drawing"
+id = "drawing-dimensions"
+feature = "Measure and dimension shapes"
+checklist = [
+  "Measure tool shapes",
+  "Dimension shapes",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10120000.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0503.html",
+]
+read = "2026-11-26"
+note = "dimension lines that calculate and show linear lengths; no angular or radial dimensions documented"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/uml/timing-diagrams/",
+]
+read = "2026-11-26"
+note = "a dimension shape in the libraries; the docs do not say that it measures by itself"
+
+[[row]]
+area = "drawing"
+id = "drawing-grid"
+feature = "Grid and rulers"
+checklist = [
+  "Show or hide the grid",
+  "Variable grid density",
+  "Fixed grid spacing",
+  "Grid origin",
+  "Show or hide rulers",
+  "Ruler position markers",
+  "Ruler subdivisions",
+  "Ruler zero point",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "mixed", source = "inventory, compare-plans", note = "gridlines are marked for Plan 1 and Plan 2, the ruler for Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/grid_and_helplines.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/01171200.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/optionen/01070300.html",
+]
+read = "2026-11-26"
+note = "grid shown or hidden with a resolution and subdivisions, rulers shown or hidden; the grid does not change density with the zoom"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/editor-grid-change/",
+]
+read = "2026-11-26"
+note = "grid shown or hidden, size and colour, rulers from the View menu; no setting of the ruler's origin or its divisions documented"
+
+[[row]]
+area = "drawing"
+id = "drawing-guides"
+feature = "Guides that shapes stick to"
+checklist = [
+  "Show or hide guides",
+  "Create and delete guides",
+  "Guide points",
+  "Glue shapes to guides",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/guides.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/04030000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/13050000.html",
+]
+read = "2026-11-26"
+note = "snap lines and snap points inserted or dragged from the rulers, shown or hidden, that objects snap to; shapes do not stay glued to a moved line"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/guides-hide-display/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt",
+]
+read = "2026-11-26"
+note = "draw.io's Guides are alignment lines shown while dragging (counted under snapping); no guides placed from the rulers"
+
+[[row]]
+area = "drawing"
+id = "drawing-snap"
+feature = "Snapping, dynamic grid and extension lines"
+checklist = [
+  "Snap on or off",
+  "Choice of snap targets",
+  "Snap strength",
+  "Dynamic grid",
+  "Shape extension lines",
+  "Isometric angle lines",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan1", source = "inventory, compare-plans", note = "gridlines and snap to grid are marked for Plan 1 and Plan 2" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/01171300.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/13140000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/13150000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/13160000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/13170000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/optionen/01070300.html",
+]
+read = "2026-11-26"
+note = "snap to the grid, snap lines, page margins, object borders and object points, with a snap range; no dynamic grid or extension lines"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/alignment-tools/",
+  "https://www.drawio.com/docs/manual/editor/panels/guides-hide-display/",
+  "https://www.drawio.com/docs/manual/shapes/snap-to-point/",
+]
+read = "2026-11-26"
+note = "snap to the grid and the page centre, Alt to drag without snapping, alignment and spacing guides; no choice of snap targets or extension lines"
+
+[[row]]
+area = "drawing"
+id = "drawing-zoom"
+feature = "Zoom and pan"
+checklist = [
+  "Scroll and zoom with the wheel",
+  "Zoom controls and keys",
+  "Zoom and pan by Ctrl+Shift",
+  "Pan & Zoom window",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/03010000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/ZoomMenu.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/20030000.html",
+]
+read = "2026-11-26"
+note = "zoom dialog, zoom menu and tools, Ctrl with the wheel; no pan and zoom overview window"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/zoom/",
+  "https://www.drawio.com/docs/manual/editor/pan-scroll/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#outline",
+]
+read = "2026-11-26"
+note = "zoom tools and keys, Ctrl with the wheel, pinch, pan, and an Outline window of the whole diagram"
+
+[[row]]
+area = "drawing"
+id = "drawing-panes"
+feature = "Task panes, Drawing Explorer and several windows"
+checklist = [
+  "Task panes show, hide and float",
+  "New window on the same drawing",
+  "Arrange, cascade and switch windows",
+  "Drawing Explorer window",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "the compare page marks the Drawing Explorer for Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/autohide.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/07010000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/navigator.html",
+]
+read = "2026-11-26"
+note = "docking and floating windows, New Window on the same document, and the Navigator listing pages and named shapes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/",
+  "https://www.drawio.com/docs/manual/editor/panels/format-panel/",
+]
+read = "2026-11-26"
+note = "shape and format panels shown or hidden; no second window on the same diagram or explorer tree documented"
+
+[[row]]
+area = "drawing"
+id = "drawing-context"
+feature = "Shortcut menus, mini toolbar and live preview"
+checklist = [
+  "Shape-specific menu commands",
+  "Mini toolbar on right-click",
+  "Live preview from galleries",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/contextmenu.html",
+]
+read = "2026-11-26"
+note = "context menus; no mini toolbar or live preview from galleries"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/menus/",
+  "https://www.drawio.com/docs/manual/styles/connector-styles/",
+]
+read = "2026-11-26"
+note = "context menus and a floating toolbar on the selection; no live preview from galleries"
+
+[[row]]
+area = "drawing"
+id = "drawing-touch"
+feature = "Touch input"
+checklist = [
+  "Touch pinch and drag",
+  "Touch tap sequence",
+  "Touch to add shapes",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "unknown"
+basis = "unknown"
+sources = [
+]
+read = "2026-11-26"
+note = "the desktop help does not describe touch input; a test on a touch screen would settle it"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/getting-started/",
+  "https://www.drawio.com/docs/diagram-types/aws-diagrams/",
+]
+read = "2026-11-26"
+note = "pinch to zoom and touch-and-hold for the context menu are documented; the touch tutorial was not read in full"
+
+[[row]]
+area = "shapes"
+id = "shapes-window"
+feature = "Shapes window with stencils, Quick Shapes and favourites"
+checklist = [
+  "Shapes window with stacked stencils",
+  "Drag a master onto the page",
+  "Minimize the Shapes window",
+  "Open a stencil from More Shapes",
+  "Close and reorder stencils",
+  "Stencil view modes",
+  "Insert a selected master by keyboard",
+  "Stamp tool",
+  "Quick Shapes",
+  "My Shapes folder and Favorites",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/gallery.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/gallery_insert.html",
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its Gallery themes read over UNO",
+]
+read = "2026-11-26"
+note = "the Gallery holds themes of objects (BPMN, flow chart, network, diagrams, shapes, icons and more) to drag into a drawing; no Quick Shapes or keyboard insert"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/shapes-panel/",
+  "https://www.drawio.com/docs/manual/editor/panels/scratchpad/",
+  "https://www.drawio.com/docs/manual/shapes/quick-add-shapes/",
+]
+read = "2026-11-26"
+note = "a shapes panel of libraries that open, close and reorder, a scratchpad of favourites and quick-add of shapes; no stamp tool"
+
+[[row]]
+area = "shapes"
+id = "shapes-search"
+feature = "Search for shapes, here and online"
+checklist = [
+  "Search for shapes",
+  "Shape search options",
+  "Search result becomes a document master",
+  "Online shape search and download",
+  "Stock images, icons and online pictures",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "mixed", source = "inventory, compare-plans", note = "online shapes (over 250,000) are marked for Plan 2 only" }
+[row.libreoffice]
+value = "unknown"
+basis = "unknown"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/gallery.html",
+]
+read = "2026-11-26"
+note = "the Gallery page read does not mention a search; the current release would settle it"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/shape-search/",
+  "https://www.drawio.com/docs/manual/editor/panels/search-omnibox/",
+]
+read = "2026-11-26"
+note = "search across the shape libraries from the shapes panel; no download of stencils from an online store"
+
+[[row]]
+area = "shapes"
+id = "shapes-custom-stencils"
+feature = "Make and edit your own stencils"
+checklist = [
+  "Create a custom stencil",
+  "Edit a stencil",
+  "Add a master by dragging a shape to a stencil",
+  "Rename and delete masters",
+  "Edit a master's icon",
+  "Share a stencil file",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/gallery.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/dragdrop_gallery.html",
+]
+read = "2026-11-26"
+note = "new Gallery themes, objects added by drag and drop, renamed and deleted; not master shapes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/custom-shape-libraries/",
+  "https://www.drawio.com/docs/reference/format-custom-shape-library/",
+]
+read = "2026-11-26"
+note = "custom libraries made, edited, filled by dragging shapes in, entries renamed or removed, and shared as files; no separate icon editing"
+
+[[row]]
+area = "shapes"
+id = "shapes-masters"
+feature = "Masters that their copies inherit from"
+checklist = [
+  "Instances inherit from their master",
+  "Edit a master",
+  "Document stencil",
+  "Master Explorer",
+  "Drop shape resizes to the drawing scale",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "the compare page marks the Document Stencil for Plan 2 only" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/gallery.html",
+]
+read = "2026-11-26"
+note = "objects from the Gallery are copies; no master that its copies inherit from is documented"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/custom-shape-libraries/",
+]
+read = "2026-11-26"
+note = "library shapes are inserted as copies; no master that its copies inherit from is documented"
+
+[[row]]
+area = "shapes"
+id = "shapes-change"
+feature = "Replace a shape and keep its connections"
+checklist = [
+  "Change Shape",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main_shape.html",
+]
+read = "2026-11-26"
+note = "no command that replaces a shape and keeps its connections in the Shape menu"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/replace-shapes/",
+]
+read = "2026-11-26"
+note = "replace one or many shapes by dropping a library shape on them; the page does not say what is kept"
+
+[[row]]
+area = "shapes"
+id = "shapes-smart"
+feature = "Smart shapes with control handles"
+checklist = [
+  "Control handles",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, the handles of preset custom shapes read over UNO",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/basicshapes.html",
+]
+read = "2026-11-26"
+note = "preset shapes such as the smiley, block arc and rounded rectangle carry adjustment handles (read over UNO)"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/circular-flowcharts/",
+  "https://www.drawio.com/docs/diagram-types/sankey-diagrams/",
+]
+read = "2026-11-26"
+note = "shapes have orange diamond handles that change their geometry"
+
+[[row]]
+area = "shapes"
+id = "shapes-protection"
+feature = "Protect shapes and the document"
+checklist = [
+  "Shape protection locks",
+  "Lock from selection",
+  "Protect Document",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05230000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/protection.html",
+]
+read = "2026-11-26"
+note = "position and size protected per object, documents opened read-only or with a password; no per-shape lock set like a protection dialog"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/lock-elements/",
+  "https://www.drawio.com/docs/manual/editor/read-only-diagram/",
+]
+read = "2026-11-26"
+note = "locked elements and a read-only mode; not each protection one by one"
+
+[[row]]
+area = "shapes"
+id = "shapes-hyperlinks"
+feature = "Shape names, tooltips, double-click actions and hyperlinks"
+checklist = [
+  "Hyperlinks on a shape",
+  "Follow a hyperlink",
+  "Back and forward after a link",
+  "Name a shape",
+  "ScreenTip on a shape",
+  "Double-click action",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/09070000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/06070000.html",
+]
+read = "2026-11-26"
+note = "objects take a name and an interaction on click, text takes hyperlinks; no tooltip on a shape"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/links-tooltips-tags/custom-links/",
+  "https://www.drawio.com/docs/manual/links-tooltips-tags/tooltips/",
+  "https://www.drawio.com/docs/manual/shapes/shape-metadata/",
+]
+read = "2026-11-26"
+note = "links on shapes, tooltips and custom links that run actions when clicked; no back and forward after a link documented"
+
+[[row]]
+area = "shapes"
+id = "shapes-pictures"
+feature = "Insert pictures"
+checklist = [
+  "Insert a picture from file",
+  "Move, resize and format a picture",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/graphic_insert.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/insert_graphic_drawit.html",
+]
+read = "2026-11-26"
+note = "insert, move, resize and format pictures"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/insert/add-images/",
+]
+read = "2026-11-26"
+note = "insert JPEG, PNG and SVG images and format them"
+
+[[row]]
+area = "shapes"
+id = "shapes-picture-edit"
+feature = "Crop and adjust pictures"
+checklist = [
+  "Crop a picture",
+  "Picture brightness and contrast",
+  "Picture image controls",
+  "Picture AutoBalance",
+  "Compress pictures",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05030800.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/colortoolbar.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/24010000.html",
+]
+read = "2026-11-26"
+note = "crop, brightness, contrast, colour and image filters; no auto balance"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/insert/image-crop/",
+]
+read = "2026-11-26"
+note = "crop; no brightness, contrast or compression controls documented"
+
+[[row]]
+area = "shapes"
+id = "shapes-charts-tables"
+feature = "Charts, tables and objects from other programs"
+checklist = [
+  "Insert a chart",
+  "Tables from shapes",
+  "Embed an object from another program",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/insert_chart.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/insert_table.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/04150000.html",
+]
+read = "2026-11-26"
+note = "charts, tables and OLE objects from other programs"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/tables/",
+  "https://www.drawio.com/docs/diagram-types/charts-in-drawio/",
+]
+read = "2026-11-26"
+note = "tables; charts are drawn by hand from shapes, not from data, and no embedded objects"
+
+[[row]]
+area = "connectors"
+id = "connectors-tool"
+feature = "Connector tool"
+checklist = [
+  "Connector tool",
+  "Connect Shapes command",
+  "Connector tool uses the selected master",
+  "Alternative connector shapes",
+  "Connector control on the Insert tab",
+  "Save a custom connector",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10100000.html",
+]
+read = "2026-11-26"
+note = "a Connectors toolbar with standard, line, straight and curved connectors and end styles; no Connect Shapes command or saved custom connector"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/connectors/connect-shapes/",
+  "https://www.drawio.com/docs/manual/styles/connector-styles/",
+]
+read = "2026-11-26"
+note = "connectors drawn from a shape's arrows or points, clone-and-connect keys, connection types (line, link, arrow, pipe) and a default style; no Connect Shapes command"
+
+[[row]]
+area = "connectors"
+id = "connectors-autoconnect"
+feature = "AutoConnect arrows that add and join shapes"
+checklist = [
+  "AutoConnect arrows and flyout",
+  "AutoConnect drag to an existing shape",
+  "Drop a master on an AutoConnect arrow",
+  "AutoConnect toggle at two levels",
+  "Which shapes the AutoConnect flyout offers",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10100000.html",
+]
+read = "2026-11-26"
+note = "connectors are drawn from glue points; no arrows that add and join shapes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/quick-add-shapes/",
+  "https://www.drawio.com/docs/manual/editor/panels/connection-arrows-hide/",
+  "https://www.drawio.com/docs/manual/connectors/connector-fixed-vs-floating/",
+]
+read = "2026-11-26"
+note = "hover arrows that offer a set of common shapes and add them connected, drag from an arrow to a shape, drop a library shape on an arrow, and one switch that hides the arrows"
+
+[[row]]
+area = "connectors"
+id = "connectors-glue"
+feature = "Glue connectors to points or to whole shapes"
+checklist = [
+  "Point-to-point glue",
+  "Shape-to-shape glue",
+  "Mixed glue on one connector",
+  "Glue master switch and targets",
+  "Glued and unglued end markers",
+  "Unglue one end by dragging",
+  "Unglue both ends with an arrow key",
+  "Glue to the shape outline or its alignment box",
+  "Which side a shape-glued 1-D shape takes",
+  "Connector to connector",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10100000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/guide/gluepoints.html",
+]
+read = "2026-11-26"
+note = "ends attach to glue points and stay attached when shapes move; dragging an end detaches it; no glue to a connector or to the whole outline documented"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/connectors/connector-fixed-vs-floating/",
+  "https://www.drawio.com/docs/manual/connectors/connectors-join/",
+  "https://www.drawio.com/docs/manual/shapes/shape-perimeter-change/",
+]
+read = "2026-11-26"
+note = "floating (whole shape) and fixed (point) ends, mixed on one connector, shown by different end markers; connectors joined through a waypoint shape; no arrow key to unglue"
+
+[[row]]
+area = "connectors"
+id = "connectors-points"
+feature = "Connection points"
+checklist = [
+  "Show connection points",
+  "Add, move and delete connection points",
+  "Inward, outward and both point types",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/guide/gluepoints.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10030200.html",
+]
+read = "2026-11-26"
+note = "glue points shown, inserted, dragged and given exit directions; no inward and outward point types"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/shape-connection-points-customise/",
+  "https://www.drawio.com/docs/manual/editor/panels/connection-points-hide/",
+]
+read = "2026-11-26"
+note = "connection points shown, hidden and edited in a dialog; no inward and outward point types"
+
+[[row]]
+area = "connectors"
+id = "connectors-styles"
+feature = "Right-angle, straight and curved connectors"
+checklist = [
+  "Right-angle connectors",
+  "Straight connectors",
+  "Curved connectors",
+  "Default connector type for a page",
+  "Routing style per page and connector",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/05170000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10100000.html",
+]
+read = "2026-11-26"
+note = "standard (right angle), line, straight and curved connectors per connector; no default connector type per page"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/connector-styles/",
+  "https://www.drawio.com/docs/manual/connectors/straight-connectors/",
+]
+read = "2026-11-26"
+note = "straight, orthogonal and curved waypoint styles per connector and a default style; no per-page setting"
+
+[[row]]
+area = "connectors"
+id = "connectors-routing"
+feature = "Connectors that route around shapes and reroute when shapes move"
+checklist = [
+  "Automatic reroute on moving shapes",
+  "Route around placeable shapes",
+  "Page spacing for routing",
+  "Move shapes away on drop",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0503.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/05170000.html",
+]
+read = "2026-11-26"
+note = "connectors stay attached and redraw when shapes move, with spacing at their ends; they do not route around other shapes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/connectors/connectors-auto-route/",
+]
+read = "2026-11-26"
+note = "auto-routed connectors go around shapes and find new paths when shapes move, with a spacing setting; shapes are not moved away on a drop"
+
+[[row]]
+area = "connectors"
+id = "connectors-edit-path"
+feature = "Edit a connector's path, reset it and reverse its ends"
+checklist = [
+  "Edit a connector path by hand",
+  "Reset Connector",
+  "Reverse Ends",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/05170000.html",
+]
+read = "2026-11-26"
+note = "line skew adjusts a connector's path and Reset line skew resets it; no reverse ends"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/connectors/waypoints-connectors/",
+  "https://www.drawio.com/docs/manual/editor/panels/arrange-tab/",
+  "https://www.drawio.com/docs/manual/connectors/connector-reverse/",
+]
+read = "2026-11-26"
+note = "waypoints dragged by hand, reset of waypoints, reverse of the ends"
+
+[[row]]
+area = "connectors"
+id = "connectors-split-heal"
+feature = "Connectors that split for a dropped shape and heal on delete"
+checklist = [
+  "Connector splits when a shape drops on it",
+  "Healing a connector when a shape is deleted",
+  "Delete connectors with their shape",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10100000.html",
+]
+read = "2026-11-26"
+note = "no splitting of a connector by a dropped shape or healing on delete documented"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/connectors/connectors-join/",
+  "https://www.drawio.com/docs/manual/shapes/shapes-delete-connections/",
+]
+read = "2026-11-26"
+note = "a waypoint shape dropped on a connector joins into it, and Shift with Delete removes a shape with its connectors; no healing documented"
+
+[[row]]
+area = "connectors"
+id = "connectors-jumps"
+feature = "Line jumps where connectors cross"
+checklist = [
+  "Show line jumps",
+  "Line jump style",
+  "Which connector carries the jump",
+  "Line jump size",
+  "Line jump direction on a connector",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/05170000.html",
+]
+read = "2026-11-26"
+note = "the connector properties have no line jumps"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/connector-styles/",
+  "https://www.drawio.com/docs/reference/diagram-generation/style-reference/",
+]
+read = "2026-11-26"
+note = "line jumps drawn as an arc, a gap or a sharp bend, with a jump size; which connector jumps and its direction are not settable"
+
+[[row]]
+area = "connectors"
+id = "connectors-text"
+feature = "Text on connectors"
+checklist = [
+  "Text on a connector",
+  "Move connector text along the line",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/01140000.html",
+]
+read = "2026-11-26"
+note = "text typed on a line by double-clicking it; moving the text along the line is not documented"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/connectors/connector-labels/",
+]
+read = "2026-11-26"
+note = "several labels per connector, dragged along it by a handle"
+
+[[row]]
+area = "connectors"
+id = "connectors-layout"
+feature = "Automatic layout of a page"
+checklist = [
+  "Re-Layout Page",
+  "Layout placement, flip and spacing options",
+  "Layout on a selection",
+  "Exclude a shape from layout",
+  "Avoid Page Breaks option",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main_shape.html",
+]
+read = "2026-11-26"
+note = "no automatic layout command in Draw"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/menus/arrange-layout-menu/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#excludeSelection",
+]
+read = "2026-11-26"
+note = "many layouts from Arrange > Layout on the page or a selection, and selected cells can be excluded; no avoid-page-breaks option"
+
+[[row]]
+area = "text"
+id = "text-on-shapes"
+feature = "Type text on shapes"
+checklist = [
+  "Type text on a selected shape",
+  "Double-click to edit text",
+  "Auto zoom while editing small text",
+  "Enter key in shape text",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/text_enter.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/13180000.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0213.html",
+]
+read = "2026-11-26"
+note = "double-click or quick editing to type on a shape, Enter for a new paragraph; no zoom while editing small text"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/text/style-text/",
+  "https://www.drawio.com/docs/manual/text/labels-add/",
+]
+read = "2026-11-26"
+note = "select a shape and type, double-click to edit; no zoom while editing small text"
+
+[[row]]
+area = "text"
+id = "text-boxes"
+feature = "Text boxes and the text block tool"
+checklist = [
+  "Text tool and text boxes",
+  "Vertical text box",
+  "Text Block tool",
+  "Rotate text",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/text_enter.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/rotate_object.html",
+]
+read = "2026-11-26"
+note = "text boxes, vertical text for Asian languages, rotated text boxes; no separate tool to move a shape's text block"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/text/labels-add/",
+  "https://www.drawio.com/docs/manual/text/writing-direction/",
+  "https://www.drawio.com/docs/manual/shapes/position-labels/",
+]
+read = "2026-11-26"
+note = "text shapes, vertical writing direction, labels moved and rotated by their handles"
+
+[[row]]
+area = "text"
+id = "text-font"
+feature = "Font, size, colour, bold, italic and underline"
+checklist = [
+  "Font and size",
+  "Font colour",
+  "Bold, italic and underline",
+  "Strikethrough",
+  "Case changes",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05020000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05020200.html",
+]
+read = "2026-11-26"
+note = "font, size, colour, bold, italic, underline, strikethrough and case"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/text/style-text/",
+  "https://www.drawio.com/docs/manual/styles/text-styles/",
+]
+read = "2026-11-26"
+note = "font, size, colour, bold, italic, underline and strikethrough; no case change command"
+
+[[row]]
+area = "text"
+id = "text-font-more"
+feature = "Subscript, superscript, double underline and other character effects"
+checklist = [
+  "Double underline",
+  "Subscript and superscript",
+  "Font width scale",
+  "Overline",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05020200.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05110300.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05020500.html",
+]
+read = "2026-11-26"
+note = "double underline and overline, subscript and superscript, and a character width scale"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/text/superscript-subscript/",
+]
+read = "2026-11-26"
+note = "subscript and superscript; no double underline, overline or width scale documented"
+
+[[row]]
+area = "text"
+id = "text-paragraph"
+feature = "Paragraph alignment, indents, spacing, margins and tab stops"
+checklist = [
+  "Horizontal paragraph alignment",
+  "Vertical text alignment",
+  "Indents and paragraph spacing",
+  "Text block margins and text background",
+  "Text ruler",
+  "Tab stops",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05030000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/tabs.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05080000.html",
+]
+read = "2026-11-26"
+note = "alignment in a drawing shape, indents, spacing and tab stops on the ruler; text block margins and a text background are not described in the pages read"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/text/text-alignment/",
+  "https://www.drawio.com/docs/manual/styles/text-styles/",
+]
+read = "2026-11-26"
+note = "horizontal and vertical alignment and spacing around the label; no indents, text ruler or tab stops"
+
+[[row]]
+area = "text"
+id = "text-lists"
+feature = "Bulleted lists"
+checklist = [
+  "Bulleted lists",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/06050000.html",
+]
+read = "2026-11-26"
+note = "bullets and numbering"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/text/labels-add/",
+]
+read = "2026-11-26"
+note = "bulleted and numbered lists in labels and text boxes"
+
+[[row]]
+area = "text"
+id = "text-fields"
+feature = "Fields, symbols and equations in text"
+checklist = [
+  "Text fields",
+  "Insert symbol",
+  "Equation Editor object",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/04990000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/04100000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/04150000.html",
+]
+read = "2026-11-26"
+note = "fields (date, time, page, file name and more), special characters, and formulas as embedded objects; no fields of shape data or geometry"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/reference/predefined-placeholders/",
+  "https://www.drawio.com/docs/manual/text/math-typesetting/",
+]
+read = "2026-11-26"
+note = "placeholders for the page, date and shape data, and mathematical typesetting; no insert-symbol dialog"
+
+[[row]]
+area = "text"
+id = "text-find"
+feature = "Find and replace text"
+checklist = [
+  "Find text",
+  "Replace text",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/02100000.html",
+]
+read = "2026-11-26"
+note = "Find & Replace"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#replaceAll",
+]
+read = "2026-11-26"
+note = "Find with Replace and Replace All"
+
+[[row]]
+area = "text"
+id = "text-rtl-asian"
+feature = "Right-to-left and East Asian text"
+checklist = [
+  "Right-to-left text direction",
+  "Right-to-left view direction",
+  "Horizontal in vertical text",
+  "Reconvert East Asian text",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/ctl.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05060000.html",
+]
+read = "2026-11-26"
+note = "right-to-left and complex text layout, Asian phonetic guides and vertical text; no reconversion of East Asian text in Draw documented"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/text/writing-direction/",
+]
+read = "2026-11-26"
+note = "right-to-left and vertical writing directions for labels"
+
+[[row]]
+area = "text"
+id = "text-spelling"
+feature = "Spelling check"
+checklist = [
+  "Check spelling across a drawing",
+  "Spelling actions",
+  "Settings for the spelling check",
+  "Check spelling as you type",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/06010000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/SpellOnline.html",
+]
+read = "2026-11-26"
+note = "a spelling dialog over the document, its actions and options, and spelling as you type"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/spell-check-diagram/",
+]
+read = "2026-11-26"
+note = "only the browser's own spell check while a label is edited; no check across a diagram"
+
+[[row]]
+area = "text"
+id = "text-proofing"
+feature = "AutoCorrect, thesaurus, translation and language settings"
+checklist = [
+  "AutoCorrect",
+  "Thesaurus",
+  "Research pane",
+  "Insights pane",
+  "Translate text",
+  "Language of shape text",
+  "Language preferences",
+  "Regional text options",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/06040000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/06020000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/06010500.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/language_select.html",
+]
+read = "2026-11-26"
+note = "AutoCorrect, thesaurus and the language of text and of the document; no research or insights pane"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/editor-language-change/",
+]
+read = "2026-11-26"
+note = "the editor's own language can be chosen; no AutoCorrect, thesaurus or translation"
+
+[[row]]
+area = "shapesheet"
+id = "shapesheet-open"
+feature = "Open the ShapeSheet of a shape, page or document"
+checklist = [
+  "Open the sheet of a shape, page or document",
+  "Sheets of other objects",
+  "Run in developer mode",
+  "Sheet stays on the object it opened with",
+  "Open each sheet in the same window",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/styles.html",
+]
+read = "2026-11-26"
+note = "Draw has no sheet of formula cells for a shape, page or document"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/diagram-source-edit/",
+  "https://www.drawio.com/docs/reference/diagram-generation/style-reference/",
+]
+read = "2026-11-26"
+note = "a shape's style is a list of properties and its data are text values; there are no formula cells"
+
+[[row]]
+area = "shapesheet"
+id = "shapesheet-read"
+feature = "Read sections, cells, formulas and values"
+checklist = [
+  "Sections, rows and cells in a sheet window",
+  "Show formulas or values",
+  "Local and inherited cell colours",
+  "Error values in cells",
+  "Show or hide sections",
+  "Collapse or expand a section",
+  "Move around a sheet with the keyboard",
+  "Drawing and sheet update together",
+  "Selecting a vertex cell marks it on the drawing",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/styles.html",
+]
+read = "2026-11-26"
+note = "Draw has no sheet of formula cells for a shape, page or document"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/diagram-source-edit/",
+  "https://www.drawio.com/docs/reference/diagram-generation/style-reference/",
+]
+read = "2026-11-26"
+note = "a shape's style is a list of properties and its data are text values; there are no formula cells"
+
+[[row]]
+area = "shapesheet"
+id = "shapesheet-edit"
+feature = "Edit formulas, with AutoComplete and function lists"
+checklist = [
+  "Edit in the cell or the formula bar",
+  "Type a new formula",
+  "Empty formula returns to inheriting",
+  "Reference a cell by clicking it",
+  "Copy a formula between cells",
+  "Formula AutoComplete",
+  "Edit a long formula in a larger editor",
+  "Insert a function from a list",
+  "Insert a cell name from a list",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/styles.html",
+]
+read = "2026-11-26"
+note = "Draw has no sheet of formula cells for a shape, page or document"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/diagram-source-edit/",
+  "https://www.drawio.com/docs/reference/diagram-generation/style-reference/",
+]
+read = "2026-11-26"
+note = "a shape's style is a list of properties and its data are text values; there are no formula cells"
+
+[[row]]
+area = "shapesheet"
+id = "shapesheet-sections"
+feature = "Add and delete sections and rows"
+checklist = [
+  "Insert a section",
+  "Delete a section",
+  "Insert a row",
+  "Delete a row",
+  "Change a row's type",
+  "Expand a row",
+  "Row commands for shape data, hyperlinks and actions",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/styles.html",
+]
+read = "2026-11-26"
+note = "Draw has no sheet of formula cells for a shape, page or document"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/diagram-source-edit/",
+  "https://www.drawio.com/docs/reference/diagram-generation/style-reference/",
+]
+read = "2026-11-26"
+note = "a shape's style is a list of properties and its data are text values; there are no formula cells"
+
+[[row]]
+area = "shapesheet"
+id = "shapesheet-trace"
+feature = "Trace formula precedents and dependents"
+checklist = [
+  "Formula Tracing window",
+  "Trace dependent cells",
+  "Trace precedent cells",
+  "Go to a traced cell",
+  "Trace back and forward",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/styles.html",
+]
+read = "2026-11-26"
+note = "Draw has no sheet of formula cells for a shape, page or document"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/diagram-source-edit/",
+  "https://www.drawio.com/docs/reference/diagram-generation/style-reference/",
+]
+read = "2026-11-26"
+note = "a shape's style is a list of properties and its data are text values; there are no formula cells"
+
+[[row]]
+area = "shapesheet"
+id = "shapesheet-style-explorer"
+feature = "Style Explorer, action tags and shape IDs"
+checklist = [
+  "Style Explorer window",
+  "Show which cells inherit from a style",
+  "Show which style a cell inherits from",
+  "Action tags on a shape",
+  "Turn action tags on or off",
+  "Show a shape's ID",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/styles.html",
+]
+read = "2026-11-26"
+note = "Draw has no sheet of formula cells for a shape, page or document"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/diagram-source-edit/",
+  "https://www.drawio.com/docs/reference/diagram-generation/style-reference/",
+]
+read = "2026-11-26"
+note = "a shape's style is a list of properties and its data are text values; there are no formula cells"
+
+[[row]]
+area = "layers-themes"
+id = "layers-assign"
+feature = "Create layers and assign shapes to them"
+checklist = [
+  "Create, rename and delete layers",
+  "Assign shapes to layers",
+  "Active layers",
+  "Layers come with shapes",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "the compare page marks layers for Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/layers.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/layer_tipps.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/layer_move.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/01/insert_layer.html",
+]
+read = "2026-11-26"
+note = "layers made, renamed and deleted, objects moved to a layer, drawing on the layer whose tab is chosen; shapes bring no layers with them"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/layers/how-layers-work/",
+  "https://www.drawio.com/docs/manual/layers/layers-add/",
+  "https://www.drawio.com/docs/manual/layers/layer-move-shapes/",
+  "https://www.drawio.com/docs/manual/layers/layers-rename/",
+]
+read = "2026-11-26"
+note = "layers added, renamed, deleted and reordered, shapes moved between them; shapes bring no layers with them"
+
+[[row]]
+area = "layers-themes"
+id = "layers-properties"
+feature = "Show, print, lock, snap and colour by layer"
+checklist = [
+  "Layer visibility",
+  "Layer printing",
+  "Layer lock",
+  "Layer snap and glue",
+  "Layer colour and transparency",
+  "Remove unreferenced layers",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "the compare page marks layers for Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/01/insert_layer.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/layer_tipps.html",
+]
+read = "2026-11-26"
+note = "visible, printable and locked per layer; no layer colour, snap and glue setting or clean-up"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/layers/hide-display-layers/",
+  "https://www.drawio.com/docs/manual/layers/layers-lock/",
+]
+read = "2026-11-26"
+note = "hidden and locked per layer; no printing, colour, snap or glue setting per layer documented"
+
+[[row]]
+area = "layers-themes"
+id = "containers-members"
+feature = "Containers that hold their members, with style, heading and fit"
+checklist = [
+  "Add a container",
+  "Container membership by drop",
+  "Members move, copy and delete with the container",
+  "Attach a shape to a container edge",
+  "Connect to a container",
+  "Select container contents",
+  "Container style and margins",
+  "Container fit and auto resize",
+  "Container heading position",
+  "Lock a container",
+  "Disband a container",
+  "List shapes",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main_shape.html",
+]
+read = "2026-11-26"
+note = "no container shapes; groups are the nearest thing"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/container-shapes/",
+  "https://www.drawio.com/docs/manual/editor/panels/arrange-tab/",
+  "https://www.drawio.com/docs/manual/shapes/list-shapes/",
+]
+read = "2026-11-26"
+note = "containers that take shapes dropped in and carry them, collapse and expand, autosize to their contents, and list shapes; no attach to an edge or disband command documented"
+
+[[row]]
+area = "layers-themes"
+id = "callouts"
+feature = "Callouts that follow their shape"
+checklist = [
+  "Add a callout",
+  "Callout follows its shape",
+  "Callout shapes from stencils",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/callouts.html",
+]
+read = "2026-11-26"
+note = "callout shapes with a pointer; they do not follow a shape"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/arrange-tab/",
+]
+read = "2026-11-26"
+note = "callout shapes in the libraries; they do not follow a shape"
+
+[[row]]
+area = "layers-themes"
+id = "themes-apply"
+feature = "Apply and remove themes"
+checklist = [
+  "Apply a theme",
+  "Apply a theme to one page or all",
+  "Remove a theme",
+  "Apply theme to new shapes",
+  "Stop a theme reaching a shape",
+  "Standard colours stay put",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "unknown"
+basis = "unknown"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/themesdialog.html",
+]
+read = "2026-11-26"
+note = "a shared help page describes document themes (theme colours for elements that refer to them) without saying whether Draw offers it; the Draw menus would settle it"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/global-style/",
+]
+read = "2026-11-26"
+note = "global style schemes restyle every shape, connector and the background in one click and can be reset; not per page"
+
+[[row]]
+area = "layers-themes"
+id = "themes-variants"
+feature = "Theme variants, swaps and custom theme colours"
+checklist = [
+  "Theme variants",
+  "Swap a theme's colours",
+  "Swap a theme's effects",
+  "Swap a theme's connector style",
+  "Theme embellishment",
+  "Custom theme colours",
+  "Text stays visible against a dark background",
+  "Theme background colour",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "unknown"
+basis = "unknown"
+sources = [
+]
+read = "2026-11-26"
+note = "see themes-apply"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/global-style/",
+]
+read = "2026-11-26"
+note = "no variants or swapped parts of a scheme documented"
+
+[[row]]
+area = "layers-themes"
+id = "styles-quick-painter"
+feature = "Quick Styles, named styles and Format Painter"
+checklist = [
+  "Apply a Quick Style",
+  "Format Painter",
+  "Format Painter on many shapes",
+  "Apply a named style",
+  "Define a named style",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/styles.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/paintbrush.html",
+]
+read = "2026-11-26"
+note = "drawing styles applied and defined, Clone Formatting; no gallery of quick styles"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/styles-copy-paste/",
+  "https://www.drawio.com/docs/manual/styles/shape-styles/",
+  "https://www.drawio.com/docs/manual/styles/default-styles/",
+]
+read = "2026-11-26"
+note = "style presets in the format panel, copy and paste of styles, a default style; no named styles"
+
+[[row]]
+area = "layers-themes"
+id = "fill-colour"
+feature = "Fill colour and transparency"
+checklist = [
+  "Fill colour",
+  "Custom colours by RGB or hex",
+  "Fill transparency",
+  "Color Palette dialog",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05210100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/color_define.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/24090000.html",
+]
+read = "2026-11-26"
+note = "fill colour, custom colours by RGB or hex, transparency and palettes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/shape-styles/",
+]
+read = "2026-11-26"
+note = "fill colour from a palette or hex code and opacity; no palette editor documented"
+
+[[row]]
+area = "layers-themes"
+id = "fill-gradient-pattern"
+feature = "Gradient and pattern fills"
+checklist = [
+  "Gradient fill",
+  "Gradient rotates with the shape",
+  "Pattern fill",
+  "Custom fill, line and line-end patterns",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/gradient.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05210100.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/lineend_define.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/linestyle_define.html",
+]
+read = "2026-11-26"
+note = "gradients, hatching and patterns, custom line styles and arrow styles; that a gradient turns with the shape is not stated"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/shape-styles/",
+  "https://www.drawio.com/docs/manual/styles/rough-style/",
+]
+read = "2026-11-26"
+note = "gradient fills and sketch fill styles; no custom patterns"
+
+[[row]]
+area = "layers-themes"
+id = "line-format"
+feature = "Line colour, weight, dashes and arrowheads"
+checklist = [
+  "Line colour",
+  "Line weight",
+  "Line dash style",
+  "Arrowheads on lines",
+  "Line transparency",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05200100.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/linestyles.html",
+]
+read = "2026-11-26"
+note = "line colour, width, style, arrow styles and transparency"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/connector-styles/",
+  "https://www.drawio.com/docs/manual/connectors/change-connector-arrows/",
+]
+read = "2026-11-26"
+note = "colour, thickness, dash pattern, arrows and opacity"
+
+[[row]]
+area = "layers-themes"
+id = "line-more"
+feature = "Line caps, compound and gradient lines"
+checklist = [
+  "Line cap",
+  "Compound line",
+  "Gradient line",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05200100.html",
+]
+read = "2026-11-26"
+note = "line caps and corner styles; no compound or gradient lines"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/connector-styles/",
+]
+read = "2026-11-26"
+note = "double-line link connections; caps and gradient lines not documented"
+
+[[row]]
+area = "layers-themes"
+id = "effects-shadow"
+feature = "Format Shape pane and drop shadows"
+checklist = [
+  "Format Shape pane with live preview",
+  "Drop shadow",
+  "Page shadow offset",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05210600.html",
+]
+read = "2026-11-26"
+note = "shadows with a position, distance, colour and transparency; no page shadow setting or live-preview pane"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/custom-shadows/",
+  "https://www.drawio.com/docs/manual/editor/panels/format-panel/",
+]
+read = "2026-11-26"
+note = "shadows with colour, offset, opacity and blur from the format panel"
+
+[[row]]
+area = "layers-themes"
+id = "effects-more"
+feature = "Reflection, glow, soft edges, bevel, 3-D rotation and sketch effects"
+checklist = [
+  "Reflection",
+  "Glow",
+  "Soft edges",
+  "Bevel",
+  "3-D rotation",
+  "Hand-drawn themes and sketch effect",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05350000.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/02/10090000.html",
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "3-D objects and effects with rotation and lighting; the foundation's own comparison lists no sketched outline style"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/styles/rough-style/",
+]
+read = "2026-11-26"
+note = "sketch and comic styles; reflection, soft edges and bevels not documented"
+
+[[row]]
+area = "pages"
+id = "pages-manage"
+feature = "Add, delete, rename, reorder and duplicate pages"
+checklist = [
+  "Add a page from the page tabs",
+  "Insert a page with chosen properties",
+  "Delete a page",
+  "Rename a page",
+  "Reorder pages by dragging a tab",
+  "Reorder pages with renumbering",
+  "Duplicate a page",
+  "Move between pages",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main_page.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/01/new_page.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/01/delete_page.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/01/rename_page.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/04120000.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/01/navigate_page.html",
+]
+read = "2026-11-26"
+note = "new, delete, rename, duplicate, move and navigate pages"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/pages/",
+]
+read = "2026-11-26"
+note = "pages added, deleted, renamed, duplicated, reordered and moved between"
+
+[[row]]
+area = "pages"
+id = "pages-move-shapes"
+feature = "Move and copy shapes between pages"
+checklist = [
+  "Drag shapes to another page tab",
+  "Copy shapes between pages and files",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/02070000.html",
+]
+read = "2026-11-26"
+note = "copy and paste between pages and documents; no drag to a page tab documented"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/pages/",
+]
+read = "2026-11-26"
+note = "copy and paste between pages; no drag to a page tab documented"
+
+[[row]]
+area = "pages"
+id = "pages-background"
+feature = "Background pages"
+checklist = [
+  "Create a background page",
+  "Turn a foreground page into a background",
+  "Assign a background to a page",
+  "Background shapes are read-only from the foreground",
+  "New page shares the latest background",
+  "Shared background takes the largest page size",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/guide/masterpage.html",
+  "https://help.libreoffice.org/latest/en-US/text/simpress/01/05120000.html",
+]
+read = "2026-11-26"
+note = "master pages hold background objects that pages show and cannot edit, and a page takes a chosen master; a page cannot become a master"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/pages/background-pages-diagrams/",
+]
+read = "2026-11-26"
+note = "any page can be the background of other pages"
+
+[[row]]
+area = "pages"
+id = "pages-borders"
+feature = "Backgrounds, borders, titles and watermarks"
+checklist = [
+  "Backgrounds gallery",
+  "Borders and Titles gallery",
+  "Watermark on a background page",
+  "Theme on a border page reaches its drawing page",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main_page.html",
+]
+read = "2026-11-26"
+note = "no gallery of backgrounds, borders and titles, and no watermark command in Draw"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/background/",
+  "https://www.drawio.com/docs/tutorials/watermark-diagrams/",
+]
+read = "2026-11-26"
+note = "background colours and images, and watermarks on locked layers or a background page; no gallery of borders and titles"
+
+[[row]]
+area = "pages"
+id = "pages-size"
+feature = "Page size, orientation and rotation"
+checklist = [
+  "Page size independent of printer paper",
+  "Page size presets and custom size",
+  "Page orientation",
+  "Page rotation by handle",
+  "View as Horizontal and View as Vertical",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05040200.html",
+]
+read = "2026-11-26"
+note = "paper format, custom size and orientation; no rotation of a page"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/page-size-scale-orientation/",
+  "https://www.drawio.com/docs/manual/pages/page-setup/",
+]
+read = "2026-11-26"
+note = "paper size, custom size and orientation per page; no rotation of a page"
+
+[[row]]
+area = "pages"
+id = "pages-fit"
+feature = "Page that grows or fits to the drawing"
+checklist = [
+  "Auto Size extends the page",
+  "Fit page to drawing",
+  "Resize the page by dragging its edge",
+  "Center the drawing on the page",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05040200.html",
+]
+read = "2026-11-26"
+note = "Fit object to paper format scales the drawing to the page; the page does not grow by itself"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/editor-page-view/",
+  "https://www.drawio.com/docs/manual/editor/increase-drawing-canvas/",
+]
+read = "2026-11-26"
+note = "a diagram can spread over several pages shown by dashed borders, or page view can be turned off; no command that fits the page to the drawing"
+
+[[row]]
+area = "pages"
+id = "pages-scale"
+feature = "Drawing scale and measurement units"
+checklist = [
+  "Drawing scale presets and custom ratio",
+  "Measurement units per page",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/measurement_units.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/optionen/01070500.html",
+]
+read = "2026-11-26"
+note = "a drawing scale and a unit of measurement for Draw; not per page"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/panels/page-size-scale-orientation/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#units",
+]
+read = "2026-11-26"
+note = "a page scale and the editor's units (points, inches, millimetres, metres); not per page"
+
+[[row]]
+area = "diagrams"
+id = "templates-start"
+feature = "Start a drawing from a template, or from your own"
+checklist = [
+  "Start a drawing from a template",
+  "Template opens its stencils",
+  "Template sets page scale, size and orientation",
+  "Choose metric or US units when starting",
+  "Template adds its own ribbon tab",
+  "Save a drawing as a custom template",
+  "Start a drawing from a custom template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01110000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/standard_template.html",
+]
+read = "2026-11-26"
+note = "new drawings from templates and your own templates saved and set as default; templates carry page settings; no stencils, unit choice or tab of their own"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/insert/insert-template/",
+  "https://www.drawio.com/docs/manual/templates/custom-template-libraries/",
+]
+read = "2026-11-26"
+note = "new diagrams from the template library and custom template libraries; no unit choice or tab of their own"
+
+[[row]]
+area = "diagrams"
+id = "templates-gallery"
+feature = "Template gallery, starter and sample diagrams"
+checklist = [
+  "Browse templates by category",
+  "Search for a template",
+  "Starter diagrams beside the blank template",
+  "Sample diagrams for the common kinds",
+  "Partner-created templates and diagrams",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "mixed", source = "inventory, compare-plans", note = "partner-created diagrams are marked for Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01110000.html",
+]
+read = "2026-11-26"
+note = "the Templates dialog organises and edits templates and saves a document as one; no starter or sample diagrams for diagram kinds"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/insert/insert-template/",
+  "https://www.drawio.com/docs/diagram-types/template-diagrams-on-github/",
+]
+read = "2026-11-26"
+note = "templates by category and subcategory with search and preview, and example diagrams; no partner gallery"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-flowchart"
+feature = "Flowcharts"
+checklist = [
+  "Basic Flowchart template",
+  "Off-page reference links two pages",
+  "Number Shapes",
+  "Work Flow Diagram template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/flowcharts.html",
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its Gallery themes read over UNO",
+]
+read = "2026-11-26"
+note = "flowchart shapes, a Flow chart theme in the Gallery and connectors; no off-page references or numbering of shapes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/getting-started/basic-flowchart/",
+  "https://www.drawio.com/docs/manual/shapes/number-shapes/",
+  "https://www.drawio.com/docs/manual/shapes/shape-metadata/",
+]
+read = "2026-11-26"
+note = "flowchart library, numbered shapes and links to other pages; no off-page reference shape that keeps two pages paired"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-swimlanes"
+feature = "Cross-functional flowcharts with swimlanes"
+checklist = [
+  "Cross-Functional Flowchart template",
+  "Swimlane orientation",
+  "Insert a swimlane",
+  "Swimlane holds its shapes",
+  "Move and resize swimlanes",
+  "Swimlane label text and direction",
+  "Phase separators",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan1", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no swimlane or cross-functional shapes in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/cross-functional-flowcharts/",
+  "https://www.drawio.com/docs/diagram-types/swimlane-diagrams/",
+]
+read = "2026-11-26"
+note = "pools and lanes as containers or table rows and columns, horizontal or vertical, added, moved and resized, holding their shapes; phase separators are table columns"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-bpmn"
+feature = "BPMN process diagrams"
+checklist = [
+  "BPMN Diagram template",
+  "BPMN shape variants by right-click",
+  "BPMN connector types",
+  "BPMN refuses non-standard styling",
+  "BPMN workflow starter templates",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its Gallery themes read over UNO",
+]
+read = "2026-11-26"
+note = "a BPMN theme of 100 objects in the Gallery; no templates or checks against the standard"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/bpmn-2-0/",
+]
+read = "2026-11-26"
+note = "a BPMN 2.0 shape library and templates; no checks against the standard"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-methods"
+feature = "Process methods: SDL, IDEF0, EPC, cause and effect, fault tree, ITIL, Six Sigma, TQM, value stream"
+checklist = [
+  "Audit Diagram template",
+  "Event-driven Process Chain template",
+  "Fault Tree Analysis template",
+  "ITIL Diagram template",
+  "Six Sigma Diagram template",
+  "House of Quality matrix",
+  "TQM Diagram template",
+  "Value Stream Map template",
+  "Cause and Effect Diagram template",
+  "SDL Diagram template",
+  "IDEF0 Diagram template",
+  "IDEF0 title block and activity boxes",
+  "IDEF0 arrow join, fork, branch and tunnel",
+  "IDEF0 node trees",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "the vendor says the process method templates are in the Professional edition and Plan 2" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/ishikawa-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/",
+  "https://www.drawio.com/docs/reference/supported-url-parameters/",
+]
+read = "2026-11-26"
+note = "cause and effect diagrams, an event-driven process chain template and a lean mapping (value stream) library; no SDL, IDEF0, fault tree, ITIL, Six Sigma or TQM content documented"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-validation"
+feature = "Check a diagram against rules"
+checklist = [
+  "Check a diagram against its rules",
+  "Issues window",
+  "Rule sets shipped with templates",
+  "Choose which rule sets are active",
+  "Import rules into a drawing",
+  "Ignore one issue",
+  "Ignore a rule",
+  "Show ignored issues",
+  "Stop ignoring an issue or rule",
+  "Go to a shape from an issue",
+  "Arrange the Issues window",
+  "Issues saved with the drawing",
+  "Write custom validation rules",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no rule checking of a diagram in the Draw help"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt",
+]
+read = "2026-11-26"
+note = "no checking of a diagram against rules in the docs or the editor's strings"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-subprocess"
+feature = "Subprocess pages linked to a shape"
+checklist = [
+  "New subprocess page for a shape",
+  "Move shapes out into a subprocess",
+  "Subprocess page keeps swimlanes",
+  "Link a shape to an existing subprocess",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main_page.html",
+]
+read = "2026-11-26"
+note = "no subprocess pages; links to other pages are not documented for shapes in Draw"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/shape-metadata/",
+  "https://www.drawio.com/docs/manual/links-tooltips-tags/custom-links/",
+]
+read = "2026-11-26"
+note = "a shape can link to another page of the diagram; no command makes a subprocess page from shapes"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-workflow-services"
+feature = "Workflow diagrams exchanged with workflow services"
+checklist = [
+  "Export a SharePoint workflow",
+  "Import a SharePoint workflow",
+  "SharePoint workflow rule set",
+  "Create a workflow from a stage view",
+  "Create a workflow diagram from the Process tab",
+  "Process repository on SharePoint",
+  "Import a cloud flow as a BPMN diagram",
+  "Microsoft SharePoint Workflow template",  # brand-ok
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "workflow export to the vendor's automation service and SharePoint workflows are marked for Plan 2 only" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no export or import of workflows"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/integrations/",
+]
+read = "2026-11-26"
+note = "no export or import of workflows to a workflow service documented"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-calendar"
+feature = "Calendars generated with dates"
+checklist = [
+  "Calendar template",
+  "Generate a month or day calendar with dates",
+  "Generate a week or multi-week calendar",
+  "Generate a year calendar",
+  "Calendar appointment shapes",
+  "Calendar multi-day events",
+  "Calendar day markers and text",
+  "Thumbnail month shape",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/",
+]
+read = "2026-11-26"
+note = "no calendar template or generated calendars documented"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-timeline"
+feature = "Timelines, Gantt charts and PERT charts"
+checklist = [
+  "Timeline template",
+  "Timeline bar with dates and scale",
+  "Timeline date formats and markings",
+  "Timeline milestones",
+  "Timeline intervals",
+  "Timeline text moves off the bar with a bracket",
+  "Today marker and elapsed time update themselves",
+  "Expanded timeline",
+  "Synchronized milestones and intervals",
+  "Change timeline, milestone and interval style",
+  "Import a Project file into a timeline",
+  "Export a timeline to a Project file",
+  "Gantt Chart template",
+  "Gantt timescale range and units",
+  "Gantt task rows and durations",
+  "Gantt milestones as zero-length tasks",
+  "Gantt summary tasks by indent",
+  "Gantt task dependencies",
+  "Gantt percent complete",
+  "Gantt bar and marker styles",
+  "Gantt data columns",
+  "Gantt working time",
+  "Gantt timescale navigation",
+  "Gantt frame and timescale width",
+  "Build a Gantt chart from a data file",
+  "PERT Chart template",
+  "PERT hierarchical summary shape",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/timeline-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/gantt-charts/",
+  "https://www.drawio.com/docs/diagram-types/dependency-graphs/",
+]
+read = "2026-11-26"
+note = "timeline, Gantt and PERT diagrams drawn from shapes, templates and tables; dates are not calculated"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-orgchart"
+feature = "Organization charts"
+checklist = [
+  "Organization Chart template",
+  "Drop a shape on its manager",
+  "Change a position's type",
+  "Org chart layout for a whole chart",
+  "Arrange one manager's subordinates",
+  "Re-layout an org chart",
+  "Fit an org chart to the page",
+  "Org chart spacing",
+  "Show or hide subordinates",
+  "Move a report left or right",
+  "Org chart shape styles",
+  "Org chart shape size controls",
+  "Org chart picture on a shape",
+  "Org chart pictures from a folder",
+  "Fields shown on org chart shapes",
+  "Team frame and dotted-line reports",
+  "Org chart across several pages",
+  "Hyperlink a person across pages",
+  "Synchronized copies of a person",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan1", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no org chart shapes or layout in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/org-charts/",
+  "https://www.drawio.com/docs/manual/layouts/org-chart-layout/",
+]
+read = "2026-11-26"
+note = "org chart shapes, templates and org chart and tree layouts; no team frames, synchronized copies or chart across pages"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-orgchart-data"
+feature = "Organization charts built from data"
+checklist = [
+  "Org chart wizard from a data file",
+  "Org chart wizard from a database or directory",
+  "Org chart wizard makes a sample data file",
+  "Org chart wizard field choices",
+  "Refresh an org chart from its data",
+  "Compare two versions of an org chart",
+  "Export org chart data",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/insert/insert-from-csv/",
+  "https://www.drawio.com/docs/diagram-types/org-charts/",
+]
+read = "2026-11-26"
+note = "an org chart built from CSV data through the CSV import; no refresh, comparison or export of the chart's data"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-mindmap"
+feature = "Brainstorming and mind maps"
+checklist = [
+  "Brainstorming Diagram template",
+  "Add main topic, subtopic and peer",
+  "Add multiple subtopics at once",
+  "Auto-arrange topics",
+  "Outline window for topics",
+  "Re-parent topics in the outline",
+  "Reorder topics in the outline only",
+  "Move a topic to a new page",
+  "Association line between topics",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/layouts/mindmap-layout/",
+  "https://www.drawio.com/docs/diagram-types/concept-maps/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#outlineHint",
+]
+read = "2026-11-26"
+note = "mind map layout and templates, topics added in a text outline, connectors between topics; no move of a topic to a new page"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-charts"
+feature = "Charts, graphs and marketing diagrams"
+checklist = [
+  "Charts and Graphs template",
+  "Bar graph shapes",
+  "3-D bar graph and axis",
+  "Line graph shape",
+  "Pie chart shape",
+  "Pie slice shapes for an emphasized slice",
+  "Graph axis labels and annotations",
+  "Marketing Charts and Diagrams template",
+  "Circle-spoke shape",
+  "Market analysis and marketing mix shapes",
+  "Matrix shape",
+  "Pyramid and triangle shapes",
+  "Venn diagram shape",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/insert_chart.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/chart_insert.html",
+]
+read = "2026-11-26"
+note = "bar, line and pie charts from data; no marketing diagram shapes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/charts-in-drawio/",
+  "https://www.drawio.com/docs/diagram-types/marketing-analysis-diagrams/",
+]
+read = "2026-11-26"
+note = "charts drawn by hand from shapes (not from data) and marketing analysis templates"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-block"
+feature = "Block, matrix, cycle, pyramid and Venn diagrams"
+checklist = [
+  "Basic Diagram template",
+  "Block Diagram template",
+  "Open-ended blocks that flow together",
+  "Tree shapes in block diagrams",
+  "Concentric layers for onion diagrams",
+  "Block Diagram With Perspective template",
+  "Second vanishing point",
+  "Depth of a perspective block",
+  "Business Matrix diagrams",
+  "Cycle diagrams",
+  "Pyramid diagrams",
+  "Venn Diagram template",
+  "Graph and Math Shapes stencil",
+  "Infographic, sticky note and icon stencils",
+  "Three-dimensional stencils and templates",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/basicshapes.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/02/blockarrows.html",
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its Gallery themes read over UNO",
+]
+read = "2026-11-26"
+note = "basic shapes, block arrows and a Diagrams theme in the Gallery; no block, pyramid, cycle or Venn templates"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/venn-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/circular-flowcharts/",
+  "https://www.drawio.com/docs/reference/supported-url-parameters/",
+]
+read = "2026-11-26"
+note = "Venn and cycle diagrams, basic, infographic and 3-D shape libraries; no perspective blocks"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-pivot"
+feature = "PivotDiagrams"
+checklist = [
+  "PivotDiagram template",
+  "Break a node down by category",
+  "PivotDiagram totals",
+  "Filter PivotDiagram nodes",
+  "Limit nodes in a breakdown",
+  "Sort a PivotDiagram breakdown",
+  "Rename PivotDiagram items",
+  "Refresh a PivotDiagram",
+  "PivotDiagram from an analysis cube",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt",
+]
+read = "2026-11-26"
+note = "no PivotDiagram-like breakdown of data"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-education"
+feature = "Education templates"
+checklist = [
+  "Algebra template",
+  "Analog Clock template",
+  "Electromagnetism template",
+  "Geometry template",
+  "Molecular Models template",
+  "Music Instruments and Notes template",
+  "Organic Compounds and Equations template",
+  "Planisphere template",
+  "School Posters template",
+  "Science Posters template",
+  "Sets template",
+  "Soccer Formations template",
+  "Tournament Fixtures template",
+  "Trigonometry template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no education templates in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/use-cases/diagrams-for-teachers/",
+  "https://www.drawio.com/docs/diagram-types/structural-formulas/",
+]
+read = "2026-11-26"
+note = "diagrams for teachers and chemical structural formulas; not the range of maths, science and sports templates"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-network"
+feature = "Network, rack, cloud architecture and directory diagrams"
+checklist = [
+  "Basic Network Diagram template",
+  "Detailed Network Diagram template",
+  "Network backbone with built-in connectors",
+  "Legend shape",
+  "Label Shapes add-on",
+  "Rack Diagram template",
+  "Rack units on the rack shape",
+  "Equipment glues into a rack",
+  "Azure Diagrams template",
+  "AWS Diagrams template",
+  "Kubernetes shapes",
+  "LDAP Directory template",
+  "Active Directory template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "mixed", source = "inventory, compare-plans", note = "network and cloud shapes are marked for Plan 1 and Plan 2, LDAP and rack diagrams for Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its Gallery themes read over UNO",
+]
+read = "2026-11-26"
+note = "a Network theme of 57 objects in the Gallery; no rack, cloud or directory shapes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/network-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/rack-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/aws-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/azure-diagrams/",
+  "https://www.drawio.com/docs/reference/supported-url-parameters/",
+]
+read = "2026-11-26"
+note = "network, rack, AWS, Azure, Google Cloud and Kubernetes shapes and templates; no network backbone shape with built-in connectors, and no LDAP or directory templates documented"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-floorplan"
+feature = "Floor plans and office layouts"
+checklist = [
+  "Floor Plan template",
+  "Room shapes",
+  "Walls glue and clean up at intersections",
+  "Doors and windows fit into walls",
+  "Wall fixtures glue to walls",
+  "Dimension a wall and type its size",
+  "Add a plan on top of a floor plan",
+  "Home Plan template",
+  "Office Layout template",
+  "Social-distancing floor plans",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/floorplans/",
+]
+read = "2026-11-26"
+note = "a floorplan library of walls, doors, windows and furniture; walls do not join and clean up by themselves"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-space-site"
+feature = "Space plans, site plans, building services plans and maps"
+checklist = [
+  "Space Plan template",
+  "Space plan startup steps",
+  "Space Explorer and Category Explorer",
+  "Space shape auto-size",
+  "Import space and resource data",
+  "Space plan display options",
+  "Site Plan template",
+  "Parking and plants glue to guides",
+  "HVAC Control Logic template",
+  "Reflected Ceiling Plan template",
+  "HVAC Plan template",
+  "Duct shapes resize by data and join by size",
+  "Duct size label",
+  "Plumbing and Piping Plan template",
+  "Electrical and Telecom Plan template",
+  "Security and Access Plan template",
+  "Plant Layout template",
+  "Directional Map template",
+  "Road and metro base width",
+  "Directional Map 3D template",
+  "Crime Scene Investigation template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/",
+  "https://www.drawio.com/docs/reference/supported-url-parameters/",
+]
+read = "2026-11-26"
+note = "no space plan, site plan, building services or directional map content documented"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-electrical"
+feature = "Electrical, logic, control and mechanical drawings"
+checklist = [
+  "Basic Electrical template",
+  "Circuits and Logic template",
+  "Industrial Control Systems template",
+  "Systems template",
+  "Fluid Power template",
+  "Part and Assembly Drawing template",
+  "Belt drawing with tangent shapes",
+  "Feature control frames",
+  "Welding symbols",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/reference/supported-url-parameters/",
+  "https://www.drawio.com/docs/diagram-types/engineering-process-flow-diagrams/",
+]
+read = "2026-11-26"
+note = "an electrical library; no mechanical drawing content"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-pid"
+feature = "Piping and instrumentation and process flow diagrams"
+checklist = [
+  "Piping and Instrumentation Diagram template",
+  "Process Flow Diagram template",
+  "Pipeline connects anywhere on equipment",
+  "Valve splits a pipeline",
+  "Component tag numbers",
+  "Renumber process components",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/engineering-process-flow-diagrams/",
+]
+read = "2026-11-26"
+note = "P&ID and process flow libraries; no tag numbering of components"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-uml-structure"
+feature = "UML class, component and deployment diagrams"
+checklist = [
+  "UML Class template",
+  "UML class members and fields",
+  "UML Component template",
+  "UML component holds other components",
+  "UML stereotype label on a shape",
+  "UML connector type and multiplicity",
+  "UML Deployment template",
+  "UML Database Notation template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan1", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/uml/class-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/uml/component-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/uml/",
+]
+read = "2026-11-26"
+note = "class, component and deployment shapes with member rows; no UML database notation"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-uml-behaviour"
+feature = "UML sequence, use case, activity, state and communication diagrams"
+checklist = [
+  "UML Sequence template",
+  "Sequence lifelines",
+  "Sequence messages",
+  "Sequence fragments",
+  "Sequence activation and destruction",
+  "UML Use Case template",
+  "UML Activity template",
+  "UML State Machine template",
+  "UML Communication template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan1", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/uml/sequence-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/uml/use-case-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/uml/activity-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/uml/state-diagrams/",
+  "https://www.drawio.com/docs/diagram-types/uml/communication-diagrams/",
+]
+read = "2026-11-26"
+note = "sequence, use case, activity, state and communication diagrams, each with its own page"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-er"
+feature = "Entity relationship diagrams (crow's foot, Chen, IDEF1X)"
+checklist = [
+  "Crow's Foot Database Notation template",
+  "Set relationship end symbols",
+  "Entity height follows its attributes",
+  "Show attribute types on an entity",
+  "Chen's Database Notation template",
+  "IDEF1X Database Notation template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan1", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "crow's foot arrow endings, per the foundation's comparison; no entity shapes or ER templates"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/entity-relationship-tables/",
+  "https://www.drawio.com/docs/tutorials/crows-foot-notation/",
+]
+read = "2026-11-26"
+note = "entity tables with rows and crow's foot relationship ends; Chen and IDEF1X notations not documented"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-database-model"
+feature = "Database models with tables and keys, and reverse engineering"
+checklist = [
+  "Database Model Diagram template",
+  "Table definition and columns",
+  "Column data types",
+  "Portable and physical data types",
+  "User-defined data types",
+  "Composite types and typed tables",
+  "Collection types on a column",
+  "Relationship creates a foreign key",
+  "Relationship cardinality",
+  "Relationship notation on a database model",
+  "Referential integrity actions",
+  "Database indexes",
+  "Database views",
+  "Check clauses, triggers and code window",
+  "Reverse engineer a database",
+  "Import a modelling tool's file",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "Draw has no database model diagrams (Base is a separate program)"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/insert/insert-sql/",
+]
+read = "2026-11-26"
+note = "entity tables generated from SQL; no keys, types or integrity rules as a model"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-dataflow-software"
+feature = "Data flow and software diagrams"
+checklist = [
+  "Data Flow Diagram template",
+  "Data Flow Model Diagram with Gane-Sarson notation",
+  "Yourdon-Coad notation shapes",
+  "COM and OLE template",
+  "Enterprise Application template",
+  "Program Structure template",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/diagram-types/data-flow-diagrams/",
+]
+read = "2026-11-26"
+note = "data flow diagram shapes; no software structure templates documented"
+
+[[row]]
+area = "diagrams"
+id = "diagrams-web-wireframe"
+feature = "Website maps and wireframes"
+checklist = [
+  "Conceptual Web Site template",
+  "Generate a web site map",
+  "Mark broken links on a site map",
+  "Report broken links",
+  "Compare two site maps",
+  "Wireframe Diagram template",
+  "Wireframe Website template",
+  "Wireframe Mobile App template",
+  "Wireframe containers fill from their items",
+  "Wireframe control states",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/guide/main.html",
+]
+read = "2026-11-26"
+note = "no template, stencil or command for it in the Draw help"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/reference/supported-url-parameters/",
+  "https://www.drawio.com/docs/diagram-types/concept-maps/",
+]
+read = "2026-11-26"
+note = "mockup libraries for web, iOS and Android and a sitemap library; no site map generated from a web site"
+
+[[row]]
+area = "data"
+id = "data-shape-data"
+feature = "Shape data fields"
+checklist = [
+  "Shape Data window",
+  "Enter shape data values",
+  "Add and delete shape data fields",
+  "Shape data field types",
+  "Fixed and variable list fields",
+  "Field display format",
+  "Prompt text on a field",
+  "Ask for data on drop",
+  "Hidden shape data fields",
+  "Shape data field order",
+  "Field language and calendar",
+  "Shape data sets",
+  "Apply a data set to shapes",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190100.html",
+]
+read = "2026-11-26"
+note = "Draw objects take a name, a title and a description, not data fields linked to a source"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/shape-data/",
+  "https://www.drawio.com/docs/manual/advanced/placeholders/",
+]
+read = "2026-11-26"
+note = "properties added and edited on each shape, copied between shapes and shown with placeholders; no field types, lists or prompts"
+
+[[row]]
+area = "data"
+id = "data-import"
+feature = "Import data from spreadsheets, databases and text files"
+checklist = [
+  "Import an Excel workbook through the wizard",
+  "Quick Import of a workbook",
+  "Import an Access database",
+  "Import a SharePoint list",
+  "Import a SQL Server table or view",
+  "Import through OLE DB or ODBC",
+  "Import a delimited text file",
+  "Reuse a saved data connection",
+  "Choose a worksheet or range to import",
+  "Choose columns and rows to import",
+  "Filter and sort rows on import",
+  "Key column for matching rows",
+  "Several data sources in one drawing",
+  "External Data window",
+  "Rename a data column",
+  "Reorder data columns",
+  "Hide a data column",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190100.html",
+]
+read = "2026-11-26"
+note = "Draw objects take a name, a title and a description, not data fields linked to a source"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/pages/data-sources/",
+  "https://www.drawio.com/docs/manual/insert/insert-from-csv/",
+]
+read = "2026-11-26"
+note = "data sources from a Google Sheet or a CSV file with a key column; no database or spreadsheet file import"
+
+[[row]]
+area = "data"
+id = "data-link"
+feature = "Link data rows to shapes"
+checklist = [
+  "Link a row to a shape by hand",
+  "Link rules between rows and shapes",
+  "Linked columns become shape data",
+  "Link many rows by matching values",
+  "Create shapes from rows",
+  "Find the shape or row at the other end of a link",
+  "Unlink rows and shapes",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190100.html",
+]
+read = "2026-11-26"
+note = "Draw objects take a name, a title and a description, not data fields linked to a source"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/pages/data-sources/",
+]
+read = "2026-11-26"
+note = "a data source fills the data of shapes on a page by key, or makes a shape for each row"
+
+[[row]]
+area = "data"
+id = "data-refresh"
+feature = "Refresh linked data"
+checklist = [
+  "Refresh linked data",
+  "Refresh on a schedule",
+  "Offer refresh when a drawing opens",
+  "Link new rows after a refresh",
+  "Resolve a deleted-row conflict",
+  "Resolve a duplicate-key conflict",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190100.html",
+]
+read = "2026-11-26"
+note = "Draw objects take a name, a title and a description, not data fields linked to a source"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/pages/data-sources/",
+]
+read = "2026-11-26"
+note = "refresh a data source to update the shapes; no schedule or conflict resolution documented"
+
+[[row]]
+area = "data"
+id = "data-graphics"
+feature = "Data graphics: bars, icons, callouts and colour by value"
+checklist = [
+  "Choose fields shown as graphics",
+  "Data graphic scope by selection",
+  "Graphics applied on import",
+  "Data bar graphic",
+  "Data bar label and value settings",
+  "Icon set graphic",
+  "Text callout graphic",
+  "Color by value",
+  "Position graphics on many shapes",
+  "Move one graphic by its handle",
+  "Data graphic legend",
+  "Build and edit a data graphic",
+  "Remove a data graphic",
+  "Apply a graphic after linking",
+  "SmartSpace on the Data tab",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190100.html",
+]
+read = "2026-11-26"
+note = "Draw objects take a name, a title and a description, not data fields linked to a source"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/pages/style-rules/",
+  "https://www.drawio.com/docs/manual/advanced/placeholders/",
+]
+read = "2026-11-26"
+note = "style rules colour shapes by their data, placeholders show values; no data bars, icon sets or legends"
+
+[[row]]
+area = "data"
+id = "data-visualizer"
+feature = "Diagrams generated from a table of data"
+checklist = [
+  "Data Visualizer templates",
+  "Excel data template from the preview",
+  "Build a diagram from a table",
+  "Map functions and phases",
+  "Map process step columns",
+  "Map values to shapes",
+  "Connect steps from data",
+  "Extra columns become shape data",
+  "Refresh a diagram from its table",
+  "Write a diagram back to its table",
+  "Relink a diagram's workbook",
+  "Open a diagram's workbook",
+  "Data Visualizer layouts",
+  "Export a template package",
+  "Install a template package",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190100.html",
+]
+read = "2026-11-26"
+note = "Draw objects take a name, a title and a description, not data fields linked to a source"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/insert/insert-from-csv/",
+]
+read = "2026-11-26"
+note = "diagrams generated from CSV with a layout; not written back to the table"
+
+[[row]]
+area = "data"
+id = "data-reports"
+feature = "Reports on shape data and export to a database"
+checklist = [
+  "Run a report on shape data",
+  "Supplied report definitions",
+  "Report to a web page or XML file",
+  "Report to an Excel worksheet",
+  "Report as a shape on the drawing",
+  "Define a report's scope",
+  "Choose report columns",
+  "Report subtotals and grouping",
+  "Report sort and column order",
+  "Save a report definition",
+  "Export shape data to a database table",
+  "Choose cells for database export",
+  "Repeat a database export",
+  "ODBC retry and monitor settings",
+  "Link a shape to a database",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190100.html",
+]
+read = "2026-11-26"
+note = "Draw objects take a name, a title and a description, not data fields linked to a source"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt",
+]
+read = "2026-11-26"
+note = "no reports on shape data or export to a database"
+
+[[row]]
+area = "files"
+id = "files-open-save"
+feature = "Open, save, save as and close drawings"
+checklist = [
+  "Open a drawing",
+  "Save a drawing",
+  "Save As another name or location",
+  "Save a Copy",
+  "Close a drawing",
+  "Exit the app",
+  "Default save format",
+  "Default working folders",
+  "Save workspace with the file",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01060000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01070000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01060002.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/optionen/01010200.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/workfolder.html",
+]
+read = "2026-11-26"
+note = "open, save, save as, save a copy, close and exit, a default file format, working folders and view settings kept with the document"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/save-file-formats/",
+  "https://www.drawio.com/docs/getting-started/save-diagram-files/",
+  "https://www.drawio.com/docs/manual/open-diagram-file/",
+]
+read = "2026-11-26"
+note = "open, save and save as to a chosen storage place and format; no working folder settings"
+
+[[row]]
+area = "files"
+id = "files-start-recent"
+feature = "Start screen and recent drawings"
+checklist = [
+  "Recent drawings list",
+  "Start screen",
+  "Fix-it hub on the Open view",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01050000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01990000.html",
+]
+read = "2026-11-26"
+note = "a Start Center and a Recent Documents list"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/new-diagram/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#openRecent",
+]
+read = "2026-11-26"
+note = "a start dialog for a new or an existing diagram, and Open Recent"
+
+[[row]]
+area = "files"
+id = "files-recovery"
+feature = "AutoRecover after a crash"
+checklist = [
+  "AutoRecover on an interval",
+  "Keep the last version when closing unsaved",
+  "Reopen after a crash",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/doc_autosave.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/optionen/01010200.html",
+]
+read = "2026-11-26"
+note = "AutoRecovery information at an interval, a backup copy, and recovery after a crash"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/save-file-formats/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#selectDraft",
+]
+read = "2026-11-26"
+note = "autosave to the storage place and drafts to continue editing"
+
+[[row]]
+area = "files"
+id = "files-properties"
+feature = "File properties, clean-up and warnings for untrusted files"
+checklist = [
+  "File properties",
+  "Preview picture in the file",
+  "Reduce file size",
+  "Remove personal information",
+  "Remove external data from a file",
+  "Info view notices",
+  "Warnings about bad XML in files",
+  "Protected view and security bars",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01100000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/viewing_file_properties.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/optionen/01010200.html",
+]
+read = "2026-11-26"
+note = "document properties and a preview image saved in the file; no reduce-file-size command for a drawing"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/read-only-diagram/",
+  "https://www.drawio.com/docs/manual/advanced/global-custom-properties/",
+  "https://www.drawio.com/docs/manual/editor/save-file-formats/",
+]
+read = "2026-11-26"
+note = "File > Properties locks the file and holds file-wide data, and files can be saved compressed; no preview picture or clean-up of personal data documented"
+
+[[row]]
+area = "files"
+id = "format-vsdx"
+feature = "VSDX drawings, stencils and templates (.vsdx, .vssx, .vstx and their macro-enabled types)"
+checklist = []
+diacraft = { rule = "manual", value = "Full", source = "docs/file-format-parity.md", note = "the VSDX row: the six VSDX types are read and written" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "its own formats, which the Open and Save rows of the checklist cover" }
+[row.libreoffice]
+value = "Partial"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "opens VSDX drawings and templates (its filter reads vsdx, vsdm and vstx) and cannot save them"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/import/import-formats/",
+  "https://www.drawio.com/docs/manual/import/vsd-import-differences/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/js/diagramly/Menus.js#exportVsdx",
+]
+read = "2026-11-26"
+note = "imports .vsdx drawings and .vssx stencils into its own format with listed differences; an Export as VSDX (beta) is in the source"
+
+[[row]]
+area = "files"
+id = "format-legacy"
+feature = "Older binary and XML drawings of the VSDX application (.vsd, .vdx)"
+checklist = [
+  "Open and edit older binary and XML formats",
+  "Compatibility Mode",
+  "Convert to the current format",
+  "Save in the older format",
+  "Compatibility Checker",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "mixed", source = "inventory, compare-plans", note = "viewing .vsd files is in every plan, editing them in Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+]
+read = "2026-11-26"
+note = "opens .vsd and .vdx files and cannot save them"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/import/import-formats/",
+  "https://www.drawio.com/docs/manual/import/vsd-import-desktop/",
+]
+read = "2026-11-26"
+note = "converts .vsd and .vst files on import; cannot import .vdx files; no save"
+
+[[row]]
+area = "files"
+id = "format-odg"
+feature = "OpenDocument drawings (.odg, .otg, .fodg)"
+checklist = []
+diacraft = { rule = "manual", value = "Partial", source = "docs/file-format-parity.md", note = "the OpenDocument Graphics row: read and written in their own format, with what is not held named" }
+reference = { value = "Not yet", edition = "none", source = "absent", note = "no vendor page read lists OpenDocument drawings among the formats it opens or saves" }
+[row.libreoffice]
+value = "Full"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+]
+read = "2026-11-26"
+note = "its own format: opens and saves .odg, .otg and .fodg"
+[row.drawio]
+value = "Not yet"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/import/import-formats/",
+]
+read = "2026-11-26"
+note = "the import page says .odg, .otg and .fodg are not supported"
+
+[[row]]
+area = "files"
+id = "format-drawio"
+feature = "draw.io diagrams (.drawio)"
+checklist = []
+diacraft = { rule = "manual", value = "Not yet", source = "docs/file-format-parity.md", note = "the Common diagram formats row: opening draw.io files is scheduled, not built" }
+reference = { value = "Not yet", edition = "none", source = "absent", note = "no vendor page read lists draw.io files among the formats it opens or saves" }
+[row.libreoffice]
+value = "Not yet"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+]
+read = "2026-11-26"
+note = "no filter opens or saves draw.io files"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/reference/file-format/",
+  "https://www.drawio.com/docs/manual/editor/save-file-formats/",
+]
+read = "2026-11-26"
+note = "its own format"
+
+[[row]]
+area = "files"
+id = "format-cad"
+feature = "CAD drawings (DWG and DXF)"
+checklist = [
+  "Open a DWG or DXF as a drawing",
+  "Set a CAD drawing's scale on import",
+  "Change a CAD drawing's scale",
+  "CAD drawing locked on the page",
+  "Crop a CAD drawing",
+  "Show or hide CAD layers",
+  "Change CAD layer colour and weight",
+  "Convert a CAD drawing to shapes",
+  "Convert many CAD drawings",
+  "Save as DWG or DXF",
+  "Insert a CAD drawing",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+]
+read = "2026-11-26"
+note = "opens DXF files as drawings; no DWG and no CAD export"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/manual/import/import-formats/",
+]
+read = "2026-11-26"
+note = "DXF and DWG are not among the import formats"
+
+[[row]]
+area = "files"
+id = "format-picture-open"
+feature = "Open a picture or vector file as a drawing"
+checklist = [
+  "Open a picture as a new drawing",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "opens SVG, PDF and bitmap files as drawings"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/import/import-formats/",
+]
+read = "2026-11-26"
+note = "imports PNG, JPEG and SVG images"
+
+[[row]]
+area = "export"
+id = "print-basic"
+feature = "Print a drawing, with a preview"
+checklist = [
+  "Print a drawing",
+  "Print range",
+  "Fit current view to one sheet",
+  "Background printing",
+  "Print preview",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01130000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/print_preview.html",
+]
+read = "2026-11-26"
+note = "print with a page range and a preview; no fit of the current view to one sheet"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/print-diagram/",
+]
+read = "2026-11-26"
+note = "print with a page range and a preview"
+
+[[row]]
+area = "export"
+id = "print-scale-tile"
+feature = "Print scaling, tiling, paper and margins"
+checklist = [
+  "Tiling across sheets",
+  "Print zoom Adjust to",
+  "Print zoom Fit to sheets",
+  "Printer paper size and orientation",
+  "Print margins and centring",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01130000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05040200.html",
+]
+read = "2026-11-26"
+note = "tile or distribute a page over several sheets, fit to the printable page, paper size, orientation and margins"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/print-diagram/",
+]
+read = "2026-11-26"
+note = "print scale, fit to a number of sheets and paper size"
+
+[[row]]
+area = "export"
+id = "print-extras"
+feature = "Headers, footers, gridlines and non-printing shapes"
+checklist = [
+  "Print gridlines",
+  "Printed headers and footers",
+  "Print without the background",
+  "Non-printing shapes",
+  "Page breaks shown on the page",
+  "Move off Page Breaks",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01130000.html",
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/01/insert_layer.html",
+]
+read = "2026-11-26"
+note = "page name, date and time on the print, and layers that do not print; no gridlines"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/export-with-grid/",
+  "https://www.drawio.com/docs/manual/editor/panels/editor-page-view/",
+]
+read = "2026-11-26"
+note = "page breaks shown in page view and the grid in exports; no headers and footers documented"
+
+[[row]]
+area = "export"
+id = "export-pdf"
+feature = "Export to PDF"
+checklist = [
+  "Export to PDF",
+  "PDF page range and options",
+  "Export to XPS",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/ref_pdf_export.html",
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+]
+read = "2026-11-26"
+note = "PDF with a page range and options; no XPS"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/export-to-pdf/",
+  "https://www.drawio.com/docs/manual/export/pdf-export-crop/",
+]
+read = "2026-11-26"
+note = "PDF of all pages, the current page or the selection, cropped or not, with a copy of the diagram; no XPS"
+
+[[row]]
+area = "export"
+id = "export-raster"
+feature = "Export to PNG, JPG and other pictures"
+checklist = [
+  "Export a page or selection to a graphic",
+  "Export to PNG",
+  "Export to JPG",
+  "Export to TIFF",
+  "Export to GIF",
+  "Export to BMP",
+  "Raster export resolution and size",
+  "Raster export rotation and flip",
+  "Raster export settings last for the session",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "oracle"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01070001.html",
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+]
+read = "2026-11-26"
+note = "PNG, JPEG, GIF, BMP, TIFF and WebP of a page or a selection; size, resolution and rotation options are not described in the pages read"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/export-to-png/",
+  "https://www.drawio.com/docs/manual/export/export-to-jpeg/",
+  "https://www.drawio.com/docs/manual/export/export-higher-resolution/",
+  "https://www.drawio.com/docs/manual/export/export-to-animated-gif/",
+]
+read = "2026-11-26"
+note = "PNG and JPEG with zoom, border and transparency, animated GIF; no TIFF or BMP"
+
+[[row]]
+area = "export"
+id = "export-vector"
+feature = "Export to SVG, EMF and WMF"
+checklist = [
+  "Export to SVG",
+  "Include or leave out the drawing's data in SVG",
+  "Export to EMF or WMF",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "mixed", source = "inventory, compare-plans", note = "SVG export with or without the drawing's data is marked for Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+]
+read = "2026-11-26"
+note = "SVG, EMF and WMF of a page or selection; no option to include the drawing's data in SVG"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/export-to-svg/",
+]
+read = "2026-11-26"
+note = "SVG with or without a copy of the diagram inside; no EMF or WMF"
+
+[[row]]
+area = "export"
+id = "export-web"
+feature = "Save as a web page"
+checklist = [
+  "Save as a web page",
+  "Web page navigation controls",
+  "Web page output format",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "oracle"
+sources = [
+  "oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO",
+]
+read = "2026-11-26"
+note = "an HTML export of a drawing; its navigation and options are not described in the pages read"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/export-to-html/",
+  "https://www.drawio.com/docs/manual/export/embed-html/",
+]
+read = "2026-11-26"
+note = "HTML with an interactive viewer of the pages and layers"
+
+[[row]]
+area = "export"
+id = "export-office"
+feature = "Export to word processor documents and slide decks"
+checklist = [
+  "Export a page to a Word document",
+  "Pick and order Word snippets",
+  "Word export property options",
+  "Word export shape options",
+  "Slide snippets for PowerPoint",
+  "Export snippets to a slide deck",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/copy_drawfunctions.html",
+]
+read = "2026-11-26"
+note = "no export of a process to a word processor document or of snippets to slides; drawings are copied into other documents"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/integrations/",
+]
+read = "2026-11-26"
+note = "an Office app puts diagrams into word processor documents, slides and spreadsheets; no generated process documents"
+
+[[row]]
+area = "export"
+id = "export-embed-link"
+feature = "Paste or link a drawing into another document"
+checklist = [
+  "Paste a drawing into another document",
+  "Link a drawing into another document",
+  "Edit links to other files",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/copy_drawfunctions.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/04150000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/02180000.html",
+]
+read = "2026-11-26"
+note = "drawings pasted into other documents or linked as objects, with an Edit Links dialog"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/embed-diagram/",
+  "https://www.drawio.com/docs/integrations/",
+]
+read = "2026-11-26"
+note = "diagrams embedded in other documents and web pages through integrations"
+
+[[row]]
+area = "review"
+id = "review-comments"
+feature = "Comments and replies"
+checklist = [
+  "Add a comment to a shape or page",
+  "Comment stays with its shape",
+  "Comment markers on the page",
+  "Show or hide comment markers",
+  "Comments Pane",
+  "Reply to a comment",
+  "Edit a comment",
+  "Delete a comment",
+  "Step through comments",
+  "Comments are not printed",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/04050000.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/view_comments.html",
+]
+read = "2026-11-26"
+note = "comments on a page with replies, shown or hidden and stepped through; not attached to a shape"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/integrations/google/google-drive-comments/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#commentsNotAvailableHint",
+]
+read = "2026-11-26"
+note = "comments with replies for diagrams stored in some cloud places only"
+
+[[row]]
+area = "review"
+id = "review-markup"
+feature = "Track markup by reviewer"
+checklist = [
+  "Track Markup on and off",
+  "Markup overlay per reviewer",
+  "Overlay colour overrides formatting",
+  "Reviewing pane",
+  "Show or hide overlays",
+  "Step through markup",
+  "Delete markup",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/redlining.html",
+]
+read = "2026-11-26"
+note = "the help says recording of changes is for text documents and spreadsheets"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt",
+]
+read = "2026-11-26"
+note = "no markup overlay per reviewer; revision history is a storage feature"
+
+[[row]]
+area = "review"
+id = "review-ink"
+feature = "Draw with a pen or finger (ink)"
+checklist = [
+  "Draw with a pen on the canvas",
+  "Group strokes into ink shapes",
+  "Ink shapes behave as shapes",
+  "Pen colour and thickness",
+  "Stroke eraser",
+  "Pressure-sensitive ink",
+  "Highlighter pen",
+  "Draw with touch",
+  "Convert ink to geometry",
+  "Convert ink to text",
+  "Format ink",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "documented"
+sources = [
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "the foundation's comparison says ink drawing is not supported"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/shapes/freehand-drawing/",
+  "https://www.drawio.com/docs/getting-started/online-whiteboard/",
+]
+read = "2026-11-26"
+note = "freehand drawing with a mouse, finger or pen; no conversion of ink to shapes or text"
+
+[[row]]
+area = "review"
+id = "review-present"
+feature = "Present a drawing full screen"
+checklist = [
+  "Presentation mode",
+  "Move between pages while presenting",
+  "Page menu while presenting",
+  "Legacy Mode",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+]
+read = "2026-11-26"
+note = "Draw has no presentation mode (slide shows are Impress)"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/publish-presentation-mode/",
+  "https://www.drawio.com/docs/manual/collaboration/present-to-everyone/",
+]
+read = "2026-11-26"
+note = "a full-screen presentation mode page by page"
+
+[[row]]
+area = "review"
+id = "review-alt-text"
+feature = "Alt text and accessibility checker"
+checklist = [
+  "Accessibility Checker",
+  "Alt text on shapes and pictures",
+  "Alt text on masters",
+  "Alt text on pages",
+  "Tagged PDF output",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/05190100.html",
+]
+read = "2026-11-26"
+note = "a description on objects; no accessibility checker for Draw or tagged PDF documented in the pages read"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/pages/page-alt-text/",
+]
+read = "2026-11-26"
+note = "alt text for pages; shapes and a checker not documented"
+
+[[row]]
+area = "review"
+id = "review-screen-reader"
+feature = "Screen reader, keyboard navigation and high contrast"
+checklist = [
+  "Diagram Navigation pane",
+  "Screen reader reads shapes in order",
+  "Move between pages with a reader",
+  "High contrast support",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/accessibility.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/keyboard.html",
+]
+read = "2026-11-26"
+note = "support of assistive tools, every function from the keyboard (objects selected with Shift+F4 and Tab) and readable screen settings; no navigation pane of shapes"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/reference/shortcuts/keyboard-navigation/",
+  "https://www.drawio.com/docs/manual/editor/explore/",
+]
+read = "2026-11-26"
+note = "keyboard navigation and an Explore view of a shape and its neighbours"
+
+[[row]]
+area = "review"
+id = "review-cloud-files"
+feature = "Cloud storage and version history"
+checklist = [
+  "Save a drawing to OneDrive or SharePoint",
+  "Open a drawing from the cloud",
+  "Add a cloud place",
+  "Files others have shared",
+  "View a prior version",
+  "Restore a prior version",
+  "Check a drawing out and in",
+  "Server file states and cached copies",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "web", source = "inventory, compare-plans", note = "the vendor's cloud storage" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/cmis-remote-files.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/01190000.html",
+]
+read = "2026-11-26"
+note = "files on remote servers with check-out and check-in, and versions kept in a document"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/file-storage-locations-compare/",
+  "https://www.drawio.com/docs/integrations/google/google-drive-revision-history/",
+]
+read = "2026-11-26"
+note = "Google Drive, OneDrive and other storage, with the storage's revision history"
+
+[[row]]
+area = "review"
+id = "review-coauthor"
+feature = "Co-authoring, sharing and access rights"
+checklist = [
+  "Co-author a drawing",
+  "See who else is in a drawing",
+  "Merge changes on save",
+  "Stop a document being co-authored",
+  "Share with people",
+  "Send a drawing by email",
+  "Restrict access with Information Rights Management",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "web", source = "inventory, compare-plans", note = "co-authoring needs files in the vendor's cloud storage" }
+[row.libreoffice]
+value = "Not yet"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/collab.html",
+]
+read = "2026-11-26"
+note = "the help says only one user at a time can open a Draw document for writing"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/collaboration/concurrent-editing/",
+  "https://www.drawio.com/docs/manual/collaboration/share-diagrams/",
+  "https://www.drawio.com/docs/manual/collaboration/synchronize/",
+]
+read = "2026-11-26"
+note = "real-time editing with shared cursors, sharing and synchronised changes, for diagrams in some cloud places"
+
+[[row]]
+area = "review"
+id = "review-services"
+feature = "Diagrams in other online services and web viewers"
+checklist = [
+  "A diagram in a Power BI report",
+  "Diagrams in Microsoft Teams",  # brand-ok
+  "Embed a diagram in a web page",
+  "A JavaScript API",
+  "Move between the desktop and web apps",
+  "Team document discovery through Delve",
+  "Publish to a web viewer",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "web", source = "inventory, compare-plans", note = "web app and online-service features (Teams, Power BI, embedding, a JavaScript API); the vendor says its separate viewer has been retired" }
+[row.libreoffice]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/sdraw/main0100.html",
+]
+read = "2026-11-26"
+note = "no embedding service, viewer or script API for diagrams on web pages"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/export/embed-html/",
+  "https://www.drawio.com/docs/reference/embed-mode/",
+  "https://www.drawio.com/docs/integrations/",
+]
+read = "2026-11-26"
+note = "embedded diagrams in web pages and many integrations, and an embed mode for other programs"
+
+[[row]]
+area = "automation"
+id = "automation-macros"
+feature = "Record and run macros"
+checklist = [
+  "Record a macro",
+  "Pause and resume a recording",
+  "List and run macros",
+  "Macro shortcut key",
+  "Run a VBA project",
+  "Visual Basic editor",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/macro_recording.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/06130001.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/scripting.html",
+]
+read = "2026-11-26"
+note = "macros in Basic and other languages organised, run and edited; the recording guide names only Writer and Calc"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/reference/plugins/",
+]
+read = "2026-11-26"
+note = "no macros; plugins are JavaScript files loaded by the editor"
+
+[[row]]
+area = "automation"
+id = "automation-keep-macros"
+feature = "Keep or remove a drawing's macro project"
+checklist = [
+  "Keep a VBA project on save",
+  "Remove a VBA project from a drawing",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/06130001.html",
+]
+read = "2026-11-26"
+note = "macros are organised in the document that holds them"
+[row.drawio]
+value = "Not yet"
+basis = "absent"
+sources = [
+  "https://www.drawio.com/docs/reference/plugins/",
+]
+read = "2026-11-26"
+note = "diagrams hold no macro project"
+
+[[row]]
+area = "automation"
+id = "automation-addins"
+feature = "Add-ins, custom ribbons and their security settings"
+checklist = [
+  "Run a bundled add-on",
+  "COM add-ins",
+  "Add-ins tab for older menus",
+  "Custom ribbon from a solution",
+  "Macro security settings",
+  "Trusted publishers and locations",
+  "Add-in trust settings",
+  "External app link settings",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/01/packagemanager.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/scripting.html",
+]
+read = "2026-11-26"
+note = "extensions installed with the Extension Manager and macro security levels; no custom ribbon from a document"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/reference/plugins/",
+  "https://www.drawio.com/docs/reference/plugins/add-plugin/",
+  "https://github.com/jgraph/drawio/blob/44dc33fb1ec64c9675b4346e667191a4e0de24de/src/main/webapp/resources/dia.txt#pluginsDisabled",
+]
+read = "2026-11-26"
+note = "plugins that can be turned off; no custom ribbon"
+
+[[row]]
+area = "automation"
+id = "automation-object-model"
+feature = "Program the app from outside: documents, shapes, commands and events"
+checklist = [
+  "Program access to documents, pages and shapes",
+  "Run a command by id",
+  "Events a program can subscribe to",
+  "Events stored in a document",
+  "Data connections through the object model",
+  "Embed the drawing surface in another program",
+  "Enable Automation Events",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/scripting.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/integratinguno.html",
+]
+read = "2026-11-26"
+note = "the UNO API gives programs documents, pages and shapes, commands and events"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/reference/embed-mode/",
+  "https://www.drawio.com/docs/reference/supported-url-parameters/",
+  "https://www.drawio.com/docs/reference/plugins/",
+]
+read = "2026-11-26"
+note = "an embed mode drives the editor from another program, URL parameters and plugins"
+
+[[row]]
+area = "automation"
+id = "automation-developer-tools"
+feature = "Developer tab and tools"
+checklist = [
+  "Show the Developer tab",
+  "Controls on a drawing",
+  "Design mode for controls",
+  "Event Monitor tool",
+  "Persistent Events tool",
+  "Print ShapeSheet tool",
+  "Stencil window explorer",
+  "Drawing Page on the Stencil tab",
+  "Developer Reference",
+  "Master shortcut on a stencil",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "plan2", source = "inventory, compare-plans", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/dev_tools.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/formfields.html",
+]
+read = "2026-11-26"
+note = "Development Tools to inspect objects, form controls and design mode"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/advanced/diagram-source-edit/",
+  "https://www.drawio.com/docs/reference/plugins/",
+]
+read = "2026-11-26"
+note = "the diagram's XML edited directly and plugins"
+
+[[row]]
+area = "platforms"
+id = "platform-windows"
+feature = "Desktop app for Windows"
+checklist = []
+diacraft = { rule = "manual", value = "Partial", source = "docs/hardware-parity.md", note = "Windows downloads ship and the programs ran with no window; the window has not been tried on Windows" }
+reference = { value = "Full", edition = "plan2", source = "compare-plans", note = "the desktop app is for Windows PCs, in Plan 2 and the perpetual editions" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "released for Windows"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/offline/",
+]
+read = "2026-11-26"
+note = "draw.io Desktop for Windows"
+
+[[row]]
+area = "platforms"
+id = "platform-macos"
+feature = "Desktop app for macOS"
+checklist = []
+diacraft = { rule = "manual", value = "Full", source = "docs/hardware-parity.md", note = "downloads for Apple silicon and Intel; ran on both" }
+reference = { value = "Not yet", edition = "none", source = "compare-plans", note = "the desktop app is for Windows PCs only; the web app runs in a browser on a Mac" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "released for macOS"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/offline/",
+]
+read = "2026-11-26"
+note = "draw.io Desktop for macOS"
+
+[[row]]
+area = "platforms"
+id = "platform-linux"
+feature = "Desktop app for Linux"
+checklist = []
+diacraft = { rule = "manual", value = "Full", source = "docs/hardware-parity.md", note = "downloads for x86_64 and ARM64" }
+reference = { value = "Not yet", edition = "none", source = "compare-plans", note = "the desktop app is for Windows PCs only; the web app runs in a browser on Linux" }
+[row.libreoffice]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "released for Linux"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/offline/",
+]
+read = "2026-11-26"
+note = "draw.io Desktop for Linux"
+
+[[row]]
+area = "platforms"
+id = "platform-web"
+feature = "Runs in a web browser"
+checklist = []
+diacraft = { rule = "manual", value = "Full", source = "docs/hardware-parity.md", note = "the web app runs in the browser; it has no printer and two built-in typefaces" }
+reference = { value = "Partial", edition = "web", source = "compare-plans", note = "the web app in every plan, with fewer features than the desktop app" }
+[row.libreoffice]
+value = "unknown"
+basis = "unknown"
+sources = [
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "for the browser the foundation's comparison points to a LibreOffice-based online suite from another vendor; no browser edition of LibreOffice Draw itself was found"
+[row.drawio]
+value = "Full"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/features/",
+  "https://www.drawio.com/docs/manual/editor/offline/",
+]
+read = "2026-11-26"
+note = "the online editor in the browser, which also works offline"
+
+[[row]]
+area = "platforms"
+id = "platform-ribbon"
+feature = "Ribbon, Quick Access Toolbar and command search"
+checklist = [
+  "Ribbon with tabs and groups",
+  "Contextual tabs",
+  "Collapse the ribbon",
+  "Key Tips on the ribbon",
+  "Customize the ribbon",
+  "Touch mode for the ribbon",
+  "Quick Access Toolbar",
+  "Search for a command",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "mixed", source = "inventory, compare-plans", note = "command search (Tell Me) is marked for Plan 2 only" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/edit_symbolbar.html",
+]
+read = "2026-11-26"
+note = "a tabbed Notebookbar interface beside menus and toolbars, and customisable toolbars"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/menus/",
+  "https://www.drawio.com/docs/manual/editor/toolbars/",
+  "https://www.drawio.com/docs/manual/editor/panels/search-omnibox/",
+]
+read = "2026-11-26"
+note = "menus and toolbars, and a search box that finds commands; no ribbon"
+
+[[row]]
+area = "platforms"
+id = "platform-settings"
+feature = "Status bar, high DPI displays, settings and the app's look"
+checklist = [
+  "User name and initials",
+  "Default units for text, angle and duration",
+  "Freeform tool precision and smoothing",
+  "More shape handles on hover",
+  "Animated transitions",
+  "Center selection on zoom",
+  "Stencil name wrapping",
+  "Window background colours",
+  "Office theme for the app",
+  "Status bar",
+  "High DPI display support",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/simpress/main0206.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/guide/configure_overview.html",
+  "https://wiki.documentfoundation.org/index.php?oldid=886199",
+]
+read = "2026-11-26"
+note = "status bar, options and light, dark and high contrast application colours"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/editor/appearance/",
+  "https://www.drawio.com/docs/manual/editor/appearance/dark-mode/",
+]
+read = "2026-11-26"
+note = "editor themes and dark mode"
+
+[[row]]
+area = "platforms"
+id = "platform-help"
+feature = "Help, updates and account"
+checklist = [
+  "Sign in and switch accounts",
+  "About the app",
+  "Product updates",
+  "Help pane",
+  "Feedback command",
+  "Training and what's new links",
+  "Privacy settings",
+]
+diacraft = { rule = "checklist" }
+reference = { value = "Full", edition = "desktop", source = "inventory", note = "" }
+[row.libreoffice]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://help.libreoffice.org/latest/en-US/text/shared/main0108.html",
+  "https://help.libreoffice.org/latest/en-US/text/shared/05/new_help.html",
+]
+read = "2026-11-26"
+note = "help, about and support"
+[row.drawio]
+value = "Partial"
+basis = "documented"
+sources = [
+  "https://www.drawio.com/docs/manual/get-help/",
+]
+read = "2026-11-26"
+note = "help and support from the Help menu"
+
+[[only]]
+id = "only-vsdx-and-odg"
+feature = "Opens and saves both VSDX drawings (.vsdx) and OpenDocument drawings (.odg) in their own formats, and Save As converts between them, saying what the target cannot hold"
+ships = true
+diacraft_sources = ["docs/file-format-parity.md", "docs/cli.md#convert", "docs/diacraft-format.md"]
+[only.reference]
+lacks = "yes"
+basis = "absent"
+sources = ["compare-plans"]
+read = "2026-11-26"
+note = "no vendor page read lists OpenDocument drawings among its formats"
+[only.libreoffice]
+lacks = "yes"
+basis = "oracle"
+sources = ["oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO"]
+read = "2026-11-26"
+note = "opens VSDX drawings but has no filter that saves them"
+[only.drawio]
+lacks = "yes"
+basis = "documented"
+sources = ["https://www.drawio.com/docs/manual/import/import-formats/"]
+read = "2026-11-26"
+note = "its import page says OpenDocument drawings are not supported"
+
+[[only]]
+id = "only-native-superset"
+feature = "Its own .diacraft format, which has a public specification and keeps the details of a VSDX file or an OpenDocument drawing it was made from, with no copy of the original file"
+ships = true
+diacraft_sources = ["docs/diacraft-format.md"]
+[only.reference]
+lacks = "yes"
+basis = "absent"
+sources = ["compare-plans"]
+read = "2026-11-26"
+note = "its own format does not open OpenDocument drawings at all (see the row above)"
+[only.libreoffice]
+lacks = "yes"
+basis = "oracle"
+sources = ["oracle: LibreOffice 26.8.2.2 run as a black box, its filter list read over UNO"]
+read = "2026-11-26"
+note = "its own format is OpenDocument; it cannot save VSDX"
+[only.drawio]
+lacks = "yes"
+basis = "documented"
+sources = ["https://www.drawio.com/docs/reference/file-format/", "https://www.drawio.com/docs/manual/import/vsd-import-differences/"]
+read = "2026-11-26"
+note = "its own format is documented; VSDX import lists differences and OpenDocument is not supported"
+
+[[only]]
+id = "only-offline-browser"
+feature = "A browser version that works with no connection once it has loaded (it asks for two files of its own the first time they are shown), PDF and picture export included, and keeps files on the device"
+ships = true
+diacraft_sources = ["docs/hardware-parity.md", "docs/website.md"]
+[only.reference]
+lacks = "yes"
+basis = "documented"
+sources = ["compare-plans"]
+read = "2026-11-26"
+note = "the vendor's plan comparison lists offline work among the desktop plan's capabilities, not the web plans'"
+[only.libreoffice]
+lacks = "yes"
+basis = "absent"
+sources = ["https://wiki.documentfoundation.org/index.php?oldid=886199"]
+read = "2026-11-26"
+note = "no browser edition of LibreOffice Draw itself was found"
+[only.drawio]
+lacks = "yes"
+basis = "documented"
+sources = ["https://www.drawio.com/docs/manual/editor/offline/"]
+read = "2026-11-26"
+note = "the offline web app cannot convert diagrams to PDF or image files without a connection"
+
+[[only]]
+id = "only-mcp-cli"
+feature = "An MCP server and a command line that run the same command registry as the window"
+ships = true
+diacraft_sources = ["docs/mcp.md", "docs/cli.md"]
+[only.reference]
+lacks = "no"
+basis = "documented"
+sources = ["mcp-server-docs"]
+read = "2026-11-26"
+note = "the vendor publishes an MCP server (preview) that automates its desktop app on Windows"
+[only.libreoffice]
+lacks = "unknown"
+basis = "absent"
+sources = []
+read = "2026-11-26"
+note = "no MCP server from the foundation was found; its command line converts and runs macros"
+[only.drawio]
+lacks = "no"
+basis = "documented"
+sources = ["https://www.drawio.com/docs/manual/generate/drawio-mcp-server/"]
+read = "2026-11-26"
+note = "publishes an official MCP server"
+
+[[only]]
+id = "only-control-channel"
+feature = "A control channel that agents use to drive the running window and take screenshots"
+ships = true
+diacraft_sources = ["docs/control-protocol.md"]
+[only.reference]
+lacks = "no"
+basis = "documented"
+sources = ["inventory", "mcp-server-docs"]
+read = "2026-11-26"
+note = "programs drive the desktop app through its object model and its MCP server"
+[only.libreoffice]
+lacks = "no"
+basis = "documented"
+sources = ["https://help.libreoffice.org/latest/en-US/text/shared/guide/scripting.html", "https://help.libreoffice.org/latest/en-US/text/shared/guide/integratinguno.html"]
+read = "2026-11-26"
+note = "programs drive it through the UNO API"
+[only.drawio]
+lacks = "no"
+basis = "documented"
+sources = ["https://www.drawio.com/docs/reference/embed-mode/"]
+read = "2026-11-26"
+note = "an embed mode lets another program drive the editor"

@@ -81,7 +81,7 @@ mod flat;
 mod frame;
 pub(crate) mod fx;
 mod geometry;
-mod groups;
+pub(crate) mod groups;
 mod held;
 pub(crate) mod kept;
 mod layers;
@@ -106,7 +106,9 @@ mod scan;
 mod shapes;
 mod splice;
 mod structure;
+pub(crate) use self::model::style_group_of_cells;
 pub use self::model::{model_refusal, without_carried_objects};
+pub(crate) use self::scan::is_legacy;
 pub(crate) use self::structure::Structure;
 /// For the Kani harnesses of the crate (`crate::kani_proofs`).
 #[cfg(kani)]
@@ -700,8 +702,8 @@ pub struct WriteWork {
     /// once a save, before anything is written, and read by the step that writes the styles and by the document file's. Empty for a save into a file.
     pub(crate) odf14: std::sync::Arc<Vec<Option<std::sync::Arc<crate::ext::odf14::Form14>>>>,
     /// **The model writer wrote some of the drawing in the form ODF 1.4 takes where the drawing held an earlier version's**: a style's property 1.4 has no place for, a list style with
-    /// no name, a negative label width, a font size of 0. DiaCraft's data carries the source's form, so a DiaCraft read gives it back; the engine's card says it in the group of what is written as
-    /// values the file format holds.
+    /// no name, a negative label width, a font size of 0, and a weight, a slant or a variant 1.4 lists no value for, and the `text:enable-numbering` of a style kept whole.
+    /// DiaCraft's data carries the source's form, so a DiaCraft read gives it back; the engine's card says it in the group of what is written as values the file format holds.
     pub forms_1_4: bool,
     /// How many new shapes and groups carried VSDX data on their own style or in an item of the document file (the note says it).
     pub(crate) carried_shapes: u64,
@@ -721,6 +723,9 @@ pub struct WriteWork {
     /// The automatic graphic styles whose kept attributes (the ones no cell reads) the model writer wrote with the style, by name: the rest of the model's kept styles of that
     /// family are still unwritten, and the note says so.
     pub(crate) graphic_remainders_written: std::collections::HashSet<String>,
+    /// The largest number among the ids of the form `id` and digits that the shapes of the model hold (the model writer writes the ids a shape was read with, and a new target
+    /// is given one above them): found once for a save, at the first page that has a new shape.
+    pub(crate) held_id_max: Option<u64>,
 }
 
 impl Default for WriteWork {
@@ -795,6 +800,7 @@ impl Default for WriteWork {
             macros_dropped: Vec::new(),
             built: None,
             graphic_remainders_written: std::collections::HashSet::new(),
+            held_id_max: None,
         }
     }
 }

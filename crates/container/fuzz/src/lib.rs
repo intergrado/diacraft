@@ -9,8 +9,9 @@
 //!
 //! * the package against itself is the same, and so is it against a copy whose parts all end in a comment (when each parses: the comment is
 //!   outside the root, so nothing is added to the content);
-//! * **the count is symmetric where nothing orients it**. One rule orients the check, [`Rules::ignored_when_extra`] (the markup of
-//!   [`QUIET`] counts as nothing when only the second package has it, so that `count(a, b)` is not `count(b, a)` for a package that has some). Without that
+//! * **the count is symmetric where nothing orients it**. One rule orients the check here, [`Rules::ignored_when_extra`] (the markup of
+//!   [`QUIET`] counts as nothing when only the second package has it, so that `count(a, b)` is not `count(b, a)` for a package that has some; the other, [`Rules::twinned`] of
+//!   Is listed by no rule set of this target, which `crates/container/tests/it/canon_twin.rs` holds to its own cases). Without that
 //!   rule ([`SYMMETRIC`]) `count(a, b) == count(b, a)` for every pair, when neither is refused. With it ([`RULES`]), a pair where neither package declares
 //!   [`QUIET`] anywhere counts exactly what it counts without it, both ways round, refusals included;
 //! * **the orientation**: an attribute of [`QUIET`] added to the root of a part that has none of it, and an element of it added beside the
@@ -79,6 +80,7 @@ pub const RULES: Rules = Rules {
     ],
     // The attributes and elements of `urn:x` count as nothing when only the second part has them. The one rule that orients the check.
     ignored_when_extra: &[QUIET],
+    twinned: &[],
     free_names: &[FreeNames {
         container: Name { ns: "", local: "Autos" },
         definitions: &[Definition { element: Name { ns: "", local: "Def" }, family: Some(Name { ns: "", local: "fam" }) }],
@@ -102,6 +104,10 @@ pub const RULES: Rules = Rules {
         never: &["User"],
     }],
     aliases: &[],
+    // The attributes that say which thing an element is (`id` of no namespace, and `k` of `urn:a`), so that the fuzzer reaches the alignment of children by their
+    // identity, and a part that may begin with a DOCTYPE that holds only an external id, so that it reaches that reading of a part.
+    identified_by: &[Name { ns: "", local: "id" }, Name { ns: "urn:a", local: "k" }],
+    doctype_parts: &["/p0.xml"],
 };
 
 /// [`RULES`] without the one rule that orients the check ([`Rules::ignored_when_extra`]): every other rule of the container, under which the count is symmetric.

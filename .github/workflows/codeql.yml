@@ -1,0 +1,89 @@
+# CodeQL code scanning, as GitHub's advanced setup (the owner, 2026-11-26). It replaces the repository's default setup, which scanned the test and fuzz code too and
+# flagged 34 alerts there (25 cleartext logging, 7 hard-coded cryptographic values, 2 unsafe deserialization), each dismissed as used in tests. The shipped code is scanned in full;
+# .github/codeql/codeql-config.yml lists what is left out (the `tests` and `fuzz` folders, the in-source test modules named by convention, the test-support crate). The rules of this
+# file and that one are held by xtask/tests/it/codeql.rs, and docs/development.md ("CI") says what is skipped and why.
+#
+# One job for each language, as CodeQL advises, and none of them builds anything (`build-mode: none`): CodeQL reads the sources. Rust needs `rustup` and `cargo` on the runner, which the
+# image has; CodeQL runs rust-analyzer, which runs the build scripts, over the workspace, so the run is long (90 minutes at most). `actions` scans the workflows, and
+# `javascript-typescript` the scripts of the website and of the web app's loader.
+#
+# Only GitHub's own actions, each pinned by its full commit with the version in a comment, as the other workflows do. The token can upload results and read the repository, and
+# nothing else. While the default setup is on, an upload from this workflow is refused ("CodeQL analyses from advanced configurations cannot be processed when the default setup is
+# enabled"): switch the default setup off when this file reaches the default branch (docs/development.md).
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays, at an odd minute: a run at the top of the hour waits in a queue when GitHub is busy.
+    - cron: "41 3 * * 1"
+  # A run by hand, on any branch the file is on, to scan again without a push.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # rust-analyzer's `cargo metadata` fetches the dependencies, some from git.
+  CARGO_NET_RETRY: 10
+
+# A newer push to a PR branch cancels its older run; every push to main runs to the end.
+concurrency:
+  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout }}
+    permissions:
+      # Uploads the results to code scanning.
+      security-events: write
+      # Reads the repository, and the run's own workflow files for the `actions` language.
+      contents: read
+      actions: read
+    strategy:
+      # A language that fails does not stop the others.
+      fail-fast: false
+      matrix:
+        include:
+          - language: rust
+            build-mode: none
+            timeout: 90
+          - language: actions
+            build-mode: none
+            timeout: 20
+          - language: javascript-typescript
+            build-mode: none
+            timeout: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # What the run scans with, in its log, for the day a version of the runner image breaks the extraction.
+      - name: Show the Rust toolchain
+        if: matrix.language == 'rust'
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      # The category the default setup used (`/language:<language>`), so that the results of both setups are one series.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -14,7 +14,7 @@
 //! [`write_planned`] after each recalculation. The marker `User.DiaCraftRoute` says a connector is ours; a connector read from a file has none, and is routed again only when
 //! a command moves one of its glued ends and its route is not fixed ([`super::reroute`]).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_doc::{
@@ -292,6 +292,11 @@ fn set_glue(doc: &mut Document, page: u32, id: u32, which: Which, glue: Option<(
         list.push(connect_row(id, which, target, index));
     }
     p.connects = Connects::from_vec(list);
+    // Owner, 2026-11-25: a shape a connector is glued to is placeable, so a route goes round it: a shape that reads none of `ObjType`'s 1, 2 and 4 gets a local 1, in
+    // the same undo step as the glue.
+    if let Some((target, _)) = glue {
+        super::obstacle::make_placeable(doc, page, target)?;
+    }
     Ok(())
 }
 
@@ -554,6 +559,10 @@ pub(super) fn reglue_all(doc: &mut Document, page: u32, plans: &[Reglue]) -> Res
     }
     p.connects = Connects::from_vec(list);
     out.glued = chosen.len();
+    // The shapes the ends are glued to are placeable (each once, found by the walk above).
+    let targets: BTreeSet<u32> = chosen.iter().flat_map(|(_, begin, end, _)| [begin.glue, end.glue]).flatten().map(|(shape, _)| shape).collect();
+    let at: Vec<ShapeRef> = targets.iter().filter_map(|id| found.get(id).cloned()).collect();
+    super::obstacle::make_all_placeable(doc, &at)?;
     Ok(out)
 }
 
@@ -654,6 +663,31 @@ pub(crate) fn plan_route(
         routed: Routed { points, pose, ours },
         reset_code: hand_edited.then_some(sheet),
     }))
+}
+
+/// The route of connector `id`, at `at`, **followed square** to its ends: `corners` are the corners on the page that [`super::hand::follow_ends`] made, and the rows
+/// are those corners in the connector's frame as it is now, constants with the last row's `X` as `Width*1` (as writes a route, so that the end of the route stays on the end
+/// of the connector). The setting stays: a route followed is no hand edit undone, so `ConFixedCode` is not written. Written by [`write_planned`] with the routes of the others. `None`
+/// for a connector whose end cells hold an error (a connector of a file whose saved cells are not ours to refuse an edit for) or whose corners do not go through the frame.
+pub(crate) fn plan_squared(reader: &Reader<'_>, id: u32, at: &ShapeRef, corners: Vec<P>) -> Option<Planned> {
+    let sheet = SheetRef::Shape(at.clone());
+    if ["BeginX", "BeginY", "EndX", "EndY", "PinX", "Width", "Angle"].iter().any(|name| has_error(reader, &sheet, name)) {
+        return None;
+    }
+    let pose = reader.pose(&sheet);
+    let local: Vec<P> = corners.iter().map(|p| pose.down(*p)).collect();
+    if !local.iter().all(|p| p.0.is_finite() && p.1.is_finite()) {
+        return None;
+    }
+    let ours = reader.is_routed(&sheet);
+    Some(Planned {
+        id,
+        at: at.clone(),
+        rows: rows::rows(&rows::polyline(&local), true),
+        inherited: inherited_rows(reader, at),
+        routed: Routed { points: corners, pose, ours },
+        reset_code: None,
+    })
 }
 
 /// Writes the routes [`plan_route`] worked out: each connector's `Geometry` section 0 rows, and one batch of the `ConFixedCode` cells taken back to 0 (a cell a `GUARD`

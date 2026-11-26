@@ -4,10 +4,11 @@
 //! alone before brackets, a call (`LISTSHEETREF(2)`). The last part is the cell or the call, and the parts before it are sheet
 //! qualifiers. Nothing is looked up: names are kept as written.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use super::{MAX_INDEX_BYTES, Node, Parser, Res, is_name_char, is_name_start};
-use crate::{Call, CellRef, Expr, Index, ParseErrorKind, Qualifier, Segment};
+use crate::{Call, CellRef, Expr, Index, ParseErrorKind, Qualifier, RefSpan, Segment, SegmentSpan};
 
 /// The most qualifiers before a cell. Real formulas have one or two (`Pages[A]!Sheet.9!EndY`).
 const MAX_QUALIFIERS: usize = 16;
@@ -43,6 +44,23 @@ fn boolean(name: &str) -> Option<bool> {
 impl Parser<'_> {
     /// A reference, a call, or a Boolean word. The position is at a name or a quote.
     pub(super) fn reference(&mut self) -> Res<Node> {
+        let start = self.pos;
+        let slot = self.rec.as_mut().map(|rec| {
+            rec.refs.push(None);
+            rec.refs.len().saturating_sub(1)
+        });
+        let node = self.name_chain()?;
+        // The position is at the end of what was read: after `finish`, the blanks that were looked past are given back.
+        if let (Some(slot), Some(rec), Expr::Ref(r)) = (slot, self.rec.as_mut(), &node.expr)
+            && let Some(place) = rec.refs.get_mut(slot)
+        {
+            *place = Some(RefSpan { start, end: self.pos, reference: (**r).clone(), segments: std::mem::take(&mut rec.last_path) });
+        }
+        Ok(node)
+    }
+
+    /// The parts of a name chain joined by `!`.
+    fn name_chain(&mut self) -> Res<Node> {
         let mut qualifiers = Vec::new();
         let mut deepest = 0;
         loop {
@@ -166,10 +184,14 @@ impl Parser<'_> {
     /// before the first name.
     fn path(&mut self) -> Res<(Vec<Segment>, bool)> {
         self.skip_ws();
+        let mark = self.rec.as_ref().map_or(0, |rec| rec.segments.len());
         let quoted_first = self.peek() == Some('\'');
         let mut segments = vec![self.segment(true)?];
         while self.eat('.') {
             segments.push(self.segment(false)?);
+        }
+        if let Some(rec) = self.rec.as_mut() {
+            rec.last_path = rec.segments.split_off(mark);
         }
         Ok((segments, quoted_first))
     }
@@ -178,6 +200,7 @@ impl Parser<'_> {
     /// start with a digit too (`Door.7`).
     fn segment(&mut self, first: bool) -> Res<Segment> {
         self.count(1)?;
+        let name_start = self.pos;
         let name = match self.peek() {
             Some('\'') => self.quoted_name()?,
             Some(c) if (first && is_name_start(c)) || (!first && is_name_char(c)) => self.identifier()?,
@@ -185,7 +208,16 @@ impl Parser<'_> {
             _ if first => return self.fail(ParseErrorKind::ExpectedOperand),
             _ => return self.fail(ParseErrorKind::BadName),
         };
-        let index = if self.peek() == Some('[') { Some(self.index()?) } else { None };
+        let name_end = self.pos;
+        let (index, digits) = if self.peek() == Some('[') {
+            let (index, digits) = self.index()?;
+            (Some(index), digits)
+        } else {
+            (None, None)
+        };
+        if let Some(rec) = self.rec.as_mut() {
+            rec.segments.push(SegmentSpan { name: name_start..name_end, index: digits });
+        }
         Ok(Segment { name, index })
     }
 
@@ -227,10 +259,11 @@ impl Parser<'_> {
     }
 
     /// `[2]` or `[Site-2]` or `['2']`: a whole number is a row number, anything else a name; text in quotes is always a name.
-    /// The position is at the `[`.
-    fn index(&mut self) -> Res<Index> {
+    /// The position is at the `[`. With the index, the bytes of its digits when it is a row number.
+    fn index(&mut self) -> Res<(Index, Option<Range<usize>>)> {
         self.pos += 1;
         self.skip_ws();
+        let mut digits = None;
         let index = if self.peek() == Some('\'') {
             let name = self.quoted_name()?;
             self.skip_ws();
@@ -244,12 +277,16 @@ impl Parser<'_> {
             if raw.is_empty() {
                 return self.fail(ParseErrorKind::BadIndex);
             }
+            let raw_start = self.pos;
             self.pos += end;
             match raw.bytes().all(|b| b.is_ascii_digit()).then(|| raw.parse::<u32>().ok()).flatten() {
-                Some(row) => Index::Number(row),
+                Some(row) => {
+                    digits = Some(raw_start..raw_start + raw.len());
+                    Index::Number(row)
+                }
                 None => Index::Name(Arc::from(raw)),
             }
         };
-        if self.eat(']') { Ok(index) } else { self.fail(ParseErrorKind::BadIndex) }
+        if self.eat(']') { Ok((index, digits)) } else { self.fail(ParseErrorKind::BadIndex) }
     }
 }

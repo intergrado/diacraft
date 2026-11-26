@@ -7,7 +7,7 @@
 //! blow up, and nothing is fetched, since no external identifier is ever followed. One exception, off unless a caller asks for it
 //! ([`ParseOptions::allow_external_doctype`], which the ODF package layer asks for in its manifest alone): a DOCTYPE that holds a name and
 //! an external id and no internal subset is read and ignored; it declares nothing, so every other refusal holds after it. A declared encoding that is not UTF-8 or UTF-16
-//! is an error, as is a document that is not well-formed: a mismatched or missing end tag, a second root, text outside the
+//! is an error, except `US-ASCII` on an all-ASCII document when a caller asks for it ([`ParseOptions::allow_us_ascii`]), as is a document that is not well-formed: a mismatched or missing end tag, a second root, text outside the
 //! root, a duplicate attribute, a bad character reference, a character XML 1.0 does not allow (a literal control character or NUL, in
 //! text, an attribute, CDATA, a comment or an instruction), `]]>` in text, `--` in a comment, and attributes not separated by white
 //! space. The sibling this module was copied from folded unclosed elements up and dropped unknown entities silently; both are errors
@@ -205,6 +205,11 @@ pub struct ParseOptions {
     /// to any entity but the five predefined ones is refused as it always is. Old OpenDocument writers put one in a package's manifest
     /// (the census); every other DTD stays `xml_entity_refused`.
     pub allow_external_doctype: bool,
+    /// Accept a declaration of the encoding `US-ASCII` (in any case) on a document that is UTF-8 with every byte of its text below 0x80, and read it as UTF-8 (a draw.io file from a tool that writes it).
+    /// Off by default: the declaration is refused, as every encoding but UTF-8 and UTF-16 is. A document
+    /// with a byte at or above 0x80, or that is UTF-16, is refused though this is on, and so is any other encoding: ASCII is the one text that is UTF-8 whatever it is
+    /// called. The text is what follows a byte order mark, when there is one.
+    pub allow_us_ascii: bool,
 }
 
 /// [`parse_counted`], with `options`.
@@ -627,6 +632,12 @@ impl<'t> Parser<'t> {
         if self.total > self.max_total { Err(XmlError::TooManyNodes { limit: self.max_total }) } else { Ok(()) }
     }
 
+    /// Whether a declaration of `declared` is `US-ASCII` that the caller asked to have read ([`ParseOptions::allow_us_ascii`]) and that the text is: UTF-8 with no byte at or
+    /// above 0x80. The scan is one pass over the text, and is made only for a declaration of that name.
+    fn read_as_us_ascii(&self, declared: &str) -> bool {
+        self.options.allow_us_ascii && self.encoding == Encoding::Utf8 && declared.trim().eq_ignore_ascii_case("us-ascii") && self.text.is_ascii()
+    }
+
     /// Whether the node being read is directly under the root of a stream, where nothing is kept.
     fn under_stream_root(&self) -> bool {
         self.stream && self.stack.len() == 1
@@ -668,7 +679,7 @@ impl<'t> Parser<'t> {
                 }
                 if let Some(declared) = decl.encoding() {
                     let declared = declared.map_err(|e| malformed(offset, e.to_string()))?.into_owned();
-                    if !encoding_matches(&declared, self.encoding) {
+                    if !encoding_matches(&declared, self.encoding) && !self.read_as_us_ascii(&declared) {
                         return Err(malformed(
                             offset,
                             format!("the declared encoding {declared:?} is not the encoding of the bytes, or is not UTF-8 or UTF-16"),
@@ -992,6 +1003,13 @@ impl Pull<'_> {
     /// The events read so far, in the units of [`Work::xml_events`].
     pub fn events(&self) -> u64 {
         self.parser.events
+    }
+
+    /// How far into the decoded text the stream has read, in bytes of it (UTF-8, whatever the document was written in): after the root's start tag when the stream is
+    /// begun, at the end of the child [`Pull::next_child`] gave last, and at the end of the document once [`Pull::finish`] has read it. A reader that caps the text of each
+    /// child of the root measures a child by the difference of the position before it and after.
+    pub fn position(&self) -> usize {
+        usize::try_from(self.parser.reader.buffer_position()).unwrap_or(usize::MAX)
     }
 }
 

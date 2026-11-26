@@ -219,11 +219,42 @@ pub(crate) fn build(r: &mut Reader, set: &mut StyleSet, res: &mut Resolver) -> R
         if let Some(odf) = set.get(at).and_then(|s| s.odf.as_deref()) {
             let mut data = odf.clone();
             held::for_sheet(r, set, at, &style_sheet.sheet, &mut data)?;
+            hold_spelling(r, style, &style_sheet.sheet, &mut data)?;
             style_sheet.ext.make_mut().odf = data;
         }
         sheets.styles.push(style_sheet);
     }
     Ok(sheets)
+}
+
+/// **Holds the spelling of the `Style` group of a style sheet when the cells would write another**: the cell `Style` is one number whose bits say
+/// the weight, the style, the small caps and the complex script's two, and a writer that says them from the cell writes all five attributes, where a file stated the weight alone, or none
+/// (a style that only underlines). The attributes the file spelled, as written, are a held value of the group `Style` of the sheet's own slot, stamped by the `Style` cell as read (bit 4, the
+/// underline's, left out): the writer says the held spelling while the stamp holds, and the cells' five when an edit changed the group. Nothing is held when the cells write what the file
+/// spelled, which is what a style that spells all five in the forms the writer uses is. Charged before it is made.
+fn hold_spelling(r: &mut Reader, style: &super::styles::OdfStyle, sheet: &Sheet, odf: &mut diacraft_doc::OdfStyle) -> Result<(), OdgError> {
+    let Some(row) = sheet.section(&diacraft_doc::SectionKey::new("Character", None)).and_then(|s| s.row(&RowKey::Ix(0))) else { return Ok(()) };
+    if !row.cells.contains_key("Style") {
+        return Ok(());
+    }
+    // What the cells write of the group, as the writer of a style sheet says it.
+    r.style_step();
+    let Some(written) = crate::write::style_group_of_cells(sheet) else { return Ok(()) };
+    let same = written.len() == style.spelled.len()
+        && style.spelled.iter().all(|s| written.iter().any(|(ns, local, value)| *ns == s.ns && *local == s.local && *value == s.value));
+    if same {
+        return Ok(());
+    }
+    let bytes = style.spelled.iter().map(|s| s.name.len().saturating_add(s.value.len())).fold(0usize, usize::saturating_add);
+    r.take_items(super::cost::HELD.saturating_add(style.spelled.len().saturating_mul(2)))?;
+    r.take_bytes(bytes)?;
+    odf.text_held.push(diacraft_doc::HeldStyleValue {
+        group: diacraft_doc::TextGroup::Style,
+        stamp: Some(diacraft_doc::stamp_text_group(row, diacraft_doc::TextGroup::Style)),
+        attrs: diacraft_doc::RawAttrs::from_pairs(style.spelled.iter().map(|s| (s.name.as_str(), s.value.as_str()))),
+        kept: diacraft_doc::Passthrough::new(),
+    });
+    Ok(())
 }
 
 /// Whether two conversions give the same tab stops: the same list. Styles that hold equal stops hold one list (`Reader::shared_tabs`, made

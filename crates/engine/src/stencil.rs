@@ -1,4 +1,4 @@
-//! Five built-in stencils, fifty original masters. New figures follow.
+//! The built-in stencils and their masters: seven stencils of fifty-eight original masters, and thirteen more registered and filled by family (STENCIL2). New figures follow.
 //!
 //! **Original figures.** Each outline is plain mathematics (a rectangle, an ellipse, a regular polygon fitted to its box, arcs through three
 //! points), and its name, default size and connection points are our choice.
@@ -28,22 +28,45 @@
 //! master on a page, and `icon` looks at a master's icon. The built-in stencils above are the same kind of thing to a window: a name and a list
 //! of masters. **Which built-in stencils are open** is the session's, in `opened`: all by default, the ones a template names after `file.new {template}`,
 //! and `stencil.open {id}` opens one more by hand (`stencil.close` refuses a built-in stencil); `shape.drop` searches every built-in stencil whether or not it is open.
+//!
+//! **A catalogue of registered and shipped stencils**. `ALL_STENCILS` registers every stencil the project plans, the second batch's thirteen with no masters yet. A stencil is
+//! **shipped** when it has masters (`StencilSpec::shipped`): [`stencils`] gives the shipped ones in catalogue order and is the only list a command, a query or a window reads, so a stencil that is
+//! not shipped is in no listing, search, `stencil.open` or `template.list` answer. A stencil is **open by default** (`StencilSpec::default_open`) in a new session: the seven of the first batches
+//! are, the thirteen new ones are closed and a template opens its own.
+//!
+//! **A master is data** (`MasterSpec`): an outline (a polygon, an ellipse, paths, geometry made by a function, a one-dimensional figure, a group), its connection points, and optional extras
+//! ([`dress::More`]): a [`dress::Dress`] (look, text, Shape Data, `User` rows, locks and role), a hidden flag and the masters it brings. A **connector master** holds its line ends, pattern and route
+//! as a [`look::ConnectorLook`] on its own shape, and its instances inherit them. **A group master** (`Outline::Group`: [`group_master`]) is a `Group` with no geometry of its own and members that follow it
+//! by guarded formulas (compartments as tall as their text among them); it is dropped through `instance.rs`, with every member listed, as a stencil file's group master is. **A container master** is a master whose dress has the
+//! container role: a container like any other, whose outline no container command makes again.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use diacraft_doc::{Cell, CellName, DocError, Document, Links, Master, Row, Section, Shape, ShapeType, Sheet, Value};
+use diacraft_doc::{Cell, CellName, DocError, Document, Links, Master, Row, Section, Shape, ShapeList, ShapeType, Sheet, Value};
 
 mod arrows;
+mod bpmn;
 mod bring;
+mod c4;
 mod callout;
+mod chen;
+mod cloud;
+mod computers;
 pub(crate) mod container;
+mod crows_foot;
 mod decorative;
 mod drawn;
+pub(crate) mod dress;
 mod flowchart;
 mod gane_sarson;
+pub(crate) mod group_master;
 mod icon;
 mod instance;
 mod keywords;
+pub(crate) mod kit;
+mod line_ends;
+pub(crate) mod look;
+mod network;
 mod opened;
 pub(crate) mod orgchart;
 mod picture;
@@ -52,6 +75,12 @@ pub(crate) mod refs;
 mod search;
 pub(crate) mod swimlane;
 mod text_box;
+mod uml_activity;
+mod uml_class;
+mod uml_component;
+mod uml_sequence;
+mod uml_state;
+mod uml_usecase;
 pub mod xfunc;
 
 pub(crate) use bring::left_out_words;
@@ -59,8 +88,14 @@ pub use bring::{Brought, Identity, MAX_BRING_NODES, Refusal, bring_master, find_
 pub use callout::{CALLOUT_HEIGHT, CALLOUT_TEXT, CALLOUT_WIDTH, CalloutStyle, STYLES as CALLOUT_STYLES, find_style as find_callout_style};
 pub(crate) use callout::{CalloutFrame, callout_shape, free_tip_cells, tied_tip_cells};
 pub(crate) use drawn::{DrawnFrame, drawn_shape};
+// The words a family's table is written in (STENCIL2): the family modules import them from here, and a stub names none yet.
+#[allow(unused_imports)]
+pub(crate) use dress::{CharRow, Dress, FieldDef, FieldKind, FieldText, More, PartKind, Role, TextSpec};
 pub use icon::{IconFormat, IconInfo, IconProblem, MAX_ICON_BYTES, decode as decode_icon, inspect as inspect_icon};
+pub(crate) use instance::drop_group_master;
 pub use instance::{MAX_LISTED_MEMBERS, OpenedDrop, drop_opened};
+#[allow(unused_imports)]
+pub(crate) use look::{ConnectorLook, Flag, LineEnd, Route};
 pub use opened::{
     AddError, IconError, IconState, MAX_LISTED_MASTERS, MAX_OPEN_ITEMS, MAX_OPEN_MEDIA_BYTES, MAX_OPEN_STENCILS, MAX_OPEN_XML_BYTES, MasterEntry,
     ModelCost, OpenedStencil, OpenedStencils,
@@ -86,36 +121,65 @@ pub const FLOWCHART_ID: &str = "flowchart";
 /// The flowchart stencil's name, as the Shapes window shows it.
 pub const FLOWCHART_NAME: &str = "Basic Flowchart";
 
-/// An outline or connection coordinate: shares of width, height and their minimum, written as a formula.
-#[derive(Clone, Copy)]
+/// An outline or connection coordinate, written as a formula: shares of width, height and their minimum, a fixed length in inches, and a corner radius that gives way when the box is small.
+///
+/// The value is `w * Width + h * Height + min * MIN(Width,Height) + k + rs * MIN(rad, MIN(Width,Height) * 0.25)`. The last term is **the corner radius**: a rounded box keeps a corner of
+/// `rad` inches until the box is smaller than four of them, and then the corner follows the box (`kit::rounded_box`). A coordinate holds at most one radius.
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Co {
     w: f64,
     h: f64,
     min: f64,
+    /// A fixed length, in inches.
+    k: f64,
+    /// The radius of the corner term, in inches, and its coefficient: 0 for no such term.
+    rad: f64,
+    rs: f64,
 }
 
 /// A share `w` of `Width`.
 const fn fw(w: f64) -> Co {
-    Co { w, h: 0.0, min: 0.0 }
+    Co { w, h: 0.0, min: 0.0, k: 0.0, rad: 0.0, rs: 0.0 }
 }
 
 /// A share `h` of `Height`.
 const fn fh(h: f64) -> Co {
-    Co { w: 0.0, h, min: 0.0 }
+    Co { w: 0.0, h, min: 0.0, k: 0.0, rad: 0.0, rs: 0.0 }
 }
 
 /// `Width*w + Height*h`.
 const fn mix(w: f64, h: f64) -> Co {
-    Co { w, h, min: 0.0 }
+    Co { w, h, min: 0.0, k: 0.0, rad: 0.0, rs: 0.0 }
+}
+
+/// A fixed length of `k` inches.
+#[allow(dead_code, reason = "the kit and the families use it as they land")]
+const fn fk(k: f64) -> Co {
+    Co { w: 0.0, h: 0.0, min: 0.0, k, rad: 0.0, rs: 0.0 }
+}
+
+#[allow(dead_code, reason = "the kit and the families use it as they land")]
+/// `coeff` times the corner radius `rad` inches (`MIN(rad, MIN(Width,Height)*0.25)`).
+const fn fr(rad: f64, coeff: f64) -> Co {
+    Co { w: 0.0, h: 0.0, min: 0.0, k: 0.0, rad, rs: coeff }
 }
 
 impl Co {
-    /// The value at a box of `width` by `height`.
-    fn value(self, width: f64, height: f64) -> f64 {
-        self.w * width + self.h * height + self.min * width.min(height)
+    #[allow(dead_code, reason = "the kit and the families use it as they land")]
+    /// The sum of two coordinates. Both may not hold a corner radius: the first one's is kept.
+    const fn plus(self, o: Co) -> Co {
+        let (rad, rs) = if self.rs != 0.0 { (self.rad, self.rs + if o.rad == self.rad { o.rs } else { 0.0 }) } else { (o.rad, o.rs) };
+        Co { w: self.w + o.w, h: self.h + o.h, min: self.min + o.min, k: self.k + o.k, rad, rs }
     }
 
-    /// The formula, or `None` for 0, which is written as a plain constant. A share of 1 is the bare name: `Width`, `Width-Height*0.5`.
+    /// The value at a box of `width` by `height`.
+    fn value(self, width: f64, height: f64) -> f64 {
+        let least = width.min(height);
+        let corner = if self.rs == 0.0 { 0.0 } else { self.rs * self.rad.min(least * 0.25) };
+        self.w * width + self.h * height + self.min * least + self.k + corner
+    }
+
+    /// The formula, or `None` when there is no term of the box: a plain constant (0, or a fixed length). A share of 1 is the bare name: `Width`, `Width-Height*0.5`.
     fn formula(self) -> Option<String> {
         let mut text = String::new();
         for (k, name) in [(self.w, "Width"), (self.h, "Height"), (self.min, "MIN(Width,Height)")] {
@@ -135,12 +199,33 @@ impl Co {
                 text.push_str(&number_text(k.abs()));
             }
         }
-        (!text.is_empty()).then_some(text)
+        if self.rs != 0.0 {
+            if text.is_empty() {
+                if self.rs < 0.0 {
+                    text.push('-');
+                }
+            } else {
+                text.push(if self.rs < 0.0 { '-' } else { '+' });
+            }
+            if self.rs.abs() != 1.0 {
+                text.push_str(&number_text(self.rs.abs()));
+                text.push('*');
+            }
+            text.push_str(&format!("MIN({},MIN(Width,Height)*0.25)", number_text(self.rad)));
+        }
+        if text.is_empty() {
+            return None;
+        }
+        if self.k != 0.0 {
+            text.push(if self.k < 0.0 { '-' } else { '+' });
+            text.push_str(&number_text(self.k.abs()));
+        }
+        Some(text)
     }
 
-    /// The cell: a length formula with the value it gives at the default size, or the constant 0.
+    /// The cell: a length formula with the value it gives at the default size, or the constant (0, or a fixed length).
     fn cell(self, width: f64, height: f64) -> Cell {
-        self.formula().map_or_else(|| length(0.0), |f| length_formula(&f, self.value(width, height)))
+        self.formula().map_or_else(|| length(self.k), |f| length_formula(&f, self.value(width, height)))
     }
 }
 
@@ -148,6 +233,7 @@ impl Co {
 type Xy = (Co, Co);
 
 /// A connection point of a master: where it sits, and the way a connector leaves it.
+#[derive(Clone, Copy, Debug)]
 struct Point {
     x: Co,
     y: Co,
@@ -156,6 +242,7 @@ struct Point {
 }
 
 /// One piece of a path. The path starts with a `Move`, and a filled one returns to where it started.
+#[derive(Clone, Copy, Debug)]
 enum Seg {
     /// `MoveTo`: lifts the pen.
     Move(Co, Co),
@@ -176,6 +263,18 @@ struct PathSpec {
     /// Whether it takes the fill (`NoFill` 0). A path that only draws a stroke inside another's fill has `NoFill` 1.
     fill: bool,
     segs: &'static [Seg],
+    /// `NoShow`: the path is not drawn (a marker a variant of Shape Data hides). A formula of the Shape Data, or a constant.
+    no_show: Flag,
+    /// `NoLine`: the path takes the fill and draws no line.
+    no_line: Flag,
+}
+
+/// A `Geometry` section made by a function when the master is built ([`Outline::Code`]): the same as a [`PathSpec`], with its segments held.
+struct OwnedPath {
+    fill: bool,
+    segs: Vec<Seg>,
+    no_show: Flag,
+    no_line: Flag,
 }
 
 /// The text block as shares of the box: left, bottom, width, height.
@@ -193,16 +292,29 @@ impl TextBox {
 }
 
 /// The outline of a master.
+#[allow(dead_code, reason = "Fixed1D, Code and Group are built by the families as they land (STENCIL2)")]
 enum Outline {
-    /// A real one-dimensional directed connector, constructed by the existing connector path.
-    Connector,
+    /// A real one-dimensional directed connector, constructed by the existing connector path, with its look: the Data Flow's is [`ConnectorLook::DATA_FLOW`].
+    Connector(ConnectorLook),
+    /// A one-dimensional shape that draws its own geometry and is **not routed**: its ends glue as a connector's do, and a move of a shape it is glued to stretches it and does not route it.
+    /// The geometry is in the line's own frame: x along it, y across it.
+    Fixed1D { look: ConnectorLook, paths: &'static [PathSpec] },
     /// Vertices as shares of the box, in order; the path returns to the first.
     Polygon(&'static [(f64, f64)]),
     /// The ellipse that fills the box.
     Ellipse,
     /// One or more paths, one `Geometry` section each, and where the text goes.
     Paths { paths: &'static [PathSpec], text: TextBox },
+    /// Paths made by a function when the master is built, for figures with repeats. **Capped**: [`MAX_SECTIONS`] sections of [`MAX_ROWS`] rows in all ([`caps_problem`]).
+    Code { build: fn() -> Vec<OwnedPath>, text: TextBox },
+    /// A group of members (builds it: until then the master has its top-level shape and no members).
+    Group { members: &'static [MemberSpec], text: TextBox },
 }
+
+/// The most `Geometry` sections, rows and connection points one master may hold (the catalogue test holds every master to them, and a build never goes past them).
+pub(crate) const MAX_SECTIONS: usize = 64;
+pub(crate) const MAX_ROWS: usize = 1_024;
+pub(crate) const MAX_POINTS: usize = 128;
 
 /// One master of the stencil.
 pub struct MasterSpec {
@@ -216,9 +328,12 @@ pub struct MasterSpec {
     identity: (u8, u16),
     outline: Outline,
     points: &'static [Point],
+    /// What the master wears besides its outline: `More::NONE` for the masters of the first seven stencils.
+    more: &'static More,
 }
 
 /// A stencil: a named list of masters.
+#[derive(Clone, Copy)]
 pub struct StencilSpec {
     /// A lowercase word: `flowchart`.
     pub id: &'static str,
@@ -227,12 +342,19 @@ pub struct StencilSpec {
     /// What the More Shapes menu files it under (ours): the words of the template categories (`General`, `Flowchart`) and `Software and Database`.
     pub category: &'static str,
     masters: &'static [MasterSpec],
+    /// Open in a new session: true for the seven stencils of the first batches, false for the new ones (a template opens its own).
+    pub default_open: bool,
 }
 
 impl StencilSpec {
     /// The masters, in the order the Shapes window lists them.
     pub fn masters(&self) -> &'static [MasterSpec] {
         self.masters
+    }
+
+    /// Whether the stencil has masters. One that has none is registered and not shipped: no command, query or listing reaches it.
+    pub fn shipped(&self) -> bool {
+        !self.masters.is_empty()
     }
 
     /// Whether the AutoConnect strip takes masters from this stencil: every built-in one but Arrow Shapes ("Not all stencils feed it (the Arrow Shapes
@@ -254,8 +376,8 @@ const fn pc(x: Co, y: Co, dx: f64, dy: f64) -> Point {
     Point { x, y, dx, dy }
 }
 
-/// The four middles of the sides of a box, top first and then anticlockwise.
-const SIDES: [Point; 4] = [pt(0.5, 1.0, 0.0, 1.0), pt(0.0, 0.5, -1.0, 0.0), pt(0.5, 0.0, 0.0, -1.0), pt(1.0, 0.5, 1.0, 0.0)];
+use group_master::MemberSpec;
+use kit::SIDES;
 
 /// Vertices of a regular pentagon fitted to its box: the golden ratio gives 0.809, 0.191 and 0.618.
 const PENTAGON: [(f64, f64); 5] = [(0.5, 1.0), (0.0, 0.618), (0.191, 0.0), (0.809, 0.0), (1.0, 0.618)];
@@ -265,6 +387,7 @@ const CUT: f64 = 0.2929;
 static MASTERS: [MasterSpec; 12] = [
     MasterSpec {
         identity: (1, 1),
+        more: &More::PLACEABLE,
         id: "rectangle",
         name: "Rectangle",
         width: 1.5,
@@ -274,6 +397,7 @@ static MASTERS: [MasterSpec; 12] = [
     },
     MasterSpec {
         identity: (1, 2),
+        more: &More::PLACEABLE,
         id: "square",
         name: "Square",
         width: 1.0,
@@ -281,10 +405,29 @@ static MASTERS: [MasterSpec; 12] = [
         outline: Outline::Polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]),
         points: &SIDES,
     },
-    MasterSpec { identity: (1, 3), id: "ellipse", name: "Ellipse", width: 1.5, height: 1.0, outline: Outline::Ellipse, points: &SIDES },
-    MasterSpec { identity: (1, 4), id: "circle", name: "Circle", width: 1.0, height: 1.0, outline: Outline::Ellipse, points: &SIDES },
+    MasterSpec {
+        identity: (1, 3),
+        more: &More::PLACEABLE,
+        id: "ellipse",
+        name: "Ellipse",
+        width: 1.5,
+        height: 1.0,
+        outline: Outline::Ellipse,
+        points: &SIDES,
+    },
+    MasterSpec {
+        identity: (1, 4),
+        more: &More::PLACEABLE,
+        id: "circle",
+        name: "Circle",
+        width: 1.0,
+        height: 1.0,
+        outline: Outline::Ellipse,
+        points: &SIDES,
+    },
     MasterSpec {
         identity: (1, 5),
+        more: &More::PLACEABLE,
         id: "triangle",
         name: "Triangle",
         width: 1.0,
@@ -294,6 +437,7 @@ static MASTERS: [MasterSpec; 12] = [
     },
     MasterSpec {
         identity: (1, 6),
+        more: &More::PLACEABLE,
         id: "right_triangle",
         name: "Right Triangle",
         width: 1.0,
@@ -303,6 +447,7 @@ static MASTERS: [MasterSpec; 12] = [
     },
     MasterSpec {
         identity: (1, 7),
+        more: &More::PLACEABLE,
         id: "diamond",
         name: "Diamond",
         width: 1.5,
@@ -312,6 +457,7 @@ static MASTERS: [MasterSpec; 12] = [
     },
     MasterSpec {
         identity: (1, 8),
+        more: &More::PLACEABLE,
         id: "pentagon",
         name: "Pentagon",
         width: 1.2,
@@ -321,6 +467,7 @@ static MASTERS: [MasterSpec; 12] = [
     },
     MasterSpec {
         identity: (1, 9),
+        more: &More::PLACEABLE,
         id: "hexagon",
         name: "Hexagon",
         width: 1.4,
@@ -330,6 +477,7 @@ static MASTERS: [MasterSpec; 12] = [
     },
     MasterSpec {
         identity: (1, 10),
+        more: &More::PLACEABLE,
         id: "octagon",
         name: "Octagon",
         width: 1.2,
@@ -348,6 +496,7 @@ static MASTERS: [MasterSpec; 12] = [
     },
     MasterSpec {
         identity: (1, 11),
+        more: &More::PLACEABLE,
         id: "parallelogram",
         name: "Parallelogram",
         width: 1.5,
@@ -357,6 +506,7 @@ static MASTERS: [MasterSpec; 12] = [
     },
     MasterSpec {
         identity: (1, 12),
+        more: &More::PLACEABLE,
         id: "trapezoid",
         name: "Trapezoid",
         width: 1.5,
@@ -371,25 +521,76 @@ pub fn masters() -> &'static [MasterSpec] {
     &MASTERS
 }
 
-/// The built-in stencils, in the order the Shapes window lists them: the two original libraries followed by the three libraries, the Cross-Functional Flowchart's and the Organization Chart Shapes.
-static STENCILS: [StencilSpec; 7] = [
-    StencilSpec { id: STENCIL_ID, name: STENCIL_NAME, category: "General", masters: &MASTERS },
-    StencilSpec { id: FLOWCHART_ID, name: FLOWCHART_NAME, category: "Flowchart", masters: &flowchart::FLOWCHART },
-    StencilSpec { id: "decorative", name: "Decorative Shapes", category: "General", masters: &decorative::MASTERS },
-    StencilSpec { id: ARROWS_ID, name: "Arrow Shapes", category: "General", masters: &arrows::MASTERS },
-    StencilSpec { id: "gane-sarson", name: "Gane-Sarson", category: "Software and Database", masters: &gane_sarson::MASTERS },
-    StencilSpec { id: xfunc::ID, name: "Cross-Functional Flowchart Shapes", category: "Flowchart", masters: &xfunc::MASTERS },
-    StencilSpec { id: orgchart::ID, name: orgchart::NAME, category: "Business", masters: &orgchart::MASTERS },
+/// The category words of the second batch's stencils.
+const SOFTWARE: &str = "Software and Database";
+
+/// **Every stencil the project registers**, in the order the Shapes window lists them: the seven of the first batches (open in a new session), and the thirteen of the second batch
+/// (STENCIL2: UML, BPMN, C4, network, cloud, crow's foot and Chen), registered with no masters and closed by default, which a family task fills. A stencil with no masters is not shipped
+/// ([`StencilSpec::shipped`]): nothing reads it but [`registered`], which the catalogue's own tests use.
+static ALL_STENCILS: [StencilSpec; 20] = [
+    StencilSpec { id: STENCIL_ID, name: STENCIL_NAME, category: "General", masters: &MASTERS, default_open: true },
+    StencilSpec { id: FLOWCHART_ID, name: FLOWCHART_NAME, category: "Flowchart", masters: &flowchart::FLOWCHART, default_open: true },
+    StencilSpec { id: "decorative", name: "Decorative Shapes", category: "General", masters: &decorative::MASTERS, default_open: true },
+    StencilSpec { id: ARROWS_ID, name: "Arrow Shapes", category: "General", masters: &arrows::MASTERS, default_open: true },
+    StencilSpec { id: "gane-sarson", name: "Gane-Sarson", category: SOFTWARE, masters: &gane_sarson::MASTERS, default_open: true },
+    StencilSpec { id: xfunc::ID, name: "Cross-Functional Flowchart Shapes", category: "Flowchart", masters: &xfunc::MASTERS, default_open: true },
+    StencilSpec { id: orgchart::ID, name: orgchart::NAME, category: "Business", masters: &orgchart::MASTERS, default_open: true },
+    StencilSpec { id: "uml-class", name: "UML Class", category: SOFTWARE, masters: &uml_class::MASTERS, default_open: false },
+    StencilSpec { id: "uml-usecase", name: "UML Use Case", category: SOFTWARE, masters: &uml_usecase::MASTERS, default_open: false },
+    StencilSpec { id: "uml-sequence", name: "UML Sequence", category: SOFTWARE, masters: &uml_sequence::MASTERS, default_open: false },
+    StencilSpec { id: "uml-activity", name: "UML Activity", category: SOFTWARE, masters: &uml_activity::MASTERS, default_open: false },
+    StencilSpec { id: "uml-state", name: "UML State Machine", category: SOFTWARE, masters: &uml_state::MASTERS, default_open: false },
+    StencilSpec {
+        id: "uml-component",
+        name: "UML Component and Deployment",
+        category: SOFTWARE,
+        masters: &uml_component::MASTERS,
+        default_open: false,
+    },
+    StencilSpec { id: "bpmn", name: "BPMN Shapes", category: "Flowchart", masters: &bpmn::MASTERS, default_open: false },
+    StencilSpec { id: "c4", name: "C4 Model", category: SOFTWARE, masters: &c4::MASTERS, default_open: false },
+    StencilSpec { id: "network", name: "Network Devices", category: "Network", masters: &network::MASTERS, default_open: false },
+    StencilSpec { id: "computers", name: "Computers and Devices", category: "Network", masters: &computers::MASTERS, default_open: false },
+    StencilSpec { id: "cloud", name: "Cloud Services", category: "Network", masters: &cloud::MASTERS, default_open: false },
+    StencilSpec { id: "crows-foot", name: "Crow's Foot Database Notation", category: SOFTWARE, masters: &crows_foot::MASTERS, default_open: false },
+    StencilSpec { id: "chen", name: "Chen's Database Notation", category: SOFTWARE, masters: &chen::MASTERS, default_open: false },
 ];
 
-/// The built-in stencils.
-pub fn stencils() -> &'static [StencilSpec] {
-    &STENCILS
+/// The stencils among `all` that are shipped, in the order given.
+fn shipped_among(all: &[StencilSpec]) -> Vec<StencilSpec> {
+    all.iter().filter(|s| s.shipped()).copied().collect()
 }
 
-/// Every master of every built-in stencil.
+/// The ids among `all` of the stencils a new session has open: the shipped ones that are open by default, in the order given.
+fn default_open_among(all: &[StencilSpec]) -> Vec<&'static str> {
+    all.iter().filter(|s| s.shipped() && s.default_open).map(|s| s.id).collect()
+}
+
+/// Every registered stencil, shipped or not, in catalogue order: for the catalogue's own tests, which hold the registration to its rules before a family fills it.
+#[cfg(test)]
+pub(crate) fn registered() -> &'static [StencilSpec] {
+    &ALL_STENCILS
+}
+
+/// The built-in stencils that are shipped, in the order the Shapes window lists them. **The one list a command, a query or a window reads**: the filter is made once.
+pub fn stencils() -> &'static [StencilSpec] {
+    static SHIPPED: LazyLock<Vec<StencilSpec>> = LazyLock::new(|| shipped_among(&ALL_STENCILS));
+    SHIPPED.as_slice()
+}
+
+/// The ids of the stencils a new session has open, in catalogue order: the shipped ones that are open by default.
+pub(crate) fn default_open_ids() -> Vec<&'static str> {
+    default_open_among(&ALL_STENCILS)
+}
+
+/// Every master of every shipped stencil. A hidden master (the custom line ends) is in no stencil and so is not here ([`find_any`] finds it).
 pub fn all_masters() -> impl Iterator<Item = &'static MasterSpec> {
-    STENCILS.iter().flat_map(|s| s.masters.iter())
+    stencils().iter().flat_map(|s| s.masters.iter())
+}
+
+/// A built-in master by its exact id, shipped or hidden: what [`More::brings`] names.
+fn find_any(id: &str) -> Option<&'static MasterSpec> {
+    all_masters().chain(line_ends::MASTERS.iter()).find(|m| m.id == id)
 }
 
 /// What `stencil.list` answers about the built-in stencils: `{stencils: [{id, name, builtin: true, masters: [{id, name, width, height,
@@ -398,16 +599,16 @@ pub fn list() -> serde_json::Value {
     list_with(&OpenedStencils::new())
 }
 
-/// What `stencil.list` answers: the built-in stencils that are open (by default every built-in; a template names the ones it
-/// opens) and then the stencils the session has opened from files, each as [`OpenedStencil::to_json`] has it (`builtin: false`), and `available`,
-/// the built-in stencils that are not open (`{id, name, builtin: true, category, masters_total}`), which `stencil.open {id}` opens. Each built-in stencil names its `category`.
+/// What `stencil.list` answers: the built-in stencils that are open (a new session has the seven of the first batches, a template names the ones it opens) and then the stencils the session
+/// has opened from files, each as [`OpenedStencil::to_json`] has it (`builtin: false`), and `available`, the shipped built-in stencils that are not open (`{id, name, builtin: true, category,
+/// masters_total}`), which `stencil.open {id}` opens. A stencil that is not shipped is in neither. Each built-in stencil names its `category`.
 pub fn list_with(opened: &OpenedStencils) -> serde_json::Value {
     let open = opened.open_builtins();
     let mut stencils: Vec<serde_json::Value> = open
         .iter()
         .filter_map(|id| builtin_stencil(id))
         .map(|s| {
-            let masters: Vec<serde_json::Value> = s.masters().iter().map(master_json).collect();
+            let masters: Vec<serde_json::Value> = s.masters().iter().filter(|m| !m.is_hidden()).map(master_json).collect();
             serde_json::json!({ "id": s.id, "name": s.name, "builtin": true, "category": s.category, "masters": masters })
         })
         .collect();
@@ -418,14 +619,18 @@ pub fn list_with(opened: &OpenedStencils) -> serde_json::Value {
     serde_json::json!({ "stencils": stencils, "available": available })
 }
 
-/// A built-in master as `stencil.list` and `stencil.search` list it: `{id, name, width, height, connection_points}` and `one_d` for a connector.
-/// A master as `stencil.list` lists it: `one_d` for a connector, `part` for one whose drop is put in a structure (a Swimlane, a Separator), and `autoconnect: false` for one that is no
-/// connector and that the AutoConnect strip never offers (a part, or a master of a stencil that does not feed the strip).
+/// A built-in master as `stencil.list` and `stencil.search` list it: `{id, name, width, height, connection_points}`; `one_d` for a connector or a one-dimensional figure, with `ends:
+/// {begin, end, pattern}` (the line-end numbers and the pattern its cells resolve to: the window draws a tile from them); `part` for one whose drop is put in a structure (a Swimlane, a
+/// Separator), and `autoconnect: false` for one that is no connector and that the AutoConnect strip never offers (a part, or a master of a stencil that does not feed the strip).
 fn master_json(m: &MasterSpec) -> serde_json::Value {
     let mut value = serde_json::json!({ "id": m.id, "name": m.name, "width": m.width, "height": m.height, "connection_points": m.point_count() });
     if let Some(map) = value.as_object_mut() {
         if m.is_connector() {
             map.insert("one_d".into(), serde_json::json!(true));
+        }
+        if let Some(look) = m.look() {
+            let (begin, end, pattern) = look.numbers();
+            map.insert("ends".into(), serde_json::json!({ "begin": begin, "end": end, "pattern": pattern }));
         }
         if m.is_part() {
             map.insert("part".into(), serde_json::json!(true));
@@ -437,9 +642,9 @@ fn master_json(m: &MasterSpec) -> serde_json::Value {
     value
 }
 
-/// The built-in stencils whose id is not in `open`, in the order of the catalogue.
+/// The shipped built-in stencils whose id is not in `open`, in the order of the catalogue.
 fn stencils_not_in<'a>(open: &'a [&'static str]) -> impl Iterator<Item = &'static StencilSpec> + 'a {
-    STENCILS.iter().filter(move |s| !open.contains(&s.id))
+    stencils().iter().filter(move |s| !open.contains(&s.id))
 }
 
 impl MasterSpec {
@@ -449,10 +654,12 @@ impl MasterSpec {
     }
 
     /// The `UniqueID` and `BaseID` of this master: fixed, so a drawing that already holds the master is found again (a copy keeps its `BaseID`).
-    /// Ours: no spec gives a form. Basic Shapes are `D1AC0001`, Basic Flowchart `D1AC0002`, each numbered from 1.
+    /// Ours: no spec gives a form. `{D1AC<series as four hex digits>-0000-4000-8000-<ordinal as twelve>}`: Basic Shapes are `D1AC0001`, Basic
+    /// Flowchart `D1AC0002`, each numbered from 1, and the second batch's stencils series 9 to 21 and the hidden line ends 22. Series 1 to 9 spell the text they had when the form was
+    /// `D1AC000<series>`, so no saved drawing loses its masters (a series past 9 has more than one digit, which that form could not hold as a GUID).
     pub(crate) fn guid(&self) -> String {
         let (series, at) = self.identity;
-        format!("{{D1AC000{series}-0000-4000-8000-{at:012X}}}")
+        format!("{{D1AC{series:04X}-0000-4000-8000-{at:012X}}}")
     }
 
     /// Where this master's connection points are, from the lower left corner of its box at its default size: `(x, y)` in inches, in the order of the `Connection` section
@@ -462,27 +669,54 @@ impl MasterSpec {
         self.points.iter().map(|p| (p.x.value(self.width, self.height), p.y.value(self.width, self.height))).collect()
     }
 
-    /// Whether placement uses the existing one-dimensional connector machinery.
+    /// Whether the master is one-dimensional: a connector, or a figure that is drawn along a line (`Fixed1D`). Its ends glue and it has a width and no height; the AutoConnect strip never
+    /// offers it, and it needs no connection point of its own.
     pub fn is_connector(&self) -> bool {
-        matches!(self.outline, Outline::Connector)
+        matches!(self.outline, Outline::Connector(_) | Outline::Fixed1D { .. })
     }
 
-    /// Whether a drop of this master is put in a structure and is no shape of its outline: a Swimlane is inserted in a list of lanes, a Separator splits a phase (`xfunc.rs`).
+    /// Whether the master is a one-dimensional figure that is **not routed** (`Fixed1D`): its geometry is its own and a move of a shape it is glued to stretches it.
+    pub fn is_fixed_1d(&self) -> bool {
+        matches!(self.outline, Outline::Fixed1D { .. })
+    }
+
+    /// The line ends, pattern and route of a one-dimensional master.
+    fn look(&self) -> Option<&ConnectorLook> {
+        match &self.outline {
+            Outline::Connector(look) | Outline::Fixed1D { look, .. } => Some(look),
+            _ => None,
+        }
+    }
+
+    /// Whether the window and the listing leave the master out (a hidden line end).
+    pub fn is_hidden(&self) -> bool {
+        self.more.hidden
+    }
+
+    /// The dress of the master, when it has one.
+    fn dress(&self) -> Option<&'static Dress> {
+        self.more.dress
+    }
+
+    /// Whether a drop of this master is put in a structure and is no shape of its outline: a Swimlane is inserted in a list of lanes, a Separator splits a phase (`xfunc.rs`), and BPMN's Pool
+    /// and Lane are parts too (their dress says so).
     pub fn is_part(&self) -> bool {
-        xfunc::is_part(self.id)
+        xfunc::is_part(self.id) || self.dress().is_some_and(|d| matches!(d.role, Role::Part(_)))
     }
 
     /// Whether the AutoConnect strip may offer this master: it is no connector, no part of a structure, and in a stencil that feeds the strip.
     pub fn on_strip(&self) -> bool {
-        !self.is_connector() && !self.is_part() && STENCILS.iter().filter(|s| !s.feeds_strip()).all(|s| s.masters.iter().all(|m| m.id != self.id))
+        !self.is_connector() && !self.is_part() && stencils().iter().filter(|s| !s.feeds_strip()).all(|s| s.masters.iter().all(|m| m.id != self.id))
     }
 
     /// Where the text goes.
     fn text_box(&self) -> TextBox {
-        match &self.outline {
-            Outline::Paths { text, .. } => *text,
-            Outline::Polygon(_) | Outline::Ellipse | Outline::Connector => TextBox::FULL,
-        }
+        self.outline.text_box()
+    }
+
+    /// Whether the master is a group of members (a class's compartments, a lifeline's head and stem): dropped as a group with its members listed (`group_master`).
+    pub fn is_group(&self) -> bool {
+        matches!(self.outline, Outline::Group { .. })
     }
 }
 
@@ -497,18 +731,18 @@ pub fn find_master(key: &str) -> Option<&'static MasterSpec> {
     all_masters().find(|m| simple(m.id) == wanted || simple(m.name) == wanted)
 }
 
-/// The built-in stencil with this exact id.
+/// The shipped built-in stencil with this exact id (a stencil that is registered and has no masters is no stencil to any caller).
 pub fn builtin_stencil(id: &str) -> Option<&'static StencilSpec> {
-    STENCILS.iter().find(|s| s.id == id)
+    stencils().iter().find(|s| s.id == id)
 }
 
-/// The built-in stencil a person or a program means by `key`: its id, in any case, with white space round it. A text longer than any id is not looked at.
+/// The shipped built-in stencil a person or a program means by `key`: its id, in any case, with white space round it. A text longer than any id is not looked at.
 pub fn find_stencil(key: &str) -> Option<&'static StencilSpec> {
     if key.len() > 64 {
         return None;
     }
     let wanted = key.trim().to_ascii_lowercase();
-    STENCILS.iter().find(|s| s.id == wanted)
+    stencils().iter().find(|s| s.id == wanted)
 }
 
 /// The master a person or a program means by `key` in one built-in stencil: as [`find_master`], but only that stencil is searched.
@@ -618,11 +852,52 @@ fn seg_row(ix: u32, seg: &Seg, w: f64, h: f64) -> Arc<Row> {
     }
 }
 
-/// The `Geometry` sections of a master: `IX` 0 up, each one path, `NoFill` 0 for a path that takes the fill.
+/// One `Geometry` section from a path: `IX` `ix`, the flags it says, and its rows (at most `rows_left`, the rest of the master's [`MAX_ROWS`]). → the section.
+fn path_section(ix: u32, path: (bool, &[Seg], &Flag, &Flag), (w, h): (f64, f64), rows_left: &mut usize) -> Section {
+    let (fill, segs, no_show, no_line) = path;
+    let mut section = flagged_section(ix, fill);
+    if !matches!(no_show, Flag::Off) {
+        put(&mut section.cells, "NoShow", no_show.cell());
+    }
+    if !matches!(no_line, Flag::Off) {
+        put(&mut section.cells, "NoLine", no_line.cell());
+    }
+    for (i, seg) in segs.iter().enumerate() {
+        if *rows_left == 0 {
+            break;
+        }
+        *rows_left -= 1;
+        section.rows.push(seg_row(u32::try_from(i + 1).unwrap_or(u32::MAX), seg, w, h));
+    }
+    section
+}
+
+/// The sections of paths in a list, `IX` 0 up, within the caps of one master.
+fn path_sections(paths: &[(bool, &[Seg], &Flag, &Flag)], size: (f64, f64)) -> Vec<Section> {
+    let mut rows_left = MAX_ROWS;
+    paths
+        .iter()
+        .take(MAX_SECTIONS)
+        .enumerate()
+        .map(|(n, path)| path_section(u32::try_from(n).unwrap_or(u32::MAX), *path, size, &mut rows_left))
+        .collect()
+}
+
+/// The paths a `Paths` or `Fixed1D` outline holds, in the form [`path_sections`] takes.
+fn spec_paths(paths: &'static [PathSpec]) -> Vec<(bool, &'static [Seg], &'static Flag, &'static Flag)> {
+    paths.iter().map(|p| (p.fill, p.segs, &p.no_show, &p.no_line)).collect()
+}
+
+/// The `Geometry` sections of a master: `IX` 0 up, each one path, `NoFill` 0 for a path that takes the fill. A master made by code is held to [`MAX_SECTIONS`] sections and [`MAX_ROWS`] rows
+/// in all (the catalogue test, [`caps_problem`], fails a master that goes past them, and a build never does).
 fn geometry(spec: &MasterSpec) -> Vec<Section> {
-    let (w, h) = (spec.width, spec.height);
-    match &spec.outline {
-        Outline::Connector => {
+    outline_sections(&spec.outline, (spec.width, spec.height))
+}
+
+/// The `Geometry` sections an outline draws in a box of `w` by `h`: a master's own, or a member's of a group master.
+fn outline_sections(outline: &Outline, (w, h): (f64, f64)) -> Vec<Section> {
+    match outline {
+        Outline::Connector(_) => {
             let mut section = flagged_section(0, false);
             section.rows.push(seg_row(1, &Seg::Move(fw(0.0), fh(0.0)), w, h));
             section.rows.push(seg_row(2, &Seg::Line(fw(1.0), fh(0.0)), w, h));
@@ -645,35 +920,80 @@ fn geometry(spec: &MasterSpec) -> Vec<Section> {
             }
             vec![section]
         }
-        Outline::Paths { paths, .. } => paths
-            .iter()
-            .enumerate()
-            .map(|(n, path)| {
-                let mut section = flagged_section(u32::try_from(n).unwrap_or(u32::MAX), path.fill);
-                for (i, seg) in path.segs.iter().enumerate() {
-                    section.rows.push(seg_row(u32::try_from(i + 1).unwrap_or(u32::MAX), seg, w, h));
-                }
-                section
-            })
-            .collect(),
+        Outline::Paths { paths, .. } | Outline::Fixed1D { paths, .. } => path_sections(&spec_paths(paths), (w, h)),
+        Outline::Code { build, .. } => {
+            let built = build();
+            let paths: Vec<(bool, &[Seg], &Flag, &Flag)> = built.iter().map(|p| (p.fill, p.segs.as_slice(), &p.no_show, &p.no_line)).collect();
+            path_sections(&paths, (w, h))
+        }
+        // A group has no geometry of its own: its members draw (`group_master`).
+        Outline::Group { .. } => Vec::new(),
     }
 }
 
-/// The `Connection` section: a row for each point, `IX` 0 up.
+/// How many sections and rows an outline would have, before the caps cut them.
+fn outline_size(outline: &Outline) -> (usize, usize) {
+    match outline {
+        Outline::Connector(_) => (1, 2),
+        Outline::Ellipse => (1, 1),
+        Outline::Polygon(vertices) => (1, vertices.len().saturating_add(1)),
+        Outline::Paths { paths, .. } | Outline::Fixed1D { paths, .. } => {
+            (paths.len(), paths.iter().map(|p| p.segs.len()).fold(0, usize::saturating_add))
+        }
+        Outline::Code { build, .. } => {
+            let built = build();
+            (built.len(), built.iter().map(|p| p.segs.len()).fold(0, usize::saturating_add))
+        }
+        Outline::Group { .. } => (0, 0),
+    }
+}
+
+/// How many sections, rows and connection points the master would have, before the caps cut them: `(sections, rows, points)`. **A group master's are its members' together** (and its own points).
+#[allow(dead_code, reason = "read by the catalogue's tests")]
+fn size_of(spec: &MasterSpec) -> (usize, usize, usize) {
+    let (sections, rows) = outline_size(&spec.outline);
+    match &spec.outline {
+        Outline::Group { members, .. } => {
+            let (member_sections, member_rows, member_points) = group_master::size_of_members(members, outline_size);
+            (sections.saturating_add(member_sections), rows.saturating_add(member_rows), spec.points.len().saturating_add(member_points))
+        }
+        _ => (sections, rows, spec.points.len()),
+    }
+}
+
+/// What is wrong with the master's size, in words: more than [`MAX_SECTIONS`] `Geometry` sections, [`MAX_ROWS`] rows or [`MAX_POINTS`] connection points. The catalogue's test calls it for
+/// every master, so a master made by code that grows past what the engine reads is found by a test and not by a drawing.
+#[allow(dead_code, reason = "read by the catalogue's tests")]
+pub(crate) fn caps_problem(spec: &MasterSpec) -> Option<String> {
+    let (sections, rows, points) = size_of(spec);
+    let mut said = Vec::new();
+    for (count, most, what) in [(sections, MAX_SECTIONS, "Geometry sections"), (rows, MAX_ROWS, "rows"), (points, MAX_POINTS, "connection points")] {
+        if count > most {
+            said.push(format!("{count} {what}, past {most}"));
+        }
+    }
+    if let Outline::Group { members, .. } = &spec.outline
+        && members.len() > group_master::MAX_MEMBERS
+    {
+        said.push(format!("{} members, past {}", members.len(), group_master::MAX_MEMBERS));
+    }
+    (!said.is_empty()).then(|| format!("{}: {}", spec.id, said.join(", ")))
+}
+
+/// The `Connection` section: a row for each point, `IX` 0 up, at most [`MAX_POINTS`].
 fn connections(spec: &MasterSpec) -> Section {
+    connection_section(spec.points, (spec.width, spec.height))
+}
+
+/// The `Connection` section of `points` in a box of `w` by `h`.
+fn connection_section(points: &[Point], (w, h): (f64, f64)) -> Section {
     let mut section = Section::new("Connection", None);
-    for (i, p) in spec.points.iter().enumerate() {
+    for (i, p) in points.iter().take(MAX_POINTS).enumerate() {
         let ix = u32::try_from(i).unwrap_or(u32::MAX);
         section.rows.push(row(
             ix,
             None,
-            vec![
-                ("X", p.x.cell(spec.width, spec.height)),
-                ("Y", p.y.cell(spec.width, spec.height)),
-                ("DirX", plain(p.dx)),
-                ("DirY", plain(p.dy)),
-                ("Type", plain(0.0)),
-            ],
+            vec![("X", p.x.cell(w, h)), ("Y", p.y.cell(w, h)), ("DirX", plain(p.dx)), ("DirY", plain(p.dy)), ("Type", plain(0.0))],
         ));
     }
     section
@@ -693,6 +1013,8 @@ fn master_shape(spec: &MasterSpec) -> Shape {
     // The formulas written on creation.
     put(cells, "LocPinX", length_formula("Width*0.5", w * 0.5));
     put(cells, "LocPinY", length_formula("Height*0.5", h * 0.5));
+    // A line end is drawn pointing right with its pin on its tip.
+    line_ends::pin_at_tip(spec, cells, w, h);
     for flat in ["Angle", "FlipX", "FlipY", "ResizeMode"] {
         put(cells, flat, plain(0.0));
     }
@@ -706,26 +1028,73 @@ fn master_shape(spec: &MasterSpec) -> Shape {
     put(cells, "TxtWidth", length_formula(&format!("Width*{}", number_text(text.w)), text.w * w));
     put(cells, "TxtHeight", length_formula(&format!("Height*{}", number_text(text.h)), text.h * h));
     put(cells, "TxtAngle", plain(0.0));
-    if spec.is_connector() {
+    if let Some(look) = spec.look() {
         for (name, value) in [("BeginX", 0.0), ("BeginY", 0.0), ("EndX", w), ("EndY", 0.0)] {
             put(cells, name, length(value));
         }
-        for (name, value) in [("BeginArrow", 0.0), ("EndArrow", 4.0), ("FillPattern", 0.0)] {
-            put(cells, name, plain(value));
+        // The line ends, the pattern and the route are the master's: an instance inherits them.
+        for (name, cell) in look.cells() {
+            put(cells, name, cell);
+        }
+        if spec.is_fixed_1d() {
+            // Route style 16 (centre to centre) keeps its geometry: a glued end that moves is followed, and no route is laid over the figure.
+            put(cells, "ShapeRouteStyle", plain(16.0));
         }
     }
     sheet.sections.extend(geometry(spec).into_iter().map(Arc::new));
     sheet.sections.push(Arc::new(connections(spec)));
-    // A position of the Organization Chart Shapes also holds its look, its Shape Data, its marker and the text that shows two of the fields.
-    let text = orgchart::is_position(spec).then(|| Arc::new(orgchart::decorate(spec, &mut sheet)));
+    // A group of compartments is as tall as they are, and holds what that needs; a dress says otherwise below (`group_master`).
+    if let Outline::Group { members, .. } = &spec.outline {
+        group_master::group_cells(members, &mut sheet);
+    }
+    // A position of the Organization Chart Shapes also holds its look, its Shape Data, its marker and the text that shows two of the fields. Any other master's dress does the same by data.
+    let text = if orgchart::is_position(spec) {
+        Some(Arc::new(orgchart::decorate(spec, &mut sheet)))
+    } else {
+        spec.dress().and_then(|dress| dress::decorate(dress, &mut sheet)).map(Arc::new)
+    };
+    let (kind, children) = match &spec.outline {
+        Outline::Group { members, .. } => (ShapeType::Group, ShapeList::from_vec(group_master::build_members(spec, members))),
+        _ => (ShapeType::Shape, ShapeList::default()),
+    };
     Shape {
         id: MASTER_SHAPE_ID,
         name: Some(Arc::from(spec.name)),
         name_u: Some(Arc::from(spec.name)),
-        kind: ShapeType::Shape,
+        kind,
         sheet: Arc::new(sheet),
         text,
+        children,
         ..Shape::new(MASTER_SHAPE_ID)
+    }
+}
+
+/// Whether a sheet holds a formula that has no value yet: a cell a dress or a flag gave as a formula alone.
+fn has_unsettled(sheet: &Sheet) -> bool {
+    let bare = |cell: &Cell| matches!(cell.formula, diacraft_doc::FormulaSlot::Local(_)) && cell.value.is_none();
+    sheet.cells.values().any(bare) || sheet.sections.iter().any(|s| s.cells.values().any(bare) || s.rows.iter().any(|r| r.cells.values().any(bare)))
+}
+
+/// Whether a shape or any member of it holds a formula that has no value yet (a group master's members do).
+fn shape_has_unsettled(shape: &Shape) -> bool {
+    has_unsettled(&shape.sheet) || shape.children.iter().any(|member| shape_has_unsettled(member))
+}
+
+/// A master whose cells that hold a formula and no value are worked out: the master is calculated alone, in a document of its own, so that **a cached value is what its formula gives at the
+/// master's default Shape Data and size**, and a table never repeats a number a formula computes. A master that cannot be settled (the budget is spent) is returned as it was.
+fn settle_values(master: Master) -> Master {
+    let id = master.id;
+    let mut scratch = Document::new_blank();
+    if scratch.add_master(master.clone()).is_err() {
+        return master;
+    }
+    let report = diacraft_calc::commit(&mut scratch, &diacraft_calc::Budget::default(), diacraft_calc::EvalOptions::default());
+    if report.budget_exhausted {
+        return master;
+    }
+    match scratch.master(id) {
+        Some(settled) => (**settled).clone(),
+        None => master,
     }
 }
 
@@ -741,29 +1110,55 @@ fn build_master(spec: &MasterSpec, id: u32) -> Master {
     let guid = spec.guid();
     let mut raw = diacraft_doc::RawAttrs::new();
     raw.push("BaseID", &guid);
+    if spec.is_hidden() {
+        raw.push("Hidden", "1");
+    }
     let mut master = Master {
         id,
         name: Some(Arc::from(spec.name)),
         name_u: Some(Arc::from(spec.name)),
         unique_id: Some(Arc::from(guid.as_str())),
-        pattern_flags: Some(0),
+        pattern_flags: Some(line_ends::pattern_flags(spec)),
         sheet: Arc::new(page_sheet),
         raw,
         ..Master::default()
     };
     master.shapes.push(Arc::new(master_shape(spec)));
+    if master.shapes.iter().any(|shape| shape_has_unsettled(shape)) {
+        master = settle_values(master);
+    }
     master
 }
+
+/// The text a shape dropped from `spec` holds when the master's text has fields (the shown form of a field lives in the text that holds it): `None` for any other master.
+pub(crate) fn dropped_text(spec: &MasterSpec) -> Option<diacraft_doc::Text> {
+    spec.dress().and_then(dress::dropped_text)
+}
+
+/// The most masters a master brings in a chain (a master that brings another that brings another): a chain past it is left as far as it went.
+const MAX_BRING_DEPTH: usize = 4;
 
 /// The `ID` of the master `spec` is in `doc`, copying the master in when the document has none of it. Whether it has is decided by the one
 /// matcher ([`find_same_master`]): a built-in master's `UniqueID` and `BaseID` are the same fixed GUID, and a master of the
 /// document that has that `UniqueID` and another `BaseID` is another master, so the copy gets a `UniqueID` of its own then.
+/// **The masters it brings** (`More::brings`: a connector's line end) are copied in first, each by the same rule.
 pub fn ensure_master(doc: &mut Document, spec: &MasterSpec) -> Result<u32, DocError> {
+    ensure_master_within(doc, spec, MAX_BRING_DEPTH)
+}
+
+fn ensure_master_within(doc: &mut Document, spec: &MasterSpec, depth: usize) -> Result<u32, DocError> {
     let guid = spec.guid();
     let mut probe = Master { unique_id: Some(Arc::from(guid.as_str())), ..Master::default() };
     probe.raw.push("BaseID", &guid);
     if let Some(found) = find_same_master(doc, &probe, Identity { unique_is_unique: true, base_is_unique: true }) {
         return Ok(found);
+    }
+    if depth > 0 {
+        for id in spec.more.brings {
+            if let Some(brought) = find_any(id).filter(|m| !std::ptr::eq(*m, spec)) {
+                ensure_master_within(doc, brought, depth - 1)?;
+            }
+        }
     }
     let id = doc.masters.iter().map(|m| m.id).max().map_or(Some(1), |highest| highest.checked_add(1)).ok_or(DocError::IdsExhausted)?;
     let mut master = build_master(spec, id);
@@ -775,6 +1170,10 @@ pub fn ensure_master(doc: &mut Document, spec: &MasterSpec) -> Result<u32, DocEr
 #[cfg(test)]
 mod batch_tests;
 #[cfg(test)]
+mod catalogue_tests;
+#[cfg(test)]
 mod flowchart_tests;
+#[cfg(test)]
+mod group_master_tests;
 #[cfg(test)]
 mod tests;

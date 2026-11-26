@@ -207,6 +207,11 @@ const TEXT: &[(Ns, &str, P)] = &[
     (Ns::Style, "font-family-complex", P::FontFamilyComplex),
 ];
 
+/// The attribute of `style:text-properties` the property `p` is, by namespace and local name, when the model maps it: what a held spelling names ([`super::held`]).
+pub(crate) fn text_attribute(p: P) -> Option<(Ns, &'static str)> {
+    TEXT.iter().find(|(_, _, q)| *q == p).map(|(ns, local, _)| (*ns, *local))
+}
+
 /// A tab stop of `style:tab-stops`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Tab {
@@ -258,6 +263,44 @@ pub(crate) struct OdfStyle {
     pub templates: Vec<super::held::Template>,
     /// The held values an automatic paragraph or text style gives each paragraph or run that names it (`held.rs`); empty for any other style.
     pub text_templates: Vec<super::held::TextTemplate>,
+    /// Whether a reference found the style (a shape, a paragraph or a run of the drawing named it, or a style whose parent it is): an automatic style that none found is **unused** and
+    /// is held whole once the part is read ([`StyleSet::hold_unused`]).
+    pub named: std::cell::Cell<bool>,
+    /// The place of the remainder this automatic style was given among the document's kept styles ([`odfdoc::DocData::push_style`]), which the whole style takes over when it is unused.
+    pub remainder_at: Option<usize>,
+    /// The attributes of the `Style` group (weight, style and small caps, and the complex script's weight and style) a **style sheet's** text properties spell, as written:
+    /// the sheet holds the spelling when the cells would write another ([`super::sheets`]).
+    pub spelled: Vec<Spelled>,
+}
+
+/// An attribute of the `Style` group of a style sheet's text properties, as the file wrote it.
+#[derive(Clone)]
+pub(crate) struct Spelled {
+    pub ns: Ns,
+    pub local: &'static str,
+    /// The name as written (its prefix is the file's).
+    pub name: String,
+    pub value: String,
+}
+
+/// The attributes of the `Style` group that the text properties element `el` spells, the first of each name and in the order written (`names` has `el` entered).
+fn spelled_style_group<'t>(names: &Names<'t>, el: &'t El) -> Vec<Spelled> {
+    let mut out: Vec<Spelled> = Vec::new();
+    let attrs = names.attrs(el);
+    for a in attrs.iter() {
+        let local = match (a.ns, a.local) {
+            (Ns::Fo, "font-weight") => "font-weight",
+            (Ns::Fo, "font-style") => "font-style",
+            (Ns::Fo, "font-variant") => "font-variant",
+            (Ns::Style, "font-weight-complex") => "font-weight-complex",
+            (Ns::Style, "font-style-complex") => "font-style-complex",
+            _ => continue,
+        };
+        if !out.iter().any(|s| s.ns == a.ns && s.local == local) {
+            out.push(Spelled { ns: a.ns, local, name: a.name.to_owned(), value: exact_value(&attrs, "text-properties", a).to_owned() });
+        }
+    }
+    out
 }
 
 impl OdfStyle {
@@ -338,6 +381,18 @@ pub(crate) struct PageLayout {
     pub units: RawAttrs,
 }
 
+/// What the walk of [`StyleSet::hold_unused`] keeps from one container of automatic styles to the next in a part.
+#[derive(Default)]
+struct Walk<'t> {
+    /// The pairs of family and name met (the names borrowed from the tree, none copied): the first of each is the style a reference finds.
+    seen: HashSet<(Family, &'t str)>,
+    /// How many repeats of each pair were met.
+    repeated: HashMap<(Family, &'t str), usize>,
+    /// The next number each name gives its repeats: it only grows, so a repeat looks for a free name from where the last of its name stopped, and the names of a container are looked at
+    /// once for all its repeats.
+    cursor: HashMap<(Family, &'t str), u64>,
+}
+
 /// Every style and common element of a drawing.
 #[derive(Default)]
 pub(crate) struct StyleSet {
@@ -346,6 +401,9 @@ pub(crate) struct StyleSet {
     auto_styles: HashMap<(Family, String), usize>,
     auto_content: HashMap<(Family, String), usize>,
     defaults: HashMap<Family, usize>,
+    /// The places in `list` of the automatic styles that repeat a name their container already holds (the first of a name is the one a reference finds), by part, family and name, in the order
+    /// read: no reference ever finds them, so they are held whole as unused styles ([`StyleSet::hold_unused`]).
+    repeats: HashMap<(File, Family, String), Vec<usize>>,
     pub page_layouts: HashMap<String, PageLayout>,
     /// The dashes and gradients in the order read, and the index of each by name (the first of a name wins): a style finds one by name
     /// once, when its part is read ([`StyleSet::resolve`]), and keeps the index.
@@ -442,6 +500,23 @@ fn unread_value(p: P, prop: &Prop) -> bool {
     }
 }
 
+/// **The exact value of the attribute `a` of the properties element `holder`** whose attributes are `attrs`: the value the file's writer carried in an attribute of DiaCraft's own beside it
+/// When `a` is one of the five attributes of the group `Style` of a text's properties and the carrier is still the value `a` stands for (`ext::odf14`: the writer wrote the value
+/// ODF 1.4 lists nearest to the exact one, and a file whose attribute another program changed is the program's); else the value written.
+fn exact_value<'t>(attrs: &super::names::Attrs<'t>, holder: &str, a: &super::names::Attr<'t>) -> &'t str {
+    use crate::ext::odf14::{Space, carried_still, listed};
+    let space = match a.ns {
+        Ns::Fo => Space::Fo,
+        Ns::Style => Space::Style,
+        _ => return a.value,
+    };
+    if holder != "text-properties" {
+        return a.value;
+    }
+    let Some((kind, carrier)) = listed(space, a.local) else { return a.value };
+    attrs.peek(Ns::Diacraft, carrier).and_then(|carried| carried_still(kind, carried, a.value)).unwrap_or(a.value)
+}
+
 /// One step of the walk of a properties element: the attributes the reader maps are kept, the rest counted (and, for a style sheet's style, collected).
 fn props_of<'t>(
     r: &mut Reader,
@@ -453,19 +528,22 @@ fn props_of<'t>(
 ) -> Vec<(P, Prop)> {
     let attrs = names.attrs(el);
     r.saw_attrs(attrs.len());
+    let holder = el.name.rsplit(':').next().unwrap_or_default();
     let mut out = Vec::new();
     let mut dia = dia;
     for a in attrs.iter() {
         if let Some((_, _, p)) = table.iter().find(|(ns, local, _)| *ns == a.ns && *local == a.local) {
             if !out.iter().any(|(q, _)| q == p) {
-                let prop = Prop::read(r, *p, a.value);
+                // The value the file's writer carried for a value ODF 1.4 lists no such value for, while the attribute is the one it wrote for it.
+                let value = exact_value(&attrs, holder, a);
+                let prop = Prop::read(r, *p, value);
                 if let Some(c) = collect.as_deref_mut() {
                     if is_px(&prop.typed) {
                         c.px.push(a.name);
                     }
                     // A value no cell can show is held as written, with the attributes no cell reads.
                     if unread_value(*p, &prop) {
-                        c.unmapped(names, el.name.as_str(), a.name, a.value);
+                        c.unmapped(names, el.name.as_str(), a.name, value);
                     }
                 }
                 out.push((*p, prop));
@@ -482,6 +560,8 @@ fn props_of<'t>(
             // attribute it stood for, so that the style is the one that was read from the file written first.
             r.keep("property");
             c.unmapped(names, el.name.as_str(), original, a.value);
+        } else if a.ns == Ns::Diacraft && holder == "text-properties" && crate::ext::odf14::is_value_carrier(a.local) {
+            // The exact value of the attribute it stands for, read with that attribute above: no attribute of the style, and no mark of a carrier another program outdated.
         } else if a.ns == Ns::Diacraft {
             match (a.local, dia.as_deref_mut()) {
                 ("version", Some(d)) => d.version = Some(a.value.to_owned()),
@@ -795,6 +875,15 @@ impl StyleSet {
         let name = attrs.peek(Ns::Style, "name").unwrap_or_default().to_owned();
         if name.is_empty() && !default {
             r.keep("style_without_name");
+            // An automatic style with no name is named by nothing: it is held whole as an unused one, and its place is no place of a name.
+            if !common {
+                let kind = match family {
+                    Family::Graphic => "graphic",
+                    Family::Paragraph => "paragraph",
+                    Family::Text => "text",
+                };
+                return self.doc.keep_unused(r, names, file, kind, "", el, None);
+            }
             return self.doc.keep_style(r, names, container, el);
         }
         // A common style of the graphic and paragraph families is a style sheet of the model, which holds what no cell reads in its own slot; **an automatic style** of the
@@ -817,6 +906,9 @@ impl StyleSet {
             odf: None,
             templates: Vec::new(),
             text_templates: Vec::new(),
+            named: std::cell::Cell::new(false),
+            remainder_at: None,
+            spelled: Vec::new(),
         };
         let mut tabs: Option<Vec<Tab>> = None;
         let (mut graphic_el, mut paragraph_el, mut text_el): (Option<&'t El>, Option<&'t El>, Option<&'t El>) = (None, None, None);
@@ -861,6 +953,9 @@ impl StyleSet {
                     if is_sheet || automatic {
                         collect.children.extend(child.elements().map(|inner| (child, inner)));
                     }
+                    if is_sheet {
+                        style.spelled = spelled_style_group(names, child);
+                    }
                 }
                 _ => r.keep("style_element"),
             }
@@ -877,12 +972,13 @@ impl StyleSet {
             keep_text_values(names, family, (paragraph_el, text_el), &mut collect);
         }
         // One item, one for each property and tab stop, and the bytes of its names and values.
-        let cost = 1 + style.props.iter().map(Vec::len).sum::<usize>() + tabs.as_ref().map_or(0, Vec::len);
+        let cost = 1 + style.props.iter().map(Vec::len).sum::<usize>() + tabs.as_ref().map_or(0, Vec::len) + style.spelled.len().saturating_mul(2);
         let bytes = style.name.len()
             + style.display.as_ref().map_or(0, String::len)
             + style.parent.as_ref().map_or(0, String::len)
             + style.props.iter().flatten().map(|(_, v)| v.text.len()).sum::<usize>()
-            + style.dia.tier2.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>();
+            + style.dia.tier2.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>()
+            + style.spelled.iter().map(|s| s.name.len() + s.value.len()).sum::<usize>();
         r.take_items(cost)?;
         r.take_bytes(bytes)?;
         // The stops are shared with an equal list of an earlier style, once charged (`Reader::shared_tabs`).
@@ -900,7 +996,7 @@ impl StyleSet {
                 Family::Text => "text",
             };
             if let Some(element) = remainder_style(r, names, el, &attrs, word, collect)? {
-                self.doc.push_style(container, word, &style.name, element);
+                style.remainder_at = Some(self.doc.push_style(container, word, &style.name, element));
             }
         } else {
             self.doc.keep_style(r, names, container, el)?;
@@ -922,6 +1018,11 @@ impl StyleSet {
             // No two styles of one family share a name in a container; a second is kept and the first is the one found.
             match map.entry(key) {
                 std::collections::hash_map::Entry::Occupied(_) => {
+                    // An automatic style that repeats a name is found by no reference: it is held whole once the part is read.
+                    if automatic {
+                        r.take_items(1)?;
+                        self.repeats.entry((file, family, style.name.clone())).or_default().push(at);
+                    }
                     // One warning for each name that a container holds twice, naming it.
                     if r.first_repeated(&style.name) {
                         r.warn("style_name_repeated", || {
@@ -1167,6 +1268,110 @@ impl StyleSet {
         Ok(())
     }
 
+    /// **Holds whole the automatic styles of the part `root` that nothing names** (the residual class: a writer dropped an automatic style that
+    /// nothing named, which the source held, and the content check counts it). Run once the part's shapes, paragraphs and runs are read, since a style no reference found is the one to hold:
+    /// each style of the graphic, paragraph and text families of the part's `office:automatic-styles` whose `named` flag no reference set, and each that repeats a name its container holds (a
+    /// reference finds the first of a name and never the others). The part's tree is walked once more, each style a step; a style is held whole and charged before it is copied
+    /// ([`super::odfdoc::DocData::keep_unused`]), and **replaces the remainder it was given when it was read** (the style is held once). A style with no name was held when it was read.
+    /// `only` is the one container a flat drawing reads (its first); `None` reads every `office:automatic-styles` the root holds, as the reader of a package does.
+    pub(crate) fn hold_unused<'t>(
+        &mut self,
+        r: &mut Reader,
+        names: &mut Names<'t>,
+        root: &'t El,
+        file: File,
+        only: Option<&El>,
+    ) -> Result<(), OdgError> {
+        // The same walk the reader made: the places of what it read are the places of this walk.
+        let mut walk = Walk::default();
+        for container in root.elements() {
+            let mark = names.enter(container);
+            if names.is(container, Ns::Office, "automatic-styles") && only.is_none_or(|first| std::ptr::eq(first, container)) {
+                r.saw_element();
+                // The declarations down to this container are the model's own, a style's own are local, as when the container was read.
+                let held = names.hold();
+                let done = self.hold_unused_in(r, names, container, file, &mut walk);
+                if held {
+                    names.release();
+                }
+                if let Err(error) = done {
+                    names.leave(mark);
+                    return Err(error);
+                }
+            }
+            names.leave(mark);
+        }
+        Ok(())
+    }
+
+    /// The styles of one `office:automatic-styles` that [`StyleSet::hold_unused`] holds.
+    fn hold_unused_in<'t>(
+        &mut self,
+        r: &mut Reader,
+        names: &mut Names<'t>,
+        container: &'t El,
+        file: File,
+        walk: &mut Walk<'t>,
+    ) -> Result<(), OdgError> {
+        for child in container.elements() {
+            r.saw_element();
+            let mark = names.enter(child);
+            let attrs = names.attrs(child);
+            let family = if names.is(child, Ns::Style, "style") { attrs.peek(Ns::Style, "family").and_then(Family::of) } else { None };
+            let name = attrs.peek(Ns::Style, "name").unwrap_or_default();
+            let (Some(family), false) = (family, name.is_empty()) else {
+                names.leave(mark);
+                continue;
+            };
+            let kind = match family {
+                Family::Graphic => "graphic",
+                Family::Paragraph => "paragraph",
+                Family::Text => "text",
+            };
+            let outcome = if walk.seen.insert((family, name)) {
+                // The first of its name: the one a reference finds, unused when none did.
+                let map = if file == File::Styles { &self.auto_styles } else { &self.auto_content };
+                match map.get(&(family, name.to_owned())).and_then(|&at| self.list.get(at)) {
+                    Some(style) if !style.named.get() => {
+                        let replace = style.remainder_at;
+                        self.doc.keep_unused(r, names, file, kind, name, child, replace)
+                    }
+                    _ => Ok(()),
+                }
+            } else {
+                // A repeat of a name: found by no reference. It is given a name of its own, so that the part it is written in holds each name once.
+                let taken = walk.repeated.entry((family, name)).or_insert(0);
+                let replace = self
+                    .repeats
+                    .get(&(file, family, name.to_owned()))
+                    .and_then(|list| list.get(*taken))
+                    .and_then(|&at| self.list.get(at))
+                    .and_then(|s| s.remainder_at);
+                *taken = taken.saturating_add(1);
+                let free = self.free_name(r, file, family, name, &mut walk.cursor);
+                self.doc.keep_unused(r, names, file, kind, &free, child, replace)
+            };
+            names.leave(mark);
+            outcome?;
+        }
+        Ok(())
+    }
+
+    /// A name for the repeat of `name` among the automatic styles of `family` of `file`: `name`, `_`, and the least number from `cursor` on that no automatic style of the family has in the
+    /// part. The cursor of a name only grows, so the repeats of one name cost one look at each number, whatever their count. Each look is a step.
+    fn free_name<'t>(&self, r: &mut Reader, file: File, family: Family, name: &'t str, cursor: &mut HashMap<(Family, &'t str), u64>) -> String {
+        let map = if file == File::Styles { &self.auto_styles } else { &self.auto_content };
+        let next = cursor.entry((family, name)).or_insert(2);
+        loop {
+            let candidate = format!("{name}_{next}");
+            *next = next.saturating_add(1);
+            r.style_step();
+            if !map.contains_key(&(family, candidate.clone())) {
+                return candidate;
+            }
+        }
+    }
+
     /// Reads `office:font-face-decls` of `file`.
     pub(crate) fn read_fonts<'t>(&mut self, r: &mut Reader, names: &mut Names<'t>, el: &'t El, file: File) -> Result<(), OdgError> {
         self.add_fonts(r, names, el, file)
@@ -1238,6 +1443,10 @@ impl StyleSet {
         if found.is_none() && r.first_missing(name) {
             r.warn("style_not_found", || "a reference names a style the drawing does not have; it reads as no style".to_owned());
         }
+        // A style a reference found is named: the ones none finds are held whole once the part is read.
+        if let Some(style) = found.and_then(|at| self.list.get(at)) {
+            style.named.set(true);
+        }
         found
     }
 
@@ -1255,6 +1464,9 @@ impl StyleSet {
         };
         if let Some(&found) = auto.get(&key) {
             r.warn("style_parent_automatic", || "a style's parent is an automatic style, which the standard forbids; it is followed".to_owned());
+            if let Some(parent) = self.list.get(found) {
+                parent.named.set(true);
+            }
             return Some(found);
         }
         if r.first_missing(parent) {

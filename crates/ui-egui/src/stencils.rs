@@ -12,21 +12,29 @@
 //! (`edit/scene.rs`: lines, ellipses and the arcs of ellipses, walked), and draws that as an unfilled outline fitted to the tile; for a master of a
 //! stencil file the scratch drawing is a session of its own that has the file open (`Scratch`), so the person's drawing is not touched. A
 //! master the engine cannot drop (a stencil this window was told of and the engine was not) is drawn as a plain box of its default size.
+//!
+//! **One-dimensional and group masters**. A master of the engine's own that is one-dimensional (a connector, or a figure drawn along a line) is drawn as its line
+//! with the marks and the pattern the list gives it (`ends: {begin, end, pattern}`: `tile_ends.rs`), in a box that holds the line and its geometry together. A group master is drawn
+//! as the outlines of its members at every depth, and not as the group's own box, which holds nothing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_engine::Session;
 use serde_json::{Value, json};
 
 use crate::edit::geom::{self, P};
-use crate::edit::scene::Scene;
+use crate::edit::scene::{Item, Kind as ItemKind, Scene};
 use crate::icons::Base;
+use crate::tile_ends::{self, Ends};
 
 /// The most stencils, masters of one stencil, and characters of a name the window takes from a list.
 const MAX_STENCILS: usize = 64;
 pub const MAX_MASTERS: usize = 2_048;
 const NAME_CHARS: usize = 64;
+/// The most members of a group master, and the most points in all, that a tile is drawn from: a hostile group is drawn to these and no further.
+const MAX_TILE_MEMBERS: usize = 256;
+const MAX_TILE_POINTS: usize = 20_000;
 
 /// One master of a stencil.
 #[derive(Clone, Debug, PartialEq)]
@@ -52,6 +60,8 @@ pub struct MasterInfo {
     /// The stencil the master is in, for a master listed in a stencil that gathers the masters of several (the Quick Shapes stencil and the search results): the heading it stands
     /// under and the stencil an Add to Quick Shapes names. `None` for a master listed in its own stencil.
     pub home: Option<Home>,
+    /// The line ends and the pattern of a one-dimensional master of the engine's own (`stencil.list`'s `ends`), which its tile draws; `None` where the list says none.
+    pub ends: Option<Ends>,
 }
 
 /// The stencil a master of a gathered list is in.
@@ -62,10 +72,10 @@ pub struct Home {
 }
 
 impl MasterInfo {
-    /// The original directed preview belongs only to this built-in master. Imported
-    /// one-dimensional masters keep their own outline and may have any direction.
+    /// Whether the tile draws the master's line ends and pattern (`tile_ends.rs`): a master of the engine's own that is one-dimensional, a connector or a figure drawn
+    /// along a line. A one-dimensional master of a stencil file keeps its own outline, whatever direction it has, and its list gives it no ends.
     pub fn directed_preview(&self) -> bool {
-        self.stencil.is_none() && self.id == "gane-sarson.data-flow"
+        self.stencil.is_none() && self.one_d
     }
 
     /// What the figures and icons of masters are kept by: the master's id, and for a stencil file the stencil's as well.
@@ -168,6 +178,7 @@ fn master_of(m: &Value, file: Option<&str>, home: Option<&Home>) -> Option<Maste
         stencil: file.map(str::to_owned),
         icon: m.get("icon").is_some_and(Value::is_object),
         home: home.cloned(),
+        ends: m.get("ends").and_then(Ends::read),
     })
 }
 
@@ -387,6 +398,12 @@ pub struct Figure {
     pub lines: Vec<Vec<P>>,
     /// Avoid acute miter spikes in the tiny Four-Way Arrow preview. The contour is unchanged.
     pub separate_strokes: bool,
+    /// The line pattern `lines` are drawn with (`tile_ends::dashes`): 1 solid, 2 to 23 the table's.
+    pub pattern: u8,
+    /// The solid marks of a one-dimensional master's line ends: closed polygons, filled with ink, with the triangles that fill them.
+    pub fills: Vec<(Vec<P>, Vec<[usize; 3]>)>,
+    /// Its hollow and open marks, as polylines, always drawn whole (a hollow one repeats its first point at its end).
+    pub marks: Vec<Vec<P>>,
 }
 
 /// What a tile shows.
@@ -418,17 +435,78 @@ fn figure_in(session: &mut Session, stencil: Option<&str>, master: &MasterInfo) 
     }
     let dropped = session.execute("shape.drop", &params).ok()?;
     let id = u32::try_from(dropped.get("id")?.as_u64()?).ok()?;
-    let scene = Scene::build(session.document()?, page, session.revision())?;
+    let scene = Scene::build_all(session.document()?, page, session.revision())?;
     let item = scene.get(id)?;
-    let (lo, hi) = item.frame;
+    let (frame, paths) = drawn(&scene, item);
+    let ends = master.directed_preview().then(|| master.ends.unwrap_or(Ends::PLAIN));
+    tile_figure(frame, &paths, ends, master.stencil.is_none() && master.id == "arrows.four-way")
+}
+
+/// The union of two boxes, each as its lower left and upper right corners.
+fn union(a: (P, P), b: (P, P)) -> (P, P) {
+    ((a.0.0.min(b.0.0), a.0.1.min(b.0.1)), (a.1.0.max(b.1.0), a.1.1.max(b.1.1)))
+}
+
+/// What the tile of a dropped shape is drawn from: the box to fit, and the paths in it (page inches, as the scene reads them). **A shape** is its own outline in its own frame.
+/// **A one-dimensional shape** is its outline in the box of its frame and its geometry together (a loop may go out farther than the line is long). **A group** is the outlines of
+/// its members at every depth ([`members_of`]) with its own, in the box of them all: its frame is no outline, and a group master has nothing to draw there.
+fn drawn(scene: &Scene, item: &Item) -> ((P, P), Vec<Vec<P>>) {
+    let mut paths: Vec<Vec<P>> = item.outline.clone();
+    let mut frame = item.frame;
+    match item.kind {
+        ItemKind::Shape => {}
+        ItemKind::Connector => frame = union(frame, item.bounds),
+        ItemKind::Group => {
+            frame = union(frame, item.bounds);
+            for member in members_of(scene, item.id) {
+                paths.extend(member.outline.iter().cloned());
+                frame = union(frame, member.bounds);
+            }
+        }
+    }
+    (frame, cut_to(paths, MAX_TILE_POINTS))
+}
+
+/// `paths` cut to `most` points in all: the paths in order, the one that crosses the limit shortened, and the rest left out.
+fn cut_to(mut paths: Vec<Vec<P>>, most: usize) -> Vec<Vec<P>> {
+    let mut left = most;
+    paths.retain_mut(|path| {
+        path.truncate(left);
+        left = left.saturating_sub(path.len());
+        !path.is_empty()
+    });
+    paths
+}
+
+/// The members of the group `group`, at every depth, in the order the scene read them (a later one is in front of an earlier one): at most [`MAX_TILE_MEMBERS`]. The scene lists
+/// a member after the group it is in, so one pass finds them all.
+fn members_of(scene: &Scene, group: u32) -> Vec<&Item> {
+    let mut reached: HashSet<u32> = HashSet::from([group]);
+    let mut found: Vec<&Item> = Vec::new();
+    for member in &scene.members {
+        if found.len() >= MAX_TILE_MEMBERS {
+            break;
+        }
+        if member.parent.is_some_and(|parent| reached.contains(&parent)) {
+            reached.insert(member.id);
+            found.push(member);
+        }
+    }
+    found
+}
+
+/// The figure of a tile from what a master draws: the `frame` that holds it, its `paths` (closed ones are areas, open ones lines) and, for a one-dimensional master of the engine's
+/// own, its `ends` (the marks `tile_ends.rs` puts on the open paths, and the pattern). The longer side of the box is 1 and y runs up. `None` when there is nothing to draw, or no box.
+pub(crate) fn tile_figure(frame: (P, P), paths: &[Vec<P>], ends: Option<Ends>, separate_strokes: bool) -> Option<Figure> {
+    let (lo, hi) = frame;
     let (w, h) = ((hi.0 - lo.0).abs(), (hi.1 - lo.1).abs());
     let longest = w.max(h);
-    if !(longest.is_finite() && longest > 1.0e-9) {
+    if !(w.is_finite() && h.is_finite() && longest > 1.0e-9) {
         return None;
     }
     let fit = |p: &P| ((p.0 - lo.0) / longest, (p.1 - lo.1) / longest);
     let (mut areas, mut lines) = (Vec::new(), Vec::new());
-    for path in &item.outline {
+    for path in paths {
         let points: Vec<P> = path.iter().map(fit).collect();
         let closed = points.len() >= 4 && points.first().zip(points.last()).is_some_and(|(a, b)| geom::distance(*a, *b) < 1.0e-6);
         if closed {
@@ -438,15 +516,13 @@ fn figure_in(session: &mut Session, stencil: Option<&str>, master: &MasterInfo) 
             lines.push(points);
         }
     }
-    if master.directed_preview() {
-        // An original thumbnail cue. Page arrows remain the connector's EndArrow style,
-        // which outline extraction deliberately does not include.
-        if let Some(end) = lines.last().and_then(|line| line.last()).copied() {
-            lines.push(vec![(end.0 - 0.18, end.1 + 0.11), end, (end.0 - 0.18, end.1 - 0.11)]);
-        }
-    }
-    let separate_strokes = master.stencil.is_none() && master.id == "arrows.four-way";
-    (!areas.is_empty() || !lines.is_empty()).then_some(Figure { aspect: (w / longest, h / longest), areas, lines, separate_strokes })
+    let (fills, marks) = ends.map_or_else(Default::default, |ends| {
+        let decor = tile_ends::decorate(&mut lines, ends);
+        (decor.fills, decor.strokes)
+    });
+    let pattern = ends.map_or(1, |ends| ends.pattern);
+    let drawn = !areas.is_empty() || !lines.is_empty() || !fills.is_empty() || !marks.is_empty();
+    drawn.then_some(Figure { aspect: (w / longest, h / longest), areas, lines, separate_strokes, pattern, fills, marks })
 }
 
 #[cfg(test)]
@@ -477,7 +553,8 @@ mod tests {
                 part: false,
                 stencil: None,
                 icon: false,
-                home: None
+                home: None,
+                ends: None
             }]
         );
         assert_eq!(stencils[1].masters.len(), 1, "a master with no id is left out");
@@ -518,6 +595,7 @@ mod tests {
                 stencil: Some(stencil.into()),
                 icon: false,
                 home: None,
+                ends: None,
             }
             .key()
         };
@@ -559,7 +637,8 @@ mod tests {
                 part: false,
                 stencil: None,
                 icon: false,
-                home: None
+                home: None,
+                ends: None
             })
             .is_none()
         );
@@ -576,9 +655,15 @@ mod tests {
         assert_eq!(flow.height, 0.0);
         let figure = figure_of(flow).unwrap();
         assert!(figure.areas.is_empty());
-        assert_eq!(figure.lines.len(), 2, "shaft and a visible directed head");
-        assert_eq!(figure.lines[1].len(), 3);
-        assert!(figure.lines[1][0].1 > figure.lines[1][1].1 && figure.lines[1][2].1 < figure.lines[1][1].1);
+        assert_eq!(figure.lines.len(), 1, "the shaft");
+        assert_eq!((figure.fills.len(), figure.marks.len()), (1, 0), "and the solid triangle that end 4 is");
+        let (head, triangles) = &figure.fills[0];
+        assert_eq!((head.len(), triangles.len()), (4, 1), "three corners and the first again");
+        assert!(geom::distance(head[0], (1.0, 0.0)) < 1.0e-9, "its tip is on the line's end, at the right of the figure: {head:?}");
+        assert!(
+            head[1].0 < 1.0 - 0.17 && head[2].0 < 1.0 - 0.17 && (head[1].1 - head[2].1).abs() > 0.17,
+            "its back is 0.18 behind the tip and as wide: {head:?}"
+        );
         let four_way = master("arrows.four-way");
         assert!(figure_of(four_way).unwrap().separate_strokes);
         let imported_four_way = MasterInfo { stencil: Some("file-1".into()), ..four_way.clone() };
@@ -594,6 +679,137 @@ mod tests {
             let (points, triangles) = &figure.areas[0];
             assert_eq!(triangles.len(), points.len() - 3, "{id}: a concave polygon is triangulated fully");
         }
+    }
+
+    #[test]
+    fn a_one_dimensional_masters_ends_are_read_from_the_list_and_nothing_in_it_is_trusted() {
+        let list = json!({"stencils": [{"id": "s", "name": "S", "masters": [
+            {"id": "a", "name": "A", "width": 1.5, "height": 0.0, "one_d": true, "ends": {"begin": 22, "end": 4, "pattern": 2}},
+            {"id": "b", "name": "B", "width": 1.5, "height": 0.0, "one_d": true},
+            {"id": "c", "name": "C", "width": 1.5, "height": 0.0, "one_d": true, "ends": "junk"},
+            {"id": "d", "name": "D", "width": 1.0, "height": 1.0, "ends": {"begin": 3, "end": 3, "pattern": 1}},
+            {"id": "e", "name": "E", "width": 1.5, "height": 0.0, "one_d": true, "ends": {"begin": 1000, "end": -4, "pattern": "dash"}}
+        ]}]});
+        let masters = &parse(&list)[0].masters;
+        assert_eq!(masters[0].ends, Some(Ends { begin: 22, end: 4, pattern: 2 }));
+        assert!(masters[0].directed_preview(), "a built-in one-dimensional master has its ends drawn");
+        assert_eq!(masters[1].ends, None, "a list that says nothing gives none");
+        assert!(masters[1].directed_preview(), "and the master is drawn as a plain line");
+        assert_eq!(masters[2].ends, None, "an entry that is no object gives none");
+        assert!(!masters[3].directed_preview(), "a two-dimensional master has no line ends to draw, whatever its entry says");
+        assert_eq!(masters[4].ends, Some(Ends::PLAIN), "numbers that are none are no mark and a solid line");
+        // A master of a stencil file keeps its own outline.
+        let file = json!({"stencils": [{"id": "file-1", "name": "F", "builtin": false, "masters": [
+            {"id": "1", "name": "Line", "width": 1.5, "height": 0.0, "one_d": true, "ends": {"begin": 4, "end": 4, "pattern": 1}}
+        ]}]});
+        assert!(!parse(&file)[0].masters[0].directed_preview(), "a file's master is never given the marks of a list");
+    }
+
+    #[test]
+    fn every_one_dimensional_master_the_engine_has_is_drawn_with_the_marks_its_list_gives_it_inside_its_card() {
+        let mut seen = 0;
+        for stencil in builtin() {
+            for master in stencil.masters.iter().filter(|m| m.one_d) {
+                seen += 1;
+                let ends = master.ends.unwrap_or_else(|| panic!("{}: the list gives a one-dimensional master its ends", master.id));
+                let figure = figure_of(master).unwrap_or_else(|| panic!("{} has no figure", master.id));
+                assert_eq!(figure.pattern, ends.pattern, "{}: the line has the pattern the list gives", master.id);
+                let marked = !figure.fills.is_empty() || !figure.marks.is_empty();
+                assert_eq!(marked, ends.begin != 0 || ends.end != 0, "{}: marks for the ends the list gives: {ends:?}", master.id);
+                let all = figure
+                    .areas
+                    .iter()
+                    .flat_map(|a| a.0.iter())
+                    .chain(figure.lines.iter().flatten())
+                    .chain(figure.fills.iter().flat_map(|f| f.0.iter()))
+                    .chain(figure.marks.iter().flatten());
+                for p in all {
+                    assert!(
+                        p.0.is_finite() && p.1.is_finite() && p.0 > -0.3 && p.0 < 1.3 && p.1 > -0.3 && p.1 < 1.3,
+                        "{}: {p:?} is off its card",
+                        master.id
+                    );
+                }
+            }
+        }
+        assert!(seen >= 1, "the Data Flow is one");
+    }
+
+    #[test]
+    fn a_figure_has_marks_on_its_open_paths_in_the_box_of_its_geometry_and_none_on_a_closed_one() {
+        // A hook that goes out 0.45 over a line 0.3 long, with a solid triangle at its end: the box is that of the geometry.
+        let hook = vec![(0.0, 0.0), (0.0, 0.45), (0.3, 0.45), (0.3, 0.0)];
+        let box_of_the_hook = ((0.0, 0.0), (0.3, 0.45));
+        let figure = tile_figure(box_of_the_hook, &[hook], Some(Ends { begin: 0, end: 4, pattern: 3 }), false).unwrap();
+        assert!((figure.aspect.0 - 0.3 / 0.45).abs() < 1.0e-9 && (figure.aspect.1 - 1.0).abs() < 1.0e-9, "{:?}", figure.aspect);
+        assert_eq!(figure.pattern, 3);
+        let (head, _) = &figure.fills[0];
+        assert!(geom::distance(head[0], (0.3 / 0.45, 0.0)) < 1.0e-9, "the tip is on the last vertex: {head:?}");
+        assert!(
+            head[1..3].iter().all(|p| (p.1 - 2.0 * tile_ends::UNIT).abs() < 1.0e-9),
+            "and the head lies up the last leg, which runs down: {head:?}"
+        );
+        // A closed path has no ends.
+        let square = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)];
+        let figure = tile_figure(((0.0, 0.0), (1.0, 1.0)), &[square], Some(Ends { begin: 4, end: 4, pattern: 1 }), false).unwrap();
+        assert_eq!((figure.areas.len(), figure.lines.len(), figure.fills.len(), figure.marks.len()), (1, 0, 0, 0));
+        // Nothing to draw, or no box.
+        assert!(tile_figure(((0.0, 0.0), (1.0, 1.0)), &[], Some(Ends::PLAIN), false).is_none());
+        assert!(tile_figure(((0.0, 0.0), (0.0, 0.0)), &[vec![(0.0, 0.0), (1.0, 0.0)]], None, false).is_none());
+        assert!(tile_figure(((0.0, 0.0), (f64::NAN, 1.0)), &[vec![(0.0, 0.0), (1.0, 0.0)]], None, false).is_none());
+    }
+
+    /// A page with `count` rectangles grouped, and the group's `ID`.
+    fn grouped(count: usize) -> (Session, u32, u32) {
+        let mut session = Session::new();
+        session.execute("file.new", &json!({})).unwrap();
+        let page = session.document().unwrap().pages.iter().next().unwrap().id;
+        let mut ids = Vec::new();
+        for k in 0..count {
+            let at = json!({"master": "rectangle", "page": page, "x": 1.0 + 0.01 * k as f64, "y": 4.0});
+            ids.push(session.execute("shape.drop", &at).unwrap()["id"].as_u64().unwrap());
+        }
+        let group = session.execute("shape.group", &json!({"ids": ids, "page": page})).unwrap()["id"].as_u64().unwrap();
+        (session, page, u32::try_from(group).unwrap())
+    }
+
+    #[test]
+    fn a_group_is_drawn_to_its_members_at_every_depth_in_the_box_of_them_all() {
+        let (mut session, page, inner) = grouped(2);
+        let outer = {
+            let third =
+                session.execute("shape.drop", &json!({"master": "rectangle", "page": page, "x": 6.0, "y": 4.0})).unwrap()["id"].as_u64().unwrap();
+            session.execute("shape.group", &json!({"ids": [inner, third], "page": page})).unwrap()["id"].as_u64().unwrap()
+        };
+        let scene = Scene::build_all(session.document().unwrap(), page, session.revision()).unwrap();
+        let item = scene.get(u32::try_from(outer).unwrap()).unwrap();
+        assert_eq!(item.kind, ItemKind::Group);
+        assert!(item.outline.is_empty(), "a group has no geometry of its own");
+        let (frame, paths) = drawn(&scene, item);
+        assert_eq!(paths.len(), 3, "the three rectangles, two of them in the group inside: {paths:?}");
+        let members = members_of(&scene, u32::try_from(outer).unwrap());
+        assert_eq!(members.len(), 4, "the inner group, its two members and the third rectangle");
+        let box_of = members.iter().fold(item.frame, |b, m| union(b, m.bounds));
+        assert_eq!(frame, box_of, "the box of the group and every member");
+        let figure = tile_figure(frame, &paths, None, false).unwrap();
+        assert_eq!(figure.areas.len(), 3, "each member a closed outline, and no box of the group's own");
+    }
+
+    #[test]
+    fn a_hostile_group_is_drawn_to_the_caps_and_no_further() {
+        let (session, page, group) = grouped(MAX_TILE_MEMBERS + 44);
+        let scene = Scene::build_all(session.document().unwrap(), page, session.revision()).unwrap();
+        let item = scene.get(group).unwrap();
+        assert_eq!(members_of(&scene, group).len(), MAX_TILE_MEMBERS, "the members read are capped");
+        let (_, paths) = drawn(&scene, item);
+        assert_eq!(paths.len(), MAX_TILE_MEMBERS);
+        // The points: the paths in order, the one that crosses the limit shortened, the rest left out.
+        let long: Vec<Vec<P>> = (0..10).map(|_| (0..5_000).map(|k| (f64::from(k), 0.0)).collect()).collect();
+        let cut = cut_to(long.clone(), 12_000);
+        assert_eq!(cut.iter().map(Vec::len).collect::<Vec<_>>(), [5_000, 5_000, 2_000]);
+        assert_eq!(cut_to(long.clone(), 0), Vec::<Vec<P>>::new());
+        assert_eq!(cut_to(long, usize::MAX).len(), 10);
+        assert!(cut_to(vec![vec![], vec![(0.0, 0.0)]], 5).len() == 1, "an empty path is left out");
     }
 
     fn stencils_master(name: &str) -> MasterInfo {

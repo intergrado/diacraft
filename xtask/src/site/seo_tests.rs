@@ -17,6 +17,7 @@ fn settings() -> Settings {
         assets: DOWNLOADS.iter().map(|id| ((*id).to_owned(), format!("{id}-{{tag}}.bin"))).collect(),
         version: "0.2.0".into(),
         licences: vec!["LICENSE-MIT".into(), "LICENSE-APACHE".into()],
+        comparison: None,
     }
 }
 

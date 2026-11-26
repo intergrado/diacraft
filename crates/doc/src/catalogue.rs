@@ -18,7 +18,13 @@
 //!
 //! Names match exactly, in case: `pinx` is not `PinX`.
 
+mod display;
 mod table;
+
+pub use display::{
+    DISPLAY_ORDER, DisplaySection, SECTION_SPELLINGS, SectionKind, SectionRules, SheetKind, display_group, display_section, ix_to_row_number,
+    next_row_number, row_number_to_ix, section_for_spelling, section_rules, section_spelling,
+};
 
 use crate::ValueKind;
 

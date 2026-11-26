@@ -1,6 +1,6 @@
 //! Original filled arrow polygons, authored.
 //! These are two-dimensional symbols; only the Gane-Sarson Data Flow is a connector.
-use super::{MasterSpec, Outline, pt};
+use super::{MasterSpec, More, Outline, pt};
 pub(super) static MASTERS: [MasterSpec; 8] = [
     MasterSpec {
         id: "arrows.right",
@@ -8,6 +8,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.6,
         height: 0.8,
         identity: (5, 1),
+        more: &More::NONE,
         outline: Outline::Polygon(&[(0.0, 0.3), (0.62, 0.3), (0.62, 0.0), (1.0, 0.5), (0.62, 1.0), (0.62, 0.7), (0.0, 0.7)]),
         points: &[pt(0.62, 1.0, 0.0, 1.0), pt(0.0, 0.3, -1.0, 0.0), pt(0.62, 0.0, 0.0, -1.0), pt(1.0, 0.5, 1.0, 0.0)],
     },
@@ -17,6 +18,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.6,
         height: 0.8,
         identity: (5, 2),
+        more: &More::NONE,
         outline: Outline::Polygon(&[(1.0, 0.3), (0.38, 0.3), (0.38, 0.0), (0.0, 0.5), (0.38, 1.0), (0.38, 0.7), (1.0, 0.7)]),
         points: &[pt(0.38, 1.0, 0.0, 1.0), pt(0.0, 0.5, -1.0, 0.0), pt(0.38, 0.0, 0.0, -1.0), pt(1.0, 0.3, 1.0, 0.0)],
     },
@@ -26,6 +28,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 0.8,
         height: 1.6,
         identity: (5, 3),
+        more: &More::NONE,
         outline: Outline::Polygon(&[(0.7, 0.0), (0.7, 0.62), (1.0, 0.62), (0.5, 1.0), (0.0, 0.62), (0.3, 0.62), (0.3, 0.0)]),
         points: &[pt(0.5, 1.0, 0.0, 1.0), pt(0.0, 0.62, -1.0, 0.0), pt(0.7, 0.0, 0.0, -1.0), pt(1.0, 0.62, 1.0, 0.0)],
     },
@@ -35,6 +38,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 0.8,
         height: 1.6,
         identity: (5, 4),
+        more: &More::NONE,
         outline: Outline::Polygon(&[(0.3, 1.0), (0.3, 0.38), (0.0, 0.38), (0.5, 0.0), (1.0, 0.38), (0.7, 0.38), (0.7, 1.0)]),
         points: &[pt(0.3, 1.0, 0.0, 1.0), pt(0.0, 0.38, -1.0, 0.0), pt(0.5, 0.0, 0.0, -1.0), pt(1.0, 0.38, 1.0, 0.0)],
     },
@@ -44,6 +48,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.8,
         height: 0.8,
         identity: (5, 5),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.0, 0.5),
             (0.28, 0.0),
@@ -64,6 +69,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 0.8,
         height: 1.8,
         identity: (5, 6),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.5, 0.0),
             (1.0, 0.28),
@@ -84,6 +90,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.4,
         height: 1.4,
         identity: (5, 7),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.5, 1.0),
             (0.3, 0.78),
@@ -118,6 +125,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.4,
         height: 1.1,
         identity: (5, 8),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.0, 0.0),
             (0.28, 0.0),

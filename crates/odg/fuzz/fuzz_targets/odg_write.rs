@@ -153,6 +153,33 @@ impl Kind {
     }
 }
 
+/// The shapes a visit writes back as they were, as a page's first shapes: a rectangle that holds the id a connector names and a glue point of its own, a second target whose
+/// id is a `draw:id` alone, a connector between them, a group with no name whose own style and glue point are the file's, a polygon whose view box the reader cannot read and a polyline
+/// whose points it cannot, two shapes that claim one id, and two rectangles whose ids are a `draw:id` alone (`n1`, `n2`) with a connector that names them: with the
+/// flag byte of an ODF 1.0 file the input is the vector of that task, which ODF 1.4 takes only as a pair.
+const SEED_SHAPES: &str = concat!(
+    r#"<draw:rect draw:style-name="gr1" xml:id="s1" draw:id="s1" svg:x="1cm" svg:y="1cm" svg:width="4cm" svg:height="2cm"><draw:glue-point draw:id="5" svg:x="10%" svg:y="-20%" draw:escape-direction="horizontal"/></draw:rect>"#,
+    r#"<draw:rect draw:style-name="gr1" draw:id="s2" svg:x="8cm" svg:y="1cm" svg:width="4cm" svg:height="2cm"/>"#,
+    r#"<draw:connector draw:style-name="gr1" draw:start-shape="s1" draw:start-glue-point="5" draw:end-shape="s2" draw:end-glue-point="3" svg:x1="5cm" svg:y1="2cm" svg:x2="8cm" svg:y2="2cm"/>"#,
+    r#"<draw:g draw:style-name="gr1"><draw:glue-point draw:id="4" svg:x="1cm" svg:y="1cm"/><draw:rect draw:style-name="gr1" svg:x="1cm" svg:y="5cm" svg:width="2cm" svg:height="2cm"/><draw:rect draw:style-name="gr1" svg:x="4cm" svg:y="5cm" svg:width="2cm" svg:height="2cm"/></draw:g>"#,
+    r#"<draw:polygon draw:style-name="gr1" svg:x="1cm" svg:y="9cm" svg:width="4cm" svg:height="2cm" svg:viewBox="0 0 0 100" draw:points="0,0 100,0 50,100"/>"#,
+    r#"<draw:polyline draw:style-name="gr1" svg:x="6cm" svg:y="9cm" svg:width="4cm" svg:height="2cm" svg:viewBox="0 0 100 100" draw:points="zz"/>"#,
+    r#"<draw:rect draw:style-name="gr1" xml:id="s1" draw:id="s1" svg:x="11cm" svg:y="9cm" svg:width="2cm" svg:height="2cm"/>"#,
+    r#"<draw:rect draw:style-name="gr1" draw:id="n1" svg:x="1cm" svg:y="13cm" svg:width="4cm" svg:height="2cm"/>"#,
+    r#"<draw:rect draw:style-name="gr1" draw:id="n2" svg:x="8cm" svg:y="13cm" svg:width="4cm" svg:height="2cm"/>"#,
+    r#"<draw:connector draw:style-name="gr1" draw:start-shape="n1" draw:start-glue-point="1" draw:end-shape="n2" draw:end-glue-point="3" svg:x1="5cm" svg:y1="14cm" svg:x2="8cm" svg:y2="14cm"/>"#
+);
+
+/// The text a visit writes back as it was, as a page's first shape: a bold span over part of a paragraph, a span of a style whose attributes no cell reads, a paragraph style that
+/// holds text properties (and a span inside it that states the weight alone), and a paragraph that names a style of nothing but attributes no cell reads.
+const SEED_TEXT: &str = concat!(
+    r#"<draw:frame svg:x="1cm" svg:y="13cm" svg:width="8cm" svg:height="4cm"><draw:text-box>"#,
+    r#"<text:p>plain <text:span text:style-name="T3">bold</text:span> and <text:span text:style-name="T4">language</text:span> end</text:p>"#,
+    r#"<text:p text:style-name="P4">sized <text:span text:style-name="T3">weight</text:span> text</text:p>"#,
+    r#"<text:p text:style-name="P5">orphans</text:p>"#,
+    r#"</draw:text-box></draw:frame>"#
+);
+
 const STYLES_TAIL: &str = concat!(
     r#"<office:automatic-styles><style:page-layout style:name="PM1"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm"/></style:page-layout>"#,
     // A layer set of the document: the layers a new shape's `draw:layer` is resolved against, and the rows the document file may rename.
@@ -180,7 +207,9 @@ fn flat(body: &[u8], flags: Flags, kind: Kind) -> Option<Vec<u8>> {
             r##"<style:style style:name="T1" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>"##,
             r##"<style:style style:name="P2" style:family="paragraph"><style:paragraph-properties fo:text-align="center" text:enable-numbering="false" text:number-lines="true" draw:fill-color="#00ff00"/></style:style>"##,
             r##"<style:style style:name="P3" style:family="paragraph"><style:paragraph-properties fo:text-align="right" xmlns:diacraft="urn:app.diacraft:extension" diacraft:older-enable-numbering="true"/></style:style>"##,
-            r##"<style:style style:name="T2" style:family="text"><style:text-properties fo:font-weight="bold" text:display="none" text:enable-numbering="true" draw:fill-color="#00ff00"/></style:style>"##
+            r##"<style:style style:name="T2" style:family="text"><style:text-properties fo:font-weight="bold" text:display="none" text:enable-numbering="true" draw:fill-color="#00ff00"/></style:style>"##,
+            r##"<style:style style:name="T3" style:family="text"><style:text-properties fo:font-weight="250" fo:font-style="slanted" xmlns:diacraft="urn:app.diacraft:extension" diacraft:older-font-weight="300"/></style:style>"##,
+            r##"<style:style style:name="P4" style:family="paragraph"><style:paragraph-properties text:enable-numbering="false" fo:text-align="left"/></style:style>"##
         )
     };
     let media = if kind.template() { TEMPLATE } else { MEDIA };
@@ -208,7 +237,15 @@ const SHEETS: &str = concat!(
     r##"<style:style style:name="standard" style:family="graphic"><style:graphic-properties draw:stroke="solid" svg:stroke-color="#3465a4" draw:fill="solid" draw:fill-color="#729fcf" fo:padding-left="0.25cm"/><style:paragraph-properties fo:margin-left="0cm"/><style:text-properties fo:font-size="18pt" style:font-size-asian="18pt"/></style:style>"##,
     r##"<style:style style:name="Filled" style:family="graphic" style:parent-style-name="standard"><style:graphic-properties draw:fill-color="#ffd428"/><style:text-properties fo:font-weight="bold"/></style:style>"##,
     r#"<style:style style:name="Heading" style:family="paragraph"><style:paragraph-properties fo:text-align="center"/></style:style>"#,
-    r#"<style:style style:name="Pictured" style:family="graphic"><style:graphic-properties draw:fill="bitmap" draw:fill-image-name="Img1" style:repeat="stretch"/></style:style>"#
+    // A style sheet that underlines and says nothing else of the text, the second style sheet of a name, and a style sheet with no name.
+    r#"<style:style style:name="Plain" style:family="graphic"><style:text-properties style:text-underline-style="solid"/></style:style>"#,
+    r#"<style:style style:name="Heading" style:family="paragraph"><style:paragraph-properties fo:text-align="left"/></style:style>"#,
+    r#"<style:style style:family="graphic"><style:graphic-properties draw:fill="solid"/></style:style>"#,
+    r#"<style:style style:name="Pictured" style:family="graphic"><style:graphic-properties draw:fill="bitmap" draw:fill-image-name="Img1" style:repeat="stretch"/></style:style>"#,
+    // A style sheet whose weight no list of ODF 1.4 has (written as the nearest, the weight carried), one carried already, and one whose carrier is outdated.
+    r#"<style:style style:name="Light" style:family="graphic"><style:text-properties fo:font-weight="250" style:font-weight-complex="650" fo:font-style="slanted"/></style:style>"#,
+    r#"<style:style style:name="Carried" style:family="graphic"><style:text-properties fo:font-weight="200" xmlns:diacraft="urn:app.diacraft:extension" diacraft:older-font-weight="250"/></style:style>"#,
+    r#"<style:style style:name="Stale" style:family="graphic"><style:text-properties fo:font-weight="bold" xmlns:diacraft="urn:app.diacraft:extension" diacraft:older-font-weight="250"/></style:style>"#
 );
 
 /// A PNG's signature and a little more: a picture the reader holds the bytes of.
@@ -244,6 +281,21 @@ fn package(body: &[u8], flags: Flags, kind: Kind) -> Option<Vec<u8>> {
             r##"<style:style style:name="P2" style:family="paragraph"><style:paragraph-properties fo:text-align="center" text:enable-numbering="false" text:number-lines="true" draw:fill-color="#00ff00"/></style:style>"##,
             r##"<style:style style:name="P3" style:family="paragraph"><style:paragraph-properties fo:text-align="right" xmlns:diacraft="urn:app.diacraft:extension" diacraft:older-enable-numbering="true"/></style:style>"##,
             r##"<style:style style:name="T2" style:family="text"><style:text-properties fo:font-weight="bold" text:display="none" text:enable-numbering="true" draw:fill-color="#00ff00"/></style:style>"##,
+            // Styles that nothing names, written whole, with the forms of an earlier version ODF 1.4 has no place for: a weight and a slant no list has, with a carrier of DiaCraft's
+            // that is outdated, the paragraph properties with `text:enable-numbering` and the carrier of it in its place, and a weight carried as the writer carries it.
+            r##"<style:style style:name="T3" style:family="text"><style:text-properties fo:font-weight="250" fo:font-style="slanted" xmlns:diacraft="urn:app.diacraft:extension" diacraft:older-font-weight="300"/></style:style>"##,
+            r##"<style:style style:name="P4" style:family="paragraph"><style:paragraph-properties text:enable-numbering="false" fo:text-align="left"/><style:text-properties fo:font-weight="200" xmlns:diacraft="urn:app.diacraft:extension" diacraft:older-font-weight="250"/></style:style>"##,
+            r##"<style:style style:name="P5" style:family="paragraph"><style:paragraph-properties xmlns:diacraft="urn:app.diacraft:extension" diacraft:older-enable-numbering="true" fo:text-align="right"/></style:style>"##,
+            // An automatic style that nothing names, one with no name, the second of a name, and one of attributes no field reads.
+            r##"<style:style style:name="gr5" style:family="graphic"><style:graphic-properties draw:fill="solid" draw:fill-color="#00ff00"/></style:style>"##,
+            r##"<style:style style:family="graphic"><style:graphic-properties draw:fill="solid"/></style:style>"##,
+            r##"<style:style style:name="gr1" style:family="graphic"><style:graphic-properties draw:fill="solid" draw:fill-color="#0000ff"/></style:style>"##,
+            r##"<style:style style:name="gr6" style:family="graphic"><style:graphic-properties draw:textarea-horizontal-align="justify"/></style:style>"##,
+            // A text style that states the weight alone, one of an attribute no cell reads, a paragraph style that holds text properties, and one of an attribute no cell reads.
+            r##"<style:style style:name="T3" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>"##,
+            r##"<style:style style:name="T4" style:family="text"><style:text-properties fo:language="en" fo:country="US"/></style:style>"##,
+            r##"<style:style style:name="P4" style:family="paragraph"><style:paragraph-properties fo:text-align="center"/><style:text-properties fo:font-size="20pt" fo:color="#FF0000"/></style:style>"##,
+            r##"<style:style style:name="P5" style:family="paragraph"><style:paragraph-properties fo:orphans="2"/></style:style>"##,
             // A shape's bitmap fill, named by the fill image of the style sheets (when the package has them).
             r#"<style:style style:name="gr4" style:family="graphic" style:parent-style-name="Filled"><style:graphic-properties draw:fill="bitmap" draw:fill-image-name="Img1"/></style:style></office:automatic-styles>"#
         )
@@ -258,6 +310,14 @@ fn package(body: &[u8], flags: Flags, kind: Kind) -> Option<Vec<u8>> {
         content.extend_from_slice(b"<draw:page draw:name=\"p\" draw:master-page-name=\"Default\"/>");
     } else {
         content.extend_from_slice(b"<draw:page draw:name=\"p\" draw:master-page-name=\"Default\">");
+        // One input in two (the parity of the body's length) starts with the shapes a visit writes back as they were.
+        if body.len() % 2 == 1 {
+            content.extend_from_slice(SEED_SHAPES.as_bytes());
+        }
+        // One input in three (the length of the body modulo 3) starts with the text a visit writes back as it was.
+        if body.len() % 3 == 1 {
+            content.extend_from_slice(SEED_TEXT.as_bytes());
+        }
         content.extend_from_slice(body);
         content.extend_from_slice(b"</draw:page>");
     }
@@ -1332,6 +1392,7 @@ fn model_write(doc: &Document, input: &[u8], limits: &Limits) {
         Ok(written) => {
             assert!(sniff(&written.bytes).is_some(), "the package the model writer made does not say what it is");
             let (back, _) = read(&written.bytes, limits).expect("the package the model writer made reads");
+            unpaired_id(&written.bytes, limits);
             let pages = |d: &Document| d.pages.iter().filter(|p| !p.background).count();
             assert_eq!(pages(&back), pages(doc), "the pages the model has are the pages the file has");
             let again = write_with(doc, None, &options).expect("a second write of a model written");
@@ -1344,6 +1405,45 @@ fn model_write(doc: &Document, input: &[u8], limits: &Limits) {
                 }
             }
             assert_eq!(back.styles.len(), doc.styles.len(), "the style sheets the model has are the style sheets the file has");
+        }
+    }
+}
+
+/// **A shape the model writer writes with a `draw:id` carries an `xml:id` of the same value** (ODF 1.4 takes `draw:id` only beside one: the schema's
+/// `common-draw-id-attlist`). Judged on `content.xml` of what the model writer made, for the shapes the writer itself writes: the children of a `draw:page` that are shapes of ODF's drawing
+/// namespace, and the members of those that are groups, down. **Not judged**: what the file's markup holds whole (a shape inside a hyperlink wrapper `draw:a`, a text box or any other
+/// element), a page's own `draw:id`, a glue point's (its number), and any part whose root, or an element on the way, binds the prefix `draw` to another namespace.
+fn unpaired_id(bytes: &[u8], limits: &Limits) {
+    const DRAWING: &str = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0";
+    const SHAPES: [&str; 12] =
+        ["rect", "ellipse", "circle", "line", "polygon", "polyline", "path", "regular-polygon", "custom-shape", "frame", "connector", "g"];
+    let Ok(package) = Package::read(bytes, limits) else { return };
+    let Some(content) = package.part("content.xml") else { return };
+    let Ok(root) = diacraft_container::xml::parse(content) else { return };
+    let rebinds = |el: &diacraft_container::xml::El| el.attrs.iter().any(|(k, v)| k == "xmlns:draw" && v != DRAWING);
+    // Each element, and whether it stands among the shapes of a page (a child of a page, or a member of a group among them).
+    let mut stack = vec![(&root, false)];
+    while let Some((el, among)) = stack.pop() {
+        if rebinds(el) {
+            continue;
+        }
+        let local = el.name.strip_prefix("draw:");
+        if among && local.is_some_and(|l| SHAPES.contains(&l)) {
+            let value = |name: &str| el.attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+            if let Some(id) = value("draw:id") {
+                assert_eq!(value("xml:id"), Some(id), "a shape written with a draw:id that has no xml:id of the same value beside it: {}", el.name);
+            }
+        }
+        // Below a page, and below a group among its shapes, the children are shapes; below any other element of a page they are what the file kept.
+        let below = el.name == "draw:page" || (among && local == Some("g"));
+        let walk_on = below || !among;
+        if !walk_on {
+            continue;
+        }
+        for child in el.children.iter() {
+            if let diacraft_container::xml::Node::El(e) = child {
+                stack.push((e, below));
+            }
         }
     }
 }

@@ -22,7 +22,7 @@ fn pages() -> Vec<String> {
         }
     }
     pages.sort();
-    assert_eq!(pages.len(), 15, "the pages, the guides, their index and 404: {pages:?}");
+    assert_eq!(pages.len(), 17, "the pages, the guides, their index and 404: {pages:?}");
     pages
 }
 
@@ -248,7 +248,7 @@ fn the_sitemaps_dates_are_dates_that_exist_not_in_the_future_or_the_pages_are_li
             assert!(day <= today.tomorrow().unwrap(), "{loc}: {date} is in the future");
         }
     }
-    assert_eq!(urls, 14, "every page but 404");
+    assert_eq!(urls, 16, "every page but 404");
     // The robots file lets every crawler in and names the sitemap.
     assert_eq!(read("site/robots.txt"), "User-agent: *\nAllow: /\n\nSitemap: https://diacraft.dev/sitemap.xml\n");
 }

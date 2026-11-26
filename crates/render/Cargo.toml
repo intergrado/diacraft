@@ -17,6 +17,8 @@ diacraft-color = { workspace = true }
 diacraft-container = { workspace = true }
 diacraft-doc = { workspace = true }
 diacraft-fonts = { workspace = true }
+# The `USE` of a custom line end is read from the parsed formula (`custom_end.rs`).
+diacraft-formula = { workspace = true }
 diacraft-geom = { workspace = true }
 diacraft-metafile = { workspace = true }
 diacraft-text = { workspace = true }

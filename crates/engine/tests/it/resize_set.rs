@@ -341,9 +341,11 @@ fn a_set_turns_about_the_point_it_is_given() {
 
 #[test]
 fn a_shape_locked_against_sizing_is_left_alone_and_the_others_are_resized() {
+    // A shape is left alone when both its size locks are set, or one of them with `LockAspect`; one lock alone sizes it along its other axis (`resize_locks.rs`).
     let mut s = blank_session();
     let (a, b, c) = (drop_shape(&mut s, "rectangle", 2.0, 2.0), drop_shape(&mut s, "rectangle", 6.0, 2.0), drop_shape(&mut s, "ellipse", 4.0, 5.0));
     set_cell(&mut s, b, "LockWidth", "1");
+    set_cell(&mut s, b, "LockHeight", "1");
     let before = doc(&s).clone();
     let (x0, y0, x1, y1) = joint(&before, &[a, b, c]);
     let to = (x0, y0, 2.0 * (x1 - x0), 2.0 * (y1 - y0));
@@ -352,8 +354,9 @@ fn a_shape_locked_against_sizing_is_left_alone_and_the_others_are_resized() {
     let d = doc(&s);
     assert_eq!((pin(d, b), size(d, b)), (pin(&before, b), size(&before, b)), "the locked shape is as it was, in size and in place");
     assert_corners_stretched("the others", &before, d, &[a, c], &stretch((x0, y0, x1, y1), to));
-    // A height lock does the same.
+    // A height lock with the aspect lock does the same.
     set_cell(&mut s, c, "LockHeight", "1");
+    set_cell(&mut s, c, "LockAspect", "1");
     let now = doc(&s).clone();
     let (x0, y0, x1, y1) = joint(&now, &[a, b, c]);
     let answer = run(&mut s, "shape.resize", json!({"ids": [a, b, c], "x": x0, "y": y0, "width": 0.5 * (x1 - x0), "height": 0.5 * (y1 - y0)}));
@@ -366,12 +369,15 @@ fn when_every_shape_is_locked_against_sizing_the_resize_is_refused_in_words_and_
     let mut s = blank_session();
     let (a, b) = (drop_shape(&mut s, "rectangle", 2.0, 2.0), drop_shape(&mut s, "rectangle", 6.0, 2.0));
     set_cell(&mut s, a, "LockWidth", "1");
+    set_cell(&mut s, a, "LockHeight", "1");
     set_cell(&mut s, b, "LockHeight", "1");
+    set_cell(&mut s, b, "LockAspect", "1");
     let before = snapshot(&s);
     let e = error_of(&mut s, "shape.resize", &json!({"ids": [a, b], "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0}));
     assert!(
-        message(&e).contains("the shapes are locked against sizing (`LockWidth` or `LockHeight`): shape ")
-            && message(&e).contains(&format!("{a}, {b}")),
+        message(&e).contains(
+            "the shapes are locked against sizing (`LockWidth` with `LockHeight`, or either with `LockAspect`, or either on a connector): shape "
+        ) && message(&e).contains(&format!("{a}, {b}")),
         "{e}"
     );
     let now = snapshot(&s);

@@ -286,8 +286,9 @@ fn a_style_sheet_with_a_bitmap_fill_says_it_natively() {
 
 /// The style sheets a drawing program writes are written as the common styles they were (found the common styles of 703 of 719 visits written empty, their cells
 /// in DiaCraft's data alone, so another program drew every shape that named one without the fill, the line and the font it gave): the graphic properties, the paragraph and text properties of
-/// the cells, the values no cell reads, the children, the display name and the parent, and the model read back is the one written. **What is still written differently** is pinned: the
-/// `Style` cell of a bold style writes every attribute of its group (the font's style, variant and the complex script's weight and style as `normal`), where the file stated the weight alone.
+/// the cells, the values no cell reads, the children, the display name and the parent, and the model read back is the one written. **The `Style` cell of a bold style wrote every attribute of
+/// its group** (the font's style, variant and the complex script's weight and style as `normal`), where the file stated the weight alone; holds the spelling of the group, so
+/// nothing is left that differs.
 #[test]
 fn style_sheets_are_written_as_the_common_styles_they_were() {
     let source = style_sheets().bytes();
@@ -310,12 +311,8 @@ fn style_sheets_are_written_as_the_common_styles_they_were() {
     ] {
         assert!(styles.contains(wanted), "{wanted}: {styles}");
     }
-    let mut left = drawing_differences(&source, &written.bytes);
-    left.sort();
-    let path = "styles.xml /document-styles[0]/styles[1]/style#0/text-properties[1]";
-    let pinned: Vec<String> =
-        ["font-style", "font-style-complex", "font-variant", "font-weight-complex"].iter().map(|a| format!("{path}/@{a} Attribute")).collect();
-    assert_eq!(left, pinned, "only the bold style's group differs");
+    let left = drawing_differences(&source, &written.bytes);
+    assert!(left.is_empty(), "the bold style says the weight alone, as the file did: {left:?}");
     let (before, _) = diacraft_odg::read(&source, &diacraft_odg::Limits::default()).unwrap();
     let (after, _) = diacraft_odg::read(&written.bytes, &diacraft_odg::Limits::default()).unwrap();
     assert_eq!(model_same(&before, &after), Ok(()));
@@ -539,34 +536,42 @@ fn the_data_of_a_group_with_no_name_that_another_such_group_shares_a_stamp_with_
     );
 }
 
-/// The concern 3: a group with no name whose own markup gives it data (a style of its own) cannot be written from the model yet, since its entry in
-/// DiaCraft's document file would be found by its place; **the refusal is in words and names the group** (its number among the groups with no name of its page, and the page), so that a person
-/// can name it, and nothing is written. The way out holds: the same drawing with the group named is written. **A group's own glue points are no such data on the model path**: the
-/// rows of its `draw:glue-point` elements are what the markup gives, written with the group and read again from it, so a group with no other data is written, with its points.
+/// The concern 3, as closed it: **a group with no name whose own markup gives it a style or glue points is written** with them, from the model alone
+/// (the style as the file named it, the points as elements, both read again as the cells the group has), so that no entry of DiaCraft's document file is made for what the markup says. **A
+/// group with no name that holds data of DiaCraft's own** (here a cell the markup gives no group) **still cannot be written**: its entry would be found by its place, and the refusal is in
+/// words and names the group (its number among the groups with no name of its page, and the page), so that a person can name it, and nothing is written. The way out holds: the same drawing
+/// with the group named is written.
 #[test]
-fn a_group_with_no_name_whose_markup_gives_it_data_is_refused_in_words_that_name_it() {
+fn a_group_with_no_name_whose_markup_gives_it_data_is_written_and_one_with_data_of_its_own_is_refused_in_words_that_name_it() {
     for (name, drawing) in group_vectors() {
         let (doc, _) = diacraft_odg::read(&drawing.bytes(), &diacraft_odg::Limits::default()).unwrap();
-        if name.contains("glue point") {
-            let written = diacraft_odg::write_with(&doc, None, &diacraft_odg::WriteOptions::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
-            let content = part(&written.bytes, "content.xml").unwrap();
-            assert_eq!(content.matches("<draw:glue-point ").count(), 1, "{name}: the point is written with the group: {content}");
-            continue;
+        let written = diacraft_odg::write_with(&doc, None, &diacraft_odg::WriteOptions::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let content = part(&written.bytes, "content.xml").unwrap();
+        let (styled, points) = (name.contains("style"), name.contains("glue point"));
+        assert_eq!(content.contains("draw:style-name=\"gr1\""), styled, "{name}: the group's style is written with it: {content}");
+        assert_eq!(content.matches("<draw:glue-point ").count(), usize::from(points), "{name}: the point is written with the group: {content}");
+        // A cell of its own on each group: DiaCraft's data, which has no key to be found by.
+        let mut own = doc.clone();
+        let page = std::sync::Arc::make_mut(own.pages.get_mut(0).unwrap());
+        for at in 0..page.shapes.len() {
+            let shape = std::sync::Arc::make_mut(page.shapes.get_mut(at).unwrap());
+            std::sync::Arc::make_mut(&mut shape.sheet)
+                .cells
+                .insert(diacraft_doc::CellName::new("Cost"), diacraft_doc::Cell::constant(diacraft_doc::Value::from_text("1")));
         }
-        let refused = diacraft_odg::write_with(&doc, None, &diacraft_odg::WriteOptions::default()).unwrap_err();
+        let refused = diacraft_odg::write_with(&own, None, &diacraft_odg::WriteOptions::default()).unwrap_err();
         let words = refused.to_string();
         assert!(words.contains("a group with no name") && words.contains("name the group"), "{name}: {words}");
         assert!(words.contains("it is the group with no name numbered 1 on the page \"page1\""), "{name}: the group is named: {words}");
         assert_eq!(refused.class(), "write_unsupported", "{name}");
         // Named, it is written.
-        let mut named = doc.clone();
-        let page = std::sync::Arc::make_mut(named.pages.get_mut(0).unwrap());
+        let page = std::sync::Arc::make_mut(own.pages.get_mut(0).unwrap());
         for at in 0..page.shapes.len() {
             let shape = std::sync::Arc::make_mut(page.shapes.get_mut(at).unwrap());
             shape.name_u = Some(std::sync::Arc::from(format!("Group {at}").as_str()));
             shape.name = shape.name_u.clone();
         }
-        assert!(diacraft_odg::write_with(&named, None, &diacraft_odg::WriteOptions::default()).is_ok(), "{name}: named, the groups are written");
+        assert!(diacraft_odg::write_with(&own, None, &diacraft_odg::WriteOptions::default()).is_ok(), "{name}: named, the groups are written");
     }
 }
 

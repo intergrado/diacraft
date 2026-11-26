@@ -408,6 +408,9 @@ impl DiacraftApp {
         }
         let editing = self.ui.edit.editing_text();
         let backstage = self.ui.backstage.is_some();
+        // While the ShapeSheet has the focus its keys are its own: Delete, Ctrl+A, Ctrl+D and the rest would change a drawing the person is not looking at. Files, the window's
+        // own commands and views, and undo and redo (the drawing's, whatever made the step) stay.
+        let sheet = self.sheet_keys_held();
         // A text field other than the shape's own box has the keyboard (the Font list's, the Size list's, the box for a colour), **with the shape's box
         // open or not**: its keys are its own.
         let other_box = self.shape_filter_keys_held() || (ctx.text_edit_focused() && ctx.memory(|m| m.focused()) != self.text_box_field());
@@ -418,7 +421,8 @@ impl DiacraftApp {
             let id = binding.id;
             // Close joins the commands on files (the browser version's Ctrl+W): it works in the File view and in a text box, where the label being typed is sent first.
             let files = id.starts_with("file.") || id == "app.closeWindow";
-            let allowed = files || (!backstage && !other_box && (!editing || binding.in_text_box));
+            let sheet_allows = !sheet || crate::sheet::shortcut_allowed(id);
+            let allowed = files || (!backstage && !other_box && sheet_allows && (!editing || binding.in_text_box));
             if !allowed {
                 continue;
             }

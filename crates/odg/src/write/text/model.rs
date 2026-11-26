@@ -24,7 +24,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_doc::{
-    Document, HeldStyleValue, MAX_LIST_LEVELS, OdfListLevel, OdfParagraph, OdfRun, OdfText, RawElement, RawNode, Row, Shape, Sheet, stamp_text_group,
+    Document, HeldStyleValue, MAX_LIST_LEVELS, OdfListLevel, OdfParagraph, OdfRun, OdfText, RawElement, RawNode, Row, Shape, Sheet, TextGroup,
+    stamp_text_group,
 };
 
 use super::super::emit::Pfx;
@@ -65,6 +66,25 @@ pub(crate) struct Rich {
     pub plain: String,
     /// The file says all of the text: DiaCraft's extension carries none of it, and none of its rows.
     pub native: bool,
+}
+
+/// Whether a held value is the whole statement of its group on a run's style (the attributes the cells write for the group are then not written): the groups a style states differently than the
+/// cells say, `Size` (the row holds one always), `Style` (one number for five attributes), `Color` and `FontScale`, and **any value with no attribute**, which says the style stated none of
+/// its group (`read/spelled.rs`). The other values of 0.2 add attributes the cells have no place for.
+fn states_whole(value: &HeldStyleValue) -> bool {
+    matches!(value.group, TextGroup::Size | TextGroup::Style | TextGroup::Color | TextGroup::FontScale) || value.attrs.is_empty()
+}
+
+/// The places of the stretches that overlap the characters `from..to`, in `stretches` (the stretches of a paragraph, in order: each begins where an earlier one ended or later, none before the
+/// one before it): from the first whose end is past `from` to the last that begins before `to`. Two searches, so the cost is the logarithm of the stretches and not their number. Empty when
+/// `from` is not before `to`, and never past the stretches.
+fn overlapping(stretches: &[(usize, usize, u32)], from: usize, to: usize) -> std::ops::Range<usize> {
+    if from >= to {
+        return 0..0;
+    }
+    let first = stretches.partition_point(|&(_, end, _)| end <= from);
+    let count = stretches.get(first..).map_or(0, |rest| rest.partition_point(|&(start, _, _)| start < to));
+    first..first.saturating_add(count)
 }
 
 /// The element kinds of a field the reader maps to a `Field` row, by the formula the row holds: the local name of its element.
@@ -212,6 +232,34 @@ struct Remainder {
     other: Vec<(Ns, String, String)>,
     same_foreign: Vec<Foreign>,
     other_foreign: Vec<Foreign>,
+}
+
+impl Remainder {
+    /// Whether the style holds nothing no cell reads that can be written.
+    fn is_empty(&self) -> bool {
+        self.same.is_empty() && self.other.is_empty() && self.same_foreign.is_empty() && self.other_foreign.is_empty()
+    }
+}
+
+/// Whether `local` is an attribute of the text properties that names a face (`style:font-name` and its Asian and complex-script forms).
+fn is_face_attribute(local: &str) -> bool {
+    matches!(local, "font-name" | "font-name-asian" | "font-name-complex")
+}
+
+/// The faces the cells put the own text of the paragraph `cx` in, when its style's held text properties name a face: the cells of the first stretch of the paragraph that is on the row those
+/// properties were read with (the stamp they carry), as (the attribute that names the face, the family). None when no held value names a face, or no stretch is on that row. A look at each held
+/// value and at each stretch at most.
+fn own_faces(cx: &Ctx<'_, '_>, char_rows: &mut ModelRows<'_>) -> Vec<(&'static str, String)> {
+    let Some(held) = cx.held.filter(|h| h.row_holds) else { return Vec::new() };
+    let own = held
+        .para
+        .style
+        .held
+        .iter()
+        .find(|v| !v.group.is_paragraph() && v.attrs.iter().any(|(k, _)| k.strip_prefix("style:").is_some_and(is_face_attribute)));
+    let Some(stamp) = own.and_then(|v| v.stamp) else { return Vec::new() };
+    let Some(row) = cx.para.stretches.iter().map(|s| s.row).find(|row| char_rows.stamp(*row) == stamp) else { return Vec::new() };
+    char_rows.props(row).map(|(props, _)| props.faces.clone()).unwrap_or_default()
 }
 
 impl Editor<'_, '_> {
@@ -490,8 +538,12 @@ impl Editor<'_, '_> {
         facts: &mut Facts,
     ) -> Result<Written1, WriteError> {
         let pfx = cx.pfx;
-        // The paragraph's style: the name the file gave it while the row is the file's, else one made from the row's cells.
-        let style = self.paragraph_style_name(cx)?;
+        // The paragraph's style: the name the file gave it while the row is the file's, else one made from the row's cells. The faces its text properties name are written as faces the part declares
+        // (GATE1622-CROSS-FONTNAME): the family the cells put its own text in says which, for a name the part has no declaration of.
+        self.texts.own_faces = own_faces(cx, char_rows);
+        let style = self.paragraph_style_name(cx);
+        self.texts.own_faces.clear();
+        let style = style?;
         let (open, close) = match cx.held.and_then(|h| h.para.element.as_ref()) {
             Some(shell) => {
                 let attr = style.as_deref().map(|s| (format!("{}:style-name", prefix_of(&shell.name, cx.text_prefix)), s.to_owned()));
@@ -558,7 +610,12 @@ impl Editor<'_, '_> {
         // over it was no span of the file's, so the row was "not confirmed" and the text rode in DiaCraft's data whole (a paragraph the reader then read back with the markup's runs
         // forgotten: the hyperlinks among them, and a check that found one run where it had three).
         let stretches = self.split_at_held_runs(stretches, (&span_by, &elem_by), char_rows)?;
-        for (start, end, row) in stretches {
+        // The row the paragraph's own text is on, when the file's paragraph says it (the text properties of its style): its stamp is the whole row's.
+        let own_stamp =
+            cx.held.filter(|h| h.row_holds).and_then(|h| h.para.style.held.iter().find(|v| !v.group.is_paragraph())).and_then(|v| v.stamp);
+        // The stretches that are the file's own spans, whatever came of them: no span is made for them again.
+        let mut seen_spans: HashSet<(usize, usize)> = HashSet::new();
+        for &(start, end, row) in &stretches {
             facts.used_char.insert(row);
             let Some((props, lossy)) = char_rows.props(row) else { continue };
             facts.native &= !lossy;
@@ -569,26 +626,23 @@ impl Editor<'_, '_> {
             let held_run = span_by.get(&(start, end)).copied();
             let row_stamp = char_rows.stamp(row);
             let confirmed = held_run.is_some_and(|r| stands_for_row(r, row_stamp, elem_by.contains_key(&(start, end))));
+            if confirmed {
+                seen_spans.insert((start, end));
+            }
+            // Text of no span of the file's that is on the row the paragraph's style gives its own text needs no span: the paragraph's style says it.
+            if held_run.is_none() && own_stamp == Some(row_stamp) {
+                continue;
+            }
             if !confirmed {
                 facts.native = false;
             }
             let Some(name) = self.run_style_name(&props, char_rows.row(row), held_run, confirmed)? else { continue };
-            let shelled = match held_run.and_then(|r| r.element.as_ref()).filter(|_| confirmed) {
-                // A span that holds an attribute of its own besides its style.
-                Some(shell) => {
-                    self.shell_tags(shell, Some((format!("{}:style-name", prefix_of(&shell.name, cx.text_prefix)), name.clone())), cx.page, pfx)?
-                }
-                None => None,
-            };
-            let tags = match shelled {
-                Some(tags) => tags,
-                None => {
-                    self.work.charge_attribute(self.limits)?;
-                    Tags { open: format!("<{}:span{}>", pfx.text, pfx.attr(Ns::Text, "style-name", &name)), close: format!("</{}:span>", pfx.text) }
-                }
-            };
+            let tags = self.span_tags(&name, held_run.filter(|_| confirmed), cx, pfx)?;
             covers.push(Cover { from: start, to: end, tags, raw: false, held: false });
         }
+        // **The file's spans that no stretch of the model stands for**: a span whose style says nothing a cell reads is on a row that writes nothing, or on the row of the text round it,
+        // so it is no stretch of its own. It is written where it was while the rows under it are the file's (each has the stamp the span was read with), with the style it named.
+        self.held_spans(cx, pfx, (&span_by, &elem_by, &seen_spans), &stretches, char_rows, &mut covers)?;
         // The fields and marks.
         let mut fields: Vec<FieldAt> = Vec::new();
         for inline in &cx.para.inlines {
@@ -696,6 +750,77 @@ impl Editor<'_, '_> {
         Ok(out)
     }
 
+    /// The start and end tags of the span named `name`: the element the file's span was when it held an attribute of its own, else a `text:span` with the name.
+    fn span_tags(&mut self, name: &str, held: Option<&OdfRun>, cx: &Ctx<'_, '_>, pfx: &Pfx) -> Result<Tags, WriteError> {
+        let shelled = match held.and_then(|r| r.element.as_ref()) {
+            // A span that holds an attribute of its own besides its style.
+            Some(shell) => {
+                self.shell_tags(shell, Some((format!("{}:style-name", prefix_of(&shell.name, cx.text_prefix)), name.to_owned())), cx.page, pfx)?
+            }
+            None => None,
+        };
+        match shelled {
+            Some(tags) => Ok(tags),
+            None => {
+                self.work.charge_attribute(self.limits)?;
+                Ok(Tags { open: format!("<{}:span{}>", pfx.text, pfx.attr(Ns::Text, "style-name", name)), close: format!("</{}:span>", pfx.text) })
+            }
+        }
+    }
+
+    /// The spans of the file's paragraph that [`Editor::paragraph`]'s stretches did not write, each written over the characters it had when **every stretch of the model under it is on the row the span
+    /// was read with** (`run.style.stamp`; the characters and the places of the spans are the file's, the paragraph having been found by their stamp): the cells under it are as read, so the style it
+    /// named is the one that says them, and its kept attributes are what no cell reads. A span the stretches of the model wrote is passed over, and so is one of no style name, no character or
+    /// one that stands past the paragraph. **Each stretch the walk of a span goes over is a step, charged before it**, found by a search for where the span starts, so that the spans of a paragraph
+    /// cost its stretches and its spans, and a span nested in others costs what it overlaps.
+    fn held_spans(
+        &mut self,
+        cx: &Ctx<'_, '_>,
+        pfx: &Pfx,
+        (span_by, elem_by, seen): (&RunsByRange<'_>, &RunsByRange<'_>, &HashSet<(usize, usize)>),
+        stretches: &[(usize, usize, u32)],
+        char_rows: &mut ModelRows<'_>,
+        covers: &mut Vec<Cover>,
+    ) -> Result<(), WriteError> {
+        if span_by.len() == seen.len() {
+            return Ok(());
+        }
+        // The held spans in the order they begin, outer first, so that the writing is the same on every machine (the map's order is not).
+        let mut wanted: Vec<(&(usize, usize), &&OdfRun)> = span_by.iter().filter(|(range, _)| !seen.contains(range)).collect();
+        self.work.charge_steps(wanted.len().saturating_mul(2))?;
+        wanted.sort_by(|a, b| a.0.0.cmp(&b.0.0).then(b.0.1.cmp(&a.0.1)));
+        for (&(from, to), run) in wanted {
+            let Some(stamp) = run.style.stamp else { continue };
+            let Some(name) = run.style.name.as_deref() else { continue };
+            if from >= to || to > cx.para.count {
+                continue;
+            }
+            // The stretches the span overlaps, charged before they are walked.
+            let over = overlapping(stretches, from, to);
+            self.work.charge_steps(over.len().saturating_add(1))?;
+            let rows: Vec<u32> = stretches.get(over).unwrap_or_default().iter().map(|&(_, _, row)| row).collect();
+            if rows.is_empty()
+                || !rows.iter().all(|row| {
+                    char_rows.stamp(*row) == stamp || (elem_by.contains_key(&(from, to)) && stands_for_row(run, char_rows.stamp(*row), true))
+                })
+            {
+                continue;
+            }
+            let Some(&row) = rows.first() else { continue };
+            let nothing = Arc::new(Props::nothing());
+            let props = char_rows.props(row).map_or(nothing, |(props, _)| props);
+            let Some(name) = self.run_style_name(&props, char_rows.row(row), Some(run), true)?.or_else(|| {
+                // A span of a common style says nothing a cell reads: the name is the style.
+                self.commons.contains(name).then(|| name.to_owned())
+            }) else {
+                continue;
+            };
+            let tags = self.span_tags(&name, Some(run), cx, pfx)?;
+            covers.push(Cover { from, to, tags, raw: false, held: true });
+        }
+        Ok(())
+    }
+
     /// The start and end tags of a `text:p` with a style.
     fn plain_paragraph_tags(&mut self, style: Option<&str>, pfx: &Pfx) -> Result<(String, String), WriteError> {
         let mut open = format!("<{}:p", pfx.text);
@@ -714,9 +839,10 @@ impl Editor<'_, '_> {
             return match h.para.style.name.as_deref() {
                 None => Ok(None),
                 Some(name) if self.commons.contains(name) => Ok(Some(name.to_owned())),
+                // A paragraph whose row holds no cell still has a style that says what no cell reads.
                 Some(name) => match cx.pp {
                     Some(props) => self.held_style(Fam::Paragraph, name, props, cx.pp_row, &h.para.style.held),
-                    None => Ok(None),
+                    None => self.held_style(Fam::Paragraph, name, &Props::nothing(), None, &h.para.style.held),
                 },
             };
         }
@@ -744,42 +870,82 @@ impl Editor<'_, '_> {
         self.style_for(Fam::Text, props)
     }
 
-    /// An automatic style made under the name the file gave it, with the values the file held for it that the row still says, **once for each name** (the same name asked for with another row is a new
-    /// style under a new name: two paragraphs of one file's style that the model has come to give different rows are two styles).
+    /// An automatic style made under the name the file gave it, with the values the file held for it that the row still says, **once for each name** (the same name asked for with another content is a
+    /// new style under a new name: two paragraphs of one file's style that the model has come to give different rows are two styles, the paragraph's with the text properties the file stated, and a run's
+    /// from its cells). The same name asked for with the same cells and values is one style, **whether or not the paragraph's text is on the row the style's text properties were read with**, and
+    /// whatever the cells say the faces of that text are while the part declares the faces the style names.
+    ///
+    /// **What the file stated is written as it stated it**: a held value of the group `Size` or `Style` of a run's style, while its stamp holds, is the whole statement of the group (its
+    /// attributes none included), so the attributes the cells write for the group are not written; the text properties a paragraph style stated are written as they were (an element of their own
+    /// after the paragraph properties), and **a style whose cells and held values write nothing still says what no cell reads**, the attributes its kept remainder holds: it is no style only when
+    /// that holds nothing either.
     fn held_style(
         &mut self,
         family: Fam,
         name: &str,
-        props: &Arc<Props>,
+        props: &Props,
         row: Option<&Row>,
         held: &[HeldStyleValue],
     ) -> Result<Option<String>, WriteError> {
         let key = (family, name.to_owned());
+        // A row the sheet does not hold stamps as an empty one, as the reader's values were.
+        let empty = Row::default();
+        let row = row.unwrap_or(&empty);
+        let paragraph = family == Fam::Paragraph;
         let values: Vec<&HeldStyleValue> = held
             .iter()
-            .filter(|v| v.group.is_paragraph() == (family == Fam::Paragraph) && row.is_some_and(|r| v.stamp == Some(stamp_text_group(r, v.group))))
+            .filter(|v| {
+                // The text properties of a paragraph style stand while the paragraph does: they are written as they were, and the stamp they carry tells the text that is on their row.
+                if paragraph && !v.group.is_paragraph() {
+                    return true;
+                }
+                v.group.is_paragraph() == paragraph && v.stamp == Some(stamp_text_group(row, v.group))
+            })
             .collect();
-        let mut ops = self.style_ops(props)?;
+        // The groups whose whole statement a value is: the attributes the cells write for them are not written (a face of such a group is not declared either).
+        let whole: Vec<&str> = values.iter().filter(|v| states_whole(v)).map(|v| v.group.id()).collect();
+        let mut ops = self.style_ops_without(props, &whole)?;
         // A run that stated no underline is not given one that says "none": the cells of the row hold no `DblUnderline`, and the file's style would read back with it.
-        if !row.is_some_and(|r| r.cells.contains_key("DblUnderline")) {
+        if !row.cells.contains_key("DblUnderline") {
             ops.retain(|o| !(o.local == "text-underline-style" && matches!(&o.val, Val::Text(t) if t == "none")));
         }
-        if ops.is_empty() && values.is_empty() {
-            return Ok(None);
-        }
-        // What the style says: the same name asked for again with the same content is the style made, and with another content a style of its own.
-        let content = format!(
+        // What the style says: the same name asked for again with the same content is the style made, and with another content a style of its own. **The faces are the ones the style is written with**
+        // (GATE1622-CROSS-FONTNAME), not the faces the paragraph's own text is in: two paragraphs of one style, one whose text is on the row of the style's text properties and one whose text is all in
+        // spans, write the same names while the part declares the faces the style names, and are one style.
+        let faces = format!("{:?}", self.written_faces(&values)?);
+        let base = format!(
             "{}#{:?}",
             self.ops_key(&ops)?,
             values.iter().map(|v| v.attrs.iter().map(|(k, t)| format!("{k}={t}")).collect::<Vec<_>>()).collect::<Vec<_>>()
         );
-        if let Some(made) = self.texts.held_made.get(&key) {
-            return if *made == content { Ok(Some(name.to_owned())) } else { self.style_for(family, props) };
+        if let Some((made_base, made_faces)) = self.texts.held_made.get(&key) {
+            // A paragraph with no text of its own on that row has nothing the faces would draw, so it takes the style as it was made, whatever faces the style was made with.
+            if *made_base == base && (*made_faces == faces || self.texts.own_faces.is_empty()) {
+                return Ok(Some(name.to_owned()));
+            }
+            // A run's row that is another row is said by its cells. A paragraph's style is more: the text properties it stated are its own text's, and the paragraph names it with no span for that text
+            // (the row it holds is the one the style's text properties were read with), so a style of its own that lost them would draw the text in the default style's face and size.
+            return if paragraph { self.held_variant(name, &format!("{base}#{faces}"), &ops, &values) } else { self.style_for(family, props) };
         }
-        self.make_named_style(family, name, &ops, &values)?;
+        let content = format!("{base}#{faces}");
+        if self.texts.held_none.get(&key).is_some_and(|said| *said == content) {
+            return Ok(None);
+        }
+        // A style whose cells and held values say nothing still says what its remainder holds: the attributes of the kept style that no cell reads.
+        let mut remainder: Option<Remainder> = None;
+        if ops.is_empty() && values.iter().all(|v| v.attrs.is_empty()) {
+            let kept = self.text_remainder(family, name, &[], &[])?;
+            if kept.is_empty() {
+                self.texts.held_none.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: 0 })?;
+                self.texts.held_none.insert(key, content);
+                return Ok(None);
+            }
+            remainder = Some(kept);
+        }
+        self.make_named_style(family, name, name, &ops, &values, remainder)?;
         self.work.text_names_written.insert((family == Fam::Text, name.to_owned()));
         self.texts.held_made.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: 0 })?;
-        self.texts.held_made.insert(key, content);
+        self.texts.held_made.insert(key, (base, faces));
         Ok(Some(name.to_owned()))
     }
 
@@ -886,7 +1052,32 @@ impl Editor<'_, '_> {
                 match (ns, uri) {
                     (Some(ns), _) => {
                         if !written.contains(&(ns, local)) && seen.insert((ns, local.to_owned())) {
-                            target.push((ns, local.to_owned(), text.to_owned()));
+                            // **A weight, a slant or a variant that ODF 1.4 lists no value for** (a file of ODF 1.0 or 1.1 takes any text there) is written as the value it lists nearest, and the
+                            // value it had rides in DiaCraft's own attribute on the same element (`ext::odf14::form_14`), as `text:enable-numbering` does below; a read gives it back
+                            // while the attribute beside it is the one written. A part of ODF 1.0 or 1.1 takes any text and is written as it was.
+                            let space = if ns == Ns::Fo { crate::ext::odf14::Space::Fo } else { crate::ext::odf14::Space::Style };
+                            let form = (!self.legacy && local_name == "text-properties")
+                                .then(|| crate::ext::odf14::listed(space, local))
+                                .flatten()
+                                .and_then(|(kind, carrier)| crate::ext::odf14::form_14(kind, text).map(|form| (form, carrier)));
+                            match form {
+                                Some((form, carrier)) if foreign_seen.insert((diacraft_doc::DIACRAFT_URN.to_owned(), carrier.to_owned())) => {
+                                    self.work.forms_1_4 = true;
+                                    target.push((ns, local.to_owned(), form.to_owned()));
+                                    foreign_target.push(Foreign {
+                                        prefix: crate::ext::names::PREFIX.to_owned(),
+                                        uri: diacraft_doc::DIACRAFT_URN.to_owned(),
+                                        local: carrier.to_owned(),
+                                        value: text.to_owned(),
+                                    });
+                                }
+                                // A carrier of the name is written already: this value is written as it is nearest, and counted as one that was not carried.
+                                Some((form, _)) => {
+                                    target.push((ns, local.to_owned(), form.to_owned()));
+                                    left = left.saturating_add(1);
+                                }
+                                None => target.push((ns, local.to_owned(), text.to_owned())),
+                            }
                         }
                     }
                     // **An attribute of the standard's own that the schema of the version written has no place for there** (a file of ODF 1.0 or 1.1 takes any): not written as it stands. One that an earlier
@@ -970,17 +1161,89 @@ impl Editor<'_, '_> {
         Ok(declarations)
     }
 
-    /// A new automatic style of `family` called `name`, with the attributes `ops` and the held values `held` (each of its attributes over the op that writes the same name).
-    fn make_named_style(&mut self, family: Fam, name: &str, ops: &[Op], held: &[&HeldStyleValue]) -> Result<(), WriteError> {
+    /// Writes the attributes `attrs` of a style's text properties in the forms ODF 1.4 lists (`ext::odf14::form_14`): a weight, a slant or a variant of another text is the value
+    /// 1.4 lists nearest to it, and the text it had is a carrier in `carriers`, written beside it once for each name (a second of a name is written as it is nearest and counted as one that was
+    /// not carried).
+    fn forms_1_4(&mut self, attrs: &mut [(Ns, String, String)], carriers: &mut Vec<Foreign>) {
+        use crate::ext::odf14::{Space, form_14, listed};
+        let mut seen: HashSet<&'static str> = HashSet::new();
+        for (ns, local, text) in attrs.iter_mut() {
+            let space = match ns {
+                Ns::Fo => Space::Fo,
+                Ns::Style => Space::Style,
+                _ => continue,
+            };
+            let Some((kind, carrier)) = listed(space, local) else { continue };
+            let Some(form) = form_14(kind, text) else { continue };
+            if seen.insert(carrier) {
+                self.work.forms_1_4 = true;
+                carriers.push(Foreign {
+                    prefix: crate::ext::names::PREFIX.to_owned(),
+                    uri: diacraft_doc::DIACRAFT_URN.to_owned(),
+                    local: carrier.to_owned(),
+                    value: std::mem::take(text),
+                });
+            } else {
+                self.texts.style_attributes_left = self.texts.style_attributes_left.saturating_add(1);
+            }
+            *text = form.to_owned();
+        }
+    }
+
+    /// The faces the held values `values` name, each as the style is written with it: the file's own name while the part declares a face of it, else the declared face of the family the paragraph's own
+    /// text is in ([`Editor::declared_face_of`], the same call [`Editor::make_named_style`] makes), in the order of the values and of their attributes. Each attribute is a look at one name.
+    fn written_faces(&mut self, values: &[&HeldStyleValue]) -> Result<Vec<String>, WriteError> {
+        let mut faces: Vec<String> = Vec::new();
+        for value in values {
+            for (key, text) in value.attrs.iter() {
+                let Some(local) = key.strip_prefix("style:").filter(|l| is_face_attribute(l)) else { continue };
+                if !super::super::kept::is_qname(key) || super::super::splice::has_bad_char(text) {
+                    continue;
+                }
+                faces.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: faces.len() as u64 })?;
+                faces.push(self.declared_face_of(local, text)?);
+            }
+        }
+        Ok(faces)
+    }
+
+    /// The paragraph style the file called `name`, asked for again with a `content` other than the one it was made with: **a style of its own that says what the file's said**, the text properties among
+    /// it, under a name the save gives it, and made once for each content. The remainder is the file's style's, which `name` finds.
+    fn held_variant(&mut self, name: &str, content: &str, ops: &[Op], values: &[&HeldStyleValue]) -> Result<Option<String>, WriteError> {
+        let key = (Fam::Paragraph, name.to_owned(), content.to_owned());
+        if let Some(made) = self.texts.held_variants.get(&key) {
+            return Ok(Some(made.clone()));
+        }
+        let fresh = self.book.as_mut().ok_or(WriteError::Mismatch("a text style without the styles of the part"))?.names.next(Fam::Paragraph);
+        self.make_named_style(Fam::Paragraph, &fresh, name, ops, values, None)?;
+        self.texts.held_variants.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: 0 })?;
+        self.texts.held_variants.insert(key, fresh.clone());
+        Ok(Some(fresh))
+    }
+
+    /// A new automatic style of `family` called `name`, with the attributes `ops` and the held values `held` (each of its attributes over the op that writes the same name). `source` is the name the file
+    /// gave the style, which its kept remainder is found by (`name` itself for a style written under the file's name). `kept` is what the style's remainder holds, when the caller has asked for it already.
+    fn make_named_style(
+        &mut self,
+        family: Fam,
+        name: &str,
+        source: &str,
+        ops: &[Op],
+        held: &[&HeldStyleValue],
+        kept: Option<Remainder>,
+    ) -> Result<(), WriteError> {
         let (word, element, prop) = if family == Fam::Text { ("text", "text-properties", 2) } else { ("paragraph", "paragraph-properties", 1) };
         let book = self.book.as_mut().ok_or(WriteError::Mismatch("a text style without the styles of the part"))?;
         let scope =
             book.auto.as_ref().map(|a| a.scope).ok_or(WriteError::Unsupported("a part with no office:automatic-styles to put a new style in"))?;
         let pfx = Pfx::of(&mut self.scopes, scope, self.work);
         let inner = pfx.without_declarations();
-        // The held attributes by the namespace and local name they stand for: the standard's own prefixes of the two namespaces a properties element is written with.
+        // The held attributes by the namespace and local name they stand for: the standard's own prefixes of the two namespaces a properties element is written with. A paragraph style's text
+        // properties (the values of a group of the text) go on an element of their own.
         let mut extra: Vec<(Ns, String, String)> = Vec::new();
+        let mut text_extra: Vec<(Ns, String, String)> = Vec::new();
         for value in held {
+            let target = if family == Fam::Paragraph && !value.group.is_paragraph() { &mut text_extra } else { &mut extra };
             for (key, text) in value.attrs.iter() {
                 let Some((prefix, local)) = key.split_once(':') else { continue };
                 let ns = match prefix {
@@ -991,14 +1254,31 @@ impl Editor<'_, '_> {
                 if !super::super::kept::is_qname(key) || super::super::splice::has_bad_char(text) {
                     continue;
                 }
-                extra.push((ns, local.to_owned(), text.to_owned()));
+                // A face is named by a face the part declares: the file's own name while it does, else the declared face of the family of the text.
+                let text = if ns == Ns::Style && is_face_attribute(local) { self.declared_face_of(local, text)? } else { text.to_owned() };
+                target.push((ns, local.to_owned(), text));
             }
+        }
+        // **A weight, a slant or a variant that ODF 1.4 lists no value for** is written as the value it lists nearest, and the value it had rides in DiaCraft's own attribute beside it, as
+        // the remainder's are: a statement a held value makes is the file's, and an earlier version of the standard took any text there.
+        let (mut carriers, mut text_carriers) = (Vec::new(), Vec::new());
+        if !self.legacy {
+            if family == Fam::Text {
+                self.forms_1_4(&mut extra, &mut carriers);
+            }
+            self.forms_1_4(&mut text_extra, &mut text_carriers);
         }
         let kept_ops: Vec<Op> =
             ops.iter().filter(|o| !extra.iter().any(|(ns, local, _)| o.ns == *ns && o.local == local.as_str())).cloned().collect();
         // **What the file's style held that no cell reads** (its kept remainder: found the sizes of the Asian and complex scripts of 406 visits dropped with no
         // word): the attributes of its paragraph and text properties that neither a cell nor a held value writes, each on the element it was read from, as a graphic style's are.
-        let remainder = self.text_remainder(family, name, &kept_ops, &extra)?;
+        let remainder = match kept {
+            Some(kept) => kept,
+            None => {
+                let written: Vec<(Ns, String, String)> = extra.iter().chain(text_extra.iter()).cloned().collect();
+                self.text_remainder(family, source, &kept_ops, &written)?
+            }
+        };
         extra.extend(remainder.same);
         let mut wrote: Vec<(Ns, &'static str)> = Vec::new();
         let mut attrs = self.ctx().attributes(&inner, &kept_ops, &mut wrote)?;
@@ -1006,20 +1286,24 @@ impl Editor<'_, '_> {
             self.work.charge_attribute(self.limits)?;
             attrs.push_str(&inner.attr(*ns, local, value));
         }
-        attrs.push_str(&self.foreign_attributes(&pfx, &remainder.same_foreign)?);
+        carriers.extend(remainder.same_foreign);
+        text_carriers.extend(remainder.other_foreign);
+        attrs.push_str(&self.foreign_attributes(&pfx, &carriers)?);
         let s = &pfx.style;
         let mut more = String::new();
-        if !remainder.other.is_empty() || !remainder.other_foreign.is_empty() {
+        if !text_extra.is_empty() || !remainder.other.is_empty() || !text_carriers.is_empty() {
             more.push_str(&format!("<{s}:text-properties"));
-            for (ns, local, value) in &remainder.other {
+            for (ns, local, value) in text_extra.iter().chain(remainder.other.iter()) {
                 self.work.charge_attribute(self.limits)?;
                 more.push_str(&inner.attr(*ns, local, value));
             }
-            more.push_str(&self.foreign_attributes(&pfx, &remainder.other_foreign)?);
+            more.push_str(&self.foreign_attributes(&pfx, &text_carriers)?);
             more.push_str("/>");
         }
+        // A paragraph style that stated text properties and no paragraph properties has no element of the paragraph properties.
+        let main = if family == Fam::Paragraph && attrs.is_empty() && !more.is_empty() { String::new() } else { format!("<{s}:{element}{attrs}/>") };
         let text = format!(
-            "<{s}:style {s}:name=\"{}\" {s}:family=\"{word}\"{}><{s}:{element}{attrs}/>{more}</{s}:style>",
+            "<{s}:style {s}:name=\"{}\" {s}:family=\"{word}\"{}>{main}{more}</{s}:style>",
             super::super::splice::escape_value(name, b'"'),
             pfx.declare
         );
@@ -1516,6 +1800,24 @@ mod tests {
 
     fn places(covers: &[Cover]) -> Vec<(usize, usize)> {
         covers.iter().map(|c| (c.from, c.to)).collect()
+    }
+
+    #[test]
+    fn the_stretches_a_span_overlaps_are_found_by_two_searches() {
+        // (start, end, row): 0..2, 2..5, 5..6, 6..10, tiling the paragraph.
+        let stretches = [(0usize, 2usize, 0u32), (2, 5, 1), (5, 6, 2), (6, 10, 3)];
+        assert_eq!(overlapping(&stretches, 0, 10), 0..4);
+        assert_eq!(overlapping(&stretches, 2, 5), 1..2, "a span that is a stretch is that stretch alone");
+        assert_eq!(overlapping(&stretches, 1, 3), 0..2, "a span over two stretches' edge");
+        assert_eq!(overlapping(&stretches, 5, 6), 2..3);
+        assert_eq!(overlapping(&stretches, 4, 7), 1..4);
+        assert_eq!(overlapping(&stretches, 10, 12), 4..4, "past the last stretch: none");
+        assert_eq!(overlapping(&stretches, 3, 3), 0..0, "a span of no character overlaps nothing");
+        assert_eq!(overlapping(&[], 0, 5), 0..0);
+        // Nothing past the stretches, whatever the numbers.
+        let all = overlapping(&stretches, 0, usize::MAX);
+        assert_eq!(all, 0..4);
+        assert!(overlapping(&stretches, usize::MAX, usize::MAX).end <= stretches.len());
     }
 
     #[test]

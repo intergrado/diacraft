@@ -481,6 +481,8 @@ impl DiacraftApp {
         self.ui.panes.explorer.forget_tree();
         self.forget_shape_data_pane();
         self.ui.format.forget_looks();
+        // The sheets open were the old drawing's (`sheet/mod.rs`).
+        self.forget_sheets();
     }
 
     /// The window state's word for the panes.

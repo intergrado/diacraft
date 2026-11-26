@@ -138,6 +138,8 @@ fn open_diacraft_in_your_browser_goes_straight_to_the_app_and_the_details_page_i
         "browser.html",
         "privacy.html",
         "changelog.html",
+        "features.html",
+        "feature-comparison.html",
         "404.html",
         "vsdx-editor.html",
         "flowcharts.html",
@@ -237,7 +239,7 @@ fn the_footers_trademark_paragraph_runs_the_full_width_of_the_rule_above_it_on_e
     }
     pages.sort();
     pages.dedup();
-    assert_eq!(pages.len(), 15, "the pages, the guides, their index and 404: {pages:?}");
+    assert_eq!(pages.len(), 17, "the pages, the guides, their index and 404: {pages:?}");
     for page in &pages {
         let text = read(page);
         assert_eq!(text.matches("<p class=\"legal\">").count(), 1, "{page}");
@@ -293,4 +295,108 @@ fn no_file_of_the_tree_holds_a_private_key() {
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
         assert!(!text.contains(&marker) && !other_markers.iter().any(|m| text.contains(m)), "{file} holds a private key");
     }
+}
+
+/// The page files of the website, as paths from the repository's root, sorted.
+fn site_pages() -> Vec<String> {
+    let mut pages = Vec::new();
+    for dir in ["site", "site/guides"] {
+        for entry in std::fs::read_dir(xtask::root().join(dir)).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if name.ends_with(".html") {
+                pages.push(format!("{dir}/{name}"));
+            }
+        }
+    }
+    pages.sort();
+    pages
+}
+
+/// The owner's ruling (2026-11-26): the Features page (`/features`) describes every feature of the release, area by area. The masthead's Features goes to it on every page (its text and the
+/// other items stay), the footer's Product column links it, the home page keeps its own short Features section, and the page itself links the guide of each area that has one.
+#[test]
+fn the_menus_features_goes_to_the_features_page_and_the_page_links_the_guides() {
+    let pages = site_pages();
+    assert!(pages.contains(&"site/features.html".to_owned()), "{pages:?}");
+    for page in &pages {
+        let html = read(page);
+        let nav = html
+            .split("aria-label=\"Main navigation\">")
+            .nth(1)
+            .and_then(|rest| rest.split("</nav>").next())
+            .unwrap_or_else(|| panic!("{page}: no masthead menu"));
+        let items: Vec<(String, String)> = anchors(nav).into_iter().map(|(tag, text)| (href(&tag).to_owned(), text)).collect();
+        let texts: Vec<&str> = items.iter().map(|(_, text)| text.split(" <span").next().unwrap_or("")).collect();
+        assert_eq!(texts, ["Features", "Guides", "Changelog", "Downloads"], "{page}: the menu's items and their text stay");
+        assert_eq!(items[0].0, "/features.html", "{page}: the menu's Features goes to the Features page");
+        assert_eq!(
+            nav.contains("aria-current=\"page\" ") || nav.contains("aria-current=\"page\">"),
+            *page == "site/features.html" || *page == "site/changelog.html",
+            "{page}"
+        );
+        let footer = html.split("<footer").nth(1).unwrap_or_else(|| panic!("{page} has no footer"));
+        let product = footer
+            .split("<p class=\"label\">Product</p>")
+            .nth(1)
+            .and_then(|rest| rest.split("</div>").next())
+            .unwrap_or_else(|| panic!("{page}: no Product column"));
+        assert!(
+            anchors(product).iter().any(|(tag, text)| href(tag) == "/features.html" && text == "Features"),
+            "{page}: the footer's Product column links the Features page"
+        );
+        assert!(!html.contains("href=\"/#features\""), "{page}: a link to the home page's section where the page is meant");
+    }
+    // The home page keeps its own section.
+    assert!(read("site/index.html").contains("id=\"features\""), "the home page's Features section stays");
+    let features = read("site/features.html");
+    assert!(features.contains("<a href=\"/features.html\" aria-current=\"page\">Features</a>"), "the page marks itself in the menu");
+    for guide in ["getting-started", "file-formats", "native-format", "command-line", "agents"] {
+        assert!(features.contains(&format!("href=\"/guides/{guide}.html\"")), "the Features page links the guide {guide}");
+    }
+    for other in ["/browser.html", "/privacy.html", "/flowcharts.html", "/org-charts.html"] {
+        assert!(features.contains(&format!("href=\"{other}\"")), "the Features page links {other}");
+    }
+    // Only what ships: no list of what is to come and no section of limits (the owner, 2026-11-26).
+    let lower = features.to_lowercase();
+    for word in ["coming next", "coming soon", "roadmap", "id=\"limits\"", "not yet", "planned"] {
+        assert!(!lower.contains(word), "the Features page says `{word}`");
+    }
+}
+
+/// The owner's ruling (2026-11-26): the changelog's first section is the notes of the release of the workspace's version; the overview of 0.2.0 is one group headed "v0.2.0" whose seven sections
+/// are nested under it in the list of the page's sections; and the page has no section of limits.
+#[test]
+fn the_changelog_starts_with_the_release_and_groups_the_overview_of_0_2_0() {
+    let manifest: toml::Table = read("Cargo.toml").parse().unwrap();
+    let version = manifest["workspace"]["package"]["version"].as_str().unwrap().to_owned();
+    let page = read("site/changelog.html");
+    let first = page.split("<article class=\"prose\">").nth(1).and_then(|rest| rest.split('>').next()).unwrap().trim().to_owned();
+    assert_eq!(first, format!("<section id=\"release-{}\"", version.replace('.', "-")), "the first section is the notes of {version}");
+    assert!(page.contains(&format!("<h2>New in {version}</h2>")), "the notes of {version} are headed New in {version}");
+    for gone in ["What is still limited", "id=\"limits\"", "href=\"#limits\""] {
+        assert!(!page.contains(gone), "the changelog still has `{gone}`");
+    }
+    let nested = ["native-default", "exchange", "editor", "downloads", "browser", "automation", "details"];
+    // In the text: one section of the group, headed v0.2.0, holding the seven in order.
+    let group = page.split("<section id=\"release-0-2-0\">").nth(1).expect("a section release-0-2-0");
+    assert!(group.trim_start().starts_with("<h2>v0.2.0</h2>"), "the group is headed v0.2.0");
+    let mut at = 0;
+    for id in nested {
+        let found =
+            group[at..].find(&format!("<section id=\"{id}\">")).unwrap_or_else(|| panic!("the group does not hold {id} after the one before"));
+        at += found;
+    }
+    // In the list of sections: the group's row holds a list of its own with the seven, in order, and the top list has the releases.
+    let toc = page.split("<nav class=\"toc\"").nth(1).and_then(|rest| rest.split("</nav>").next()).unwrap();
+    let row = toc.split("<li><a href=\"#release-0-2-0\">").nth(1).expect("a row for the group");
+    let inner = row.split("<ol>").nth(1).and_then(|rest| rest.split("</ol>").next()).expect("the group's row holds a list");
+    let links: Vec<String> = anchors(inner).into_iter().map(|(tag, _)| href(&tag).trim_start_matches('#').to_owned()).collect();
+    assert_eq!(links, nested, "the seven sections are nested under v0.2.0, in order");
+    let top = toc.split("<ol>").nth(1).unwrap().split("<li><a href=\"#release-0-2-0\">").next().unwrap();
+    let releases: Vec<String> = anchors(top).into_iter().map(|(tag, _)| href(&tag).to_owned()).collect();
+    assert_eq!(
+        releases.first().map(String::as_str),
+        Some(format!("#release-{}", version.replace('.', "-")).as_str()),
+        "the list starts with the release"
+    );
 }

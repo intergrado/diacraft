@@ -103,6 +103,25 @@ fn text_tokens_are_readable_on_their_bars() {
     }
 }
 
+/// The ShapeSheet window's four tokens (design 10): the text of an own cell, of a cell that reads its default and of an error read at 4.5 to 1 or more on the sheet's ground in
+/// both themes, and the background of a cell the last commit changed holds all three and the ordinary text at that ratio too.
+#[test]
+fn the_sheets_tokens_read_on_its_ground_in_both_themes() {
+    for (theme, t) in [("light", Tokens::light()), ("dark", Tokens::dark())] {
+        for (what, ink) in [("own", t.sheet_local), ("default", t.sheet_default), ("error", t.sheet_error), ("inherited", t.text)] {
+            let ratio = contrast(ink, t.panel_fill);
+            assert!(ratio >= 4.5, "{theme} {what} on the sheet's ground: {ratio:.2} is under 4.5");
+        }
+        assert_eq!(t.sheet_changed.a(), 255, "{theme}: a changed cell's background is opaque");
+        for (what, ink) in [("own", t.sheet_local), ("error", t.sheet_error), ("inherited", t.text)] {
+            let ratio = contrast(ink, t.sheet_changed);
+            assert!(ratio >= 4.5, "{theme} {what} on a changed cell: {ratio:.2} is under 4.5");
+        }
+        assert_ne!(t.sheet_changed, t.panel_fill, "{theme}: a changed cell shows");
+        assert_ne!(t.sheet_local, t.text, "{theme}: own and inherited cells differ in colour");
+    }
+}
+
 /// The close button's hover colour is DiaCraft's own: not the red another craft app uses for it (196, 43, 28), which is also
 /// the red Windows 11 shows there, nor Windows 10's (232, 17, 35).
 #[test]

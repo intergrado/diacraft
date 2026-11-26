@@ -440,7 +440,8 @@ pub fn search(opened: &OpenedStencils, query: &Query) -> Outcome {
 }
 
 fn search_builtin(c: &mut Collector, group: &mut Group, spec: &StencilSpec, query: &Query) {
-    for m in spec.masters() {
+    // A hidden master (a custom line end) is not looked at: the window leaves it out, as it leaves out a stencil file's.
+    for m in spec.masters().iter().filter(|m| !m.is_hidden()) {
         match c.look(query, m.name, &[keywords::of(m.id)]) {
             None => return,
             Some(true) => c.matched(group, || master_json(m)),

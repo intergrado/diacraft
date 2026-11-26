@@ -1,5 +1,5 @@
 //! Dropping a master of an opened stencil on a page: the master is brought into the document (`bring.rs`), and an instance of it is
-//! put where the person points.
+//! put where the person points. **A built-in group master is dropped by the same code** ([`drop_group_master`]): `ensure_master` has copied it in, and the instance and its members are made from it as below.
 //!
 //! **Everything is read from the drawing's master**: once the master is brought in, the instance is made from the master of the
 //! drawing it names, which is the stencil's copy or, when finds the drawing's own, a master that may differ from the stencil's (another
@@ -29,12 +29,12 @@ use std::sync::Arc;
 use diacraft_calc::{Budget, Changes};
 use diacraft_doc::{
     Cell, CellAddr, CellName, Document, FormulaSlot, MAX_SHAPE_DEPTH, MAX_SHAPES_PER_PAGE, Owner, Resolver, Shape, ShapeList, ShapeRef, ShapeType,
-    SheetRef, Value,
+    SheetRef, TextPart, Value,
 };
 
 use super::bring::{Brought, bring_master};
-use super::number_text;
 use super::opened::{MasterEntry, OpenedStencil};
+use super::{MasterSpec, ensure_master, number_text};
 use crate::calc_index::commit_changed;
 use crate::draw::{
     DropInfo, Pose, Problem, below, charge_all, checked, localise_geometry, page_mut, page_stats, require_page, shape_mut, tie_to_group,
@@ -71,8 +71,9 @@ fn descendants(shape: &Shape, cap: usize) -> usize {
 
 /// The members of an instance of the group `list` belongs to: a shape for each of `list` that is not deleted, standing for it, and its own members,
 /// with `ID`s taken from `next` on. Depth-first in the master's order. Recursion is as deep as the model allows and no
-/// deeper.
-fn members(list: &ShapeList, next: &mut u32, depth: usize) -> Result<ShapeList, Problem> {
+/// deeper. `fields` says whether a member whose master shape's text holds fields keeps that text (**a built-in group master's**: the shown form of a field lives in the
+/// text that holds it, as a dropped shape's does, so the member must hold the text for the field to be refreshed when the group's Shape Data changes).
+fn members(list: &ShapeList, next: &mut u32, depth: usize, fields: bool) -> Result<ShapeList, Problem> {
     let mut out: Vec<Arc<Shape>> = Vec::with_capacity(list.len());
     for child in list.iter().filter(|c| !c.del) {
         let id = *next;
@@ -80,8 +81,11 @@ fn members(list: &ShapeList, next: &mut u32, depth: usize) -> Result<ShapeList, 
         let mut member = Shape::new(id);
         member.kind = child.kind.clone();
         member.master_shape = Some(child.id);
+        if fields && child.text.as_ref().is_some_and(|t| t.parts.iter().any(|p| matches!(p, TextPart::Fld { .. }))) {
+            member.text = child.text.clone();
+        }
         if depth < MAX_SHAPE_DEPTH && !child.children.is_empty() {
-            member.children = members(&child.children, next, depth + 1)?;
+            member.children = members(&child.children, next, depth + 1, fields)?;
         }
         out.push(Arc::new(member));
     }
@@ -353,10 +357,60 @@ fn drop_into(doc: &mut Document, page: u32, stencil: &OpenedStencil, entry: &Mas
     }
     let brought = bring_master(doc, stencil.document(), entry.position, stencil.identity(entry))
         .map_err(|r| Problem::failed(format!("master `{named}` cannot be dropped: {r}")))?;
+    let placed = Placement { page, master: brought.id, id, count, at: (x, y), named: &named, fields: false };
+    let (info, highest_id) = place(doc, &placed)?;
+    Ok(OpenedDrop { info, brought, highest_id })
+}
 
+/// Drops the built-in group master `spec` centred at (`x`, `y`) on `page`, in the page's drawing units, with an `ID` above `above` and above every `ID` on the page
+/// ([`crate::draw::drop_shape_above`] says why): the same drop as a stencil file's master of a group (are one code), **the
+/// instance holds only its pin and lists a member for each member of the master**, each with a local copy of its master shape's geometry, and the text of a member whose master shape's text holds
+/// fields. The document is as it was when this fails.
+pub(crate) fn drop_group_master(doc: &mut Document, page: u32, spec: &MasterSpec, (x, y): (f64, f64), above: u32) -> Result<DropInfo, Problem> {
+    let saved = doc.clone();
+    let done = drop_group_inner(doc, page, spec, (x, y), above);
+    if done.is_err() {
+        *doc = saved;
+    }
+    done
+}
+
+fn drop_group_inner(doc: &mut Document, page: u32, spec: &MasterSpec, (x, y): (f64, f64), above: u32) -> Result<DropInfo, Problem> {
+    let (x, y) = (checked("x", x)?, checked("y", y)?);
+    require_page(doc, page)?;
+    let (highest, count) = page_stats(doc, page).ok_or_else(|| Problem::bad(format!("there is no page {page}")))?;
+    if count >= MAX_SHAPES_PER_PAGE {
+        return Err(Problem::failed(format!("a page holds at most {MAX_SHAPES_PER_PAGE} shapes")));
+    }
+    let id = highest.max(above).checked_add(1).ok_or_else(|| Problem::failed("no shape ids are left on the page"))?;
+    let master = ensure_master(doc, spec)?;
+    let placed = Placement { page, master, id, count, at: (x, y), named: &shown(spec.name, 64), fields: true };
+    place(doc, &placed).map(|(info, _)| info)
+}
+
+/// Where and how an instance of a master the document holds is put on a page.
+struct Placement<'a> {
+    page: u32,
+    /// The `ID` of the master in the document.
+    master: u32,
+    /// The instance's `ID`, which every one it lists is above.
+    id: u32,
+    /// How many shapes the page holds before the drop.
+    count: usize,
+    /// Where the middle goes.
+    at: (f64, f64),
+    /// The master's name for a refusal's words.
+    named: &'a str,
+    /// Whether a member whose master shape's text holds fields keeps that text ([`members`]).
+    fields: bool,
+}
+
+/// Puts an instance of the master `placed.master`, which `doc` holds, on the page, and lists its members. → what the drop made, and the highest `ID` it gave.
+fn place(doc: &mut Document, placed: &Placement<'_>) -> Result<(DropInfo, u32), Problem> {
+    let Placement { page, master: master_id, id, count, at: (x, y), named, fields } = *placed;
     // From here on everything is read from the drawing's master, the one the instance names.
-    let master = Arc::clone(doc.master(brought.id).ok_or_else(|| Problem::failed("the master went away"))?);
-    let plan = layout(doc, brought.id, x, y, &named)?;
+    let master = Arc::clone(doc.master(master_id).ok_or_else(|| Problem::failed("the master went away"))?);
+    let plan = layout(doc, master_id, x, y, named)?;
     if count.saturating_add(plan.shapes) > MAX_SHAPES_PER_PAGE {
         return Err(Problem::failed(format!("a page holds at most {MAX_SHAPES_PER_PAGE} shapes")));
     }
@@ -365,7 +419,7 @@ fn drop_into(doc: &mut Document, page: u32, stencil: &OpenedStencil, entry: &Mas
     instance.name = Some(Arc::clone(&name));
     instance.name_u = Some(Arc::clone(&name));
     instance.kind = plan.kind.clone();
-    instance.master = Some(brought.id);
+    instance.master = Some(master_id);
     let mut sheet = diacraft_doc::Sheet::default();
     for (cell, value) in &plan.cells {
         sheet.cells.insert(CellName::new(cell), length(checked(cell, *value)?));
@@ -385,7 +439,7 @@ fn drop_into(doc: &mut Document, page: u32, stencil: &OpenedStencil, entry: &Mas
         if let Some(shape) = live.and_then(|at| master.shapes.get(at))
             && plan.shapes > 1
         {
-            instance.children = members(&shape.children, &mut next, 1)?;
+            instance.children = members(&shape.children, &mut next, 1, fields)?;
         }
     } else {
         let mut listed: Vec<Arc<Shape>> = Vec::with_capacity(plan.members.len());
@@ -408,7 +462,7 @@ fn drop_into(doc: &mut Document, page: u32, stencil: &OpenedStencil, entry: &Mas
             }
             shape.sheet = Arc::new(sheet);
             if member.below && !of.children.is_empty() {
-                shape.children = members(&of.children, &mut next, 2)?;
+                shape.children = members(&of.children, &mut next, 2, fields)?;
             }
             listed.push(Arc::new(shape));
         }
@@ -448,5 +502,5 @@ fn drop_into(doc: &mut Document, page: u32, stencil: &OpenedStencil, entry: &Mas
     let resolved = Resolver::new(doc);
     let sheet = SheetRef::Shape(at);
     let (width, height) = (number(&resolved, &sheet, "Width").unwrap_or(0.0), number(&resolved, &sheet, "Height").unwrap_or(0.0));
-    Ok(OpenedDrop { info: DropInfo { id, master: brought.id, name: name.to_string(), width, height }, brought, highest_id })
+    Ok((DropInfo { id, master: master_id, name: name.to_string(), width, height }, highest_id))
 }

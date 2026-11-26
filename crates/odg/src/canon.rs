@@ -21,6 +21,16 @@
 //!   `draw:fill-image`, each by `draw:name`. Source: a style names its dash, gradient or marker, so the definitions
 //!   are a set by name.
 //!
+//! **What says which thing an element is** ([`CANON_RULES`]`.identified_by`): `draw:name`, `draw:id`, `xml:id`, `style:name`, `style:family`, `table:name` and `config:name`.
+//! The children of an element that are not keyed (the pages, the shapes of a page, the master pages, the layers, the settings) are set side by side by what they are, and not by the place
+//! they stand in: an element the written file adds (`office:font-face-decls`, in 100 sample files) or drops (`office:scripts`, in 291 of 320 flat sample files) is **one difference**, and
+//! every sibling after it is still compared, in depth, with its own (set by place, the root's children were each compared with the one beside them, and nothing inside was looked at: of 638
+//! differences planted in `content.xml` of 51 files, none was seen). An element that has some of these attributes is told from its siblings by its name and their values, so a page, a
+//! layer or a shape that changed, or was put in or taken out, is matched with the one it is; the same children in another order are **one** [`Found::Order`](diacraft_container::canon::Found::Order) (pages, shapes in z-order, layers
+//! are in an order the person sees, so an order is a difference), and what is inside them is still compared. The attributes only choose what is set beside what: every pair is compared in
+//! full. Source: ODF 1.4 Part 3 gives each to the element it names (`draw:name` to a page, a layer, a shape and a table, `draw:id` and `xml:id` to a shape and a glue point, `style:name` to a
+//! master page, a page layout and a list style, `style:family` to a default style, `config:name` to a setting). See `diacraft_container::canon` for the three keys and what each matches.
+//!
 //! **Lengths** (NP8, [`CANON_RULES`]`.lengths`): exactly the length attributes the `.odg` writer respells, each with `lengths.rs` or the line that
 //! writes it as its source. The writer gives a length as the shortest decimal that reads back, in the attribute's own unit (`2.50cm` is written
 //! `2.5cm`), so those attributes pass when the number is the same `f64` and the unit the same text (`2.5cm` is not `25mm`), **read as ODF reads a
@@ -101,10 +111,19 @@
 //!   `DiaCraft/` (ASCII case-insensitively, the folder included), their manifest rows and the attributes and elements of DiaCraft's namespace, that the second file has and the first has
 //!   not. **The check is oriented by it**: what the first file (the source) held of the carrier is compared as written, so an entry of it that the second lacks is a missing part, and an
 //!   object that rides only in a carrier entry of the second still leaves its own entry of the first missing.
+//! * **An `xml:id` beside an equal `draw:id` counts as nothing when only the written file has it** (`twinned`, `TWINNED`): a file of ODF 1.0 or 1.1 names a shape by `draw:id` alone,
+//!   and the file a visit writes says ODF 1.4, which takes `draw:id` only beside an `xml:id` (the schema's `common-draw-id-attlist`; both with equal values are one id).
+//!   **Oriented** as the carrier is: an `xml:id` the source holds is compared as written, so one the written file lacks is a difference, and one whose value is not the `draw:id`'s on its element
+//!   is a difference. It is the same element's twin and no other (an `xml:id` with no `draw:id` beside it is any attribute).
 //! * **Copies of an automatic style count as one, and a reference from one automatic style to another is resolved**: see `FREE_NAMES`. `style:parent-style-name` never
 //!   names an automatic style (§19.510).
 //! * **Not the same, as before**: a layer set added where the source had none, DiaCraft's own markup that the source held and the written file lacks, every property and every name that is
 //!   none of the above.
+//!
+//! * **A DOCTYPE in the manifest** ([`CANON_RULES`]`.doctype_parts`): `META-INF/manifest.xml` may begin with one DOCTYPE that holds only a name and an external id (and no
+//!   internal subset), as an old OpenOffice.org writer writes it (32 sample files). It declares nothing and is read and left out, as the package layer reads a manifest, so such a manifest
+//!   is read as one that has none: the DOCTYPE is no content (it was compared as bytes, and every such file differed). Any other DTD is refused as ever. This crate's own reading of a manifest
+//!   ([`parse_manifest`], for the rows of an empty part and of an entry only one package holds) reads it so too.
 //!
 //! The first four are lists of the container's check; the manifest's rows are the one rule that this crate applies itself, to each side's manifest before the entries are compared.
 //!
@@ -199,16 +218,16 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use diacraft_container::canon::{
     CanonError, ContentDiff, Definition, EmptyPart, EmptyUnder, Entry, FreeNames, IgnoredUnder, KeyFold, Keyed, MAX_COMPARE_BYTES, MAX_COMPARE_ITEMS,
-    Name, ODF_TEXT_NAMESPACE, Reference, Rules, Takes, Unordered, compare_entries, part_holds_nothing,
+    Name, ODF_TEXT_NAMESPACE, Reference, Rules, Takes, Twin, Unordered, compare_entries, part_holds_nothing,
 };
 use diacraft_container::limits::XML_DEPTH_CEILING;
-use diacraft_container::xml::{self, El, Node, XmlError, write_element};
+use diacraft_container::xml::{self, El, Node, ParseOptions, XmlError, write_element};
 use diacraft_container::{ContainerError, Work};
 
 use crate::error::{LimitKind, OdgError};
 use crate::flat::Form;
 use crate::limits::Limits;
-use crate::ns::{MANIFEST, OFFICE, PRESENTATION};
+use crate::ns::{MANIFEST, OFFICE, PRESENTATION, XML};
 use crate::package::{Inflate, Package, percent_decode, read_package};
 
 const STYLE: &str = "urn:oasis:names:tc:opendocument:xmlns:style:1.0";
@@ -220,6 +239,8 @@ const SVG_W3C: &str = "http://www.w3.org/2000/svg";
 const XLINK: &str = "http://www.w3.org/1999/xlink";
 const META: &str = "urn:oasis:names:tc:opendocument:xmlns:meta:1.0";
 const DC: &str = "http://purl.org/dc/elements/1.1/";
+const TABLE: &str = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
+const CONFIG: &str = "urn:oasis:names:tc:opendocument:xmlns:config:1.0";
 
 const fn name(ns: &'static str, local: &'static str) -> Name {
     Name { ns, local }
@@ -472,6 +493,11 @@ const FREE_NAMES: &[FreeNames] = &[FreeNames {
 /// it writes.
 const EXTRA_MARKUP: &[&str] = &[crate::ext::names::URN];
 
+/// The attributes that say again what another attribute of their element says, in the form ODF 1.2 and later take (`Rules::twinned`): an `xml:id` beside a `draw:id` of the
+/// same value. Source: ODF 1.4 Part 3 (`draw:id` is deprecated in favour of `xml:id`, and the schema takes it only beside one), and ODF 1.0 and 1.1, which have no `xml:id` and
+/// say an id by `draw:id` alone, so that a writer that raises the version to 1.4 adds it. It counts as nothing only in the written file (the check is oriented by it).
+const TWINNED: &[Twin] = &[Twin { attr: name(XML, "id"), with: name(DRAW, "id") }];
+
 /// The spellings DiaCraft's own namespace has had (`Rules::aliases`, APPID): the namespace that builds made before the id moved to `diacraft.app` wrote reads as the one written now,
 /// wherever it stands in a part (a declaration, the carrier's fragments inside an attribute's value), so that **a drawing one build wrote and the other wrote again from the model
 /// are the same content**, and the carrier of the first (`EXTRA_MARKUP`, oriented) is found in the second.
@@ -511,6 +537,15 @@ const EXACT_INLINE: &[Name] = &[
     name(ODF_TEXT_NAMESPACE, "execute-macro"),
 ];
 
+/// The attributes that say which thing an element is, among its siblings (`Rules::identified_by`): the name of a page, a layer, a shape or a table (`draw:name`,
+/// `table:name`), the identifier of a shape or a glue point (`draw:id`, `xml:id`), the name of a master page, a page layout, a list style or a setting (`style:name`,
+/// `config:name`) and the family of a default style (`style:family`). Source: ODF 1.4 Part 3, where each names the one thing among its siblings that an element is (a drawing's
+/// `draw:name`, `draw:id`, `xml:id`; the style families; `style:name`; a setting's `config:name`), and the rules of that a style, a face and a named
+/// definition are found by their names. They are what the check sets the children of one parent side by side by (a child put in or taken out is then one difference), and
+/// never what two children are the same by: every pair is compared in full.
+const IDENTIFIED_BY: &[Name] =
+    &[name(DRAW, "name"), name(DRAW, "id"), name(XML, "id"), name(STYLE, "name"), name(STYLE, "family"), name(TABLE, "name"), name(CONFIG, "name")];
+
 /// The lists of the content check for OpenDocument: see the [module documentation](self) for each entry and its source. Every key is folded exactly: ODF
 /// names are compared as written.
 pub const CANON_RULES: Rules = Rules {
@@ -536,8 +571,11 @@ pub const CANON_RULES: Rules = Rules {
     ignored_attributes: IGNORED_ATTRIBUTES,
     ignored_children: IGNORED_CHILDREN,
     ignored_when_extra: EXTRA_MARKUP,
+    twinned: TWINNED,
     free_names: FREE_NAMES,
     aliases: ALIASES,
+    identified_by: IDENTIFIED_BY,
+    doctype_parts: &[crate::package::MANIFEST_PATH],
     ..Rules::NONE
 };
 
@@ -673,6 +711,12 @@ fn compare_packages(a: &[u8], b: &[u8], limits: &Limits, work: &mut Work) -> Res
     compare_entries(&ea, &eb, false, &CANON_RULES, &limits.container.xml, work).map_err(canon_error)
 }
 
+/// A package's manifest as a tree: **an old writer's DOCTYPE is read, and is no content** (the container's [`ParseOptions::allow_external_doctype`], which every
+/// other reading of a manifest here asks for): a manifest that has one is read as one that has none, and a manifest that does not parse is compared as it is.
+fn parse_manifest(bytes: &[u8], limits: &Limits, work: &mut Work) -> Result<El, XmlError> {
+    xml::parse_with_options(bytes, &limits.container.xml, ParseOptions { allow_external_doctype: true, ..ParseOptions::default() }, work)
+}
+
 /// The parts of one side that counts as absent ([`EMPTY_PARTS`]: an empty `settings.xml` or `meta.xml`), and the side's manifest written again without the rows
 /// that name them (`None` when there is none to leave out, or the manifest does not parse: it is then compared as it is, and the row is a difference, never a false same).
 fn empty_parts<'p>(entries: &[Entry<'p>], limits: &Limits, work: &mut Work) -> (Vec<&'p str>, Option<Vec<u8>>) {
@@ -681,7 +725,7 @@ fn empty_parts<'p>(entries: &[Entry<'p>], limits: &Limits, work: &mut Work) -> (
         return (gone, None);
     }
     let Some(manifest) = entries.iter().find(|e| e.name == crate::package::MANIFEST_PATH) else { return (gone, None) };
-    let Ok(mut root) = xml::parse_counted(manifest.bytes, &limits.container.xml, work) else { return (gone, None) };
+    let Ok(mut root) = parse_manifest(manifest.bytes, limits, work) else { return (gone, None) };
     let mut scopes = Scopes::default();
     scopes.enter_all(&root);
     let rows = root.children.len();
@@ -717,9 +761,7 @@ fn derived_rows(a: &[Entry<'_>], b: &[Entry<'_>], limits: &Limits, work: &mut Wo
     else {
         return (None, None);
     };
-    let (Ok(mut ra), Ok(mut rb)) =
-        (xml::parse_counted(ma.bytes, &limits.container.xml, work), xml::parse_counted(mb.bytes, &limits.container.xml, work))
-    else {
+    let (Ok(mut ra), Ok(mut rb)) = (parse_manifest(ma.bytes, limits, work), parse_manifest(mb.bytes, limits, work)) else {
         return (None, None);
     };
     let (side_a, side_b) = (Side::of(&ra, a), Side::of(&rb, b));

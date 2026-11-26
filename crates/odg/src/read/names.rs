@@ -141,6 +141,11 @@ impl<'t> Names<'t> {
     /// The URI the prefix of `name` (an element's or an attribute's name as written) is bound to here: `None` for a name with no prefix, and for a prefix bound to nothing.
     pub(crate) fn uri_of(&self, name: &str) -> Option<&'t str> {
         let (prefix, _) = name.split_once(':')?;
+        self.uri_of_prefix(prefix)
+    }
+
+    /// The URI `prefix` is bound to here: `None` for a prefix bound to nothing.
+    pub(crate) fn uri_of_prefix(&self, prefix: &str) -> Option<&'t str> {
         self.bound.get(prefix).and_then(|stack| stack.last()).map(|(_, uri, _)| *uri)
     }
 

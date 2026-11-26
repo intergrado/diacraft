@@ -68,6 +68,7 @@ pub use diff::{
     DiffCounts, DiffWork, ElementChange, ElementPath, HeaderChange, Moved, PackageDiff, PartDiff, Unparsed, diff_packages, diff_packages_counted,
 };
 pub use error::{ErrorKind, LimitKind, MimetypeFault, Missing, OdgError, Warning};
+pub use ext::docfile::{GroupKeys, groups_needing_a_key};
 pub use figures::Figures;
 pub use flat::Form;
 pub use index::{OriginalPackage, PageShapes, PageSource, ReadCost, ShapeIndex};

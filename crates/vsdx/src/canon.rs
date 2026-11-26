@@ -19,6 +19,12 @@
 //!   takes the first, so those are compared in the order written: two rows for one part in another order are another type for the part.
 //! * **`Relationship` rows by `Id`**. Source: OPC, as for the rows above (ignores their order).
 //!
+//! **What says which thing an element is** ([`CANON_RULES`]`.identified_by`): `ID`, `N`, `IX`, `NameU` and `Name`. The children of an element that are not keyed (the shapes
+//! of a page, a shape's sections, text and child shapes, the rows of a section) are set side by side by what they are, and not by the place they stand in: a shape put in or taken out is one
+//! difference and the shapes after it are still compared with their own; **a shape's children written in another order are one [`Found::Order`](diacraft_container::canon::Found::Order)**, and what is inside them is still found (set
+//! by place, each was compared with the child in its place, counted as an element, and nothing inside was looked at). Every pair is compared in full: the attributes only choose what is
+//! set beside what. See `diacraft_container::canon` for the three keys and what each matches.
+//!
 //! `Section` is not keyed. The model keeps a sheet's sections in a `Vec`, in the order the reader found them (`Sheet::sections` in
 //! `crates/doc/src/sheet.rs`), and writes them in that order, so a section's place survives a trip; the design's "by `N` and `IX`, where the
 //! model does not keep their order" does not apply. (If a writer is ever shown to reorder them, the entry is `Section` by `N` and `IX`,
@@ -112,6 +118,12 @@ const ID: &[Name] = &[attr("Id")];
 /// The schema instance namespace, whose `type` names a type by a prefixed name (`xsi:type="dcterms:W3CDTF"`).
 const NS_XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
+/// The attributes that say which thing an element is, among its siblings (`Rules::identified_by`): `ID` (a shape, a page, a master, a style sheet), `N` and `IX`
+/// (a section's name and index, a row's index), `NameU` and `Name` (a page, a master). A rule of this format that chooses **what sets the children of one parent side by side**, and
+/// never what makes two of them the same: a shape put in, taken out or written in another order is one difference, and the shapes after it are still compared with their own, in
+/// depth (`R13` of the pages and shapes spec: shapes are the drawing's order, so an order is still a difference); every pair is compared in full.
+const IDENTIFIED_BY: &[Name] = &[attr("ID"), attr("N"), attr("IX"), attr("NameU"), attr("Name")];
+
 /// The lists of the content check for VSDX: see the [module documentation](self) for each entry and its source.
 pub const CANON_RULES: Rules = Rules {
     keyed: &[
@@ -150,12 +162,15 @@ pub const CANON_RULES: Rules = Rules {
     ignored_attributes: &[],
     ignored_children: &[],
     ignored_when_extra: &[],
+    twinned: &[],
     free_names: &[],
     // Class F7: a `Row` with no `IX` has the count of the rows before it.
     placed: &[placed(NS_2012), placed(NS_2011), placed("")],
     // APPID: the namespace that builds made before the id moved to `diacraft.app` wrote, in DiaCraft's own part and in the type of its relationships to the parts it carries, is
     // the one that is written now: a file one build wrote and the other wrote again are the same content.
     aliases: ALIASES,
+    identified_by: IDENTIFIED_BY,
+    doctype_parts: &[],
 };
 
 /// The spellings DiaCraft's own namespace has had (`Rules::aliases`): the earlier one reads as the current one. The type of the relationship to a carried part is the namespace and

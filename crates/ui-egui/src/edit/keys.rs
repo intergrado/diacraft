@@ -55,6 +55,7 @@ impl DiacraftApp {
             || self.pane_keys_held()
             || self.comment_keys_held(ctx)
             || self.shape_filter_keys_held()
+            || self.sheet_keys_held()
     }
 
     /// Runs the keys that act on the drawing, once per frame.

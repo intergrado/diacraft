@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod canon;
+mod canon_align;
 mod canon_empty_parts;
 mod canon_implied_rows;
 mod carry;

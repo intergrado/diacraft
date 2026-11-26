@@ -62,14 +62,22 @@ fn a_paragraph_and_a_run_hold_the_style_they_named() {
     assert_eq!(runs, [(1, 3, Some("T1")), (5, 6, Some("T2"))]);
     let t1 = &p0.runs[0].style;
     let groups: Vec<TextGroup> = t1.held.iter().map(|h| h.group).collect();
-    assert_eq!(groups, [TextGroup::Underline, TextGroup::Case]);
+    // The two values at the end are what the style stated of the size and of the weight and style, where the cells say otherwise: no size (the run's row holds one all the same), the weight alone.
+    assert_eq!(groups, [TextGroup::Underline, TextGroup::Case, TextGroup::Size, TextGroup::Style]);
+    assert!(t1.held[2].attrs.is_empty(), "T1 stated no size");
+    assert_eq!(t1.held[3].attrs.get("fo:font-weight"), Some("bold"));
+    assert_eq!(t1.held[3].attrs.len(), 1, "the weight alone");
     assert_eq!(t1.held[0].attrs.get("style:text-underline-style"), Some("dotted"));
     assert_eq!(t1.held[0].attrs.get("style:text-underline-color"), Some("#ff0000"));
     assert_eq!(t1.held[0].attrs.get("style:text-underline-width"), Some("bold"));
     assert_eq!(t1.held[1].attrs.get("fo:text-transform"), Some("lowercase"));
-    assert!(t1.held.iter().all(|h| h.attrs.get("fo:font-weight").is_none()), "a weight is a cell's");
-    // A solid underline is the cell's alone (R22 holds a style other than `solid`): nothing is held for T2's.
-    assert!(p0.runs[1].style.held.is_empty());
+    assert!(
+        t1.held.iter().filter(|h| h.group != TextGroup::Style).all(|h| h.attrs.get("fo:font-weight").is_none()),
+        "a weight is a cell's, and the statement of the Style group's"
+    );
+    // A solid underline is the cell's alone (R22 holds a style other than `solid`): nothing is held for T2's underline.
+    assert!(p0.runs[1].style.held.iter().all(|h| h.group != TextGroup::Underline));
+    assert_eq!(p0.runs[1].style.held.iter().map(|h| h.group).collect::<Vec<_>>(), [TextGroup::Size, TextGroup::Style]);
     assert!(p0.runs[1].style.stamp.is_some());
 }
 

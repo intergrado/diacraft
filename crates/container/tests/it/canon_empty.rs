@@ -177,8 +177,9 @@ fn a_name_written_twice_is_left_out_only_when_every_copy_of_it_is_empty() {
     // One that holds something beside an empty one: the empty one stays, before it and after it.
     only("<e:e/><e:e>x</e:e>", "<e:e>x</e:e>", Found::Element, "/r[0]/e[0]");
     only("<e:e>x</e:e><e:e/>", "<e:e>x</e:e>", Found::Element, "/r[0]/e[1]");
-    // An empty one on each side of the full one: the empty ones are not left out, so three copies against one.
-    assert_eq!(diff_in(&RULES, "<e:e/><e:e>x</e:e><e:e/>", "<e:e>x</e:e>").count, 3);
+    // An empty one on each side of the full one: the empty ones are not left out, so the full one is the one both have, and the two empty ones are extra (they
+    // were counted as three, the first of them compared with the full one by place).
+    assert_eq!(diff_in(&RULES, "<e:e/><e:e>x</e:e><e:e/>", "<e:e>x</e:e>").count, 2);
     // Each name on its own: an empty `e` beside a full `f` is left out, and an empty `f` beside a full `f` is not.
     same("<e:e/><f>x</f>", "<f>x</f>");
     only("<e:e/><f>x</f><f/>", "<f>x</f>", Found::Element, "/r[0]/f[1]");

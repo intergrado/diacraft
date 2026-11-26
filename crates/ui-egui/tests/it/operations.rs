@@ -12,6 +12,7 @@ use diacraft_engine::Session;
 use diacraft_engine::formatting::{Rgb, look_of};
 use diacraft_testkit::package::{cell, shape};
 use diacraft_ui_egui::render_worker::bundled_drawer;
+use diacraft_ui_egui::ribbon::spec::{self, Kind};
 use diacraft_ui_egui::work;
 use diacraft_ui_egui::{ControlRequest, DiacraftApp};
 use egui::{Key, Modifiers};
@@ -83,10 +84,15 @@ fn run_from_menu(w: &mut Window, op: &str) {
 
 /// Whether each of the menu's nine rows is enabled now, in the menu's order; the menu is opened and closed again.
 fn menu_enabled(w: &mut Window) -> Vec<(&'static str, bool)> {
-    hit(w, "ribbon.Developer.OperationsMenu");
+    menu_enabled_at(w, "ribbon.Developer.OperationsMenu")
+}
+
+/// As [`menu_enabled`], for the Operations button called `button` (the Developer tab's, or the Draw tab's), which must be on the tab shown.
+fn menu_enabled_at(w: &mut Window, button: &str) -> Vec<(&'static str, bool)> {
+    hit(w, button);
     let rows = ["Union", "Combine", "Fragment", "Intersect", "Subtract", "Join", "Trim", "Offset", "UpdateAlignmentBox"]
         .map(|op| (op, w.state().element(&menu_row(op)).unwrap_or_else(|| panic!("{op} is not in the menu")).enabled));
-    hit(w, "ribbon.Developer.OperationsMenu");
+    hit(w, button);
     assert!(w.state().element(&menu_row("Union")).is_none(), "the menu closed");
     rows.to_vec()
 }
@@ -839,5 +845,202 @@ fn the_developer_tab_and_the_options_dialog_fit_at_narrow_and_wide_windows() {
         let listed = w.state().element("options.section.Customize Ribbon").is_some();
         assert_eq!(listed, width >= 560.0, "the list of sections at {width}");
         assert_eq!(w.state().ui_panics(), 0);
+    }
+}
+
+// ---- the Draw tab's copy of the menu ---------------------------------------------------------------------------------------------
+
+/// The group of `tab` that holds the top-level control `id`, and the control.
+fn top_control(tab: &str, id: &str) -> (&'static spec::Group, &'static spec::Ctl) {
+    let tab = spec::tab_by_label(tab).unwrap_or_else(|| panic!("no tab {tab}"));
+    tab.groups
+        .iter()
+        .find_map(|group| group.top_level().into_iter().find(|c| c.id == id).map(|c| (group, c)))
+        .unwrap_or_else(|| panic!("{} has no control {id}", tab.label))
+}
+
+/// A window of `size` on the Draw tab, at 100%, with the Developer tab left off (a person who has not turned it on).
+fn draw_window(dir: &TempDir, shapes: &str, size: [f32; 2]) -> Window {
+    let mut w = fast_window(DiacraftApp::new(open_in(dir, "ops.vsdx", shapes), None).with_inline_pictures(bundled_drawer()), size);
+    w.rest();
+    run_command(&mut w, "view.zoom", json!({"percent": 100}));
+    run_command(&mut w, "window.tab", json!({"tab": "Draw"}));
+    w
+}
+
+/// The owner's extra (2026-11-25): the shape operations are also on the Draw tab, in a group of their own after Create and Convert, as a menu of the very items of
+/// the Developer tab's Operations, which keeps its place and its id.
+#[test]
+fn the_draw_tab_has_an_operations_menu_with_the_items_of_the_developer_tabs() {
+    let (developer_group, developer) = top_control("Developer", "OperationsMenu");
+    let (group, draw) = top_control("Draw", "DrawShapeOperations");
+    assert_eq!(developer_group.id, "GroupShapeDesign", "the Developer tab keeps its entry where it was");
+    assert_eq!((developer.kind, developer.label, developer.confirmed), (Kind::Menu, "Operations", true));
+    assert_eq!((draw.kind, draw.label), (Kind::Menu, "Operations"));
+    assert_ne!(draw.id, developer.id, "the Draw tab's button has an id of its own");
+
+    // The same items: the ids, the captions, the commands and the parameters they run with.
+    let shape = |c: &spec::Ctl| (c.id, c.label, c.kind, c.command, c.args);
+    let (drawn, wanted): (Vec<_>, Vec<_>) = (draw.items.iter().map(shape).collect(), developer.items.iter().map(shape).collect());
+    assert_eq!(drawn, wanted);
+    assert_eq!(drawn.len(), 9);
+    assert_eq!(
+        draw.items.iter().filter_map(|c| c.command).collect::<Vec<_>>(),
+        ["operations.union", "operations.combine", "operations.fragment", "operations.intersect", "operations.subtract"]
+    );
+
+    // After Create and Convert, in a group of its own.
+    let ids: Vec<&str> = spec::tab_by_label("Draw").unwrap().groups.iter().map(|g| g.id).collect();
+    assert_eq!(ids, ["GroupWrite", "GroupPens", "GroupDrawCreate", "GroupDrawConvert", "GroupDrawShapeOperations"]);
+    assert_eq!((group.id, group.label), ("GroupDrawShapeOperations", "Shape Operations"));
+    assert!(!group.confirmed, "the group is ours: the map names no such group");
+    assert_eq!(group.top_level().len(), 1, "the Operations menu is the group's one control");
+}
+
+/// The Draw tab's button and its nine rows are enabled exactly when the Developer tab's are, for every selection: nothing, one shape, two, a locked shape first
+/// (Subtract alone), a locked shape second (every entry quiet) and a group.
+#[test]
+fn the_draw_tabs_operations_menu_is_enabled_as_the_developer_tabs_is() {
+    let locked = [painted(1, (3.0, 3.0, 2.0, 2.0), RED, &cell("LockDelete", "1")), painted(2, (4.0, 4.0, 2.0, 2.0), BLUE, "")].concat();
+    let group = fixture::group(10, &placed(7.0, 3.0, 2.0, 2.0), "", &fixture::boxed(11, 0.0, 0.0, 2.0, 2.0));
+    let with_group = [two_squares(), group].concat();
+    let squares = two_squares();
+    let scenarios: [(&str, &str, &[u32]); 6] = [
+        ("nothing", &squares, &[]),
+        ("A", &squares, &[1]),
+        ("A, B", &squares, &[1, 2]),
+        ("a locked A, B", &locked, &[1, 2]),
+        ("B, a locked A", &locked, &[2, 1]),
+        ("A, a group", &with_group, &[1, 10]),
+    ];
+    let mut seen = Vec::new();
+    for (name, shapes, ids) in scenarios {
+        let dir = TempDir::new("ops-draw-states");
+        let mut w = developer_window(&dir, shapes, WIDE);
+        run_command(&mut w, "edit.select", json!({"ids": ids}));
+        let mut state = |tab: &str, button: &str| {
+            run_command(&mut w, "window.tab", json!({"tab": tab}));
+            let button = format!("ribbon.{tab}.{button}");
+            let on = w.state().element(&button).unwrap_or_else(|| panic!("{button} is not drawn at {WIDE:?}")).enabled;
+            // A quiet button does not open its menu: there are no rows to read.
+            (on, if on { menu_enabled_at(&mut w, &button) } else { Vec::new() })
+        };
+        let (developer, draw) = (state("Developer", "OperationsMenu"), state("Draw", "DrawShapeOperations"));
+        assert_eq!(draw, developer, "{name}");
+        seen.push((name, draw.0, draw.1.iter().filter(|row| row.1).count()));
+        assert_eq!(w.state().ui_panics(), 0, "{name}");
+    }
+    // What those states are, so that two empty answers do not agree by chance.
+    assert_eq!(
+        seen,
+        [("nothing", false, 0), ("A", true, 1), ("A, B", true, 5), ("a locked A, B", true, 1), ("B, a locked A", false, 0), ("A, a group", false, 0)]
+    );
+}
+
+/// Each of the five runs from the Draw tab, with the Developer tab never turned on, on the shapes selected in click order, as one undo step, and makes what it
+/// makes from the Developer tab: the same commands, the same results.
+#[test]
+fn each_of_the_five_runs_from_the_draw_tab() {
+    for (op, command, made) in [
+        ("Union", "shape.union", 1),
+        ("Combine", "shape.combine", 1),
+        ("Fragment", "shape.fragment", 3),
+        ("Intersect", "shape.intersect", 1),
+        ("Subtract", "shape.subtract", 1),
+    ] {
+        let dir = TempDir::new("ops-draw-five");
+        let mut w = draw_window(&dir, &two_squares(), WIDE);
+        assert!(w.state().element("tab.Developer").is_none(), "the Developer tab is off: {op} is reached without it");
+        select_a_then_b(&mut w);
+        let steps = undo_steps(&w);
+        hit(&mut w, "ribbon.Draw.DrawShapeOperations");
+        hit(&mut w, &menu_row(op));
+        assert!(w.state().notice().is_none(), "{op}: {:?}", w.state().notice());
+        assert_eq!(undo_steps(&w), (steps.0 + 1, 0), "{op} is one undo step");
+        assert!(w.state().selection().is_empty(), "{op}: nothing stays selected");
+        assert_eq!(journal_ids(&w, command), [1, 2], "{op} sends the shapes in the order they were selected");
+        let ids = shape_ids(&w);
+        assert_eq!(ids.len(), made, "{op}");
+        if op == "Union" {
+            assert!(near(frame_of(&w, ids[0]), (3.0, 3.0, 3.0, 3.0)), "{:?}", frame_of(&w, ids[0]));
+            assert_eq!(fill_of(&w, ids[0]), Some(Rgb(255, 0, 0)), "the first shape's formatting");
+        }
+        // Ctrl+Z brings the originals back.
+        key(&mut w, Key::Z, CTRL);
+        assert_eq!(shape_ids(&w), [1, 2], "{op}");
+        assert_eq!(w.state().ui_panics(), 0, "{op}");
+    }
+}
+
+/// The rows that are not built are as quiet on the Draw tab as on the Developer tab, with the same words on hover, and a click on one runs nothing.
+#[test]
+fn the_rows_that_are_not_built_are_quiet_on_the_draw_tab_too() {
+    let dir = TempDir::new("ops-draw-later");
+    let mut w = draw_window(&dir, &two_squares(), WIDE);
+    select_a_then_b(&mut w);
+    let steps = undo_steps(&w);
+    for (op, words) in [("Join", "Join (not available yet)"), ("UpdateAlignmentBox", "Update Alignment Box (not available yet)")] {
+        hit(&mut w, "ribbon.Draw.DrawShapeOperations");
+        assert_eq!(hovered_words(&mut w, &menu_row(op)), [words], "{op}");
+        let at = w.state().element(&menu_row(op)).unwrap().rect.center();
+        click(&mut w, at);
+        w.rest();
+        assert!(w.state().element(&menu_row(op)).is_none(), "{op}: a click closes the menu");
+    }
+    assert_eq!((undo_steps(&w), shape_ids(&w)), (steps, vec![1, 2]), "nothing was done");
+}
+
+/// The Draw tab with its new group and the menu open fits at narrow and wide windows, as the Developer tab does: the five groups do not lie on one another and
+/// none leaves the window; the group is whole in every window the app allows (480 points and more) and folds to one button, first of the groups since it is the
+/// last, in a narrower one (320, which the card's path needs); the menu opens from the button or from the card of the folded group, with nine rows inside the
+/// window, and a row runs from there.
+#[test]
+fn the_draw_tab_and_its_operations_menu_fit_at_narrow_and_wide_windows() {
+    for width in [320.0_f32, 360.0, 400.0, 440.0, 480.0, 560.0, 640.0, 800.0, 1024.0, 1280.0, 1700.0, 2400.0] {
+        let dir = TempDir::new("ops-draw-fit");
+        let mut w = draw_window(&dir, &two_squares(), [width, 700.0]);
+        run_command(&mut w, "edit.select", json!({"ids": [1, 2]}));
+        let ribbon = crate::support::elements_named(&w, "ribbon.Draw.");
+        let mut groups: Vec<_> = ribbon.iter().filter(|(n, ..)| n.starts_with("ribbon.Draw.group.")).cloned().collect();
+        assert_eq!(groups.len(), 5, "the five groups are drawn at {width}: {groups:?}");
+        groups.sort_by(|a, b| a.1.min.x.total_cmp(&b.1.min.x));
+        for pair in groups.windows(2) {
+            assert!(pair[0].1.max.x <= pair[1].1.min.x + 0.5, "{} lies on {} at {width}", pair[0].0, pair[1].0);
+        }
+        assert_eq!(groups.last().map(|g| g.0.as_str()), Some("ribbon.Draw.group.Shape Operations"), "the new group is last at {width}");
+        for (name, rect, _) in &ribbon {
+            assert!(rect.max.x <= width + 0.5, "{name} at {width}: {rect:?}");
+        }
+        // The menu: its button is in the group, or the group is folded to one button that opens a card with it.
+        let folded = w.state().element("ribbon.Draw.DrawShapeOperations").is_none();
+        if folded {
+            assert!(w.state().element("ribbon.Draw.fold.GroupDrawShapeOperations").is_some(), "the group is drawn, folded, at {width}");
+            hit(&mut w, "ribbon.Draw.fold.GroupDrawShapeOperations");
+            let card =
+                w.state().element("ribbon.Draw.DrawShapeOperations").unwrap_or_else(|| panic!("the card has no Operations at {width}")).clone();
+            assert!(card.enabled, "the card has the Operations button, working, at {width}");
+            assert!(card.rect.min.x >= 0.0 && card.rect.max.x <= width + 0.5, "the card is inside the window at {width}: {:?}", card.rect);
+        }
+        // The app's smallest window is 480 points wide (`MIN_WINDOW_SIZE`), where the whole tab fits with the group as it is; 320 is below it, where the group
+        // folds (it is the last, so it folds first), so that the card is tried too.
+        assert!(!folded || width < 480.0, "the group is folded at {width}, in a window the app allows");
+        assert!(folded || width > 320.0, "the group is not folded at {width}, where the card is to be tried");
+        hit(&mut w, "ribbon.Draw.DrawShapeOperations");
+        let rows: Vec<_> = crate::support::elements_named(&w, "menu.ShapesObject");
+        assert_eq!(rows.len(), 9, "the nine rows are drawn at {width} (folded: {folded})");
+        assert!(rows[..5].iter().all(|row| row.2), "two shapes are selected: the five work at {width}");
+        let mut rects: Vec<_> = rows.iter().map(|(n, r, _)| (n.clone(), *r)).collect();
+        rects.sort_by(|a, b| a.1.min.y.total_cmp(&b.1.min.y));
+        for pair in rects.windows(2) {
+            assert!(pair[0].1.max.y <= pair[1].1.min.y + 0.5, "{} lies on {} at {width}", pair[0].0, pair[1].0);
+        }
+        for (name, rect, _) in &rows {
+            assert!(rect.min.x >= 0.0 && rect.max.x <= width + 0.5, "{name} at {width}: {rect:?}");
+        }
+        hit(&mut w, &menu_row("Fragment"));
+        assert_eq!(shape_ids(&w).len(), 3, "Fragment ran at {width} (folded: {folded})");
+        key(&mut w, Key::Z, CTRL);
+        assert_eq!(shape_ids(&w), [1, 2]);
+        assert_eq!(w.state().ui_panics(), 0, "{width}");
     }
 }

@@ -43,7 +43,7 @@ fn note_absent_for_tier1_only_drawing() {
     let mut s = open_drawing(&dir, &four());
     let (a, b) = (id_of(s.document().unwrap(), 0, "A"), id_of(s.document().unwrap(), 0, "B"));
     // The Organization Chart Shapes hold Shape Data a LibreOffice save would drop: `orgchart_files.rs` has them.
-    for (n, stencil) in diacraft_engine::stencil::stencils().iter().filter(|st| st.id != "orgchart").enumerate() {
+    for (n, stencil) in diacraft_engine::stencil::stencils().iter().filter(|st| st.default_open && st.id != "orgchart").enumerate() {
         for (m, master) in stencil.masters().iter().enumerate() {
             run(&mut s, "shape.drop", json!({ "master": master.id, "stencil": stencil.id, "page": 0, "x": 1.0 + m as f64, "y": 4.0 + n as f64 }));
         }
@@ -70,7 +70,7 @@ fn note_is_absent_for_shapes_dropped_from_the_stencils_and_for_the_file_that_hol
     let mut s = open_drawing(&dir, &four());
     // The Organization Chart Shapes hold Shape Data (a position has its Name, Title and the rest), which a LibreOffice save would drop: they are a trigger of the note, and have a test of their own
     // (`orgchart_files.rs`).
-    for (n, stencil) in diacraft_engine::stencil::stencils().iter().filter(|st| st.id != "orgchart").enumerate() {
+    for (n, stencil) in diacraft_engine::stencil::stencils().iter().filter(|st| st.default_open && st.id != "orgchart").enumerate() {
         let master = stencil.masters().first().unwrap();
         run(&mut s, "shape.drop", json!({ "master": master.id, "stencil": stencil.id, "page": 0, "x": 1.0 + n as f64, "y": 5.0 }));
     }

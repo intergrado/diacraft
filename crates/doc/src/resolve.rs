@@ -184,6 +184,16 @@ pub struct EffectiveRow<'a> {
     pub cells: Vec<(CellName, Resolved<'a>)>,
 }
 
+/// A row of a section after merging, with **no cell resolved**: what a list of the rows of a section needs, and what
+/// [`EffectiveRow`] is made from. The cells are the names any contributing row holds, in name order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RowShape {
+    pub key: RowKey,
+    /// The row type `T`: the highest-precedence row's that has one.
+    pub row_type: Option<Arc<str>>,
+    pub cells: Vec<CellName>,
+}
+
 /// A member of a shape that has members, after the instance and its master are put together (MS-VSDX lets an
 /// instance leave members out, and an omitted member is read by R6).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1130,6 +1140,23 @@ impl<'a> Resolver<'a> {
     }
 
     fn merge_rows(&self, sheet: &SheetRef, section: &SectionKey, layers: &[(Source, &'a Sheet)]) -> Vec<EffectiveRow<'a>> {
+        let merged = self.merge_row_keys(section, layers);
+        let mut rows = Vec::with_capacity(merged.len());
+        for m in merged {
+            let mut cells = Vec::with_capacity(m.cells.len());
+            for cell in m.cells {
+                let addr = CellAddr { section: Some(section.clone()), row: Some(m.key.clone()), cell: cell.clone() };
+                if let Some(resolved) = self.resolve(sheet, &addr) {
+                    cells.push((cell, resolved));
+                }
+            }
+            rows.push(EffectiveRow { key: m.key, row_type: m.row_type, cells });
+        }
+        rows
+    }
+
+    /// The rows of a section as the `layers` (nearest first) leave them, in the order [`Resolver::effective_rows`] gives, with no cell resolved.
+    fn merge_row_keys(&self, section: &SectionKey, layers: &[(Source, &'a Sheet)]) -> Vec<RowShape> {
         let name = section.name.as_str();
         struct Merged {
             key: RowKey,
@@ -1181,18 +1208,42 @@ impl<'a> Resolver<'a> {
         } else {
             merged.sort_by_key(|m| (std::cmp::Reverse(m.rank.0), m.rank.1));
         }
-        let mut rows = Vec::with_capacity(merged.len());
-        for m in merged {
-            let mut cells = Vec::with_capacity(m.cells.len());
-            for cell in m.cells {
-                let addr = CellAddr { section: Some(section.clone()), row: Some(m.key.clone()), cell: cell.clone() };
-                if let Some(resolved) = self.resolve(sheet, &addr) {
-                    cells.push((cell, resolved));
-                }
+        merged.into_iter().map(|m| RowShape { key: m.key, row_type: m.row_type, cells: m.cells.into_iter().collect() }).collect()
+    }
+
+    /// The rows of a section after merging cell by cell, **with no cell resolved**: [`Resolver::effective_rows`] without its resolving, the same rows
+    /// in the same order, each with its type and the names of the cells any contributing row holds. A list of the rows of a section (a window's, a
+    /// query's) needs no more, and the walk costs the rows of each sheet the section is looked for on, once. `None` if the sheet does not exist.
+    pub fn effective_row_keys(&self, sheet: &SheetRef, section: &SectionKey) -> Option<Vec<RowShape>> {
+        let layers = self.layers(sheet, section_class(section.name.as_str()))?;
+        Some(self.merge_row_keys(section, &layers))
+    }
+
+    /// The names of the cells one row holds after merging (the cells any contributing row has, in name order), found without merging the section: a
+    /// look at each layer and the row's place in it. Empty for a row that is not there, one deleted at its nearest step (what a step below it holds is not
+    /// inherited), and one of a section deleted at a step. `None` if the sheet does not exist. The cells are those of the row in [`Resolver::effective_rows`].
+    pub fn row_cell_names(&self, sheet: &SheetRef, section: &SectionKey, row: &RowKey) -> Option<Vec<CellName>> {
+        let layers = self.layers(sheet, section_class(section.name.as_str()))?;
+        let mut names: BTreeSet<CellName> = BTreeSet::new();
+        for (_, layer) in &layers {
+            let Some(found) = self.find_section(layer, section) else { continue };
+            if found.del {
+                break;
             }
-            rows.push(EffectiveRow { key: m.key, row_type: m.row_type, cells });
+            let Some(held) = found.row(row) else { continue };
+            if held.del {
+                // Deleted at this step: what a step below it holds is not inherited. The cells of a nearer step stay, as the merge keeps them.
+                break;
+            }
+            names.extend(held.cells.keys().cloned());
         }
-        rows
+        Some(names.into_iter().collect())
+    }
+
+    /// The sheets a cell of `class` is looked for on, nearest first, each with where it is: the sheet itself, its master shape, the style chain and the
+    /// root: what [`Resolver::resolve`] walks. `None` if the sheet does not exist.
+    pub fn lookup_layers(&self, sheet: &SheetRef, class: CellClass) -> Option<Vec<(Source, &'a Sheet)>> {
+        self.layers(sheet, class)
     }
 
     /// The section `section` as each sheet a cell of it is looked for on holds it, nearest first: the sheet, its master shape, the style chain

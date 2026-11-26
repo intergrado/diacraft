@@ -52,9 +52,9 @@ impl StencilNames {
     }
 }
 
-/// The stencils a new drawing has open: every built-in stencil, in the order of the catalogue.
+/// The stencils a new drawing has open: the built-in stencils that are open by default (the shipped ones that say so), in the order of the catalogue.
 fn default_ids() -> Vec<&'static str> {
-    stencil::stencils().iter().map(|s| s.id).collect()
+    stencil::default_open_ids()
 }
 
 /// The built-in stencils that are open in a drawing started from `doc` as a template: what its list names (`StencilNames::opens`), or the stencils a new

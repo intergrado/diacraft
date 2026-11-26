@@ -3,7 +3,7 @@
 
   1. Fonts          4. Layout          7. Home page sections
   2. Tokens         5. Masthead        8. Footer
-  3. Base           6. Components      9. Article pages   10. Motion (the widths come before it)
+  3. Base           6. Components      9. Article pages (the feature comparison page is the last of them)   10. Motion (the widths come before it)
 
   Typefaces (both under the SIL Open Font License 1.1; the licence texts are in docs/licenses/fonts/ of the source repository):
   Besley, Copyright 2020 The Besley Project Authors; Martian Mono, Copyright 2021 The Martian Mono Project Authors.
@@ -657,6 +657,11 @@ footer .ruler { border-top: 0; }
 .toc a::after { content: ""; align-self: center; width: .6rem; height: .6rem; border: var(--stroke) solid var(--wire); border-radius: 50%; }
 .toc a:hover { color: var(--teal); }
 .toc a:hover::after { background: var(--wire); }
+/* A row that holds a list of its own (the changelog's sections of 0.2.0): its rows are numbered under it (04.01), set in under its text and a size smaller, and the last of them closes on the row's own rule. */
+.toc ol ol { margin: 0 0 0 2.1rem; border-top: 1px solid var(--line); }
+.toc ol ol li:last-child { border-bottom: 0; }
+.toc ol ol a { grid-template-columns: 2.6rem minmax(0, 1fr) auto; padding-block: .5rem; font-size: .95rem; }
+.toc ol ol a::before { content: counters(toc, ".", decimal-leading-zero); }
 .rail-note { color: var(--ink-muted); font-size: .95rem; line-height: 1.55; }
 
 /* The text */
@@ -666,6 +671,11 @@ footer .ruler { border-top: 0; }
 .prose h2 { margin-bottom: 1.1rem; font-size: var(--text-xl); letter-spacing: -.015em; line-height: 1.15; }
 .prose > section > h2::before { content: counter(sec, decimal-leading-zero); display: block; margin-bottom: .7rem; color: var(--teal); font: 500 var(--text-xs)/1 var(--font-mono); letter-spacing: .09em; }
 .prose h3 { margin: 1.75rem 0 .5rem; }
+.prose > section > section { counter-increment: subsec; }
+.prose > section { counter-reset: subsec; }
+.prose > section > * + section { margin-top: clamp(1.75rem, 3vw, 2.5rem); }
+.prose > section > section > h3 { margin-top: 0; font-size: var(--text-l); }
+.prose > section > section > h3::before { content: counter(sec, decimal-leading-zero) "." counter(subsec, decimal-leading-zero); display: block; margin-bottom: .5rem; color: var(--teal); font: 500 var(--text-xs)/1 var(--font-mono); letter-spacing: .09em; }
 .prose p, .prose ul, .prose ol { max-width: var(--measure-read); }
 .prose p + p, .prose p + ul, .prose p + ol, .prose ul + p, .prose ol + p, .prose .table-scroll + p, .prose figure + p { margin-top: 1.1rem; }
 .prose ul, .prose ol { margin: 0; padding: 0; list-style: none; }
@@ -739,6 +749,87 @@ footer .ruler { border-top: 0; }
 /* A route of four stops: the page that is not found, and on the guides' index the pages about kinds of diagram and file, after the route of the five guides. */
 .route-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .lost-way + .lost-way { padding-top: 0; }
+
+/* The comparison page: a table for each area, a mark and a word in each cell, and the note and the sources of a cell one click away. The marks differ in shape as well as in colour:
+   a disc, a half disc, a ring, a dashed ring (the documentation read does not mention the feature) and a question mark. */
+.cmp { display: grid; gap: clamp(2.5rem, 5vw, 4rem); padding-block: clamp(2.75rem, 5vw, 4.5rem) var(--band); }
+.cmp > * { min-width: 0; }
+.cmp h2 { font-size: var(--text-xl); font-weight: 500; letter-spacing: -.015em; line-height: 1.15; }
+.cmp .prose h3 { margin: 0 0 .75rem; font-size: var(--text-l); }
+.cmp-toc ol { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); column-gap: clamp(1.5rem, 3vw, 3rem); }
+.cmp-how-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem var(--split-gap); margin-top: 1.25rem; }
+.cmp-legend { display: grid; gap: .85rem; margin-top: 1.5rem; }
+.cmp-legend > div { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); column-gap: 1rem; align-items: baseline; }
+.cmp-legend dd { font-size: 1rem; line-height: 1.5; }
+.cmp-legend .cmp-sub { margin-left: 1.45rem; }
+.prose p.cmp-asof { margin-top: 1.5rem; padding: 1rem 1.2rem 1.1rem; border: 1px solid var(--line); border-left: .25rem solid var(--wire); border-radius: 0 var(--radius-m) var(--radius-m) 0; background: var(--paper-raised); font-size: 1.0625rem; line-height: 1.6; }
+.cmp-captions { margin-top: .75rem; }
+.cmp-captions li { font-size: 1rem; line-height: 1.5; }
+.prose p.cmp-legal { padding: 1rem 1.2rem; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--paper-raised); color: var(--ink); font-size: 1rem; line-height: 1.6; }
+
+/* One area: its heading is the button that folds its table. */
+.cmp-area > details > summary { display: flex; align-items: baseline; gap: 1rem; padding: 1rem 0 .9rem; border-top: var(--stroke) solid var(--ink); cursor: pointer; list-style: none; }
+.cmp-area > details > summary::-webkit-details-marker { display: none; }
+.cmp-area > details > summary::after { content: "+"; flex: none; color: var(--teal); font: 500 1.2rem/1 var(--font-mono); transition: rotate .2s var(--ease); }
+.cmp-area > details[open] > summary::after { rotate: 45deg; }
+.cmp-area summary h2 { flex: 1; transition: color .15s; }
+.cmp-area summary:hover h2 { color: var(--teal); }
+.cmp-count { color: var(--ink-muted); font: 500 var(--text-xs)/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.cmp-scroll { overflow-x: auto; }
+.cmp-table { width: 100%; min-width: 44rem; border-collapse: collapse; table-layout: fixed; font-size: .95rem; line-height: 1.4; }
+.cmp-table thead th { width: 17%; padding: .55rem .9rem .6rem .75rem; border-bottom: 1px solid var(--line-strong); color: var(--ink); font: 400 var(--text-s)/1.3 var(--font-serif); text-align: left; vertical-align: bottom; }
+.cmp-table thead th:first-child { width: 32%; padding-left: 0; color: var(--ink-muted); font: 500 var(--text-xs)/1.3 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.cmp-table thead b { font-weight: 650; }
+.cmp-table tbody th { padding: .85rem 1rem .85rem 0; border-bottom: 1px solid var(--line); color: var(--ink); font-weight: 600; text-align: left; vertical-align: top; }
+.cmp-table td { padding: .85rem .9rem .85rem .75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.cmp-table .cmp-us { background: var(--teal-wash); }
+
+/* A mark: a shape and a word. */
+.cmp-mark { display: inline-flex; align-items: center; gap: .45rem; color: var(--ink); font-weight: 600; line-height: 1.2; }
+.cmp-mark i { flex: none; box-sizing: border-box; display: grid; place-items: center; width: .95rem; height: .95rem; border: 2px solid var(--teal); border-radius: 50%; background: var(--teal); font: 700 .66rem/1 var(--font-mono); font-style: normal; }
+.cmp-part i { border-color: var(--signal); background: linear-gradient(90deg, var(--signal) 50%, transparent 50%); }
+.cmp-no i, .cmp-unk i { border-color: var(--ink-muted); background: transparent; color: var(--ink-muted); }
+.cmp-nf i { border-style: dashed; }
+.cmp-sub { display: block; margin-top: .2rem; padding-left: 1.4rem; color: var(--ink-muted); font: 500 .68rem/1.35 var(--font-mono); letter-spacing: .02em; }
+
+/* The note and the sources of a cell. */
+.cmp-why { margin-top: .5rem; }
+.cmp-why summary { display: inline-block; color: var(--teal); cursor: pointer; font: 500 .72rem/1.4 var(--font-mono); letter-spacing: .03em; list-style: none; text-decoration: underline; text-decoration-thickness: .06em; text-underline-offset: .2em; }
+.cmp-why summary::-webkit-details-marker { display: none; }
+.cmp-why summary:hover { text-decoration-thickness: .12em; }
+.cmp-why[open] summary { margin-bottom: .4rem; }
+.cmp-why p { font-size: .84rem; line-height: 1.45; }
+.cmp-why p + p { margin-top: .4rem; }
+.cmp-src { margin: .4rem 0 0; padding: 0; list-style: none; }
+.cmp-src li { margin-top: .3rem; font-size: .8rem; line-height: 1.4; overflow-wrap: anywhere; }
+.cmp-read { color: var(--ink-muted); font: 500 .68rem/1.4 var(--font-mono); letter-spacing: .02em; }
+
+/* What only DiaCraft has. */
+.cmp-only-list { display: grid; gap: 1.25rem; margin: 1.5rem 0 0; padding: 0; list-style: none; }
+.cmp-only-list > li { padding: 1.2rem 1.4rem 1.3rem; border: 1px solid var(--line); border-left: .25rem solid var(--wire); border-radius: 0 var(--radius-m) var(--radius-m) 0; background: var(--paper-raised); }
+.cmp-only-name { max-width: 52rem; color: var(--ink); font-size: var(--text-l); font-weight: 600; line-height: 1.3; }
+.cmp-others { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem 1.5rem; margin-top: 1rem; }
+.cmp-others dt { margin-bottom: .3rem; color: var(--ink-muted); font: 500 var(--text-xs)/1.3 var(--font-mono); letter-spacing: .04em; }
+.cmp-others dd { font-size: .95rem; line-height: 1.5; }
+.cmp-others .cmp-read { display: block; margin-top: .4rem; }
+.cmp-docs { margin-top: 1rem; color: var(--ink-muted); font-size: .95rem; }
+
+@media (max-width: 52rem) {
+  .cmp-how-grid { grid-template-columns: minmax(0, 1fr); }
+  .cmp-others { grid-template-columns: minmax(0, 1fr); }
+}
+/* On a phone each row is a card: the feature's name, then the four tools two by two with the name of each over its mark. The table's own roles are written in the markup, so a screen reader still reads a table. */
+@media (max-width: 46rem) {
+  .cmp-table { min-width: 0; table-layout: auto; }
+  .cmp-table, .cmp-table tbody, .cmp-table tr, .cmp-table th, .cmp-table td { display: block; }
+  .cmp-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .cmp-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem 1rem; padding: 1rem 0 1.1rem; border-bottom: 1px solid var(--line); }
+  .cmp-table tbody th { grid-column: 1 / -1; padding: 0; border: 0; font-size: 1.05rem; line-height: 1.3; }
+  .cmp-table td { padding: 0; border: 0; }
+  .cmp-table td::before { content: attr(data-col); display: block; margin-bottom: .3rem; color: var(--ink-muted); font: 500 .68rem/1.3 var(--font-mono); letter-spacing: .04em; }
+  .cmp-table td.cmp-us { margin-left: -.6rem; padding: .5rem .6rem .6rem; }
+  .cmp-legend > div { grid-template-columns: minmax(0, 1fr); row-gap: .15rem; }
+}
 
 /* Widths */
 @media (max-width: 68rem) {
@@ -864,7 +955,7 @@ footer .ruler { border-top: 0; }
 /* The list of a page's sections marks the section that is being read: each section is a timeline of its own, seen through a band a third of the way down the screen, and
    its row in the list takes the teal, and the point at the end of the row is filled, while the section crosses that band. Nothing moves, so this is for every reader whose browser can do it. */
 @supports (animation-timeline: view()) and (timeline-scope: --a) {
-  .doc { timeline-scope: --sec-1, --sec-2, --sec-3, --sec-4, --sec-5, --sec-6, --sec-7, --sec-8; }
+  .doc { timeline-scope: --sec-1, --sec-2, --sec-3, --sec-4, --sec-5, --sec-6, --sec-7, --sec-8, --sec-9, --sec-10, --sec-11, --sec-12, --sec-13, --sec-14, --sec-15, --sec-16, --sub-1, --sub-2, --sub-3, --sub-4, --sub-5, --sub-6, --sub-7, --sub-8; }
   .prose > section { view-timeline-inset: 30% 66%; }
   .prose > section:nth-of-type(1) { view-timeline-name: --sec-1; }
   .prose > section:nth-of-type(2) { view-timeline-name: --sec-2; }
@@ -874,14 +965,47 @@ footer .ruler { border-top: 0; }
   .prose > section:nth-of-type(6) { view-timeline-name: --sec-6; }
   .prose > section:nth-of-type(7) { view-timeline-name: --sec-7; }
   .prose > section:nth-of-type(8) { view-timeline-name: --sec-8; }
-  .toc li:nth-child(1) { --section: --sec-1; }
-  .toc li:nth-child(2) { --section: --sec-2; }
-  .toc li:nth-child(3) { --section: --sec-3; }
-  .toc li:nth-child(4) { --section: --sec-4; }
-  .toc li:nth-child(5) { --section: --sec-5; }
-  .toc li:nth-child(6) { --section: --sec-6; }
-  .toc li:nth-child(7) { --section: --sec-7; }
-  .toc li:nth-child(8) { --section: --sec-8; }
+  .prose > section:nth-of-type(9) { view-timeline-name: --sec-9; }
+  .prose > section:nth-of-type(10) { view-timeline-name: --sec-10; }
+  .prose > section:nth-of-type(11) { view-timeline-name: --sec-11; }
+  .prose > section:nth-of-type(12) { view-timeline-name: --sec-12; }
+  .prose > section:nth-of-type(13) { view-timeline-name: --sec-13; }
+  .prose > section:nth-of-type(14) { view-timeline-name: --sec-14; }
+  .prose > section:nth-of-type(15) { view-timeline-name: --sec-15; }
+  .prose > section:nth-of-type(16) { view-timeline-name: --sec-16; }
+  .prose > section > section { view-timeline-inset: 30% 66%; }
+  .prose > section > section:nth-of-type(1) { view-timeline-name: --sub-1; }
+  .prose > section > section:nth-of-type(2) { view-timeline-name: --sub-2; }
+  .prose > section > section:nth-of-type(3) { view-timeline-name: --sub-3; }
+  .prose > section > section:nth-of-type(4) { view-timeline-name: --sub-4; }
+  .prose > section > section:nth-of-type(5) { view-timeline-name: --sub-5; }
+  .prose > section > section:nth-of-type(6) { view-timeline-name: --sub-6; }
+  .prose > section > section:nth-of-type(7) { view-timeline-name: --sub-7; }
+  .prose > section > section:nth-of-type(8) { view-timeline-name: --sub-8; }
+  .toc > ol > li:nth-child(1) { --section: --sec-1; }
+  .toc > ol > li:nth-child(2) { --section: --sec-2; }
+  .toc > ol > li:nth-child(3) { --section: --sec-3; }
+  .toc > ol > li:nth-child(4) { --section: --sec-4; }
+  .toc > ol > li:nth-child(5) { --section: --sec-5; }
+  .toc > ol > li:nth-child(6) { --section: --sec-6; }
+  .toc > ol > li:nth-child(7) { --section: --sec-7; }
+  .toc > ol > li:nth-child(8) { --section: --sec-8; }
+  .toc > ol > li:nth-child(9) { --section: --sec-9; }
+  .toc > ol > li:nth-child(10) { --section: --sec-10; }
+  .toc > ol > li:nth-child(11) { --section: --sec-11; }
+  .toc > ol > li:nth-child(12) { --section: --sec-12; }
+  .toc > ol > li:nth-child(13) { --section: --sec-13; }
+  .toc > ol > li:nth-child(14) { --section: --sec-14; }
+  .toc > ol > li:nth-child(15) { --section: --sec-15; }
+  .toc > ol > li:nth-child(16) { --section: --sec-16; }
+  .toc ol ol > li:nth-child(1) { --section: --sub-1; }
+  .toc ol ol > li:nth-child(2) { --section: --sub-2; }
+  .toc ol ol > li:nth-child(3) { --section: --sub-3; }
+  .toc ol ol > li:nth-child(4) { --section: --sub-4; }
+  .toc ol ol > li:nth-child(5) { --section: --sub-5; }
+  .toc ol ol > li:nth-child(6) { --section: --sub-6; }
+  .toc ol ol > li:nth-child(7) { --section: --sub-7; }
+  .toc ol ol > li:nth-child(8) { --section: --sub-8; }
   .toc a { animation: row-on-screen linear both; animation-timeline: var(--section); animation-range: cover 0% cover 100%; }
   .toc a::after { animation: on-screen linear both; animation-timeline: var(--section); animation-range: cover 0% cover 100%; }
 }

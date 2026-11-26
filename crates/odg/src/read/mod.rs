@@ -54,6 +54,7 @@ pub(crate) mod readback;
 mod shapes;
 pub use shapes::TEXT_OBJECT_ROW;
 mod sheets;
+mod spelled;
 mod styles;
 mod text;
 mod texts;
@@ -718,9 +719,12 @@ impl<'l> Reader<'l> {
                         styles: HashMap::new(),
                         shared: &mut shared,
                         texts: texts::StyleTexts::of(&set),
+                        legacy: crate::write::is_legacy(names.attrs(&tree).peek(names::Ns::Office, "version")),
                     };
                     pages::read_master_pages(self, &mut names, &masters, &mut cx, scale.as_ref())?
                 };
+                // The automatic styles of this part that no master page's shape named.
+                set.hold_unused(self, &mut names, &tree, styles::File::Styles, None)?;
                 names.leave(mark);
                 (sheets, out)
             }
@@ -759,9 +763,12 @@ impl<'l> Reader<'l> {
                 styles: HashMap::new(),
                 shared: &mut shared,
                 texts: texts::StyleTexts::of(&set),
+                legacy: crate::write::is_legacy(names.attrs(&tree).peek(names::Ns::Office, "version")),
             };
             pages::read_content_pages(self, &mut names, &tree, &mut cx, &masters, scale.as_ref(), None)?
         };
+        // The automatic styles of this part that no shape, paragraph or run named.
+        set.hold_unused(self, &mut names, &tree, styles::File::Content, None)?;
         names.leave(mark);
         drop(tree);
         // Step 5.

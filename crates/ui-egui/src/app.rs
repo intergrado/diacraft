@@ -561,13 +561,20 @@ impl DiacraftApp {
             self.backstage(ui, tokens, page);
         } else {
             self.ribbon_panel(ui);
+            // The formula bar, directly under the ribbon body while a ShapeSheet is open (`sheet/area.rs`).
+            self.sheet_bar_panel(ui, tokens);
             self.status_bar(ui, tokens);
             self.shapes_window(ui, tokens);
             // The panes at the right, before the page tabs and the drawing area: the tabs run under the drawing area only.
             self.right_dock(ui, tokens);
-            self.page_tabs(ui, tokens);
-            self.canvas(ui, tokens);
+            // The ShapeSheet area, below or beside the drawing, or filling the band in place of it.
+            let sheet_fills = self.sheet_area(ui, tokens);
+            if !sheet_fills {
+                self.page_tabs(ui, tokens);
+                self.canvas(ui, tokens);
+            }
             self.open_overlay(ui, tokens);
+            self.sheet_focus_update(&ui.ctx().clone());
         }
         // The dialogs of page setup, then the questions over them: a question asked while a dialog is open is the one to answer first.
         self.page_dialogs(&ui.ctx().clone(), tokens);
@@ -650,6 +657,8 @@ impl eframe::App for DiacraftApp {
             app.prepare_shape_filter_keys(&ctx);
             // Escape dismisses the splash before anything else can take it (`splash.rs`).
             app.splash_keys(&ctx);
+            // The ShapeSheet's keys while it has the focus: before the shortcuts and the drawing's keys, which then stand aside (`sheet/keys.rs`).
+            app.run_sheet_keys(&ctx);
             app.run_shortcuts(&ctx);
             app.run_edit_keys(&ctx);
             // A notice whose time is up is not drawn; one the frame shows starts its time, and the frame asks for the next at the moment it ends.

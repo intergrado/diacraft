@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 use diacraft_calc::{Budget, CellAddress, EvalCtx, Value as Calc};
 use diacraft_doc::{
-    Cell, CellAddr, CellEdit, Document, MAX_SHAPE_DEPTH, MAX_SHAPES_PER_PAGE, Owner, Shape, ShapeList, ShapeRef, ShapeType, SheetRef, Value,
+    Cell, CellAddr, CellEdit, Document, FormulaSlot, MAX_SHAPE_DEPTH, MAX_SHAPES_PER_PAGE, Owner, Shape, ShapeList, ShapeRef, ShapeType, SheetRef,
+    Value,
 };
 
 use super::jumps;
-use super::read::Reader;
+use super::read::{Pose, Reader};
 use super::route::P;
 use super::scan;
 use super::settle::settle;
@@ -85,18 +86,11 @@ pub fn drop_shape_above(doc: &mut Document, page: u32, spec: &MasterSpec, x: f64
     let (x, y) = (checked("x", x)?, checked("y", y)?);
     require_page(doc, page)?;
     if spec.is_connector() {
-        let half = spec.width / 2.0;
-        let begin = super::End::Point { x: checked("begin x", x - half)?, y };
-        let end = super::End::Point { x: checked("end x", x + half)?, y };
-        let master = stencil::ensure_master(doc, spec)?;
-        let info = super::add_connector_above(doc, page, &begin, &end, above)?;
-        let at = require_shape(doc, page, info.id)?;
-        let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the connector went away"))?;
-        let name: Arc<str> = Arc::from(format!("{}.{id}", spec.name, id = info.id));
-        shape.master = Some(master);
-        shape.name = Some(Arc::clone(&name));
-        shape.name_u = Some(Arc::clone(&name));
-        return Ok(DropInfo { id: info.id, master, name: name.to_string(), width: spec.width, height: spec.height });
+        return drop_connector(doc, page, spec, (x, y), above);
+    }
+    // A group master is dropped with a member for each member of the master, as a stencil file's group master is (`stencil/instance.rs`).
+    if spec.is_group() {
+        return stencil::drop_group_master(doc, page, spec, (x, y), above);
     }
     let (highest, count) = page_stats(doc, page).ok_or_else(|| Problem::bad(format!("there is no page {page}")))?;
     if count >= MAX_SHAPES_PER_PAGE {
@@ -118,10 +112,44 @@ pub fn drop_shape_above(doc: &mut Document, page: u32, spec: &MasterSpec, x: f64
     if let Some((text, marker)) = stencil::orgchart::dressing(spec) {
         sheet.sections.push(Arc::new(marker));
         shape.text = Some(Arc::new(text));
+    } else if let Some(text) = stencil::dropped_text(spec) {
+        // A master whose text holds fields (the `Dress`): the shown form of a field lives in the text that holds it.
+        shape.text = Some(Arc::new(text));
     }
     shape.sheet = Arc::new(sheet);
     page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.push(Arc::new(shape));
     Ok(DropInfo { id, master, name: name.to_string(), width: spec.width, height: spec.height })
+}
+
+/// Drops a one-dimensional master: its ends are the master's width apart, centred on (`x`, `y`) and level. **The instance inherits the master's look** (its line ends, pattern, weight and route):
+/// the arrowhead the connector tool writes on a connector of its own is taken out, so that the master's cells are what draws. A connector master is routed as any
+/// connector is. **A `Fixed1D` master is not routed**: it has no route marker and none of the route's own geometry, so its geometry is the master's, stretched along the line as its ends
+/// move, and the master's `ShapeRouteStyle` 16 keeps a reroute from laying a path over it.
+fn drop_connector(doc: &mut Document, page: u32, spec: &MasterSpec, (x, y): (f64, f64), above: u32) -> Result<DropInfo, Problem> {
+    let half = spec.width / 2.0;
+    let begin = super::End::Point { x: checked("begin x", x - half)?, y };
+    let end = super::End::Point { x: checked("end x", x + half)?, y };
+    let master = stencil::ensure_master(doc, spec)?;
+    let before = doc.clone();
+    let info = if spec.is_fixed_1d() {
+        super::attach_connector_above(doc, page, &begin, &end, above)?
+    } else {
+        super::add_connector_above(doc, page, &begin, &end, above)?
+    };
+    let at = require_shape(doc, page, info.id)?;
+    let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the connector went away"))?;
+    let name: Arc<str> = Arc::from(format!("{}.{id}", spec.name, id = info.id));
+    shape.master = Some(master);
+    shape.name = Some(Arc::clone(&name));
+    shape.name_u = Some(Arc::clone(&name));
+    let sheet = Arc::make_mut(&mut shape.sheet);
+    sheet.cells.remove(&diacraft_doc::CellName::new("EndArrow"));
+    if spec.is_fixed_1d() {
+        // No route marker, and no route section: the geometry is the master's.
+        sheet.sections.retain(|section| !matches!(section.name.as_str(), "User" | "Geometry"));
+        settle(doc, &before, page, &[info.id], &[])?;
+    }
+    Ok(DropInfo { id: info.id, master, name: name.to_string(), width: spec.width, height: spec.height })
 }
 
 /// Moves shapes by (`dx`, `dy`). A shape moves by its pin; a one-dimensional shape (a connector) moves its ends that are not glued, and
@@ -323,35 +351,37 @@ fn moved_cells(doc: &Document, page: u32, reader: &Reader<'_>, id: u32, sheet: &
 /// member of a group that is turned or flipped is refused, since its box is not square to the page (of the M3 review).
 pub fn resize_shape(doc: &mut Document, page: u32, id: u32, x: f64, y: f64, width: f64, height: f64) -> Result<(), Problem> {
     let before = doc.clone();
-    let (at, group, old_size) = resize_cells(doc, page, id, x, y, width, height)?;
-    // A group is one shape: its members follow its frame, by the formulas that tie them to it and, where they hold numbers, by the stretch of the frame.
+    let Resized { at, group, old_size, kept } = resize_cells(doc, page, id, x, y, width, height)?;
+    // A group is one shape: its members follow its frame, by the formulas that tie them to it and, where they hold numbers, by the stretch of the frame. A size the shape keeps
+    // is not stretched.
     let mut member_lines: Vec<u32> = Vec::new();
     if group {
         let mut left = super::scale::MAX_SCALED_MEMBERS;
-        super::scale::scale_members_of(doc, &at, old_size, (width, height), &mut left, &mut member_lines)?;
+        let new_size = (if kept.0 { old_size.0 } else { width }, if kept.1 { old_size.1 } else { height });
+        super::scale::scale_members_of(doc, &at, old_size, new_size, &mut left, &mut member_lines)?;
     }
     settle(doc, &before, page, &[id], &member_lines)
 }
 
+/// What [`resize_cells`] wrote: where the shape is, whether it is a group (its members are then not scaled: that is for [`resize_shape`]), its old size, and which sizes it keeps
+/// (width, height: [`keeps`]).
+pub(super) struct Resized {
+    pub(super) at: ShapeRef,
+    pub(super) group: bool,
+    pub(super) old_size: (f64, f64),
+    pub(super) kept: (bool, bool),
+}
+
 /// The writes of [`resize_shape`] and no recalculation after them: the cells of the frame (`Width`, `Height` and the pin, which is placed with the local pin the new size
-/// gives), for a caller that sizes many shapes and settles once (a fit of containers, `draw/container/fit.rs`). → where the shape is, whether it is a group (its members are
-/// then not scaled: that is for [`resize_shape`]), and its old size.
-pub(super) fn resize_cells(
-    doc: &mut Document,
-    page: u32,
-    id: u32,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(ShapeRef, bool, (f64, f64)), Problem> {
+/// gives), for a caller that sizes many shapes and settles once (a fit of containers, `draw/container/fit.rs`).
+pub(super) fn resize_cells(doc: &mut Document, page: u32, id: u32, x: f64, y: f64, width: f64, height: f64) -> Result<Resized, Problem> {
     let (x, y, width, height) = (checked("x", x)?, checked("y", y)?, checked("width", width)?, checked("height", height)?);
     if width <= 0.0 || height <= 0.0 {
         return Err(Problem::bad("`width` and `height` must be more than 0"));
     }
     let at = require_shape(doc, page, id)?;
     let sheet = SheetRef::Shape(at.clone());
-    let (group, old_size);
+    let (group, old_size, kept);
     let ((x, y), pose) = {
         let reader = Reader::new(doc);
         if reader.is_one_d(&sheet) {
@@ -362,22 +392,54 @@ pub(super) fn resize_cells(
         }
         group = doc.shape(&at).is_some_and(|s| !s.children.is_empty());
         old_size = (reader.number(&sheet, "Width"), reader.number(&sheet, "Height"));
+        kept = kept_sizes(&reader, &sheet);
         (reader.point_from_page(&at, (x, y)), reader.pose(&sheet))
     };
     // A group's members follow its size: one on a locked layer is not resized through it.
     if group {
         super::layers::refuse_locked_member(doc, page, &[id], "resized")?;
     }
-    write_length(doc, &sheet, "Width", width)?;
-    write_length(doc, &sheet, "Height", height)?;
+    if !kept.0 {
+        write_length(doc, &sheet, "Width", width)?;
+    }
+    if !kept.1 {
+        write_length(doc, &sheet, "Height", height)?;
+    }
     // The local pin for the new size, worked out on its own: the pin is placed with it, and the page is recalculated once.
     let loc_x = evaluate_number(doc, &sheet, "LocPinX").unwrap_or_else(|| Reader::new(doc).number(&sheet, "LocPinX"));
     let loc_y = evaluate_number(doc, &sheet, "LocPinY").unwrap_or_else(|| Reader::new(doc).number(&sheet, "LocPinY"));
     // The pin is the local pin carried from the corner by the turn and the flips (nothing for a shape that has neither).
     let (to_pin_x, to_pin_y) = pose.up_vector((loc_x, loc_y));
-    write_length(doc, &sheet, "PinX", checked("x", x + to_pin_x)?)?;
-    write_length(doc, &sheet, "PinY", checked("y", y + to_pin_y)?)?;
-    Ok((at, group, old_size))
+    let pin = (x + to_pin_x, y + to_pin_y);
+    let (pin_x, pin_y) = if kept.0 || kept.1 { held_pin(&pose, pin, kept) } else { pin };
+    write_length(doc, &sheet, "PinX", checked("x", pin_x)?)?;
+    write_length(doc, &sheet, "PinY", checked("y", pin_y)?)?;
+    Ok(Resized { at, group, old_size, kept })
+}
+
+/// Which sizes of a shape a resize of it leaves alone: `(width, height)`, each by [`keeps`].
+pub(super) fn kept_sizes(reader: &Reader<'_>, sheet: &SheetRef) -> (bool, bool) {
+    (keeps(reader, sheet, "LockWidth", "Width"), keeps(reader, sheet, "LockHeight", "Height"))
+}
+
+/// Whether a resize of one shape leaves its `name` size cell (`Width` or `Height`) alone: its lock (`LockWidth`, `LockHeight`) is set **and the cell holds a
+/// formula**, which is what a group made of compartments has for its height (the sum of theirs), and which a write would replace or a `GUARD` would refuse. A locked size that is a number is
+/// written as it always was: `shape.resize` with one `id` and the window's handles do not read the locks otherwise (those with `ids` do, `draw/scale.rs`).
+fn keeps(reader: &Reader<'_>, sheet: &SheetRef, lock: &str, name: &str) -> bool {
+    reader.number(sheet, lock) != 0.0
+        && reader
+            .resolver()
+            .resolve(sheet, &CellAddr::direct(name))
+            .is_some_and(|found| found.formula.cell.is_some_and(|cell| matches!(cell.formula, FormulaSlot::Local(_) | FormulaSlot::Inherit)))
+}
+
+/// The pin a resize puts a shape at when it keeps a size: the pin the box asks for, held where it is along each axis of the shape's own frame that is kept. A shape whose height is its text's keeps
+/// the pin it has on that axis (its top edge if the pin is there, its middle if it is in the middle), and the text that wraps differently in a new width moves nothing of it.
+fn held_pin(pose: &Pose, want: P, (width, height): (bool, bool)) -> P {
+    let (dx, dy) = pose.down_vector((want.0 - pose.pin.0, want.1 - pose.pin.1));
+    let (dx, dy) = (if width { 0.0 } else { dx }, if height { 0.0 } else { dy });
+    let (ux, uy) = pose.up_vector((dx, dy));
+    (pose.pin.0 + ux, pose.pin.1 + uy)
 }
 
 /// What a cell directly under `sheet` works out to now, if it is a number.

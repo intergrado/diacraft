@@ -244,10 +244,60 @@ fn starved(what: &'static str, held: usize) -> WriteError {
 }
 
 /// The attributes of the graphic properties of a style that no cell reads (namespace, local name, value), and whether that is all the model's kept style of the name holds.
+/// **The rest of what the style kept is in [`KeptRest`]**: the caller that knows the style's name finds it and hands it to [`Editor::new_style_with`] with the rest.
 #[derive(Debug, Default)]
 pub(crate) struct KeptAttrs {
     pub attrs: Vec<(Ns, String, String)>,
     pub complete: bool,
+    pub rest: KeptRest,
+}
+
+/// One attribute a style kept that is written where it stood.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum KeptAttr {
+    /// An attribute of ODF's own namespaces (the five the writer has a prefix for), written under the prefix the place binds.
+    Odf(Ns, String, String),
+    /// Any other, under the prefix the file had and with a declaration of that prefix on its element, which the file bound where it was read.
+    Foreign { prefix: String, uri: String, local: String, value: String },
+}
+
+impl KeptAttr {
+    /// The bytes the attribute comes to as written, at the most (its name, its value and a declaration).
+    fn bytes(&self) -> usize {
+        match self {
+            KeptAttr::Odf(_, local, value) => local.len().saturating_add(value.len()).saturating_add(8),
+            KeptAttr::Foreign { prefix, uri, local, value } => {
+                prefix.len().saturating_add(uri.len()).saturating_add(local.len()).saturating_add(value.len()).saturating_add(24)
+            }
+        }
+    }
+}
+
+/// What an automatic graphic style kept beyond the attributes of its graphic properties in ODF's namespaces: written where it stood, so that a
+/// visit gives the style back as it was. Made once for the style's name, and every style made for a shape that names it has it (a clone of it included).
+#[derive(Debug, Default)]
+pub(crate) struct KeptRest {
+    /// The attributes of the `style:style` element beyond its identity (its name, its family and its parent), with their prefixes.
+    pub own: Vec<KeptAttr>,
+    /// The attributes of the graphic properties in any other namespace than ODF's five.
+    pub graphic_foreign: Vec<KeptAttr>,
+    /// The children of the graphic properties element, written as they were, each with the declarations it needs.
+    pub graphic_children: String,
+    /// The style's other children after the graphic properties: the paragraph and text properties it held and any other element, in the order they stood, each with the declarations it needs.
+    pub after: String,
+}
+
+impl KeptRest {
+    /// Whether it holds nothing to write.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.own.is_empty() && self.graphic_foreign.is_empty() && self.graphic_children.is_empty() && self.after.is_empty()
+    }
+
+    /// The bytes it comes to as written, at the most.
+    pub(crate) fn bytes(&self) -> usize {
+        let attrs = self.own.iter().chain(&self.graphic_foreign).fold(0usize, |sum, a| sum.saturating_add(a.bytes()));
+        attrs.saturating_add(self.graphic_children.len()).saturating_add(self.after.len())
+    }
 }
 
 /// What an automatic graphic style written under a held name was made from: the parent, the attributes the cells write and the attributes of DiaCraft's extension.
@@ -278,6 +328,9 @@ pub(crate) struct StyleBook {
     /// The kept styles of the model's automatic graphic family by name (their place in `OdfDoc::styles`), made when a shape of the file first asks for what its style kept: the attributes of the
     /// graphic properties no cell reads.
     pub remainders: Option<HashMap<String, usize>>,
+    /// The namespaces the root of `content.xml` and the container of its automatic styles bound as read, made with [`StyleBook::remainders`]: where a prefix of what a style
+    /// kept is bound when the style does not declare it.
+    pub remainder_bound: Option<super::kept::Bindings>,
     /// What each such style kept, made once for a name and shared by every shape that names it.
     pub remainder_cache: HashMap<String, std::sync::Arc<KeptAttrs>>,
     /// The kept styles of the model's automatic paragraph and text families by family (`true` for text) and name (their place in `OdfDoc::styles`), and the namespaces the root of
@@ -341,6 +394,7 @@ impl StyleBook {
             held_styles: HashMap::new(),
             held_paragraphs: std::collections::BTreeSet::new(),
             remainders: None,
+            remainder_bound: None,
             remainder_cache: HashMap::new(),
             text_remainders: None,
             held_inputs: HashMap::new(),
@@ -1137,17 +1191,19 @@ impl Editor<'_, '_> {
         dia: &[(String, String)],
         wrote: &mut Vec<(Ns, &'static str)>,
     ) -> Result<String, WriteError> {
-        self.new_style_with(name, parent, ops, &[], dia, wrote)
+        self.new_style_with(name, parent, ops, (&[], None), dia, wrote)
     }
 
-    /// [`Editor::new_style`] with the attributes of the style's graphic properties that no cell reads (`extra`: namespace, local name and value, put after what `ops` write and before DiaCraft's
-    /// own), which the model writer takes from what the file's style kept of them.
+    /// [`Editor::new_style`] with what the file's style kept that no cell reads, which the model writer takes from the style its shape named (it is the caller that knows the name: a name
+    /// is no key to look it up by here, since a clone made for an edited shape may be given the name of a style another shape's remainder was kept under): `extra` is the attributes of
+    /// the style's graphic properties in ODF's namespaces (namespace, local name and value, put after what `ops` write and before DiaCraft's own), and `rest` the rest of it
+    /// The style's own attributes, the foreign attributes and the children of its graphic properties, and its other children.
     pub(crate) fn new_style_with(
         &mut self,
         name: &str,
         parent: Option<&str>,
         ops: &[Op],
-        extra: &[(Ns, &str, &str)],
+        (extra, rest): (&[(Ns, &str, &str)], Option<&KeptRest>),
         dia: &[(String, String)],
         wrote: &mut Vec<(Ns, &'static str)>,
     ) -> Result<String, WriteError> {
@@ -1164,8 +1220,17 @@ impl Editor<'_, '_> {
             text.push_str(&format!(" {}:parent-style-name=\"{}\"", pfx.style, escape(parent)));
         }
         text.push_str(&pfx.declare);
-        text.push('>');
         let inner = pfx.without_declarations();
+        // What the style kept beyond its graphic properties' attributes of ODF's namespaces is written where it stood: its own attributes on its start tag, the foreign ones of
+        // the graphic properties and its children inside that element, and its other children after it. Charged before it is copied.
+        let rest = rest.filter(|r| !r.is_empty());
+        if let Some(rest) = rest {
+            self.work.charge_copy(rest.bytes(), self.limits)?;
+        }
+        let (own_declare, own) = self.kept_attributes(rest.map_or(&[][..], |r| &r.own), &inner, ops, "")?;
+        text.push_str(&own_declare);
+        text.push_str(&own);
+        text.push('>');
         let mut attrs = self.ctx().attributes(&inner, ops, wrote)?;
         for (ns, local, value) in extra {
             self.ctx().charge_one()?;
@@ -1175,14 +1240,58 @@ impl Editor<'_, '_> {
         }
         let (declare, extension) = self.extension_attributes(scope, dia)?;
         let declare = format!("{declare}{}", loext_declaration(ops));
+        let (foreign_declare, foreign) = self.kept_attributes(rest.map_or(&[][..], |r| &r.graphic_foreign), &inner, ops, &declare)?;
+        let declare = format!("{declare}{foreign_declare}");
+        let (children, after) = rest.map_or(("", ""), |r| (r.graphic_children.as_str(), r.after.as_str()));
         // On the model path a style that says nothing has no properties element: an empty one is an element the file the shape was read from did not hold.
-        if self.work.model_path && attrs.is_empty() && declare.is_empty() && extension.is_empty() {
-            text.pop();
-            text.push_str("/>");
+        if self.work.model_path && attrs.is_empty() && declare.is_empty() && extension.is_empty() && foreign.is_empty() && children.is_empty() {
+            if after.is_empty() {
+                text.pop();
+                text.push_str("/>");
+                return Ok(text);
+            }
+            text.push_str(after);
+            text.push_str(&format!("</{}:style>", inner.style));
             return Ok(text);
         }
-        text.push_str(&format!("<{}:graphic-properties{declare}{attrs}{extension}/></{}:style>", inner.style, inner.style));
+        text.push_str(&format!("<{}:graphic-properties{declare}{attrs}{foreign}{extension}", inner.style));
+        if children.is_empty() {
+            text.push_str("/>");
+        } else {
+            text.push_str(&format!(">{children}</{}:graphic-properties>", inner.style));
+        }
+        text.push_str(after);
+        text.push_str(&format!("</{}:style>", inner.style));
         Ok(text)
+    }
+
+    /// The text of the attributes a style kept (`list`) for one of its elements: the declarations they need (each prefix once, none that `taken` declares already), then the attributes, each
+    /// of ODF's own under the prefix `pfx` has for it and each of the others under the prefix the file had. An attribute of the extension of LibreOffice that `ops` writes is left out (the
+    /// cells' own is the one written). Each is a step and an attribute, charged before it is made.
+    fn kept_attributes(&mut self, list: &[KeptAttr], pfx: &Pfx, ops: &[Op], taken: &str) -> Result<(String, String), WriteError> {
+        let (mut declare, mut attrs) = (String::new(), String::new());
+        for attr in list {
+            self.ctx().charge_one()?;
+            match attr {
+                KeptAttr::Odf(ns, local, value) => {
+                    self.work.charge_attribute(self.limits)?;
+                    attrs.push_str(&pfx.attr(*ns, local, value));
+                }
+                KeptAttr::Foreign { prefix, uri, local, value } => {
+                    if uri == super::fx::LOEXT_URI && ops.iter().any(|o| o.ns == Ns::Other && o.local == local.as_str()) {
+                        continue;
+                    }
+                    self.work.charge_attribute(self.limits)?;
+                    let binding = format!(" xmlns:{prefix}=\"{}\"", super::splice::escape_value(uri, b'"'));
+                    if !prefix.is_empty() && !taken.contains(&binding) && !declare.contains(&binding) {
+                        declare.push_str(&binding);
+                    }
+                    let qname = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
+                    attrs.push_str(&format!(" {qname}=\"{}\"", super::splice::escape_value(value, b'"')));
+                }
+            }
+        }
+        Ok((declare, attrs))
     }
 
     /// The attributes of DiaCraft's extension that `dia` (local names and values, the owned ones) makes on a new graphic properties element put where
@@ -1621,6 +1730,7 @@ mod tests {
             held_styles: HashMap::new(),
             held_paragraphs: std::collections::BTreeSet::new(),
             remainders: None,
+            remainder_bound: None,
             remainder_cache: HashMap::new(),
             text_remainders: None,
             held_inputs: HashMap::new(),

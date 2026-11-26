@@ -14,7 +14,7 @@
 //!
 //! The edit writes the route as constants in the connector's own frame with the last row's `X` as `Width*1` (as a file's fixed route has it, so that
 //! the end of the route stays on the end of the connector), writes `ConFixedCode` **3** locally ("a path edited by hand writes 3"), and
-//! places the label, in one undo step. A route that is fixed is not routed again when its shapes move. A leg of a straight or a
+//! places the label, in one undo step. A route that is fixed is not routed again when its shapes move: it follows its ends square ([`follow_ends`]). A leg of a straight or a
 //! curved connector, of a connector inside a group and of a route with a slanted leg is not edited: there is no square leg to move.
 //!
 //! [`reset_connectors`] is Reset Connector: `ConFixedCode` goes back to 0 (locally written, so that a master's 3 is overridden) and the
@@ -154,6 +154,98 @@ pub(crate) fn move_leg(points: &[P], leg: usize, to: f64) -> Option<Vec<P>> {
 
 /// How far a jog goes out along a leg at an end before it turns, as the routes' standoff.
 const STANDOFF_HAND: f64 = route::STANDOFF;
+
+/// The corner (ours; "the end legs stretch along their own direction": "the interior corners unchanged and only the ends and their
+/// neighbouring corners moved"). The corner `corner` of a fixed route, next to an end that has moved to `end`, on a leg that was `level` (or upright): it takes the end's
+/// coordinate **across** the leg (a level leg's `y`, an upright leg's `x`) and keeps its own **along** it, so that the leg stays level (or upright) and the leg after it
+/// stretches.
+pub(crate) fn square_corner(end: P, corner: P, level: bool) -> P {
+    if level { (corner.0, end.1) } else { (end.0, corner.1) }
+}
+
+/// How a leg lies: `Some(true)` level, `Some(false)` upright, `None` slanted or of no length (to [`EPS`]).
+fn lies(a: P, b: P) -> Option<bool> {
+    let (along_x, along_y) = ((a.0 - b.0).abs() >= EPS, (a.1 - b.1).abs() >= EPS);
+    match (along_x, along_y) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        _ => None,
+    }
+}
+
+/// Whether the end leg from `old_from` to `old_to`, which lay level (or upright), now runs the other way along its axis between `from` and `to`: an end moved past its corner. A
+/// leg that has shrunk to nothing is no fold, it is dropped with its repeated point.
+fn runs_back(old_from: P, old_to: P, from: P, to: P, level: bool) -> bool {
+    let (was, is) = if level { (old_to.0 - old_from.0, to.0 - from.0) } else { (old_to.1 - old_from.1, to.1 - from.1) };
+    is.abs() > EPS && was * is < 0.0
+}
+
+/// A fixed route after its ends moved.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Followed {
+    /// The route from the new begin to the new end, repeated points and points between their neighbours dropped.
+    pub points: Vec<P>,
+    /// Both ends moved by one vector: the route goes with them as it is, which the rows in the connector's frame already do, so nothing is written.
+    pub carried: bool,
+    /// An end moved past its corner, so that an end leg runs the other way, or the route now runs over itself where it did not: a route made so is kept by a connector that
+    /// never reroutes, and made again by the style by one that reroutes as needed or on crossover (a leg would pass through the shape).
+    pub folded: bool,
+}
+
+/// The route `old` (corners on the page, begin first) of a connector whose ends are now at `begin` and `end`, **followed square** (
+/// "the bends stay in the connector's frame", which turned the legs with the frame): the interior corners stay where they are on the page, and the corner next to an end that is
+/// not at its place moves across the end's leg ([`square_corner`]) so that the leg stays level or upright and the leg after it stretches. Ours where the specifications stop
+///
+/// * **both ends moved by one vector** (a shape and its neighbour moved together): the whole route goes with them ([`Followed::carried`]);
+/// * **a route of two legs** has one corner, next to both ends: it goes where the two end legs meet (the begin's leg's level or upright line and the end's);
+/// * **a route of one leg** has no corner: it stays one leg and slants where it has to (finds saved connectors with one slanted leg);
+/// * an end leg that was **slanted** keeps its corner where it is: only the end moves.
+///
+/// `None` for fewer than two points, a number that is not one, and a route of more than [`MAX_HAND_POINTS`] points, which is not followed (its rows stay in the connector's frame:
+/// the test of a fold is quadratic in the points, and no route a person or DiaCraft draws has so many).
+pub(crate) fn follow_ends(old: &[P], begin: P, end: P) -> Option<Followed> {
+    let (&first, &last) = (old.first()?, old.last()?);
+    let finite = |p: &P| p.0.is_finite() && p.1.is_finite();
+    if old.len() < 2 || old.len() > MAX_HAND_POINTS || !old.iter().all(finite) || !finite(&begin) || !finite(&end) {
+        return None;
+    }
+    let (by_begin, by_end) = ((begin.0 - first.0, begin.1 - first.1), (end.0 - last.0, end.1 - last.1));
+    if (by_begin.0 - by_end.0).abs() < EPS && (by_begin.1 - by_end.1).abs() < EPS {
+        let carried = old.iter().map(|p| (p.0 + by_begin.0, p.1 + by_begin.1)).collect();
+        return Some(Followed { points: with_ends(carried, begin, end), carried: true, folded: false });
+    }
+    // The legs at the ends, as they lay (level, upright or neither): the corners next to the ends move across them, and an end leg that runs the other way is a fold.
+    let n = old.len();
+    let (second, before_last) = (*old.get(1)?, *old.get(n.checked_sub(2)?)?);
+    let (first_leg, last_leg) = (lies(first, second), lies(before_last, last));
+    let mut points = with_ends(old.to_vec(), begin, end);
+    if n >= 3 {
+        if let (Some(level), Some(corner)) = (first_leg, points.get_mut(1)) {
+            *corner = square_corner(begin, *corner, level);
+        }
+        if let (Some(level), Some(corner)) = (last_leg, points.get_mut(n - 2)) {
+            *corner = square_corner(end, *corner, level);
+        }
+    }
+    let ran_back = |old_from: P, old_to: P, from: usize, to: usize, level: Option<bool>| match (points.get(from), points.get(to), level) {
+        (Some(from), Some(to), Some(level)) => runs_back(old_from, old_to, *from, *to, level),
+        _ => false,
+    };
+    let folded = ran_back(first, second, 0, 1, first_leg) || ran_back(before_last, last, n - 2, n - 1, last_leg);
+    let tidy = with_ends(route::tidy_all(points), begin, end);
+    Some(Followed { folded: folded || route::flaws(&tidy) > route::flaws(old), points: tidy, carried: false })
+}
+
+/// `points` starting exactly on `begin` and ending exactly on `end` (points dropped as repeats may differ from the ends by rounding).
+fn with_ends(mut points: Vec<P>, begin: P, end: P) -> Vec<P> {
+    if let Some(slot) = points.first_mut() {
+        *slot = begin;
+    }
+    if let Some(slot) = points.last_mut() {
+        *slot = end;
+    }
+    points
+}
 
 /// The route that moving leg `leg` of the route `points` (the corners of [`ConnectorPath::points`]) across to the line `to` makes, in the same units: what
 /// [`edit_leg`] writes, so that a window can draw it while the leg is dragged. `None` for a leg that is not there or not square, a route that is not square, a number that
@@ -374,6 +466,118 @@ mod tests {
                     if let Some(r) = move_leg(points, leg, to) {
                         assert_eq!((r.first(), r.last()), (points.first(), points.last()), "{points:?} leg {leg} to {to}");
                         assert!(r.len() <= MAX_HAND_POINTS && square(&r) && route::flaws(&r) == 0, "{points:?} leg {leg} to {to}: {r:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The corner takes the end's coordinate across the leg and keeps its own along it.
+    #[test]
+    fn a_corner_takes_the_end_across_a_level_leg_and_along_an_upright_one() {
+        assert_eq!(square_corner((7.0, 5.0), (1.0, 2.0), true), (1.0, 5.0));
+        assert_eq!(square_corner((7.0, 5.0), (1.0, 2.0), false), (7.0, 2.0));
+    }
+
+    /// The interior corners stay and the corners next to the ends move across the end legs.
+    #[test]
+    fn a_z_followed_moves_the_corner_next_to_the_end_that_moved_and_keeps_the_other() {
+        let z = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 2.0), (3.0, 2.0)];
+        let f = follow_ends(&z, (0.0, 1.0), (3.0, 2.0)).unwrap();
+        assert!(near(&f.points, &[(0.0, 1.0), (1.0, 1.0), (1.0, 2.0), (3.0, 2.0)]), "{:?}", f.points);
+        assert!(!f.carried && !f.folded);
+        let f = follow_ends(&z, (0.0, 0.0), (4.0, 3.0)).unwrap();
+        assert!(near(&f.points, &[(0.0, 0.0), (1.0, 0.0), (1.0, 3.0), (4.0, 3.0)]), "{:?}", f.points);
+        // A route of five legs keeps its two middle corners.
+        let hand = vec![(0.0, 0.0), (0.25, 0.0), (0.25, -1.0), (4.0, -1.0), (4.0, 0.0), (4.25, 0.0)];
+        let f = follow_ends(&hand, (0.0, 0.0), (4.25, 1.0)).unwrap();
+        assert!(near(&f.points, &[(0.0, 0.0), (0.25, 0.0), (0.25, -1.0), (4.0, -1.0), (4.0, 1.0), (4.25, 1.0)]), "{:?}", f.points);
+        // An upright first leg moves its corner along x.
+        let up = vec![(0.0, 0.0), (0.0, 2.0), (3.0, 2.0)];
+        let f = follow_ends(&up, (1.0, 0.0), (3.0, 2.0)).unwrap();
+        assert!(near(&f.points, &[(1.0, 0.0), (1.0, 2.0), (3.0, 2.0)]), "{:?}", f.points);
+    }
+
+    #[test]
+    fn a_route_of_two_legs_has_its_corner_where_the_two_end_legs_meet_and_one_leg_slants() {
+        let l = vec![(0.0, 0.0), (4.0, 0.0), (4.0, 3.0)];
+        let f = follow_ends(&l, (0.0, 1.0), (5.0, 4.0)).unwrap();
+        assert!(near(&f.points, &[(0.0, 1.0), (5.0, 1.0), (5.0, 4.0)]), "{:?}", f.points);
+        let one = vec![(0.0, 0.0), (4.0, 0.0)];
+        let f = follow_ends(&one, (0.0, 0.0), (4.0, 1.0)).unwrap();
+        assert!(near(&f.points, &[(0.0, 0.0), (4.0, 1.0)]) && !f.folded, "{:?}", f.points);
+    }
+
+    /// Both ends moved by one vector carry the route; an end past its corner is a fold; a leg shrunk to nothing is no fold; a slanted end leg keeps its corner.
+    #[test]
+    fn both_ends_by_one_vector_carry_it_and_an_end_past_its_corner_folds_it() {
+        let z = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 2.0), (3.0, 2.0)];
+        let f = follow_ends(&z, (5.0, 1.0), (8.0, 3.0)).unwrap();
+        assert!(f.carried && !f.folded && near(&f.points, &[(5.0, 1.0), (6.0, 1.0), (6.0, 3.0), (8.0, 3.0)]), "{f:?}");
+        // The end comes back past the corner (1, 2): its leg runs the other way.
+        let f = follow_ends(&z, (0.0, 0.0), (0.5, 2.0)).unwrap();
+        assert!(f.folded, "{f:?}");
+        // The end comes level with the corner: the leg is gone and the route is one leg shorter, no fold.
+        let f = follow_ends(&z, (0.0, 0.0), (1.0, 5.0)).unwrap();
+        assert!(!f.folded && near(&f.points, &[(0.0, 0.0), (1.0, 0.0), (1.0, 5.0)]), "{f:?}");
+        // A slanted end leg keeps its corner: only the end moves.
+        let slanted = vec![(0.0, 0.0), (2.0, 1.0), (2.0, 4.0)];
+        let f = follow_ends(&slanted, (0.0, 1.0), (2.0, 4.0)).unwrap();
+        assert!(near(&f.points, &[(0.0, 1.0), (2.0, 1.0), (2.0, 4.0)]) || near(&f.points, &[(0.0, 1.0), (2.0, 4.0)]), "{:?}", f.points);
+    }
+
+    #[test]
+    fn a_route_that_cannot_be_followed_gives_none() {
+        let z = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 2.0), (3.0, 2.0)];
+        assert_eq!(follow_ends(&z[..1], (0.0, 0.0), (1.0, 1.0)), None);
+        assert_eq!(follow_ends(&[], (0.0, 0.0), (1.0, 1.0)), None);
+        assert_eq!(follow_ends(&z, (f64::NAN, 0.0), (3.0, 2.0)), None);
+        assert_eq!(follow_ends(&z, (0.0, 0.0), (f64::INFINITY, 2.0)), None);
+        let bad = vec![(0.0, 0.0), (f64::NAN, 0.0), (1.0, 2.0)];
+        assert_eq!(follow_ends(&bad, (0.0, 0.0), (1.0, 2.0)), None);
+        // A route of more points than a hand edit gives is not followed (the test of a fold is quadratic in them).
+        let long: Vec<P> = (0..=MAX_HAND_POINTS).map(|i| if i % 2 == 0 { (i as f64, 0.0) } else { (i as f64 - 1.0, 1.0) }).collect();
+        assert_eq!(long.len(), MAX_HAND_POINTS + 1);
+        assert_eq!(follow_ends(&long, (0.0, 0.0), (9.0, 9.0)), None);
+        let at_most: Vec<P> = long.iter().take(MAX_HAND_POINTS).copied().collect();
+        assert!(follow_ends(&at_most, (0.0, 0.5), (9.0, 9.0)).is_some());
+    }
+
+    /// Whatever the move, the route starts on the begin and ends on the end, every leg that was level or upright at an end still is, and no interior corner but the two
+    /// next to the ends moves (invariant 4 of the design's section 4.5).
+    #[test]
+    fn a_followed_route_starts_and_ends_on_its_ends_and_keeps_every_other_corner() {
+        let routes: [Vec<P>; 4] = [
+            vec![(0.0, 0.0), (1.0, 0.0), (1.0, 2.0), (3.0, 2.0)],
+            vec![(0.0, 0.0), (0.25, 0.0), (0.25, -1.0), (4.0, -1.0), (4.0, 0.0), (4.25, 0.0)],
+            vec![(0.0, 0.0), (0.0, 1.0), (2.0, 1.0), (2.0, 3.0), (5.0, 3.0), (5.0, 4.0), (7.0, 4.0)],
+            vec![(0.0, 0.0), (4.0, 0.0), (4.0, 3.0)],
+        ];
+        let steps = [-2.5, -1.0, 0.0, 0.5, 1.0, 3.0];
+        let mut moves: Vec<(f64, f64, f64, f64)> = Vec::new();
+        for bx in steps {
+            for by in steps {
+                for ex in steps {
+                    for ey in steps {
+                        moves.push((bx, by, ex, ey));
+                    }
+                }
+            }
+        }
+        for route in &routes {
+            let (first, last) = (route[0], route[route.len() - 1]);
+            for &(bx, by, ex, ey) in &moves {
+                let (begin, end) = ((first.0 + bx, first.1 + by), (last.0 + ex, last.1 + ey));
+                let Some(f) = follow_ends(route, begin, end) else { continue };
+                assert_eq!((f.points.first(), f.points.last()), (Some(&begin), Some(&end)), "{route:?} {begin:?} {end:?}");
+                if f.carried {
+                    assert_eq!((bx, by), (ex, ey));
+                    continue;
+                }
+                // Every interior corner that is not next to an end is a corner of the route it was, or the route lost it with a leg that shrank.
+                if f.points.len() == route.len() {
+                    for i in 2..route.len().saturating_sub(2) {
+                        assert_eq!(f.points.get(i), route.get(i), "{route:?} {begin:?} {end:?}: corner {i} moved");
                     }
                 }
             }

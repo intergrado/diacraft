@@ -7,13 +7,13 @@ use diacraft_doc::{CellAddr, Document, ShapeRef, SheetRef};
 
 use crate::calc_index::{changes_between, commit_changed};
 
-use super::connectors::{plan_route, write_planned};
+use super::connectors::{plan_route, plan_squared, write_planned};
 use super::glue;
 use super::jumps;
 use super::label;
 use super::read::Reader;
 use super::refit::{Left, MAX_LEFT_LISTED};
-use super::reroute::{EndIndex, connectors_to_route};
+use super::reroute::{EndIndex, Fate, connectors_to_route};
 use super::scan::Located;
 use super::shapes::subtree_ids;
 use super::{Problem, require_page};
@@ -214,13 +214,17 @@ pub(super) fn route_after_within(
         let reader = Reader::new(doc);
         let mut plans = Vec::new();
         let mut labels = Vec::new();
+        // The document as the command found it: a fixed route whose ends moved is followed from the route it had there.
+        let old = Reader::new(before);
         for next in tried {
-            if next.check && !index.crosses(&reader, &located, next.id) {
-                continue;
-            }
             let Some(at) = located.get(&next.id) else { continue };
-            // A connector routed again because a leg crossed a shape it is glued to keeps the setting that asked for it.
-            if let Some(plan) = plan_route(&reader, page, next.id, at, next.check, &mut index, &located)? {
+            let planned = match index.fate(&reader, &located, &old, next) {
+                Fate::Stays => continue,
+                Fate::Square(corners) => plan_squared(&reader, next.id, at, corners),
+                // A connector routed again because a leg crossed a shape it is glued to keeps the setting that asked for it.
+                Fate::Route => plan_route(&reader, page, next.id, at, next.check, &mut index, &located)?,
+            };
+            if let Some(plan) = planned {
                 labels.extend(label::writes_for(&reader, &plan.at, &plan.routed, plan.routed.ours));
                 plans.push(plan);
             }

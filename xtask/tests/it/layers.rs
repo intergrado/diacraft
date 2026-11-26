@@ -344,9 +344,10 @@ fn the_table_registers_every_crate_of_design_section_6() {
         (0, &["units", "geom", "color", "formula"]),
         (1, &["doc", "fonts"]),
         // `sheetxml` is the ShapeSheet XML codec carved out of `vsdx`; design section 6 predates it.
-        (2, &["calc", "text", "pathops", "layout", "plugins", "sheetxml"]),
-        // `odg` is a file format like the rest of this layer, though design section 6 predates it; so is `native`, DiaCraft's own.
-        (3, &["render", "vsdx", "odg", "native", "vsd", "vdx", "svg", "pdf", "pptx", "emf", "cadimport", "interchange"]),
+        (2, &["calc", "text", "pathops", "layout", "route", "plugins", "sheetxml"]),
+        // `odg` is a file format like the rest of this layer, though design section 6 predates it; so is `native`, DiaCraft's own, and so is `mxfile`, the
+        // reader of draw.io files.
+        (3, &["render", "vsdx", "odg", "native", "mxfile", "vsd", "vdx", "svg", "pdf", "pptx", "emf", "cadimport", "interchange"]),
         (4, &["tools"]),
         (5, &["engine"]),
     ];

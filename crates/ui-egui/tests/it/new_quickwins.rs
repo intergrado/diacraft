@@ -11,7 +11,10 @@ use crate::stencil_files::rows;
 use crate::support::{Rest, Window, click, press, run_command};
 
 const WIDE: [f32; 2] = [1280.0, 900.0];
-const TEMPLATES: [&str; 4] = ["basic_diagram", "basic_flowchart", "cross_functional_flowchart", "organization_chart"];
+/// The templates the engine lists: the four of the first batches, and the ones of the second stencil batch as their stencils ship (STENCIL2).
+fn templates() -> Vec<&'static str> {
+    diacraft_engine::template::templates().iter().map(|t| t.id).collect()
+}
 
 /// A press on a template's tile, which opens its detail, and a press on Create there ("picking a tile opens a dialog ... and a large Create button").
 fn create_from(w: &mut Window, id: &str) {
@@ -36,7 +39,8 @@ fn new_lists_a_tile_for_each_template_of_the_engine() {
     let mut w = new_page(WIDE);
     let listed = w.state_mut().execute("template.list", &json!({})).unwrap();
     let ids: Vec<&str> = listed["templates"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, TEMPLATES, "the engine's three templates");
+    assert_eq!(ids, templates(), "the engine's templates");
+    assert_eq!(&ids[..4], ["basic_diagram", "basic_flowchart", "cross_functional_flowchart", "organization_chart"]);
     assert!(w.state().element("backstage.tile.blank").unwrap().enabled);
     for t in listed["templates"].as_array().unwrap() {
         let tile = w.state().element(&format!("backstage.tile.template.{}", t["id"].as_str().unwrap())).unwrap_or_else(|| panic!("no tile for {t}"));

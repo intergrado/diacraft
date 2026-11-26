@@ -80,8 +80,8 @@ People trust DiaCraft with their drawings; a crash loses work. This outranks fea
 |---|---|
 | L0 | `units`, `geom`, `color`, `formula`; standalone `container` (bounded zip and XML, for OPC and ODF packages), `opc` (on `container`), `metafile`, `dxf`, `data` |
 | L1 | `doc`, `fonts` |
-| L2 | `calc`, `text`, `pathops`, `layout`, `plugins`, `sheetxml` (the ShapeSheet XML codec both file formats use, and the whole-model codec) |
-| L3 | `render`, `vsdx`, `odg`, `native` (`.diacraft`), `vsd`, `vdx`, `svg`, `pdf`, `pptx`, `emf`, `cadimport`, `interchange` |
+| L2 | `calc`, `text`, `pathops`, `layout`, `route`, `plugins`, `sheetxml` (the ShapeSheet XML codec both file formats use, and the whole-model codec) |
+| L3 | `render`, `vsdx`, `odg`, `native` (`.diacraft`), `mxfile`, `vsd`, `vdx`, `svg`, `pdf`, `pptx`, `emf`, `cadimport`, `interchange` |
 | L4 | `tools` |
 | L5 | `engine` |
 | L6 | `ui-egui`, `mcp` |
@@ -162,7 +162,8 @@ else's name.
 
 `.github/workflows/ci.yml` runs `cargo xtask ci` on Linux and builds and smoke tests the app and the command line on Windows and macOS;
 `.github/workflows/release.yml` builds the downloads of a pushed `v*` tag into a draft release and deploys the website and the web
-app (`docs/releasing.md`); `.github/workflows/deploy-site.yml` deploys the two sites by hand between releases. Don't add or change CI
+app (`docs/releasing.md`); `.github/workflows/deploy-site.yml` deploys the two sites by hand between releases; `.github/workflows/codeql.yml` runs GitHub's CodeQL code
+scanning on the shipped code, leaving out the test and fuzz code (`docs/development.md`, "CI"). Don't add or change CI
 in a feature or fix change.
 
 CodeRabbit reviews pull requests to this repository, as the `.coderabbit.yaml` at the root sets it up. **Its review is advice only and

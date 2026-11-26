@@ -180,9 +180,15 @@ fn a_master_is_copied_in_once_and_found_again() {
 
 // ---- Basic Flowchart and the two stencils ----------------------------------------------------------------------------------
 
+/// The stencils of the first batches, which a new session opens: the seven of 629feee1. A stencil of the second batch is shipped after them and closed by default, so the pinned lists of this file
+/// are about these (STENCIL2: a family that ships does not change them).
+fn first_seven() -> Vec<&'static super::StencilSpec> {
+    stencils().iter().filter(|s| s.default_open).collect()
+}
+
 fn flowchart() -> &'static [MasterSpec] {
     let all = stencils();
-    assert_eq!(all.len(), 7, "the catalogue retains Basic Shapes and Basic Flowchart first");
+    assert_eq!(first_seven().len(), 7, "the catalogue retains Basic Shapes and Basic Flowchart first");
     assert_eq!((all[1].id, all[1].name), (FLOWCHART_ID, FLOWCHART_NAME));
     all[1].masters()
 }
@@ -191,7 +197,7 @@ fn flowchart() -> &'static [MasterSpec] {
 fn there_are_five_stencils_and_basic_shapes_keeps_its_twelve() {
     let all = stencils();
     assert_eq!(
-        all.iter().map(|s| (s.id, s.name)).collect::<Vec<_>>(),
+        first_seven().iter().map(|s| (s.id, s.name)).collect::<Vec<_>>(),
         [
             (STENCIL_ID, STENCIL_NAME),
             (FLOWCHART_ID, FLOWCHART_NAME),
@@ -205,7 +211,12 @@ fn there_are_five_stencils_and_basic_shapes_keeps_its_twelve() {
     assert_eq!(all[0].masters().len(), 12);
     assert_eq!(masters().len(), 12, "`masters()` is still Basic Shapes: the API grew and nothing changed");
     assert_eq!(all[0].masters().as_ptr(), masters().as_ptr());
-    assert_eq!(all_masters().count(), 58);
+    assert_eq!(
+        first_seven().iter().map(|s| s.masters().len()).sum::<usize>(),
+        58,
+        "the seven stencils of the first batches hold fifty-eight masters"
+    );
+    assert!(all.iter().zip(first_seven()).all(|(a, b)| a.id == b.id), "the stencils of the second batch are shipped after the seven");
 }
 
 #[test]
@@ -249,7 +260,7 @@ fn each_built_in_stencil_has_a_series_of_its_own_in_its_masters_guids() {
         let before = seen.insert(one, stencil.id);
         assert_eq!(before, None, "{} has the series {one} of another stencil", stencil.id);
     }
-    assert_eq!(seen.keys().copied().collect::<Vec<_>>(), [1, 2, 4, 5, 6, 7, 8]);
+    assert!(seen.keys().copied().collect::<Vec<_>>().starts_with(&[1, 2, 4, 5, 6, 7, 8]), "the first seven stencils keep their series: {seen:?}");
     assert_eq!(find_master("orgchart.executive").map(MasterSpec::guid).as_deref(), Some("{D1AC0008-0000-4000-8000-000000000001}"));
     assert_eq!(find_master("xfunc.swimlane").map(MasterSpec::guid).as_deref(), Some("{D1AC0007-0000-4000-8000-000000000001}"));
 }
@@ -264,7 +275,9 @@ fn master_ids_and_guids_are_global_but_display_names_are_scoped() {
             assert!(names.insert(m.name), "duplicate name within {}", stencil.id);
             assert_eq!(find_master(m.id).map(|found| found.id), Some(m.id));
             assert!(m.id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b)));
-            assert!(m.width > 0.0 && (m.height > 0.0 || m.is_connector()) && m.width <= 3.0 && m.height <= 3.0);
+            // A master of the first seven stencils is at most 3 inches each way; one of the second batch (series 9 and up) at most 10, since a pool is 8 inches wide.
+            let most = if m.identity.0 >= 9 { 10.0 } else { 3.0 };
+            assert!(m.width > 0.0 && (m.height > 0.0 || m.is_connector()) && m.width <= most && m.height <= most);
         }
     }
     // Fixed GUIDs, all different: a master is found again in a document by its `UniqueID`.
@@ -464,7 +477,8 @@ fn each_flowchart_master_is_copied_in_once_beside_the_basic_ones() {
 
 #[test]
 fn a_new_session_has_every_built_in_stencil_open_in_the_order_of_the_catalogue() {
-    let ids: Vec<&str> = stencils().iter().map(|s| s.id).collect();
+    // The seven of the first batches, in the order of the catalogue: a stencil of the second batch is closed in a new session (`default_open`).
+    let ids: Vec<&str> = first_seven().iter().map(|s| s.id).collect();
     let opened = super::OpenedStencils::new();
     assert_eq!(opened.open_builtins(), ids);
 }

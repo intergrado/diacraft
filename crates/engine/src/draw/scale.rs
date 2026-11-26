@@ -17,8 +17,13 @@
 //!   them again by its own factors. A cell that holds any other formula is data and is left as it is (then makes the group the box of what its members came to).
 //!   **A line among the members is routed again** with the rest of the edit: its route is rows of its own frame, which the stretch changes.
 //! * **Locks** (`LockWidth`, `LockHeight`: "keeps width (height) fixed during sizing", `LockAspect`: "allows sizing only in proportion"): **a shape with
-//!   `LockWidth` or `LockHeight` set is left alone** (neither sized nor moved, and its box still counts in the joint box the others are stretched from), a shape with
-//!   `LockAspect` set is scaled by the same factor on both axes (the geometric mean of the two), and when every shape named is locked the resize is refused in words.
+//!   `LockHeight` set keeps its own height and is sized along its width, and one with `LockWidth` the reverse** (the lock is of the shape's own axis, so a
+//!   shape turned a quarter keeps the length the page's other axis would give it). Its middle goes where the map puts it, as every shape's does, and the cell of the kept size is not
+//!   written, so a formula in it stays: **a group whose height is a formula of its width keeps that formula**, and its pin and its members go by what the formula works out to.
+//!   **A shape with both locks, or with one of them and `LockAspect`, is left alone** (neither sized nor moved, and its box still counts in the joint box the others are stretched
+//!   from), and so is a one-dimensional shape with either lock: a line has no other axis to size, and a stretch that is not even would change its length or its direction. A shape
+//!   with `LockAspect` alone is scaled by the same factor on both axes (the geometric mean of the two). The shapes left alone are listed, and when every shape named is left alone
+//!   the resize is refused in words.
 //!
 //! The members of a turned or flipped group are refused, as they are by every command that carries a place of the page into a group's frame.
 
@@ -43,7 +48,8 @@ pub const MAX_SCALED_MEMBERS: usize = 20_000;
 pub struct Scaled {
     /// How many shapes changed: those sized, and the connectors with an end moved.
     pub resized: usize,
-    /// The shapes left alone because `LockWidth` or `LockHeight` is set, in the order they were named.
+    /// The shapes left alone by their locks (both size locks, one with `LockAspect`, or either on a connector), in the order they were named. A shape sized along one axis only
+    /// because the other is locked is not one of them.
     pub locked: Vec<u32>,
 }
 
@@ -64,6 +70,47 @@ pub fn carry(v: f64, old_low: f64, new_low: f64, scale: f64) -> f64 {
     new_low + (v - old_low) * scale
 }
 
+/// What a shape's size locks leave of the stretch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Sizing {
+    /// Sized along both of its own axes.
+    Both,
+    /// `LockWidth`: the width is kept and the height is sized.
+    KeepsWidth,
+    /// `LockHeight`: the height is kept and the width is sized.
+    KeepsHeight,
+    /// `LockAspect`: sized by one factor on both axes.
+    Proportional,
+    /// Neither sized nor moved: both locks, one of them with `LockAspect`, or either lock on a one-dimensional shape.
+    Alone,
+}
+
+/// What the locks of a shape make of a stretch: `width`, `height` and `aspect` are whether `LockWidth`, `LockHeight` and `LockAspect` are on. A one-dimensional shape has no
+/// width and height of its own to size apart, so either lock leaves it alone and `LockAspect` is not read.
+fn sizing(one_d: bool, width: bool, height: bool, aspect: bool) -> Sizing {
+    match (one_d, width, height, aspect) {
+        (true, false, false, _) | (false, false, false, false) => Sizing::Both,
+        (true, ..) | (false, true, true, _) | (false, true, false, true) | (false, false, true, true) => Sizing::Alone,
+        (false, true, false, false) => Sizing::KeepsWidth,
+        (false, false, true, false) => Sizing::KeepsHeight,
+        (false, false, false, true) => Sizing::Proportional,
+    }
+}
+
+/// The factors by which a shape's own width and height are scaled, given the lengths `(fx, fy)` the stretch gives its two axes and what its locks leave: a kept axis
+/// has the factor 1, and a shape that keeps its proportions has the geometric mean of the two on both.
+fn held_factors(sizing: Sizing, (fx, fy): (f64, f64)) -> (f64, f64) {
+    match sizing {
+        Sizing::KeepsWidth => (1.0, fy),
+        Sizing::KeepsHeight => (fx, 1.0),
+        Sizing::Proportional => {
+            let same = (fx * fy).sqrt();
+            (same, same)
+        }
+        Sizing::Both | Sizing::Alone => (fx, fy),
+    }
+}
+
 /// A shape of the set that is sized: where it is and what it comes to.
 struct Sized {
     at: ShapeRef,
@@ -71,6 +118,8 @@ struct Sized {
     pose: Pose,
     old: (f64, f64),
     new: (f64, f64),
+    /// The axes whose size a lock keeps (width, height): the cell is not written, so a formula it holds stays, and what it works out to is read once the others are written.
+    kept: (bool, bool),
     /// Where the middle of the box goes, on the page.
     centre: P,
     group: bool,
@@ -108,7 +157,9 @@ pub fn resize_shapes(doc: &mut Document, page: u32, ids: &[u32], to: (f64, f64, 
         }
         let map = |p: P| (carry(p.0, old.x0, to.x0, sx), carry(p.1, old.y0, to.y0, sy));
         for t in &targets {
-            if ["LockWidth", "LockHeight"].iter().any(|name| reader.number(&t.sheet, name) != 0.0) {
+            let is_on = |lock: &str| reader.number(&t.sheet, lock) != 0.0;
+            let how = sizing(t.one_d, is_on("LockWidth"), is_on("LockHeight"), is_on("LockAspect"));
+            if how == Sizing::Alone {
                 locked.push(t.id);
                 continue;
             }
@@ -122,11 +173,7 @@ pub fn resize_shapes(doc: &mut Document, page: u32, ids: &[u32], to: (f64, f64, 
             let pose = reader.pose(&t.sheet);
             let corners = reader.corners(&t.at);
             let (w, h) = (reader.number(&t.sheet, "Width"), reader.number(&t.sheet, "Height"));
-            let (mut fx, mut fy) = size_factors(pose.angle, sx, sy);
-            if reader.number(&t.sheet, "LockAspect") != 0.0 {
-                let same_factor = (fx * fy).sqrt();
-                (fx, fy) = (same_factor, same_factor);
-            }
+            let (fx, fy) = held_factors(how, size_factors(pose.angle, sx, sy));
             let middle = ((corners[0].0 + corners[2].0) / 2.0, (corners[0].1 + corners[2].1) / 2.0);
             sized.push(Sized {
                 at: t.at.clone(),
@@ -134,6 +181,7 @@ pub fn resize_shapes(doc: &mut Document, page: u32, ids: &[u32], to: (f64, f64, 
                 pose,
                 old: (w, h),
                 new: (checked("width", w * fx)?, checked("height", h * fy)?),
+                kept: (how == Sizing::KeepsWidth, how == Sizing::KeepsHeight),
                 centre: map(middle),
                 group: doc.shape(&t.at).is_some_and(|shape| !shape.children.is_empty()),
             });
@@ -141,7 +189,7 @@ pub fn resize_shapes(doc: &mut Document, page: u32, ids: &[u32], to: (f64, f64, 
         if !targets.is_empty() && locked.len() == targets.len() {
             let named: Vec<String> = locked.iter().map(u32::to_string).collect();
             return Err(Problem::failed(format!(
-                "{} locked against sizing (`LockWidth` or `LockHeight`): shape {}; clear the lock to size {}",
+                "{} locked against sizing (`LockWidth` with `LockHeight`, or either with `LockAspect`, or either on a connector): shape {}; clear a lock to size {}",
                 if locked.len() == 1 { "the shape is" } else { "the shapes are" },
                 named.join(", "),
                 if locked.len() == 1 { "it" } else { "them" }
@@ -154,6 +202,16 @@ pub fn resize_shapes(doc: &mut Document, page: u32, ids: &[u32], to: (f64, f64, 
             if (now - was).abs() > SAME_PLACE {
                 write_length(doc, &s.sheet, name, now)?;
             }
+        }
+    }
+    // A kept size is not written, so a formula in its cell stays (a group whose height follows its text keeps that formula): what the cell works out to once every size is written
+    // is the size the shape has, and its pin and its members go by that.
+    for s in &mut sized {
+        if s.kept.0 {
+            s.new.0 = evaluate_number(doc, &s.sheet, "Width").unwrap_or(s.new.0);
+        }
+        if s.kept.1 {
+            s.new.1 = evaluate_number(doc, &s.sheet, "Height").unwrap_or(s.new.1);
         }
     }
     // The pins, in one reading of the document: the middle of each box where the map put it, and the pin from the middle by the shape's own turn and flips.
@@ -307,6 +365,34 @@ mod tests {
         // At 45 degrees along both of the shape's axes the lengths are the mean square of the two.
         let (a, b) = size_factors(std::f64::consts::FRAC_PI_4, 2.0, 4.0);
         assert!((a - (10.0_f64).sqrt()).abs() < 1e-12 && (b - (10.0_f64).sqrt()).abs() < 1e-12, "{a} {b}");
+    }
+
+    #[test]
+    fn the_locks_of_a_shape_say_which_axes_are_sized_and_which_shapes_are_left_alone() {
+        // A shape: no lock sizes both axes; one size lock keeps that axis; the aspect lock alone keeps the proportions; both size locks, or one with the aspect lock, leave it alone.
+        assert_eq!(sizing(false, false, false, false), Sizing::Both);
+        assert_eq!(sizing(false, true, false, false), Sizing::KeepsWidth);
+        assert_eq!(sizing(false, false, true, false), Sizing::KeepsHeight);
+        assert_eq!(sizing(false, false, false, true), Sizing::Proportional);
+        for (width, height, aspect) in [(true, true, false), (true, true, true), (true, false, true), (false, true, true)] {
+            assert_eq!(sizing(false, width, height, aspect), Sizing::Alone, "LockWidth {width}, LockHeight {height}, LockAspect {aspect}");
+        }
+        // A line: either size lock leaves it alone, and the aspect lock is not read.
+        for aspect in [false, true] {
+            assert_eq!(sizing(true, false, false, aspect), Sizing::Both, "LockAspect {aspect}");
+            for (width, height) in [(true, false), (false, true), (true, true)] {
+                assert_eq!(sizing(true, width, height, aspect), Sizing::Alone, "LockWidth {width}, LockHeight {height}, LockAspect {aspect}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_kept_axis_has_the_factor_one_and_a_proportional_shape_the_mean_of_the_two() {
+        assert_eq!(held_factors(Sizing::Both, (2.0, 3.0)), (2.0, 3.0));
+        assert_eq!(held_factors(Sizing::KeepsHeight, (2.0, 3.0)), (2.0, 1.0));
+        assert_eq!(held_factors(Sizing::KeepsWidth, (2.0, 3.0)), (1.0, 3.0));
+        let (a, b) = held_factors(Sizing::Proportional, (4.0, 1.0));
+        assert!((a - 2.0).abs() < 1e-12 && (b - 2.0).abs() < 1e-12, "{a} {b}");
     }
 
     #[test]

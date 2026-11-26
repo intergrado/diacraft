@@ -82,6 +82,8 @@ pub(crate) struct ParaOdf {
     pub name: Option<Arc<str>>,
     /// The `Paragraph` row.
     pub row: u32,
+    /// The `Character` row of the paragraph's own text, the characters no span holds (they read through the paragraph's style, text properties included), when it has any.
+    pub own_row: Option<u32>,
     /// A stamp of the paragraph's characters and where its spans lie, as read.
     pub characters: diacraft_doc::Stamp,
     pub spans: Vec<SpanOdf>,
@@ -532,7 +534,7 @@ fn paragraph<'t, 's>(
     let base = shape_base(r, cx, st)?;
     let row = st.paragraphs.row(r, &base.paragraph, full_para)?;
     let mut run = Run { pieces: Vec::new(), space: Space::Start, trailing: None, count: 0, spans: Vec::new(), opened: 0 };
-    content(r, names, cx, el, st, &layers, &mut run, 0)?;
+    let own_row = content(r, names, cx, el, st, &layers, &mut run, 0)?;
     // Trailing white space goes.
     if let Some((piece, at)) = run.trailing
         && let Some(Piece::Chars { text, .. }) = run.pieces.get_mut(piece)
@@ -555,7 +557,7 @@ fn paragraph<'t, 's>(
     let characters = characters_stamp(&run.pieces, &spans, run.count);
     // What the paragraph named is held until the text's `.odg` data is made, and is charged here, before it is: a text of a million paragraphs is a million of them.
     r.take_items(super::cost::TEXT_PARAGRAPH)?;
-    st.paras.push(Para { row, pieces: run.pieces, odf: ParaOdf { style, name: style_name, row, characters, spans, element, levels } });
+    st.paras.push(Para { row, pieces: run.pieces, odf: ParaOdf { style, name: style_name, row, own_row, characters, spans, element, levels } });
     Ok(())
 }
 

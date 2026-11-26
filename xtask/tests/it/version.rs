@@ -143,3 +143,30 @@ fn the_docs_examples_and_the_changelog_say_the_workspace_version() {
     assert!(changelog.contains(&block), "site/changelog.html does not hold `{block}`: write the notes of {version}");
     assert!(changelog.contains("<dt>Date</dt><dd>"), "the changelog's title block has no date (`Unreleased`, or the day of the release)");
 }
+
+/// The owner's ruling (2026-11-26): the Features page (`site/features.html`) says what works in the release, and it is read again for every release. Its title block names the release, as the
+/// changelog's does, and every "DiaCraft <version>" it says is the workspace's: after `cargo xtask version set` this fails until the page is read again and its version moved (`docs/releasing.md`).
+#[test]
+fn the_features_page_says_the_workspace_version() {
+    let version = workspace_version();
+    let page = std::fs::read_to_string(xtask::root().join("site/features.html")).unwrap();
+    let block = format!("<dt>Release</dt><dd><b>{version}</b></dd>");
+    assert_eq!(page.matches("<dt>Release</dt>").count(), 1, "site/features.html has one release in its title block");
+    assert!(page.contains(&block), "site/features.html does not hold `{block}`: read the page again for {version} and move its version");
+    let said = said_versions(&page);
+    assert!(!said.is_empty(), "the features page names its release in its words (\"DiaCraft {version}\")");
+    assert!(said.iter().all(|v| *v == version), "site/features.html says DiaCraft {said:?}, the workspace says {version}");
+    assert_eq!(said_versions("DiaCraft 0.1.0 and DiaCraft 0.2 and DiaCraft. And DiaCraft 1.2.3."), ["0.1.0", "1.2.3"], "the check sees a version");
+}
+
+/// The versions `x.y.z` that follow "DiaCraft " in `text`.
+fn said_versions(text: &str) -> Vec<String> {
+    text.match_indices("DiaCraft ")
+        .filter_map(|(at, key)| {
+            let rest = &text[at + key.len()..];
+            let word: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            let word = word.trim_end_matches('.');
+            (word.split('.').count() == 3 && word.split('.').all(|part| !part.is_empty())).then(|| word.to_owned())
+        })
+        .collect()
+}

@@ -1,7 +1,8 @@
 //! Text edited in place: an egui text box over the shape, holding the shape's characters, sent with `shape.set_text` when the edit ends.
 //!
 //! Double-click, F2, or typing on a selected shape opens the box with all of the shape's characters selected (so what is typed replaces
-//! them). **Escape, Ctrl+Enter, or a click away ends the edit and keeps what was typed** ("Esc or a click away ends
+//! them). **On a group whose `IsTextEditTarget` is FALSE the box opens over the member on top of its stack** (`group_text.rs`), and
+//! the group stays selected. **Escape, Ctrl+Enter, or a click away ends the edit and keeps what was typed** ("Esc or a click away ends
 //! it"); Enter is a line break. Nothing is sent if the text did not change, so an edit that changes nothing is no undo step.
 //!
 //! **The box edits the characters and never the fields** (of the M3 review). A shape's text is kept in parts: the characters, the
@@ -24,7 +25,7 @@ use serde_json::json;
 
 use super::geom::{self, P};
 use super::gesture::Gesture;
-use super::scene::Item;
+use super::group_text;
 use super::{Cx, LEAST_SIZE, Tool, inch};
 use crate::app::DiacraftApp;
 use crate::theme::{self, Tokens, size};
@@ -54,8 +55,13 @@ const BOX_WIDTH: f64 = 1.0;
 
 /// A text box open over a shape, or over the place a new box will be.
 pub(super) struct TextEditing {
-    /// The shape being edited; 0 while the box is a new one (`new`): no shape has the `ID` 0.
+    /// The shape being edited; 0 while the box is a new one (`new`): no shape has the `ID` 0. **It may be a member of the shape that is selected**: typing
+    /// on a group goes to the member that holds its text (`group_text.rs`).
     pub id: u32,
+    /// Where the shape is on the page, lower left and upper right in inches, **when the scene does not read it**: a member of a group set to group
+    /// only has no place in the scene, and typing on such a group still reaches its member, so the box is drawn from the place the
+    /// engine finds for it. `None` for a shape the scene reads (its place is then the scene's, which follows every edit).
+    unread: Option<(P, P)>,
     /// The box the Text tool is making. **Nothing is sent until the edit ends with characters in it** (`text.box` goes with its text), so that no
     /// empty box is left on the page to delete.
     pub new: Option<NewBox>,
@@ -81,6 +87,11 @@ impl TextEditing {
     /// Whether the characters in the box differ from the ones the shape had when the box opened.
     pub(super) fn changed(&self) -> bool {
         self.text != self.original
+    }
+
+    /// Whether the shape is one the scene does not read (`unread`) and the document still has: its box stays open though the scene lacks it.
+    pub(super) fn is_unread_member_still_there(&self, doc: Option<&Document>) -> bool {
+        self.unread.is_some() && doc.is_some_and(|doc| doc.find_shape(Owner::Page(self.page), self.id).is_some())
     }
 }
 
@@ -139,9 +150,8 @@ fn storable(text: &str) -> String {
     text.chars().filter(|c| !(c.is_control() && !matches!(c, '\n' | '\t')) && !matches!(c, '\u{fffe}' | '\u{ffff}')).collect()
 }
 
-/// Where the box goes on the screen for `item`: over the shape, at least [`LEAST_WIDTH`] wide.
-fn box_centre_and_width(cx: &Cx, item: &Item) -> (Pos2, f32) {
-    let (lo, hi) = item.bounds;
+/// Where the box goes on the screen for a shape whose box on the page is `lo` to `hi`: over the shape, at least [`LEAST_WIDTH`] wide.
+fn box_centre_and_width(cx: &Cx, (lo, hi): (P, P)) -> (Pos2, f32) {
     let (a, b) = (cx.screen_at((lo.0, hi.1)), cx.screen_at((hi.0, lo.1)));
     let rect = Rect::from_two_pos(a, b);
     (rect.center(), rect.width().clamp(LEAST_WIDTH, MOST_WIDTH))
@@ -190,6 +200,7 @@ impl DiacraftApp {
         self.set_selection(page, Vec::new());
         self.ui.edit.text = Some(TextEditing {
             id: 0,
+            unread: None,
             new: Some(new),
             page,
             original: String::new(),
@@ -237,10 +248,16 @@ impl DiacraftApp {
     }
 
     /// Opens the text box over the shape under `over`, if the pointer is on one. A double-click.
+    ///
+    /// **A member that is selected on its own, with the pointer on it, is the shape double clicked**, and not the group it is in: its text is edited, whatever
+    /// the group's `IsTextEditTarget` says. (A group selected is not a member: the second click of the pair did not go in to the member under it,
+    /// `gesture.rs`, and the group sends the text where its cell says, `start_text`.)
     pub(super) fn edit_text_at(&mut self, cx: &Cx, over: Option<Pos2>) {
         let Some(at) = over else { return };
         self.ensure_scene(cx.page);
-        let hit = self.ui.edit.scene.as_ref().and_then(|s| s.hit(cx.page_at(at), cx.reach(super::HIT_REACH))).map(|i| i.id);
+        let (p, reach) = (cx.page_at(at), cx.reach(super::HIT_REACH));
+        let member = self.single().filter(|item| item.parent.is_some() && item.hit(p, reach)).map(|item| item.id);
+        let hit = member.or_else(|| self.ui.edit.scene.as_ref().and_then(|s| s.hit(p, reach)).map(|i| i.id));
         if let Some(id) = hit {
             self.select(&[id]);
             self.start_text(cx.page, id);
@@ -257,8 +274,11 @@ impl DiacraftApp {
         }
     }
 
+    /// Opens the box where text typed on shape `id` goes: the shape itself, or for a group whose `IsTextEditTarget` is FALSE the member on top of its stack,
+    /// the last in document order (`group_text.rs`). The selection stays as it is.
     pub(super) fn start_text(&mut self, page: u32, id: u32) {
-        self.open_text_box(page, id, None);
+        let target = self.session.document().map_or(id, |doc| group_text::text_target(doc, page, id));
+        self.open_text_box(page, target, None);
     }
 
     /// Opens the box over shape `id` with `initial` selected, or all of its characters.
@@ -267,8 +287,10 @@ impl DiacraftApp {
         self.commit_pending_text();
         let Some(view) = self.session.document().and_then(|doc| text_view(doc, page, id)) else { return };
         self.ui.edit.gesture = None;
+        let unread = self.place_not_in_scene(page, id);
         self.ui.edit.text = Some(TextEditing {
             id,
+            unread,
             page,
             original: view.chars.clone(),
             text: view.chars,
@@ -279,6 +301,20 @@ impl DiacraftApp {
             selection: None,
             initial,
         });
+    }
+
+    /// Where shape `id` is on the page, in inches, when the scene does not read it (a member of a group set to group only): the corners the
+    /// engine gives it, carried up through its groups. `None` when the scene reads it, and for a shape the engine cannot place either (the box then ends at
+    /// once, as it does for any shape that is not there).
+    fn place_not_in_scene(&mut self, page: u32, id: u32) -> Option<(P, P)> {
+        self.ensure_scene(page);
+        if self.ui.edit.scene.as_ref().is_some_and(|scene| scene.get(id).is_some()) {
+            return None;
+        }
+        let doc = self.session.document()?;
+        let per_inch = diacraft_engine::draw::units_per_inch(doc, page);
+        let corners = diacraft_engine::draw::shape_corners(doc, page, id)?.map(|(x, y)| (x / per_inch, y / per_inch));
+        geom::bounds_of(&corners).filter(|(lo, hi)| [lo.0, lo.1, hi.0, hi.1].iter().all(|n| n.is_finite()))
     }
 
     /// The box that is open, if one is, and the characters selected in it: what formatting needs before it sends what was typed.
@@ -307,6 +343,12 @@ impl DiacraftApp {
     pub(crate) fn reopen_text(&mut self, page: u32, id: u32, selected: Option<(usize, usize)>) {
         let n = self.text_chars(page, id).unwrap_or(0);
         self.open_text_box(page, id, selected.map(|(from, to)| (from.min(n), to.min(n))));
+    }
+
+    /// The shape the open text box edits, if one is open over a shape (a new text box has none until its edit ends). **It may be a member of the
+    /// shape that is selected**: typing on a group reaches the member that holds its text.
+    pub fn edited_text_shape(&self) -> Option<u32> {
+        self.ui.edit.text.as_ref().filter(|t| t.new.is_none()).map(|t| t.id)
     }
 
     /// The characters in the text box, if one is open.
@@ -344,15 +386,15 @@ impl DiacraftApp {
     /// One frame of the open text box: ends the edit on Escape, Ctrl+Enter or a press away from the box, and draws it.
     pub(super) fn text_box_input(&mut self, ctx: &Context, cx: &Cx, pressed: bool, _over: Option<Pos2>) {
         let Some(editing) = &self.ui.edit.text else { return };
-        let (id, previous, new) = (editing.id, editing.rect, editing.new);
+        let (id, unread, previous, new) = (editing.id, editing.unread, editing.rect, editing.new);
         let place = match new {
             Some(new) => new_box_place(cx, new),
             None => {
-                let Some(item) = self.ui.edit.scene.as_ref().and_then(|s| s.get(id)).cloned() else {
+                let Some(bounds) = self.ui.edit.scene.as_ref().and_then(|s| s.get(id)).map(|item| item.bounds).or(unread) else {
                     self.ui.edit.text = None;
                     return;
                 };
-                box_centre_and_width(cx, &item)
+                box_centre_and_width(cx, bounds)
             }
         };
         let escape = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));

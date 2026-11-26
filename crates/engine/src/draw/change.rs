@@ -389,7 +389,13 @@ fn put_cell(cells: &mut BTreeMap<CellName, Cell>, name: CellName, cell: Cell) ->
 /// old master had supplied, with the sections that stay. **Bounded before it is copied**: a sheet that already holds more than a
 /// sheet may is refused at once, the cells are copied up to the most a sheet holds and no further, the sections that stay and the new instance's are found by a set
 /// of their keys (one look for each, not a search of the list for each), and the result is checked against every limit of a sheet (`Sheet::check_limits`).
-fn merged_sheet(old: &Old, base: Option<&Sheet>, new_numbers: &HashMap<&'static str, f64>, locks: Locks) -> Result<Sheet, Problem> {
+fn merged_sheet(
+    old: &Old,
+    base: Option<&Sheet>,
+    new_numbers: &HashMap<&'static str, f64>,
+    locks: Locks,
+    keeps: (bool, bool),
+) -> Result<Sheet, Problem> {
     let held = &old.shape.sheet;
     let too_many = |what: &str, n: usize, most: usize| {
         Problem::failed(format!("a sheet of the shape or of the new master holds {n} {what}, more than the {most} a sheet may hold"))
@@ -417,6 +423,10 @@ fn merged_sheet(old: &Old, base: Option<&Sheet>, new_numbers: &HashMap<&'static 
         put_cell(&mut cells, name.clone(), cell.clone())?;
     }
     for (name, cell) in &old.frozen {
+        // A size the new master keeps as a formula under its lock (a group of compartments is as tall as its text) is the master's, whatever the old shape's was.
+        if (*name == "Width" && keeps.0) || (*name == "Height" && keeps.1) {
+            continue;
+        }
         // A frame cell the old master supplied is written when the new master would give another result; the pin and the ends of a line always.
         let always = old.one_d || matches!(*name, "PinX" | "PinY");
         let differs = number_of(cell).zip(new_numbers.get(name)).is_none_or(|(was, now)| (was - now).abs() > EPS);
@@ -473,8 +483,14 @@ fn merged_sheet(old: &Old, base: Option<&Sheet>, new_numbers: &HashMap<&'static 
 }
 
 /// The shape as it is once it is changed: the old shape, with the new master, members and `Type`, and the merged sheet.
-fn merged_shape(old: &Old, id: u32, new: &NewMaster, dropped: Option<&Shape>, new_numbers: &HashMap<&'static str, f64>) -> Result<Shape, Problem> {
-    let sheet = merged_sheet(old, dropped.map(|d| &*d.sheet), new_numbers, new.locks)?;
+fn merged_shape(
+    old: &Old,
+    id: u32,
+    new: &NewMaster,
+    dropped: Option<&Shape>,
+    (new_numbers, keeps): (&HashMap<&'static str, f64>, (bool, bool)),
+) -> Result<Shape, Problem> {
+    let sheet = merged_sheet(old, dropped.map(|d| &*d.sheet), new_numbers, new.locks, keeps)?;
     let mut shape = (*old.shape).clone();
     shape.master = Some(new.id);
     shape.master_shape = None;
@@ -509,6 +525,8 @@ struct Dropped {
     numbers: HashMap<&'static str, f64>,
     /// The highest `ID` the drop gave (the instance's, or its last member's).
     highest: u32,
+    /// Which sizes the new master keeps as a formula under a lock (width, height: `shapes::keeps`).
+    keeps: (bool, bool),
 }
 
 /// Drops an instance of the master on the page, as `shape.drop` does, and takes it off the page again.
@@ -516,7 +534,9 @@ fn drop_instance(doc: &mut Document, page: u32, to: &Replacement<'_>, above: u32
     let (id, highest) = match to {
         Replacement::Builtin(spec) => {
             let info = super::drop_shape_above(doc, page, spec, 0.0, 0.0, above)?;
-            (info.id, info.id)
+            // The members of a group master's instance have `ID`s above its own: the highest on the page is the last of them.
+            let highest = super::page_stats(doc, page).map_or(info.id, |(highest, _)| highest.max(info.id));
+            (info.id, highest)
         }
         Replacement::Opened { stencil, entry } => {
             let done = stencil::drop_opened(doc, page, stencil, entry, 0.0, 0.0, above)?;
@@ -529,12 +549,13 @@ fn drop_instance(doc: &mut Document, page: u32, to: &Replacement<'_>, above: u32
     let place = list.iter().rposition(|s| s.id == id).ok_or_else(|| Problem::failed("the new shape went away"))?;
     let at = ShapeRef::top(Owner::Page(page), u32::try_from(place).map_err(|_| Problem::failed("a page holds too many shapes"))?);
     let numbers = numbers_of(doc, &at);
+    let keeps = super::shapes::kept_sizes(&Reader::new(doc), &SheetRef::Shape(at.clone()));
     let list = &mut page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes;
     let shape = list.remove(place).ok_or_else(|| Problem::failed("the new shape went away"))?;
     // The members' formulas name the new instance by its `ID` (a member's pin and size are formulas of the group's: `tie_to_group`); the shape that takes them keeps its own.
     let mut shape = Arc::unwrap_or_clone(shape);
     rehome(&mut shape, &HashMap::from([(id, takes_the_id_of)]), 0);
-    Ok(Dropped { shape: Arc::new(shape), numbers, highest })
+    Ok(Dropped { shape: Arc::new(shape), numbers, highest, keeps })
 }
 
 /// How many shapes are below `shape`, counted no further than `cap + 1`: iterative, and no deeper than the model allows.
@@ -795,9 +816,9 @@ pub fn change_shapes(doc: &mut Document, page: u32, ids: &[u32], to: &Replacemen
             Verdict::Change => {
                 let old = gather(doc, &at, id)?;
                 let made = if old.one_d { None } else { Some(drop_instance(doc, page, to, above, id)?) };
-                let (dropped, numbers, highest) = match made {
-                    Some(d) => (Some(d.shape), d.numbers, d.highest),
-                    None => (None, HashMap::new(), 0),
+                let (dropped, numbers, highest, keeps) = match made {
+                    Some(d) => (Some(d.shape), d.numbers, d.highest, d.keeps),
+                    None => (None, HashMap::new(), 0, (false, false)),
                 };
                 report.highest_id = report.highest_id.max(highest);
                 // A file holds no shapes nested deeper than a group may make them (`MAX_GROUP_DEPTH`): the new members go below the shape, which is `at.path.len()` levels down.
@@ -823,7 +844,7 @@ pub fn change_shapes(doc: &mut Document, page: u32, ids: &[u32], to: &Replacemen
                         )));
                     }
                 }
-                let merged = merged_shape(&old, id, &new, dropped.as_deref(), &numbers)?;
+                let merged = merged_shape(&old, id, &new, dropped.as_deref(), (&numbers, keeps))?;
                 *shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))? = merged;
                 report.changed.push(id);
                 done.push(Done { id, at, old });
@@ -893,7 +914,7 @@ mod tests {
     }
 
     fn merge(old: &Old, base: &Sheet) -> Result<Sheet, Problem> {
-        merged_sheet(old, Some(base), &HashMap::new(), Locks::default())
+        merged_sheet(old, Some(base), &HashMap::new(), Locks::default(), (false, false))
     }
 
     /// A shape and a new instance that hold more sections together than a sheet may are refused in words, and at the limit they are not.

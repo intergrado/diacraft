@@ -6,9 +6,49 @@
 //! general knowledge of flowcharts (ISO 5807) and not copied from any application's stencil. A master with no entry has no words beyond its name.
 //!
 //! The words are not written into a drawing: a master that is dropped brings the cells it is made of, and the search reads the stencils, not the drawing.
+//!
+//! **The second batch's masters have a table each**: the id of a master of the thirteen new stencils is `<stencil id>.<name>`, and [`of`] asks the table of the family whose id is
+//! the part before the dot, so that each family task edits its own file only. An id with another prefix is looked up in the table below.
+
+use super::{bpmn, c4, chen, cloud, computers, crows_foot, network, uml_activity, uml_class, uml_component, uml_sequence, uml_state, uml_usecase};
+
+/// A family's table: the master's id → its search words.
+type Table = fn(&str) -> &'static str;
+
+/// The families of the second batch, by the stencil id their masters' ids begin with.
+const FAMILIES: [(&str, Table); 13] = [
+    ("uml-class", uml_class::keywords),
+    ("uml-usecase", uml_usecase::keywords),
+    ("uml-sequence", uml_sequence::keywords),
+    ("uml-activity", uml_activity::keywords),
+    ("uml-state", uml_state::keywords),
+    ("uml-component", uml_component::keywords),
+    ("bpmn", bpmn::keywords),
+    ("c4", c4::keywords),
+    ("network", network::keywords),
+    ("computers", computers::keywords),
+    ("cloud", cloud::keywords),
+    ("crows-foot", crows_foot::keywords),
+    ("chen", chen::keywords),
+];
 
 /// The search words of the built-in master with this id, space separated, or `""`.
 pub(super) fn of(master_id: &str) -> &'static str {
+    of_in(&FAMILIES, master_id)
+}
+
+/// [`of`] over the families given: an id whose part before the first `.` names one is answered by that family's table, and any other by the first seven stencils' table.
+fn of_in(families: &[(&str, Table)], master_id: &str) -> &'static str {
+    if let Some((prefix, _)) = master_id.split_once('.')
+        && let Some((_, table)) = families.iter().find(|(id, _)| *id == prefix)
+    {
+        return table(master_id);
+    }
+    first_seven(master_id)
+}
+
+/// The words of the masters of the first seven stencils.
+fn first_seven(master_id: &str) -> &'static str {
     match master_id {
         // Basic Shapes.
         "rectangle" => "box rectangular block",
@@ -96,5 +136,30 @@ mod tests {
     #[test]
     fn a_master_the_table_does_not_know_has_none() {
         assert_eq!(of("no-such-master"), "");
+    }
+
+    #[test]
+    fn keywords_of_asks_the_family_table_for_an_id_with_its_prefix() {
+        let families: [(&str, Table); 2] = [("uml-class", |_| "from the uml table"), ("c4", |id| if id == "c4.person" { "human user" } else { "" })];
+        assert_eq!(of_in(&families, "uml-class.class"), "from the uml table");
+        assert_eq!(of_in(&families, "c4.person"), "human user");
+        assert_eq!(of_in(&families, "c4.other"), "", "the family's table answers, whatever it says");
+        // The prefix is the whole part before the first dot: another stencil's name that begins with it is not the family.
+        assert_eq!(of_in(&families, "uml-class2.class"), "");
+        assert_eq!(of_in(&families, "uml.class"), "");
+        // An id with no family is looked up in the table of the first seven stencils.
+        assert_eq!(of_in(&families, "rectangle"), "box rectangular block");
+        assert_eq!(of_in(&families, "gane-sarson.process"), "transform function bubble");
+        assert_eq!(of_in(&[], "uml-class.class"), "");
+        assert_eq!(of_in(&families, ""), "");
+    }
+
+    #[test]
+    fn every_family_of_the_second_batch_is_a_stencil_of_the_catalogue() {
+        let registered: Vec<&str> = crate::stencil::registered().iter().map(|s| s.id).collect();
+        for (id, _) in FAMILIES {
+            assert!(registered.contains(&id), "{id} is no registered stencil");
+        }
+        assert_eq!(FAMILIES.len(), registered.len() - 7, "the thirteen new stencils each have a table");
     }
 }

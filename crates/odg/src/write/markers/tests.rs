@@ -82,8 +82,10 @@ fn the_width_is_the_spread_times_the_class_base_plus_the_weight() {
     assert_eq!(plan(4, 100, 0.75), Err(WORDS_SIZE));
     assert_eq!(plan(46, 2, 0.75), Err(WORDS_NUMBER));
     assert_eq!(plan(0, 2, 0.75), Err(WORDS_NUMBER));
-    // 254 is the custom end: refused in words of its own.
-    assert!(plan(254, 2, 0.75).unwrap_err().contains("custom line end"));
+    // 254 is DiaCraft's filled diamond, a marker of its own and no number: it has a plan (the next test), and a number past it has none.
+    assert!(plan(254, 2, 0.75).is_ok());
+    assert_eq!(plan(255, 2, 0.75), Err(WORDS_NUMBER));
+    assert_eq!(plan(253, 2, 0.75), Err(WORDS_NUMBER));
 }
 
 #[test]
@@ -236,5 +238,56 @@ fn a_weight_past_a_million_points_is_refused_and_the_cap_itself_is_written() {
     // The words of the other refusals come first: a class the specification gives no base for is its own refusal, whatever the weight.
     assert_eq!(plan(16, 7, 1e300), Err(WORDS_SIZE));
     assert_eq!(plan(46, 2, 1e300), Err(WORDS_NUMBER));
-    assert!(plan(254, 2, 1e300).unwrap_err().contains("custom line end"));
+    assert_eq!(plan(254, 2, 1e300), Err(WORDS_WEIGHT));
+}
+
+/// DiaCraft's filled diamond (the custom end of UML composition) is a `draw:marker` of its own, `DiaCraft_20_end_20_254`: one path in a box of
+/// 1000 by 2000 with its tip at the middle of the top side (where a program that draws a marker puts the line's end) and its back at the bottom, so that it is twice as long as it is wide;
+/// as wide as the box of the master is tall times 10, which is the weight times the unit at the class over the unit at Medium, times 10 (7.5 pt at 0.75 pt and class 2,
+/// says: 15 points long and 7.5 across). Its name is read back as the same marker, it has no band and is not centred, and the check of the bytes made knows it.
+#[test]
+fn the_filled_diamond_is_written_as_a_draw_marker_and_reads_back() {
+    let diamond = key(254, 0);
+    assert_eq!((diamond.name().as_str(), diamond.display_name().as_str()), ("DiaCraft_20_end_20_254", "DiaCraft end 254"));
+    assert_eq!(key_of(&diamond.name()), Some(diamond), "the name reads back as the diamond");
+    assert_eq!(
+        Def::of_name(&diamond.name()),
+        Some(def(254, 0)),
+        "and is a definition of DiaCraft's own, which upkeep takes out when no style names it"
+    );
+    // No band, no centre, and no other spelling is the diamond: a band class on it is no marker of DiaCraft's.
+    for bad in
+        ["DiaCraft_20_end_20_254_20_t23", "DiaCraft_20_end_20_0254", "DiaCraft_20_end_20_253", "DiaCraft_20_end_20_255", "DiaCraft_20_end_20_+254"]
+    {
+        assert_eq!(key_of(bad), None, "{bad}");
+    }
+    let close = |a: f64, b: f64| assert!((a - b).abs() < 1e-9, "{a} against {b}");
+    // The width is 10 times the box's height, which is the weight times S(class) over S(2): the project rule for the other classes.
+    let at = |class: u32, weight: f64| plan(254, class, weight).unwrap();
+    assert_eq!(at(2, 0.75).key, diamond);
+    close(at(2, 0.75).width, 7.5);
+    close(at(2, 1.5).width, 15.0);
+    close(at(4, 0.75).width, 7.5 * (3.96 + 0.75) / (2.52 + 0.75));
+    close(at(0, 0.25).width, 2.5 * (1.44 + 0.25) / (2.52 + 0.25));
+    close(at(6, 2.0).width, 20.0 * (18.0 + 2.0) / (2.52 + 2.0));
+    // A weight of 0 is a box of no height: no width, and no refusal, so that a weight set to 0 on a line with the diamond saves.
+    close(at(2, 0.0).width, 0.0);
+    // The same refusals as any marker: a class with no base, a weight past a million points.
+    assert_eq!(plan(254, 7, 0.75), Err(WORDS_SIZE));
+    assert_eq!(plan(254, 2, MOST_WEIGHT_PT.next_up()), Err(WORDS_WEIGHT));
+    assert_eq!(plan(254, 2, f64::NAN), Err(WORDS_WEIGHT));
+    // The art: the diamond, its tip at the middle of the top side.
+    let mut steps = 0;
+    let made = art(diamond, &mut steps).unwrap();
+    assert_eq!((made.view_box.as_str(), made.d.as_str(), made.centred), ("0 0 1000 2000", "M 500 0 L 1000 1000 L 500 2000 L 0 1000 Z", false));
+    assert_eq!(
+        element(diamond, &made, "draw", "svg", ""),
+        "<draw:marker draw:name=\"DiaCraft_20_end_20_254\" draw:display-name=\"DiaCraft end 254\" svg:viewBox=\"0 0 1000 2000\" svg:d=\"M 500 0 L 1000 1000 L 500 2000 L 0 1000 Z\"/>"
+    );
+    // The read-back of a part that holds it: as written, and the check refuses any other path.
+    let wanted: BTreeSet<Def> = [def(254, 0)].into_iter().collect();
+    let part = styles_with(&element(diamond, &made, "draw", "svg", ""));
+    assert!(check(&part, &wanted, &wanted, &BTreeSet::new(), &Limits::default(), &mut WriteWork::default()).is_ok());
+    let other = styles_with(&element(diamond, &made, "draw", "svg", "").replace("L 1000 1000", "L 900 900"));
+    assert!(check(&other, &wanted, &wanted, &BTreeSet::new(), &Limits::default(), &mut WriteWork::default()).is_err());
 }

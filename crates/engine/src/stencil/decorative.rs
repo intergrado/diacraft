@@ -1,7 +1,7 @@
 //! Original decorative geometry from the bounded recipes.
 //! Star vertices alternate the stated radii at equal angular steps. The heart is a fixed sampling
 //! of six original cubic curves; it is one simple contour, with no stroke across either lobe.
-use super::{MasterSpec, Outline, pt};
+use super::{MasterSpec, More, Outline, pt};
 pub(super) static MASTERS: [MasterSpec; 8] = [
     MasterSpec {
         id: "decorative.star-5",
@@ -9,6 +9,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.0,
         height: 1.0,
         identity: (4, 1),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.5, 1.0),
             (0.370687244496, 0.677983738762),
@@ -34,6 +35,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.0,
         height: 1.0,
         identity: (4, 2),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.5, 1.0),
             (0.375, 0.716506350946),
@@ -56,6 +58,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.0,
         height: 1.0,
         identity: (4, 3),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.5, 1.0),
             (0.392848638938, 0.758686269103),
@@ -82,6 +85,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.1,
         height: 1.1,
         identity: (4, 4),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.5, 1.0),
             (0.39906057241, 0.876711072253),
@@ -116,6 +120,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.0,
         height: 0.95,
         identity: (4, 5),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.5, 0.82),
             (0.4695703125, 0.87080078125),
@@ -174,6 +179,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 0.7,
         height: 1.2,
         identity: (4, 6),
+        more: &More::NONE,
         outline: Outline::Polygon(&[(0.58, 1.0), (0.08, 0.44), (0.4, 0.44), (0.28, 0.0), (0.92, 0.64), (0.6, 0.64)]),
         points: &[pt(0.58, 1.0, 0.0, 1.0), pt(0.08, 0.44, -1.0, 0.0), pt(0.28, 0.0, 0.0, -1.0), pt(0.92, 0.64, 1.0, 0.0)],
     },
@@ -183,6 +189,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.0,
         height: 1.0,
         identity: (4, 7),
+        more: &More::NONE,
         outline: Outline::Polygon(&[
             (0.34, 1.0),
             (0.66, 1.0),
@@ -205,6 +212,7 @@ pub(super) static MASTERS: [MasterSpec; 8] = [
         width: 1.6,
         height: 0.7,
         identity: (4, 8),
+        more: &More::NONE,
         outline: Outline::Polygon(&[(0.0, 1.0), (1.0, 1.0), (0.86, 0.5), (1.0, 0.0), (0.0, 0.0), (0.14, 0.5)]),
         points: &[pt(0.0, 1.0, 0.0, 1.0), pt(0.0, 1.0, -1.0, 0.0), pt(1.0, 0.0, 0.0, -1.0), pt(1.0, 1.0, 1.0, 0.0)],
     },

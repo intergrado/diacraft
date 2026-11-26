@@ -399,7 +399,8 @@ fn a_connector_of_the_file_follows_a_shape_that_is_moved_and_saves_again_as_no_e
 fn each_master_of_the_built_in_stencils_is_saved_and_the_drop_of_none_warns() {
     let mut count = 0;
     let mut written = Vec::new();
-    for stencil in diacraft_engine::stencil::stencils() {
+    // The seven stencils of the first batches. The second batch's stencils are closed by default and have their own checks (`stencils2_<stencil>.rs`), which report the masters an `.odg` shows other programs as a rectangle.
+    for stencil in diacraft_engine::stencil::stencils().iter().filter(|st| st.default_open) {
         for master in stencil.masters() {
             count += 1;
             let dir = Dir::new();

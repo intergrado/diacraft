@@ -67,7 +67,8 @@ fn a_shape_of_each_stencil_keeps_its_master_link_through_a_save_a_reopen_and_the
     let dir = Dir::new();
     let mut s = open_drawing(&dir, &four());
     let mut dropped = Vec::new();
-    for (n, stencil) in diacraft_engine::stencil::stencils().iter().enumerate() {
+    // The seven stencils of the first batches (the second batch's have their own checks, `stencils2_<stencil>.rs`).
+    for (n, stencil) in diacraft_engine::stencil::stencils().iter().filter(|st| st.default_open).enumerate() {
         let master = stencil.masters().first().unwrap();
         let made = run(&mut s, "shape.drop", json!({ "master": master.id, "stencil": stencil.id, "page": 0, "x": 1.0 + 2.0 * n as f64, "y": 5.0 }));
         dropped.push((format!("{}/{}", stencil.id, master.id), made["id"].as_u64().unwrap()));

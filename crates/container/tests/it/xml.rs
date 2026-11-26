@@ -45,7 +45,7 @@ fn what_is_refused_has_its_class() {
 
 /// The class of what parsing `text` with the external DOCTYPE allowed gives, or `"read"`.
 fn with_doctype(text: &str) -> &'static str {
-    let options = ParseOptions { allow_external_doctype: true };
+    let options = ParseOptions { allow_external_doctype: true, ..ParseOptions::default() };
     match parse_with_options(text.as_bytes(), &XmlLimits::default(), options, &mut Work::default()) {
         Ok(_) => "read",
         Err(e) => e.class(),
@@ -58,8 +58,13 @@ fn a_doctype_of_an_external_id_alone_is_read_only_when_asked_for() {
     // refused as every DTD is.
     let office = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE manifest:manifest PUBLIC \"-//OpenOffice.org//DTD Manifest 1.0//EN\" \"Manifest.dtd\">\n<manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"/>";
     assert_eq!(with_doctype(office), "read");
-    let tree =
-        parse_with_options(office.as_bytes(), &XmlLimits::default(), ParseOptions { allow_external_doctype: true }, &mut Work::default()).unwrap();
+    let tree = parse_with_options(
+        office.as_bytes(),
+        &XmlLimits::default(),
+        ParseOptions { allow_external_doctype: true, ..ParseOptions::default() },
+        &mut Work::default(),
+    )
+    .unwrap();
     assert_eq!(tree.name, "manifest:manifest");
     assert_eq!(parse(office.as_bytes()).unwrap_err().class(), "xml_entity_refused", "off by default");
     assert_eq!(with_doctype("<!DOCTYPE m SYSTEM \"m.dtd\"><m/>"), "read");

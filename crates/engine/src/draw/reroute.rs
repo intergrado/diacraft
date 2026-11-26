@@ -5,7 +5,7 @@
 //! by DiaCraft (it has `User.DiaCraftRoute`) is also routed when the command is about it (`connector.add`, `connector.reconnect`), whatever moved.
 //! The rows a reroute writes replace the connector's `Geometry` section 0 rows and nothing else of the connector but its label (`label.rs`).
 //!
-//! **When a route is fixed** (the connector's ends still follow what they are glued to, by their formulas; only the route is left):
+//! **When a route is fixed** (the connector's ends still follow what they are glued to, by their formulas, and the route follows its ends square, below):
 //!
 //! * the page's `DynamicsOff` is not 0, for a connector that follows its shape (while it is 1, edits on the page
 //!   reroute nothing); a command about the connector itself still routes it;
@@ -13,7 +13,10 @@
 //!   6 (they mark whole-shape glue in files) and any other number (the last row). **2, never,** keeps the route it has and moves only the
 //!   ends. **1, as needed, and 3, on crossover,** do the same, **except that a leg that would pass through a shape the connector is glued to makes a new
 //!   route** (the second cause of 1, a placeable shape coming to cross a leg, is not built: nothing in the engine knows a shape as an obstacle
-//!   but the two the connector stands on). A route made so keeps its setting: 3 is a setting and the mark of a hand edit alike;
+//!   but the two the connector stands on). A route made so keeps its setting: 3 is a setting and the mark of a hand edit alike. **A route that is not made
+//!   again follows its ends square ([`super::hand::follow_ends`])**: its interior corners stay where they are on the
+//!   page, the corner next to an end that moved goes across the end's leg, and the rows are written in the connector's new frame. The follow is a try, counted as the crossing
+//!   test is, and only for a connector whose ends moved ([`ToRoute::was`]); the route is read from the document the command found, within [`MAX_CROSSING_ROWS`] rows;
 //! * the connector is on a locked layer (a shape on a locked layer is not moved or edited, and the specifications say
 //!   nothing of its route): it is routed by nothing, not even a forced reset, and its line jumps are not made again (`jumps.rs`);
 //! * for a connector of a file, its effective route style is centre to centre (16), which does not route (a straight one
@@ -40,7 +43,7 @@ use diacraft_doc::{CellAddr, CellEdit, Document, ShapeRef, SheetRef, Value};
 use super::Problem;
 use super::connectors::{EndFacts, TO_PART_BASE};
 use super::glue::{WHOLE_SHAPE, exit_at_among};
-use super::hand::{MAX_HAND_POINTS, base_route_within};
+use super::hand::{Followed, MAX_HAND_POINTS, base_route_within, follow_ends};
 use super::read::{GluedPoints, Reader};
 use super::route::{Dir, P};
 use super::route_clear;
@@ -231,10 +234,34 @@ impl EndIndex {
         let Some(at) = located.get(&id) else { return false };
         let sheet = SheetRef::Shape(at.clone());
         let Ok(Some(points)) = base_route_within(reader, &sheet, &reader.pose(&sheet), MAX_CROSSING_ROWS) else { return false };
+        self.crosses_route(reader, located, at, id, &points)
+    }
+
+    /// [`EndIndex::crosses`] for the route `points` (corners on the page, begin first) instead of the rows the connector holds: the route a fixed connector is followed to
+    /// Whose ends are where the recalculation put them, is tested before its rows are written.
+    pub(crate) fn crosses_route(&mut self, reader: &Reader<'_>, located: &Located, at: &ShapeRef, id: u32, points: &[P]) -> bool {
+        let sheet = SheetRef::Shape(at.clone());
         let (begin, end) =
             ((reader.number(&sheet, "BeginX"), reader.number(&sheet, "BeginY")), (reader.number(&sheet, "EndX"), reader.number(&sheet, "EndY")));
         let (from, to) = self.end_facts(reader, located, at, id, begin, end);
-        route_clear::crosses(&points, begin, from.dir, end, to.dir, from.quad.as_ref(), to.quad.as_ref())
+        route_clear::crosses(points, begin, from.dir, end, to.dir, from.quad.as_ref(), to.quad.as_ref())
+    }
+
+    /// What the try of connector `next` comes to. `old` reads the document as the command found it. A connector to route again (neither tested nor
+    /// followed) is routed. A fixed route whose ends moved is **followed square**, unless it is set to reroute as needed or on crossover and the route it is followed to is folded
+    /// or has a leg through a shape the connector is glued to: it is then routed again by its style, keeping its setting. One that cannot be followed (no end moved, both moved by
+    /// one vector, a route that was not read) is only tested, as it was before a change, if it is set to be.
+    pub(crate) fn fate(&mut self, reader: &Reader<'_>, located: &Located, old: &Reader<'_>, next: &ToRoute) -> Fate {
+        let Some(at) = located.get(&next.id) else { return Fate::Stays };
+        if !next.check && next.was.is_none() {
+            return Fate::Route;
+        }
+        match next.was.as_ref().and_then(|was| follow(reader, old, was, at)) {
+            Some(followed) if next.check && (followed.folded || self.crosses_route(reader, located, at, next.id, &followed.points)) => Fate::Route,
+            Some(followed) => Fate::Square(followed.points),
+            None if next.check && self.crosses(reader, located, next.id) => Fate::Route,
+            None => Fate::Stays,
+        }
     }
 
     /// What a route needs to know of the two ends of connector `id` (at `connector`), whose begin is at `begin` and end at `end`: the way each leaves and the box of the
@@ -293,13 +320,49 @@ fn glued_connectors(doc: &Document, page: u32) -> BTreeSet<u32> {
 }
 
 /// A connector [`connectors_to_route`] hands on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ToRoute {
     pub id: u32,
     /// A fixed route set to reroute as needed or on crossover: it is routed again only if a leg of it crosses a shape the connector is glued to
     /// ([`EndIndex::crosses`]), and then it keeps its setting.
     pub check: bool,
+    /// A fixed route of a connector with a glued end **whose ends moved**: where the connector was in the document the command found. It is followed square, its interior corners
+    /// where they were on the page ([`EndIndex::fate`]), and it is a try, as the crossing test is. A route whose ends did not move is no try.
+    pub was: Option<ShapeRef>,
 }
+
+/// What the try of a connector comes to ([`EndIndex::fate`]).
+#[derive(Debug, PartialEq)]
+pub(crate) enum Fate {
+    /// Its rows stay as they are.
+    Stays,
+    /// Its route is followed square: these are its corners on the page, which are written in the connector's frame (`connectors::plan_squared`).
+    Square(Vec<P>),
+    /// A new route by the connector's style (rules 1 to 7).
+    Route,
+}
+
+/// The route connector `at` had in `old` (the document as the command found it, where it was at `was`), **followed square** to where its ends are now: `None`
+/// when both ends moved by one vector (the route goes with them, as its rows in the connector's frame already do), when the rows the connector holds now already give the
+/// followed route (a route of one leg whose last row is `Width*1`, as a file's is: its rows run from the begin to the end however they move, and its formulas stay as they are) and
+/// when the route it had is not a path of at most [`MAX_HAND_POINTS`] points read from at most [`MAX_CROSSING_ROWS`] rows (unread: a curve, a route of more).
+fn follow(reader: &Reader<'_>, old: &Reader<'_>, was: &ShapeRef, at: &ShapeRef) -> Option<Followed> {
+    let (sheet, old_sheet) = (SheetRef::Shape(at.clone()), SheetRef::Shape(was.clone()));
+    let Ok(Some(route)) = base_route_within(old, &old_sheet, &old.pose(&old_sheet), MAX_CROSSING_ROWS) else { return None };
+    let (begin, end) =
+        ((reader.number(&sheet, "BeginX"), reader.number(&sheet, "BeginY")), (reader.number(&sheet, "EndX"), reader.number(&sheet, "EndY")));
+    let followed = follow_ends(&route, begin, end).filter(|followed| !followed.carried)?;
+    // The rows as they are now, in the frame the recalculation gave the connector: if they are the followed route already, nothing is written.
+    let now = base_route_within(reader, &sheet, &reader.pose(&sheet), MAX_CROSSING_ROWS).ok().flatten();
+    let same = now.is_some_and(|now| {
+        now.len() == followed.points.len()
+            && now.iter().zip(&followed.points).all(|(a, b)| (a.0 - b.0).abs() < SAME_ROUTE && (a.1 - b.1).abs() < SAME_ROUTE)
+    });
+    (!same).then_some(followed)
+}
+
+/// How far two routes' corners may differ and be the same route: a millionth of a drawing unit (the rows are written to nine places and carried through the connector's turn).
+const SAME_ROUTE: f64 = 1.0e-6;
 
 /// The connectors to route again after a command, and those to route again if their route crosses a shape they are glued to, in the order of their `ID`s. `reach`
 /// is the shapes the command changed and everything inside them; `touched` and `extra` are the shapes it wrote and the connectors it is about (see
@@ -334,8 +397,9 @@ pub(crate) fn connectors_to_route(
     // Routed for what they are; a connector of a file that is glued and may be routed, if one of its ends moved (`compared`).
     let mut routed: Vec<u32> = Vec::new();
     let mut compared: Vec<(u32, SheetRef)> = Vec::new();
-    // The connectors routed again if a leg would cross a shape they are glued to: they keep the setting that said so.
-    let mut checked: Vec<u32> = Vec::new();
+    // The fixed routes of connectors with a glued end: tested for a leg through a shape they are glued to if set to reroute as needed or on crossover (and then they keep the
+    // setting that said so), and followed square when their ends moved.
+    let mut fixed: Vec<(u32, bool)> = Vec::new();
     // The locked layers of the page, read once, and each connector judged by its own list.
     let mut locks = super::layers::Locks::default();
     for id in &candidates {
@@ -362,13 +426,17 @@ pub(crate) fn connectors_to_route(
             continue;
         }
         let ours = reader.is_routed(&sheet);
-        // A fixed route is left, but a connector of ours that the command is about (a new one) has to have a route at all, and one set to reroute as needed
-        // or on crossover has a new route when a leg of the one it has would pass through a shape it is glued to: it is tested.
+        // A fixed route is not made again, but a connector of ours that the command is about (a new one) has to have a route at all, and one set to reroute as needed
+        // or on crossover has a new route when a leg of the one it has would pass through a shape it is glued to: it is tested. The route it keeps follows
+        // its ends square, but for a connector of a file that is centre to centre, which keeps the rows it has.
         if con_fixed(&reader, &sheet) {
             if ours && subject {
                 routed.push(*id);
-            } else if matches!(setting(&reader, &sheet), Reroute::AsNeeded | Reroute::OnCrossover) && glued.contains(id) {
-                checked.push(*id);
+            } else if glued.contains(id) {
+                let check = matches!(setting(&reader, &sheet), Reroute::AsNeeded | Reroute::OnCrossover);
+                if check || !not_routable(&reader, page, &sheet) {
+                    fixed.push((*id, check));
+                }
             }
             continue;
         }
@@ -378,15 +446,27 @@ pub(crate) fn connectors_to_route(
             compared.push((*id, sheet));
         }
     }
-    if !compared.is_empty() {
-        // The page as the command found it: a page the command added has none of them.
-        let wanted: HashSet<u32> = compared.iter().map(|(id, _)| *id).collect();
+    let mut out: Vec<ToRoute> = routed.into_iter().map(|id| ToRoute { id, check: false, was: None }).collect();
+    if !compared.is_empty() || !fixed.is_empty() {
+        // The page as the command found it: a page the command added has none of them. Where each connector was is found in one walk, for the connectors of a file whose ends
+        // are compared and for the fixed routes alike.
+        let wanted: HashSet<u32> = compared.iter().map(|(id, _)| *id).chain(fixed.iter().map(|(id, _)| *id)).collect();
         let old_paths = if before.page(page).is_some() { scan(before, page, &wanted)?.found } else { HashMap::new() };
         let old = Reader::new(before);
-        routed.extend(compared.into_iter().filter(|(id, sheet)| ends_moved(&reader, sheet, &old, &old_paths, *id)).map(|(id, _)| id));
+        out.extend(compared.into_iter().filter(|(id, sheet)| ends_moved(&reader, sheet, &old, &old_paths, *id)).map(|(id, _)| ToRoute {
+            id,
+            check: false,
+            was: None,
+        }));
+        // A fixed route is followed square when an end moved, and only then is it a try; one set to reroute as needed or on crossover is tested whether or not an end moved.
+        for (id, check) in fixed {
+            let Some(at) = path_of(&id) else { continue };
+            let moved = old_paths.get(&id).filter(|_| ends_moved(&reader, &SheetRef::Shape(at), &old, &old_paths, id)).cloned();
+            if check || moved.is_some() {
+                out.push(ToRoute { id, check, was: moved });
+            }
+        }
     }
-    let mut out: Vec<ToRoute> = routed.into_iter().map(|id| ToRoute { id, check: false }).collect();
-    out.extend(checked.into_iter().map(|id| ToRoute { id, check: true }));
     out.sort_unstable_by_key(|next| next.id);
     Ok(out)
 }

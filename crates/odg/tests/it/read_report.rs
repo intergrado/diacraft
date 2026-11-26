@@ -306,7 +306,28 @@ fn a_style_is_charged_for_itself_and_what_it_states() {
         }
         items + bytes(raw as u64) + bytes((family.len() + name.len()) as u64)
     };
-    let whole = |_name: &str, _extra: &[(&str, &str)], _props: &[(&str, &str)], _tabs: bool| -> u64 { 0 };
+    // **A style no shape names is held whole** (the style of the container `unused`): the figure is the one a kept element costs, from its family and name to the last attribute
+    // of its elements (the style, its graphic properties, its paragraph properties and the tab stops that stand in them).
+    let whole = |name: &str, extra: &[(&str, &str)], props: &[(&str, &str)], tabs: bool| -> u64 {
+        let mut style_attrs: Vec<(&str, &str)> = vec![("style:name", name), ("style:family", "graphic")];
+        style_attrs.extend(extra.iter().copied());
+        let none: &[(&str, &str)] = &[];
+        let one_cm: &[(&str, &str)] = &[("style:position", "1cm")];
+        let two_cm: &[(&str, &str)] = &[("style:position", "2cm")];
+        let mut elements: Vec<(&str, &[(&str, &str)])> =
+            vec![("style:style", style_attrs.as_slice()), ("style:graphic-properties", props), ("style:paragraph-properties", none)];
+        if tabs {
+            elements.extend([("style:tab-stops", none), ("style:tab-stop", one_cm), ("style:tab-stop", two_cm)]);
+        }
+        // The record (2 items), the elements and attributes (3 and 2 items), the bytes of every name and value as the model keeps text (an eighth more, at 64 to the item), and the bytes of
+        // its family and name.
+        let (mut items, mut raw) = (2u64, 0usize);
+        for (element, attrs) in &elements {
+            items += 3 + 2 * attrs.len() as u64;
+            raw += element.len() + attrs.iter().map(|(n, v)| n.len() + v.len()).sum::<usize>();
+        }
+        items + (raw + raw.div_ceil(8)).div_ceil(64) as u64 + bytes(("unused:graphic".len() + name.len()) as u64)
+    };
     // The values a shape's own style gives are made once, when the style is read, and charged then: a template and a pair for each attribute, and the tab stops' element.
     let template = |pairs: &[(&str, &str)], element: u64| -> u64 {
         1 + 2 * pairs.len() as u64 + element + bytes(pairs.iter().map(|(n, v)| (n.len() + v.len()) as u64).sum())
@@ -324,9 +345,10 @@ fn a_style_is_charged_for_itself_and_what_it_states() {
         1 + 3 + 2 + bytes(2 + 7 + 3 + 7) + whole("gx", &[], three_p, true) + shadow + template(&[], stops_element)
     );
     let parent_gp: &[(&str, &str)] = &[("style:parent-style-name", "gp")];
+    // `gp` is the parent of `gx`, which the standard forbids for an automatic style and the reader follows: a reference found it, so it is no unused style and is not held whole.
     assert_eq!(
         delta(format!("{}{}", style("gp", "", three, ""), style("gx", r#" style:parent-style-name="gp""#, one, ""))),
-        (1 + 3 + bytes(2 + 17)) + (1 + 1 + bytes(2 + 2 + 7)) + whole("gp", &[], three_p, false) + shadow + whole("gx", parent_gp, one_p, false)
+        (1 + 3 + bytes(2 + 17)) + (1 + 1 + bytes(2 + 2 + 7)) + shadow + whole("gx", parent_gp, one_p, false)
     );
     // The bytes are summed and then charged: the name's 2 and a value's 70 are two items.
     let long = format!(r#"draw:fill-gradient-name="{}""#, "g".repeat(70));

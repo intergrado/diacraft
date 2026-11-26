@@ -27,7 +27,8 @@ pub struct Work {
     pub name_comparisons: u64,
     /// Local headers read: one for each row, to lay the entries out, and one more for each entry kept.
     pub local_headers: u64,
-    /// Bytes that came out of entries read (inflated, or copied when stored), including the byte past a limit that refuses one.
+    /// Bytes that came out of entries read (inflated, or copied when stored), including the byte past a limit that refuses one, and out of the streams
+    /// [`crate::inflate`] inflates (raw DEFLATE and zlib, which are no entries of an archive), counted the same way.
     pub inflated: u64,
     /// Events the XML parser read: tags, text, references, CDATA, comments, instructions, declarations.
     pub xml_events: u64,
@@ -42,6 +43,10 @@ pub struct Work {
     /// side by side, the bytes of two parts it compared as bytes, and the bytes of a name or a key it sorted by. The steps count how many
     /// things were compared; these count how long they were, so that long equal keys cannot hide behind a small step count.
     pub canon_bytes: u64,
+    /// Children the content check set side by side by place because their list was longer than [`crate::canon::MAX_ALIGNED`], counted on both sides: the check sets the
+    /// children of an element that are not keyed side by side by what they are, and a list past the cap is set by place as every list was before, so that its count is not less than
+    /// the changes and may be more. Zero when every list was set by what its children are.
+    pub canon_by_place: u64,
 }
 
 impl Work {

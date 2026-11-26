@@ -266,3 +266,44 @@ fn the_fields_of_the_shapes_named_are_found_in_one_walk_of_the_page() {
     let e = super::fields::refresh(&mut doc, super::fields::Scope::Shapes(7, &[chosen[0]]), &super::fields::Env::none(), true).unwrap_err();
     assert!(e.message.contains("there is no page 7"), "{e:?}");
 }
+
+#[test]
+fn a_new_page_style_finds_the_connectors_that_follow_the_page_in_one_walk_of_the_page() {
+    // `draw/routing.rs::followers`: every connector of a page of 30,000 follows the page and reroutes freely, so each is asked, and the page is walked for them once, and not
+    // once for each. The routing the edit makes after it tries 10,000 of them at the most (`MAX_ROUTED_PER_EDIT`), and the answer says the others.
+    let (mut s, _) = page_of(Seed::Connector, false);
+    let (answer, finds, walked) = counted(&mut s, "page.set_routing", json!({"style": "straight"}));
+    assert_eq!(answer["routed"], PAGE, "every connector of the page was asked: {answer}");
+    assert_one_walk_each("page.set_routing", finds, walked, WALKS);
+    // The same style again asks nobody, and walks the page not at all.
+    run(&mut s, "page.set_routing", json!({"style": "straight"}));
+    let (answer, finds, walked) = counted(&mut s, "page.set_routing", json!({"style": "straight"}));
+    assert_eq!((answer["routed"].as_u64(), finds, walked), (Some(0), 0, 0), "{answer}");
+}
+
+// ---- `sheet.set_cells` -------------------------------------------------------------------------------------------------------------
+
+/// A batch of 4,096 writes to shapes spread over a page of 30,000, named by their `ID` alone and by `page`, finds them in a few walks of the page and not one for each write
+/// (the cost is a count). Two counts hold it: no `Document::find_shape` search, and the nodes `draw/scan.rs` walked.
+#[test]
+fn a_batch_of_sheet_writes_finds_its_shapes_in_a_few_walks_of_the_page() {
+    let (mut s, ids) = page_of(Seed::Rectangle, false);
+    let named = spread(&ids, MAX_IDS);
+    for with_page in [false, true] {
+        let writes: Vec<Value> = named
+            .iter()
+            .map(|id| {
+                let mut w = json!({"id": id, "cell": "PinX", "formula": "1"});
+                if with_page {
+                    w["page"] = json!(1);
+                }
+                w
+            })
+            .collect();
+        reset();
+        run(&mut s, "sheet.set_cells", json!({"writes": writes}));
+        let (finds, walked) = counts();
+        assert_eq!(finds, 0, "page {with_page}: no search of the page for a shape");
+        assert!(walked <= WALKS * PAGE, "page {with_page}: {walked} shapes walked for 4,096 writes");
+    }
+}

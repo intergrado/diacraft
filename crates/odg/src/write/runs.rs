@@ -152,6 +152,35 @@ pub(crate) fn changes(old: &Props, new: &Props) -> (Vec<Op>, Vec<(&'static str, 
     (ops, faces)
 }
 
+/// The attributes of each group of a row, by the group's name ([`written_groups`]): the qualified name of each and its value.
+pub(crate) type WrittenGroups = Vec<(&'static str, Vec<(String, String)>)>;
+
+/// What the cells of a `Character` row write, by group: the attributes of each group as the standard's own qualified names (`fo:font-size`) with their values, in the form the writer says them,
+/// and a face (the writer names it by a declaration of the part) as `style:font-name` and the family the cell holds. A group the row has no cell of writes none. `None` for a row whose cells the
+/// writer cannot say (the reader compares what a style stated with this, and holds the statement where the two differ).
+pub(crate) fn written_groups(row: &Row) -> Option<WrittenGroups> {
+    let props = row_props(row, false, &|_| None).ok()??;
+    let qname = |ns: Ns, local: &str| match ns {
+        Ns::Fo => Some(format!("fo:{local}")),
+        Ns::Style => Some(format!("style:{local}")),
+        _ => None,
+    };
+    let mut out: WrittenGroups = Vec::new();
+    for part in &props.parts {
+        let mut attrs: Vec<(String, String)> = Vec::new();
+        for op in &part.ops {
+            if let (Val::Text(value), Some(name)) = (&op.val, qname(op.ns, op.local)) {
+                attrs.push((name, value.clone()));
+            }
+        }
+        for (local, family) in &part.faces {
+            attrs.push((format!("style:{local}"), family.clone()));
+        }
+        out.push((part.id, attrs));
+    }
+    Some(out)
+}
+
 /// Whether a group is a paragraph row's (its attributes are on `style:paragraph-properties`).
 fn is_paragraph_group(id: &str) -> bool {
     matches!(id, "HorzAlign" | "Flags" | "IndLeft" | "IndRight" | "IndFirst" | "SpBefore" | "SpAfter" | "SpLine")
@@ -179,6 +208,11 @@ impl Props {
     /// Whether the row writes any attribute or names any face: a row with nothing to write is no style at all.
     pub(crate) fn writes(&self) -> bool {
         !self.ops.is_empty() || !self.faces.is_empty()
+    }
+
+    /// What a row with no cell comes to: nothing to write (a paragraph or a run of the file whose style says nothing a cell reads).
+    pub(crate) fn nothing() -> Props {
+        Props { key: String::new(), ops: Vec::new(), faces: Vec::new(), bullet: false, list: None, parts: Vec::new() }
     }
 }
 

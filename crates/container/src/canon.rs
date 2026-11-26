@@ -48,6 +48,10 @@
 //!   paragraphs that differ, and may keep apart two that ODF joins.
 //! * Children are compared in order, except the siblings [`Rules::keyed`] names: those are compared as a set by their key, sorted
 //!   (`O(n log n)`), the order among them and against the rest ignored. Equal keys are compared in the order written.
+//! * **The children that are not keyed are set side by side by what they are, and not by the place they stand in**: see "What a difference is" below, and `align.rs`.
+//! * **A part named in [`Rules::doctype_parts`] may begin with one DOCTYPE that holds only an external id** (and no internal subset), which is read and left out: the manifest of an
+//!   OpenDocument package, as old OpenOffice.org writers wrote it. The DOCTYPE is no content, and a part that has one is read as one that has none. Any other DTD is refused as ever, and
+//!   the part is then compared as bytes.
 //! * A child that [`Rules::absent_when_empty`] names and that holds nothing (no attribute, no child element, no instruction, no text but white space)
 //!   is left out of its parent: an empty container is the same as an absent one. Every copy of the name among the siblings must be empty for any to
 //!   go, and the rule does not apply inside a paragraph element or to a keyed one. The blank text around it is read while it still stands, as spacing
@@ -65,6 +69,10 @@
 //!   holds of them must be in the second, with its value, and what only the second holds is no difference. **The comparison is oriented by it**: `count(a, b)` is not `count(b, a)` for a
 //!   document that has such markup, and the first is the one the second became. They are left out of the hash that aligns children, and set apart from the keyed ones (an element of such a
 //!   namespace is compared by the hash of its content, in order, apart from its siblings). A format that lists none is symmetric.
+//! * An attribute that [`Rules::twinned`] names ([`Twin`]) **counts as nothing when only the second document has it, while its element holds the attribute it is the twin of with an equal
+//!   value**: `xml:id="a"` beside `draw:id="a"` is ODF 1.2's way of saying what ODF 1.0 and 1.1 say by `draw:id` alone, so a program that writes the later version adds it.
+//!   **Oriented as the above**: what the first document holds is in the second, with its value; what only the second holds, beside an equal twin, is no difference; the twin alone, or a twin
+//!   of another value, is as any attribute. Such an attribute is left out of the hash that aligns children. A format that lists none is as before.
 //! * [`Rules::free_names`] ([`FreeNames`]): the definitions of a container and the references to them are compared by what the definition says, and not by its name:
 //!   a definition and the references to it that ask for its kind and family read as the content; **copies of one definition on one side count as one**, and **a reference from one
 //!   definition to another is resolved to the content at the end of the chain**, a circle and a chain of more than [`MAX_CHAIN`] compared as written. A definition
@@ -74,10 +82,14 @@
 //! # What a difference is, and what is counted
 //!
 //! One difference is one of [`Found`], at one place. A child on one side only is one difference, whatever it holds. Children are
-//! aligned by what they hold (a hash of each), so one added or taken-out child is one difference and not a shift of all the rest: the
-//! common start and end of two lists of children are matched, and what is left of one is its own (extra, missing) or, if the same
-//! children stand in another order, one [`Found::Order`]. The hash only aligns: every pair it matches is compared in full, so it can
-//! never make two different contents the same. `count` is exact, and symmetric (`count(a, b) == count(b, a)`) under every rule but the one that orients the check
+//! set side by side by what they are, so one added or taken-out child is one difference and not a shift of all the rest, and **every sibling after it is still compared, in
+//! depth, with its own** (set side by side by place, the first child after an element put in was compared with the element, the second with the first, and so on,
+//! and nothing inside them was looked at: a change planted deep in one of them was never seen). The common start and end of two lists of children, equal by a hash of each, are
+//! matched at once. Of what lies between, each child is matched by **what it holds** (the same hash), then by **which thing it is** (its name and the attributes
+//! [`Rules::identified_by`] lists), then by **what it is called** when its name is the only one of its kind in its list on each side (`align.rs`, which says why this is not an LCS: the count is
+//! the same whichever document is first). Where the pairs are not in the same order in both lists the same children stand in another order: **one** [`Found::Order`], however many
+//! cross. The children between two matched pairs that no key matched are set side by side by place (a replaced child is one difference), and what is left of one side is its own
+//! (extra, missing). The hash only aligns: every pair it matches is compared in full, so it can never make two different contents the same. `count` is exact, and symmetric (`count(a, b) == count(b, a)`) under every rule but the one that orients the check
 //! ([`Rules::ignored_when_extra`], above), which a format that lists nothing in it does not have; `shown` holds the first 200. The fuzz target `canon_compare` holds the
 //! check to that law: symmetric without the rule, the same count with it where neither document declares its namespace, and oriented where it is planted.
 //!
@@ -108,8 +120,10 @@
 //!
 //! # What it costs, and the budget
 //!
-//! Linear in the parts' XML, `O(n log n)` in the siblings of one key set and in the parts; counted in [`Work::canon_steps`] and
-//! [`Work::canon_bytes`]. Each tree is built into a canonical form that borrows from the parsed tree, one part against its partner at a time;
+//! Linear in the parts' XML, `O(n log n)` in the siblings of one key set, in the children of one element that are set side by side (`align.rs`: two sorts of its children for each of
+//! the keys it tries, the one the format lists and the others) and in the parts; counted in [`Work::canon_steps`] and [`Work::canon_bytes`]. **A list of more than [`MAX_ALIGNED`]
+//! children between its matched start and end, on either side, is set side by side by place**, as every list was before, and counted in [`Work::canon_by_place`]: its count may then be
+//! higher than the changes (an element put in shifts what follows it), and never lower. Each tree is built into a canonical form that borrows from the parsed tree, one part against its partner at a time;
 //! the text of a paragraph is one string as long as the text. Recursion goes as deep as the parser's depth ceiling (512) and no deeper, on a
 //! stack of 2 MiB.
 //!
@@ -141,8 +155,9 @@ use std::collections::HashMap;
 
 use crate::limits::{XML_DEPTH_CEILING, XmlLimits};
 use crate::work::Work;
-use crate::xml::{self, El, Node, XmlError};
+use crate::xml::{self, El, Node, ParseOptions, XmlError};
 
+mod align;
 mod names;
 
 /// The namespace `xml:` is bound to without a declaration.
@@ -153,6 +168,10 @@ pub const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
 pub const ODF_TEXT_NAMESPACE: &str = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 /// Most differences a [`ContentDiff`] lists; the count goes on past it.
 pub const MAX_SHOWN: usize = 200;
+/// Most children of one element, between the start and the end that match, that are set side by side by what they are (`align.rs`), on either side: 262,144. A list of more is set side by side by
+/// place, as every list was before, and counted in [`Work::canon_by_place`]; the count is then not less than the changes, and may be more. The work of the alignment is `n log n`
+/// and what it holds is a few dozen bytes for each child on each side, so the cap keeps it small beside the trees; the part limits ([`MAX_COMPARE_ITEMS`]) are what bound a list in the end.
+pub const MAX_ALIGNED: usize = 1 << 18;
 /// Most items one part of a comparison may hold, on each side: elements, attributes, text runs and instructions, as the parser counts them. The
 /// parser itself allows 6 million, and a pair at that holds about 3.9 GB; this is the part of that which a whole comparison can afford
 /// (see "What it costs"). The largest real part measured is 1,481,648 items. A part past it is refused in words, naming it, before its pair
@@ -178,6 +197,13 @@ const MAX_PART_IN_DIFFERENCE: usize = 128;
 pub struct Name {
     pub ns: &'static str,
     pub local: &'static str,
+}
+
+/// An attribute that says again what another attribute of its element says ([`Rules::twinned`]): `attr`, whose `with` is the twin.
+#[derive(Debug, Clone, Copy)]
+pub struct Twin {
+    pub attr: Name,
+    pub with: Name,
 }
 
 /// Siblings compared as a set: the children named `child`, matched by the attributes `key`. A format's list gives each entry its source, in
@@ -284,6 +310,11 @@ pub struct Rules {
     /// a document that has such markup. A format that lists none is symmetric, as before. Such an attribute is left out of the hash that aligns children, so that a child that a program
     /// marked is still aligned with the child it was.
     pub ignored_when_extra: &'static [&'static str],
+    /// Attributes that **count as nothing when only the second document has them, beside an equal twin** ([`Twin`]): an attribute that says again what another attribute of
+    /// its element says, in the form a later version of the format takes (ODF's `xml:id` beside `draw:id`: a file of ODF 1.0 or 1.1 cannot say the first, and a writer that raises the
+    /// version adds it). **The comparison is oriented by it**, as by [`Rules::ignored_when_extra`]: what the first document holds is compared as written, so an attribute of the first that the
+    /// second lacks is a difference; and the attribute counts as nothing only while the element holds its twin with the same value. A format that lists none is symmetric, as before.
+    pub twinned: &'static [Twin],
     /// Names that are free ([`FreeNames`]): the names of the definitions a document gives its own automatic things (ODF's automatic styles) and the references to
     /// them are compared by what the definition says, so that two documents that differ only in the names they chose are the same. At most one entry is read.
     pub free_names: &'static [FreeNames],
@@ -297,6 +328,16 @@ pub struct Rules {
     /// that what is held beside the parts is one pair's copy. It is a rule of the text and never of a name: the spelling is read wherever it stands, in a value or a text as in a
     /// namespace, and a format lists only a spelling that no document uses for anything else (a URN of its own).
     pub aliases: &'static [(&'static str, &'static str)],
+    /// **What says which thing an element is**: the attributes whose values name an element among its siblings (a page's, a shape's or a style's name, an identifier). An
+    /// element that has any of them is told from its siblings by its name and the values of those it has, in this list's order: **the second key of the alignment** of the children that are
+    /// not keyed ([`MAX_ALIGNED`], `align.rs`), so that a page or a shape that changed, put in, taken out or written in another place is still matched with the page or the shape it is. A format
+    /// lists an attribute only on a source that says it names a thing among its siblings. It is never what makes two children the same: every pair is compared in full. An empty list tries
+    /// no such key.
+    pub identified_by: &'static [Name],
+    /// **The parts that may begin with a DOCTYPE** that holds only a name and an external id and no internal subset, by their exact names as the entry gives them: the
+    /// OpenDocument manifest, which an old OpenOffice.org writer began so. It is read and left out of the tree, as the package layer reads a manifest, so that a part that has one is read as
+    /// one that has none and the DOCTYPE is no content. Any other DTD, and a DOCTYPE in any other part, is refused as ever, and the part is compared as bytes.
+    pub doctype_parts: &'static [&'static str],
 }
 
 /// A set of children whose order among themselves has no meaning under one parent ([`Rules::unordered`]).
@@ -450,9 +491,12 @@ impl Rules {
         ignored_attributes: &[],
         ignored_children: &[],
         ignored_when_extra: &[],
+        twinned: &[],
         free_names: &[],
         placed: &[],
         aliases: &[],
+        identified_by: &[],
+        doctype_parts: &[],
     };
 }
 
@@ -1324,6 +1368,20 @@ impl<'r, 'a, 'w> Builder<'r, 'a, 'w> {
         Ok(out)
     }
 
+    /// Whether the attribute `name`, written with `value` on `el`, is one [`Rules::twinned`] lists beside its twin of the same value on the same element (the names read through the
+    /// declarations in force). The look at the element's other attributes is counted, as the walk of them is.
+    fn is_twin(&mut self, el: &'a El, name: QName<'a>, value: &str) -> bool {
+        let rules = self.rules;
+        if !rules.twinned.iter().any(|t| name.is(&t.attr)) {
+            return false;
+        }
+        self.steps(el.attrs.len());
+        rules
+            .twinned
+            .iter()
+            .any(|t| name.is(&t.attr) && el.attrs.iter().any(|(k, v)| v == value && !k.starts_with("xmlns") && self.expand(k, true).is(&t.with)))
+    }
+
     /// The attributes of `el` as they compare: declarations left out, names expanded, numbers read where the rules say, sorted.
     fn attributes(&mut self, el: &'a El, owner: QName<'a>) -> Result<Vec<CAttr<'a>>, Refusal> {
         let mut attrs = Vec::with_capacity(el.attrs.len());
@@ -1351,7 +1409,7 @@ impl<'r, 'a, 'w> Builder<'r, 'a, 'w> {
                 },
             };
             self.bytes(v.len());
-            let quiet = self.rules.ignored_when_extra.contains(&name.ns);
+            let quiet = self.rules.ignored_when_extra.contains(&name.ns) || self.is_twin(el, name, v);
             attrs.push(CAttr { name, val, quiet });
         }
         self.steps(attrs.len());
@@ -1924,10 +1982,23 @@ fn render(path: &[PathSeg<'_>], tail: Option<PathSeg<'_>>) -> String {
     out
 }
 
+/// The two lists of a middle and what [`align`] made of them.
+struct Place<'p, 't> {
+    a: &'p [Item<'t>],
+    b: &'p [Item<'t>],
+    /// The place of the middle among its parent's children.
+    base: usize,
+    /// For each child of the first list, the place of its match in the second.
+    a_partner: &'p [Option<usize>],
+    /// For each child of the second list, whether it is matched.
+    b_matched: &'p [bool],
+}
+
 struct Cmp<'t, 'w> {
     sink: &'w mut Sink,
     path: Vec<PathSeg<'t>>,
     work: &'w mut Work,
+    rules: &'w Rules,
 }
 
 impl<'t> Cmp<'t, '_> {
@@ -2015,7 +2086,106 @@ impl<'t> Cmp<'t, '_> {
         }
     }
 
+    /// What lies between the start and the end that match: the children of each side are set in order by what they are ([`align`]), each pair is compared in full, the same
+    /// children in another order are one [`Found::Order`], and what is matched by nothing is, between two anchors, set side by side by place (a replaced child is one difference) or
+    /// is put in or taken out. A list longer than [`MAX_ALIGNED`] is set side by side by place, and counted.
     fn middle(&mut self, a: &[Item<'t>], b: &[Item<'t>], base: usize) {
+        // Nothing to match: one side holds nothing (what the other holds is put in or taken out) or one child each (a replaced child, or a changed one, compared in full).
+        match (a, b) {
+            ([x], [y]) => self.pair(x, y, base),
+            ([], rest) | (rest, []) => {
+                for (k, item) in rest.iter().enumerate() {
+                    self.alone(item, base.saturating_add(k));
+                }
+            }
+            _ if a.len().max(b.len()) > MAX_ALIGNED => {
+                Work::add(&mut self.work.canon_by_place, a.len().saturating_add(b.len()));
+                self.by_place(a, b, base);
+            }
+            _ => self.aligned(a, b, base),
+        }
+    }
+
+    /// The middle of two lists that are set side by side by what they are ([`Cmp::middle`]).
+    fn aligned(&mut self, a: &[Item<'t>], b: &[Item<'t>], base: usize) {
+        let (fa, fb) = (self.facets(a), self.facets(b));
+        let aligned = align::align(&fa, &fb, !self.rules.identified_by.is_empty(), self.work);
+        if aligned.crossed {
+            self.record(Found::Order, None);
+        }
+        let place = Place { a, b, base, a_partner: &aligned.a_partner, b_matched: &aligned.b_matched };
+        let (mut from_a, mut from_b) = (0usize, 0usize);
+        for &(end_a, end_b) in &aligned.anchors {
+            self.gap(&place, from_a..end_a, from_b..end_b);
+            if let (Some(x), Some(y)) = (a.get(end_a), b.get(end_b)) {
+                self.pair(x, y, base.saturating_add(end_a));
+            }
+            (from_a, from_b) = (end_a.saturating_add(1), end_b.saturating_add(1));
+        }
+        self.gap(&place, from_a..a.len(), from_b..b.len());
+    }
+
+    /// The children between two anchors: the ones that are matched by a pair that crosses another are compared with their match; the others, none of which a key matched, are set
+    /// side by side by place, first with first, and what is left of one side is put in or taken out.
+    fn gap(&mut self, place: &Place<'_, 't>, in_a: std::ops::Range<usize>, in_b: std::ops::Range<usize>) {
+        let mut free_b = in_b.filter(|&j| !place.b_matched.get(j).copied().unwrap_or(true));
+        for i in in_a {
+            let Some(x) = place.a.get(i) else { continue };
+            let partner = match place.a_partner.get(i).copied().flatten() {
+                Some(j) => Some(j),
+                None => free_b.next(),
+            };
+            match partner.and_then(|j| place.b.get(j)) {
+                Some(y) => self.pair(x, y, place.base.saturating_add(i)),
+                None => self.alone(x, place.base.saturating_add(i)),
+            }
+        }
+        for j in free_b {
+            if let Some(y) = place.b.get(j) {
+                self.alone(y, place.base.saturating_add(j));
+            }
+        }
+    }
+
+    /// What the alignment needs to know of each child of `items`: what it holds, what it is called and, when the format says so, which thing it is.
+    fn facets(&mut self, items: &[Item<'t>]) -> Vec<align::Facet> {
+        let by = self.rules.identified_by;
+        Work::add(&mut self.work.canon_steps, items.len().saturating_mul(by.len().saturating_add(1)));
+        items
+            .iter()
+            .map(|item| match item {
+                Item::El(c) => {
+                    let mut name = Hash::new(b'N');
+                    name.str(c.name.ns);
+                    name.str(c.name.local);
+                    let name = name.finish();
+                    // Its name, and each attribute of the list it has, in the list's order (the attributes are sorted by name, so one is found by a search).
+                    let mut identity = Hash::new(b'D');
+                    identity.u64(name);
+                    let mut told = false;
+                    for (k, n) in by.iter().enumerate() {
+                        let at = c.attrs.partition_point(|a| a.name < QName { ns: n.ns, local: n.local });
+                        if let Some(attr) = c.attrs.get(at).filter(|a| a.name.is(n) && !a.quiet) {
+                            identity.u64(k as u64);
+                            attr.val.feed(&mut identity);
+                            told = true;
+                        }
+                    }
+                    align::Facet { content: c.hash, name, identity: told.then(|| identity.finish()) }
+                }
+                Item::Text(_, h) => align::Facet { content: *h, name: Hash::new(b'T').finish(), identity: None },
+                Item::Pi(target, _, h) => {
+                    let mut name = Hash::new(b'I');
+                    name.str(target);
+                    align::Facet { content: *h, name: name.finish(), identity: None }
+                }
+            })
+            .collect()
+    }
+
+    /// The old reading, for a list past [`MAX_ALIGNED`]: set side by side by place, or one [`Found::Order`] when it is the same children in another order. Every pair is compared
+    /// in full.
+    fn by_place(&mut self, a: &[Item<'t>], b: &[Item<'t>], base: usize) {
         if a.len() == b.len() && !a.is_empty() && self.same_children(a, b) {
             self.record(Found::Order, None);
             return;
@@ -2109,7 +2279,7 @@ impl<'t> Cmp<'t, '_> {
             paired_in_run += 1;
             let equal = partner.is_some_and(|y| {
                 let mut found = Sink::default();
-                let mut inner = Cmp { sink: &mut found, path: Vec::new(), work: &mut *self.work };
+                let mut inner = Cmp { sink: &mut found, path: Vec::new(), work: &mut *self.work, rules: self.rules };
                 inner.element(&x.el, &y.el, PathSeg { local: x.el.name.local, mark: Mark::Item, index: 0 });
                 found.count == 0
             });
@@ -2199,7 +2369,7 @@ fn holds_an_empty_root(entry: &Entry<'_>, rules: &Rules, limits: &XmlLimits, wor
     if kinds().next().is_none() || !entry.xml || entry.bytes.len() > MAX_EMPTY_PART_BYTES {
         return false;
     }
-    let Ok(root) = xml::parse_counted(entry.bytes, limits, work) else { return false };
+    let Ok(root) = xml::parse_with_options(entry.bytes, limits, options_of(entry, rules), work) else { return false };
     let mut builder = Builder::new(rules, work);
     builder.bind(&root);
     let name = builder.expand(&root.name, false);
@@ -2234,6 +2404,12 @@ pub fn part_holds_nothing(entry: &Entry<'_>, rules: &Rules, limits: &XmlLimits, 
 /// empty `settings.xml` is no `settings.xml`, whichever empty form it takes).
 fn both_empty(a: &Entry<'_>, b: &Entry<'_>, rules: &Rules, limits: &XmlLimits, work: &mut Work) -> bool {
     !rules.parts_absent_when_empty.is_empty() && holds_an_empty_root(a, rules, limits, work) && holds_an_empty_root(b, rules, limits, work)
+}
+
+/// How a part is parsed: a part [`Rules::doctype_parts`] names may begin with a DOCTYPE that holds only an external id, which is read and is no content; any other part, and
+/// any other DOCTYPE, is refused as ever.
+fn options_of(entry: &Entry<'_>, rules: &Rules) -> ParseOptions {
+    ParseOptions { allow_external_doctype: rules.doctype_parts.contains(&entry.name), ..ParseOptions::default() }
 }
 
 /// Whether the XML error is a limit (the part is too large to say anything of) and not damage (the part is bytes).
@@ -2279,13 +2455,13 @@ fn compare_pair(a: &Entry<'_>, b: &Entry<'_>, rules: &Rules, limits: &XmlLimits,
     }
     if a.xml && b.xml {
         // A part the limits refuse is refused before its partner is read: nothing is built for a pair that cannot be compared.
-        let ta = xml::parse_counted(a.bytes, limits, work);
+        let ta = xml::parse_with_options(a.bytes, limits, options_of(a, rules), work);
         if let Err(e) = &ta
             && is_limit(e)
         {
             return Err(e.clone().into());
         }
-        let tb = xml::parse_counted(b.bytes, limits, work);
+        let tb = xml::parse_with_options(b.bytes, limits, options_of(b, rules), work);
         match (ta, tb) {
             (Ok(ta), Ok(tb)) => return compare_trees(&ta, &tb, rules, work, sink),
             (_, Err(e)) if is_limit(&e) => return Err(e.into()),
@@ -2319,7 +2495,7 @@ fn compare_trees(a: &El, b: &El, rules: &Rules, work: &mut Work, sink: &mut Sink
         sink.add(Found::Bytes, String::new);
         return Ok(());
     }
-    let mut cmp = Cmp { sink, path: Vec::new(), work };
+    let mut cmp = Cmp { sink, path: Vec::new(), work, rules };
     let root = PathSeg { local: ca.name.local, mark: Mark::Item, index: 0 };
     cmp.element(&ca, &cb, root);
     Ok(())

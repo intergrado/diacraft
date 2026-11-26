@@ -27,6 +27,10 @@
 //!   writer of such a tree ([`xml::to_bytes`]). A document of any number of children is read as a stream, one child of the root's tree at a
 //!   time ([`xml::XmlText`], [`xml::Pull`] and [`xml::PullLimits`]), and written child by child ([`xml::RootWriter`]).
 //!
+//! * [`inflate`] inflates a slice: raw DEFLATE and zlib streams that are not entries of an archive (a page of a draw.io file, a text chunk of a PNG), within a cap on the
+//!   output and a ratio of output to input, charged before each chunk is kept, with the bytes made counted in [`Work::inflated`]. Every inflate of bytes that are
+//!   not an archive's entries has this one home.
+//!
 //! * [`canon`] is the content check: whether two packages say the same thing, under the rules of the design's section 4.3 (spacing,
 //!   attribute order, prefixes and comments ignored; numbers by value where a format says; keyed siblings as sets), configured by each
 //!   format's own lists.
@@ -44,6 +48,7 @@
 use std::fmt;
 
 pub mod canon;
+pub mod inflate;
 pub mod limits;
 pub mod par;
 pub mod spare;

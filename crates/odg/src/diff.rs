@@ -344,7 +344,7 @@ fn parse_side(name: &str, bytes: &[u8], parsed: &mut u64, limits: &Limits, work:
     if *parsed > limits.max_xml_bytes {
         return Err(OdgError::Limit { kind: LimitKind::XmlBytes, max: limits.max_xml_bytes });
     }
-    let options = xml::ParseOptions { allow_external_doctype: name == package::MANIFEST_PATH };
+    let options = xml::ParseOptions { allow_external_doctype: name == package::MANIFEST_PATH, ..xml::ParseOptions::default() };
     Ok(xml::parse_with_options(bytes, &limits.container.xml, options, &mut work.xml).map_err(|e| e.class()))
 }
 

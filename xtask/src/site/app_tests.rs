@@ -1036,6 +1036,7 @@ pub(super) fn settings(app_url: &str) -> super::settings::Settings {
         assets: super::settings::DOWNLOADS.iter().map(|id| ((*id).to_owned(), "diacraft-{version}-a.zip".to_owned())).collect(),
         version: "0.2.0".into(),
         licences: vec!["LICENSE-MIT".into(), "LICENSE-APACHE".into()],
+        comparison: None,
     }
 }
 

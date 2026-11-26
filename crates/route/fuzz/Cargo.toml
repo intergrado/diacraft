@@ -1,0 +1,34 @@
+[package]
+name = "diacraft-route-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly: neither is in the workspace's Cargo.lock, which the `fuzz check` step of the gate starts each crate from, so a release of either
+# could turn the gate red with no change here. `arbitrary` is libfuzzer-sys's own dependency, named so that it is pinned too. Move both together, in
+# every fuzz crate (a test in xtask checks that they agree).
+libfuzzer-sys = "=0.4.13"
+arbitrary = "=1.5.0"
+diacraft-route = { path = ".." }
+
+# A workspace of its own: cargo-fuzz needs nightly and sanitizer flags, so this crate stays out of DiaCraft's workspace and its lockfile
+# (`xtask/src/stats.rs` skips a nested `fuzz` folder).
+[workspace]
+
+# The input and the properties of the target, which the router's tests include (`crates/route/tests/it/props.rs` includes `src/lib.rs`).
+[lib]
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "route_scene"
+path = "fuzz_targets/route_scene.rs"
+test = false
+doc = false
+bench = false

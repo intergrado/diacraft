@@ -204,7 +204,7 @@ impl<'a> Manifest<'a> {
         let mut walked = 0u64;
         // The manifest is read as the package layer reads it, which accepts the OpenOffice.org document type declaration (an external id and no internal
         // subset), so the save reads its own file as the reader does.
-        let options = ParseOptions { allow_external_doctype: true };
+        let options = ParseOptions { allow_external_doctype: true, ..ParseOptions::default() };
         scan_tags_with::<()>(bytes, &limits.manifest_xml(), options, &mut container, |tag| {
             walked += 1;
             scan.visit(tag);

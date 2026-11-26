@@ -362,7 +362,7 @@ impl Evaluator<'_, '_> {
 
     /// A result fitted to the cell that holds it: a bare number takes the unit the cell last held, or its
     /// default. Only the unit changes, never the stored number.
-    fn fit_to_cell(&mut self, v: Value, res: &Resolved<'_>, addr: &CellAddr) -> Value {
+    pub(crate) fn fit_to_cell(&mut self, v: Value, res: &Resolved<'_>, addr: &CellAddr) -> Value {
         if let Value::Point(p) = &v {
             return fit_point(p, addr);
         }
@@ -428,7 +428,7 @@ fn spells_a_path(text: &str) -> bool {
 /// `ClippingPath` evaluated: a string that is not a path is `#N/A`, with `V` left empty, and one
 /// that spells a path is that string and no error. Only the empty string is attested on the error side (1,656 cells, all saving `E` `#N/A`); that
 /// other text gives `#N/A` too is the rule's own reasoning. A result that is no string is left alone.
-fn clipping_path_result(v: Value, addr: &CellAddr) -> Value {
+pub(crate) fn clipping_path_result(v: Value, addr: &CellAddr) -> Value {
     if addr.section.is_none() && addr.row.is_none() && addr.cell.as_str() == "ClippingPath" && matches!(&v, Value::Text(t) if !spells_a_path(t)) {
         return Value::Error(CellError::Na);
     }

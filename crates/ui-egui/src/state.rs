@@ -148,6 +148,8 @@ pub struct UiState {
     pub layers: crate::layers_dialog::LayersState,
     /// The Define Shape Data dialog and the question a drop asks, while they are open (`shape_data.rs`).
     pub shape_data: crate::shape_data::DataState,
+    /// The ShapeSheet windows: the tabs of the sheet area, where it docks, the view toggles and the focus (`sheet/`).
+    pub sheet: crate::sheet::SheetState,
     /// The Snap & Glue dialog, while it is open (`snap_dialog.rs`).
     pub snap_dialog: Option<crate::snap_dialog::SnapDialog>,
     /// The Zoom dialog, while it is open (`zoom_dialog.rs`).
@@ -346,6 +348,7 @@ impl Default for UiState {
             text_dialog: None,
             layers: Default::default(),
             shape_data: Default::default(),
+            sheet: Default::default(),
             snap_dialog: None,
             zoom_dialog: None,
             relayout: crate::relayout_ui::RelayoutState::default(),

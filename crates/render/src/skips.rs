@@ -89,7 +89,9 @@ pub enum SkipKind {
     /// An open path with a line end asked for and **no direction anywhere** (every segment of no length), where there is nothing to turn the
     /// mark by: the path is drawn without it. The count is of paths.
     LineEndNoDirection,
-    /// A line end that is a master (`BeginArrow` 254): not drawn.
+    /// A line end that is a master (`BeginArrow` 254) that cannot be drawn as one, so number 4 is drawn in its place: the `USE` names no master, the master is no line end (its
+    /// `PatternFlags` lack 2), it has no geometry, it is past the caps of `limits::MAX_END_SECTIONS`, `MAX_END_ROWS`, `MAX_END_SHAPES` or `MAX_END_DEPTH`, or its box has no height. A master
+    /// that is drawn as the line end it is is not counted.
     CustomLineEnd,
     /// A compound line (double or triple) is drawn as bands of the weight.
     CompoundApproximate,

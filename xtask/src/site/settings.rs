@@ -38,6 +38,9 @@ pub(super) struct Settings {
     /// The files of the repository that hold the licences of the code (`LICENSE-MIT`), which the home page's structured data names: `Cargo.toml`'s `license` read by `seo::licence_files`. Empty
     /// where no manifest is read (the tests), and then the data names no licence.
     pub(super) licences: Vec<String>,
+    /// The data of the feature comparison page (`compare.rs`), read from the repository's docs where the folder has that page: `--write` makes the page's regions from it, and the check says the page
+    /// is stale when they differ. `None` where no repository is read (the tests).
+    pub(super) comparison: Option<std::sync::Arc<super::compare::Comparison>>,
 }
 
 impl Settings {
@@ -170,7 +173,7 @@ pub(super) fn load(dir: &Path, version: &str) -> Result<Settings, String> {
         valid_asset(&key, asset)?;
         assets.insert(id.to_owned(), asset.to_owned());
     }
-    Ok(Settings { domain, app_url, repository: repository.into(), assets, version: version.to_owned(), licences: Vec::new() })
+    Ok(Settings { domain, app_url, repository: repository.into(), assets, version: version.to_owned(), licences: Vec::new(), comparison: None })
 }
 
 fn valid_filename(s: &str) -> bool {
@@ -213,6 +216,12 @@ fn set_value(html: &mut String, prefix: &str, value: &str) -> Result<(), String>
 pub(super) const DOWNLOAD_SUFFIX: &str = "/releases/download";
 
 fn render_page(mut source: String, settings: &Settings, name: &str, url: &str) -> Result<String, String> {
+    // The regions of the feature comparison page are made from the data first (`compare.rs`), so that the rest of the page is made from what it says.
+    if name == super::compare::PAGE
+        && let Some(comparison) = &settings.comparison
+    {
+        source = super::compare::render(&source, comparison, settings)?;
+    }
     set_value(&mut source, r#"<link rel="canonical" href=""#, url)?;
     set_value(&mut source, r#"<meta property="og:url" content=""#, url)?;
     set_value(&mut source, r#"<meta property="og:image" content=""#, &format!("{}/assets/social.jpg", settings.domain))?;
@@ -480,6 +489,7 @@ mod tests {
             assets: DOWNLOADS.iter().map(|id| ((*id).to_owned(), format!("{id}-{{tag}}.bin"))).collect(),
             version: VERSION.into(),
             licences: Vec::new(),
+            comparison: None,
         }
     }
 

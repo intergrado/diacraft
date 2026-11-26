@@ -335,6 +335,50 @@ fn an_odg_drawing_makes_the_whole_trip_and_the_content_check_says_what_it_found(
     );
 }
 
+/// The drawing of `odg_save`, as a template: the media type of a template in its `mimetype` and in the root row of its manifest.
+fn odg_template() -> Vec<u8> {
+    use diacraft_container::zip::{ArchiveWriter, Method};
+    let template = format!("{}-template", crate::odg_save::DRAWING);
+    let package = diacraft_odg::package::Package::read(&crate::odg_save::drawing(), &diacraft_odg::Limits::default()).unwrap();
+    let part = |name: &str| String::from_utf8(package.part(name).unwrap().to_vec()).unwrap();
+    let mut w = ArchiveWriter::new();
+    w.add("mimetype", template.as_bytes(), Method::Stored).unwrap();
+    w.add("content.xml", part("content.xml").as_bytes(), Method::Deflated).unwrap();
+    w.add("styles.xml", part("styles.xml").as_bytes(), Method::Deflated).unwrap();
+    w.add("META-INF/manifest.xml", part("META-INF/manifest.xml").replace(crate::odg_save::DRAWING, &template).as_bytes(), Method::Deflated).unwrap();
+    w.finish().unwrap()
+}
+
+/// **A template is saved back as a template**: `--via diacraft` of an `.otg` writes an `.otg` (`file.save_as` takes the kind from the name, so an `.odg` name would write
+/// a drawing, whose media type the content check counts as a difference no save made), and an `.odg` name for a template is refused in words, before anything is made.
+#[test]
+fn a_template_makes_the_whole_trip_and_comes_back_as_a_template() {
+    let dir = TempDir::new("via-otg");
+    let input = dir.write("in.otg", &odg_template());
+    let run = cli(&["roundtrip", s(&input), "--out", s(&dir.path("out.odg")), "--via", "diacraft"], None);
+    assert_eq!(run.status.code(), Some(1), "{}", text(&run.stderr));
+    assert!(text(&run.stderr).contains("--out must end in .otg"), "{}", text(&run.stderr));
+    assert!(run.stdout.is_empty() && !dir.path("out.odg").exists());
+    let output = dir.path("out.otg");
+    let (report, out) = visit(&input, &output, &[]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!((report["format"].clone(), report["variant"].clone()), (json!("odg"), json!("otg")), "{}", shown(&report));
+    assert_eq!(report["refusal"], Value::Null, "the trip finished: {}", shown(&report));
+    assert_eq!(report["content"]["compared"], true, "{}", shown(&report));
+    assert_eq!(
+        (report["content"]["same"].clone(), report["content"]["count"].clone()),
+        (json!(true), json!(0)),
+        "a template came back as a template: {}",
+        shown(&report)
+    );
+    assert_eq!(diacraft_odg::sniff(&std::fs::read(&output).unwrap()), Some(diacraft_odg::Variant::Template));
+    // A drawing is still a drawing: `.odg` is its type, and `.otg` is refused for it.
+    let drawing_input = dir.write("in.odg", &crate::odg_save::drawing());
+    let run = cli(&["roundtrip", s(&drawing_input), "--out", s(&dir.path("o.otg")), "--via", "diacraft"], None);
+    assert_eq!(run.status.code(), Some(1), "{}", text(&run.stderr));
+    assert!(text(&run.stderr).contains("--out must end in .odg"), "{}", text(&run.stderr));
+}
+
 /// A drawing of two pages that share the automatic style `gr1`, the second with two shapes that carry ids and a connector glued to both (a drawing whose second page the model writer
 /// writes with styles of its own, which carry DiaCraft's own markup), written by hand from the ODF standard. The file holds its layer set (LibreOffice's five): one that the writer adds where the
 /// file had none still counts.

@@ -9,6 +9,7 @@
 
 mod canon;
 mod canon_alias;
+mod canon_align;
 mod canon_empty;
 mod canon_extra;
 mod canon_free;
@@ -21,14 +22,17 @@ mod canon_order_parts;
 mod canon_placed;
 mod canon_props;
 mod canon_scale;
+mod canon_twin;
 mod copy;
 mod cost;
 mod fuzz;
+mod inflate;
 mod par_read;
 mod par_write;
 mod read;
 mod splice;
 mod stream;
+mod us_ascii;
 mod write;
 mod xml;
 mod xml_pull;

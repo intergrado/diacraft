@@ -12,6 +12,9 @@
 //!   style had, and the properties elements: the attributes the sheet's own cells come to (the fill and line cells and the text block's, as a new shape's style writes them; the
 //!   `Paragraph` and `Character` cells of row 0, as a paragraph's or a run's style writes them), over them **the held values whose stamps still hold** (as a shape's), and the properties no
 //!   cell reads (`OdfStyle::unmapped`), with the children the style and its properties elements held. A value a cell writes is the cell's; a value no cell writes is the file's.
+//! * **The forms of an earlier version.** A held spelling of the group `Style` may hold a weight, a slant or a variant that the schema of ODF 1.4 lists no value for (a file of 1.0 or 1.1 takes any
+//!   text there, `fo:font-weight="250"`): it is written as the value 1.4 lists nearest and the value it had rides in an attribute of DiaCraft's own at the end of the same properties element
+//!   (`diacraft:older-font-weight`; [`crate::ext::odf14::form_14`]), which a read gives back while the attribute beside it is still the one written.
 //! * **What is carried.** What the markup does not say (a cell no attribute is written for, a formula, a face no declaration names) is the difference between the sheet the reader builds from
 //!   this markup and the model's, which DiaCraft's document file carries for each style as it carries a style sheet of a file whose cells changed (`ext::docfile`'s `style` entries, read over the
 //!   sheet the markup gives): the splice is told this markup is the model's own (`newstyles::plan` on the model path), so a sheet that differs in its cells alone is carried, never refused, and
@@ -23,10 +26,8 @@
 //!
 //! **Cost.** Each style, attribute and child is a step, and each child is taken from the budget of what the part holds and charged before it is made ([`super::node_total`]).
 
-use std::collections::HashSet;
-
 use diacraft_container::xml::{El, Node};
-use diacraft_doc::{Document, OdfStyle, Passthrough, RawNode, Row, Sheet, Style, stamp_text_group};
+use diacraft_doc::{Document, OdfStyle, Passthrough, RawNode, Row, Sheet, Style, TextGroup, stamp_text_group};
 
 use super::{WORDS_KEPT, node_total};
 use crate::limits::Limits;
@@ -53,20 +54,39 @@ fn odf_of(style: &Style) -> Option<&OdfStyle> {
     style.ext.get().map(|d| &d.odf).filter(|o| matches!(o.family.as_deref(), Some("graphic" | "paragraph")) && o.name.is_some())
 }
 
-/// How many of the model's style sheets after the root this step writes: the run of those the `.odg` reader made, each of a name and family no earlier one has, and each numbered by its place
-/// (the `ID` the reader gives the style it reads in that place).
+/// How many of the model's style sheets after the root this step writes: the run of those the `.odg` reader made, each with a name, and each numbered by its place (the `ID` the reader gives the
+/// style it reads in that place). A name a container holds twice is the file's own and does not end the run.
 pub(crate) fn count(doc: &Document) -> usize {
-    let mut seen: HashSet<(&str, &str)> = HashSet::new();
     let mut n = 0usize;
     for (at, style) in doc.styles.iter().enumerate().skip(1) {
         let Some(odf) = odf_of(style) else { break };
-        let (Some(family), Some(name)) = (odf.family.as_deref(), odf.name.as_deref()) else { break };
-        if u32::try_from(at).ok() != Some(style.id) || name.is_empty() || !seen.insert((family, name)) {
+        let (Some(_), Some(name)) = (odf.family.as_deref(), odf.name.as_deref()) else { break };
+        // A name a container holds twice is the file's own (the first is the one a reference finds): the style that repeats it is written under it again, as read.
+        if u32::try_from(at).ok() != Some(style.id) || name.is_empty() {
             break;
         }
         n += 1;
     }
     n
+}
+
+/// The attributes the cells of `sheet` write for the group `Style` of a style's text properties (row 0 of `Character`): the namespace, the local name and the value of each, as the writer of a
+/// style sheet says them. `None` for a sheet whose row says nothing the writer can write. The reader compares them with what the file spelled.
+pub(crate) fn style_group_of_cells(sheet: &Sheet) -> Option<Vec<(Ns, &'static str, String)>> {
+    let mut steps = 0u64;
+    let no_palette = |_: i64| None;
+    let mut rows = crate::write::runs::Rows::of(sheet, false, &no_palette, &mut steps);
+    let props = rows.props(0).ok().flatten()?;
+    let part = props.parts.iter().find(|p| p.id == "Style")?;
+    Some(
+        part.ops
+            .iter()
+            .filter_map(|op| match &op.val {
+                Val::Text(text) => Some((op.ns, op.local, text.clone())),
+                _ => None,
+            })
+            .collect(),
+    )
 }
 
 /// The standard prefix this step writes a namespace under, for the vocabularies of a style's properties.
@@ -86,6 +106,8 @@ fn prefix_of(ns: Ns) -> Option<(&'static str, &'static str)> {
 #[derive(Default)]
 struct Props {
     attrs: Vec<(String, String, String)>,
+    /// The attributes of DiaCraft's own that carry the exact value an attribute of the standard was written without ([`Props::in_1_4_form`]): the local name of the carrier and the value.
+    carried: Vec<(&'static str, String)>,
 }
 
 impl Props {
@@ -108,11 +130,50 @@ impl Props {
         }
     }
 
-    fn element(self, name: &str, children: Vec<Node>) -> Option<El> {
+    /// Takes out the attributes the group of cells `group` owns (`runs::owned`): what the cells wrote of it, before a held spelling of the group is put in their place.
+    fn drop_owned(&mut self, group: &str) {
+        for &(ns, name) in crate::write::runs::owned(group) {
+            if let Some((_, uri)) = prefix_of(ns) {
+                self.attrs.retain(|(u, n, _)| !(u == uri && local(n) == name));
+            }
+        }
+    }
+
+    /// **Writes the attributes of the group `Style` that ODF 1.4 lists no value for as the value it lists nearest** (`ext::odf14::form_14`): the spelling a file of an earlier version
+    /// gave (`fo:font-weight="250"`, which the schemas of 1.0 and 1.1 take and 1.4's does not) is held by the style and written as it was, which the schema of the version written refuses. The
+    /// value the file had rides in an attribute of DiaCraft's own on the same element ([`Props::element`]), and a read gives it back while the attribute beside it is the one written here. One step for
+    /// each attribute; the save is marked as one that writes a form of an earlier version in 1.4's (the card says so in its values group).
+    fn in_1_4_form(&mut self, work: &mut WriteWork) -> Result<(), WriteError> {
+        work.charge_steps(self.attrs.len())?;
+        for (uri, name, value) in self.attrs.iter_mut() {
+            let Some(space) = crate::ext::odf14::space_of(uri) else { continue };
+            let Some((kind, carrier)) = crate::ext::odf14::listed(space, local(name)) else { continue };
+            let Some(form) = crate::ext::odf14::form_14(kind, value) else { continue };
+            self.carried.push((carrier, std::mem::replace(value, form.to_owned())));
+            work.forms_1_4 = true;
+        }
+        Ok(())
+    }
+
+    /// The element `name` holding the attributes and `children`, and the carriers beside them: each `diacraft:older-...` with the declaration of the prefix on the element, as the used
+    /// automatic styles write theirs (`write/text/model.rs`). A carrier is written once and only where nothing of the element has its name or declares the prefix already, which a model of a
+    /// hostile file may; one that cannot be written is added to `left`.
+    fn element(self, name: &str, children: Vec<Node>, left: &mut usize) -> Option<El> {
         if self.attrs.is_empty() && children.is_empty() {
             return None;
         }
-        Some(El { name: name.to_owned(), attrs: self.attrs.into_iter().map(|(_, n, v)| (n, v)).collect(), children })
+        let mut attrs: Vec<(String, String)> = self.attrs.into_iter().map(|(_, n, v)| (n, v)).collect();
+        if !self.carried.is_empty() {
+            let prefix = crate::ext::names::PREFIX;
+            let declaration = format!("xmlns:{prefix}");
+            if attrs.iter().any(|(n, _)| *n == declaration || n.split_once(':').is_some_and(|(p, _)| p == prefix)) {
+                *left = left.saturating_add(self.carried.len());
+            } else {
+                attrs.push((declaration, diacraft_doc::DIACRAFT_URN.to_owned()));
+                attrs.extend(self.carried.into_iter().map(|(carrier, value)| (format!("{prefix}:{carrier}"), value)));
+            }
+        }
+        Some(El { name: name.to_owned(), attrs, children })
     }
 }
 
@@ -303,6 +364,10 @@ fn one(
                 if value.stamp != Some(stamp_text_group(row, value.group)) {
                     continue;
                 }
+                // The spelling of a group: the attributes the file stated of the group are all of it, so the ones the cells would write beside them are not written.
+                if value.group == TextGroup::Style {
+                    target.drop_owned("Style");
+                }
                 for (k, v) in value.attrs.iter() {
                     match uri_of(k, bindings) {
                         Some(uri) if is_qname(k) => target.put(uri, k.to_owned(), v.to_owned(), true),
@@ -363,6 +428,8 @@ fn one(
             }
         }
     }
+    // The group `Style` the schema of the version written lists no value of is written in the value it lists nearest, the file's carried.
+    text.in_1_4_form(work)?;
     let mut children: Vec<Node> = Vec::new();
     for (props, name, kids) in [
         (graphic, "style:graphic-properties", in_graphic),
@@ -370,7 +437,7 @@ fn one(
         (text, "style:text-properties", in_text),
     ] {
         work.charge_steps(props.attrs.len())?;
-        if let Some(el) = props.element(name, kids) {
+        if let Some(el) = props.element(name, kids, left) {
             children.push(Node::El(el));
         }
     }

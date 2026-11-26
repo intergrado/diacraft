@@ -546,6 +546,45 @@ fn the_connector_path_commands_run_as_steps() {
     assert!(stderr.contains("step 1 (connector.reroute)") && stderr.contains("freely, as_needed, never or on_crossover"), "{stderr}");
 }
 
+/// The page's routing settings run as steps (`docs/cli.md`). `page.routing` says what the page holds, `page.set_routing` writes it in one step (a new style routes the connectors
+/// that follow the page), and `connector.path` gives the corners of a route in paper inches.
+#[test]
+fn the_page_routing_commands_run_as_steps() {
+    let steps = [
+        r#"{"command":"file.new"}"#,
+        r#"{"command":"shape.drop","params":{"master":"rectangle","page":1,"x":3.0,"y":4.0}}"#,
+        r#"{"command":"shape.drop","params":{"master":"rectangle","page":1,"x":9.0,"y":6.0}}"#,
+        r#"{"command":"connector.add","params":{"from":{"id":1,"point":3},"to":{"id":2,"point":1}}}"#,
+        r#"{"command":"connector.path","params":{"id":3}}"#,
+        r#"{"command":"page.set_routing","params":{"style":"straight","connector_to_shape":{"x":0.25,"y":0.3}}}"#,
+        r#"{"command":"connector.path","params":{"id":3}}"#,
+        r#"{"command":"page.set_routing","params":{"style":"straight","connector_to_shape":{"x":0.25,"y":0.3}}}"#,
+        r#"{"command":"page.routing"}"#,
+        r#"{"command":"document.inspect"}"#,
+    ]
+    .join("\n");
+    let out = cli(&["run", "--commands", "-"], Some(steps.as_bytes()));
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let lines = json_lines(&out.stdout);
+    assert_eq!(lines.len(), 10, "{lines:?}");
+    let corners = |line: &Value| line["result"]["points"].as_array().map(Vec::len);
+    assert_eq!(corners(&lines[4]), Some(4), "a right-angle route, a Z: {}", lines[4]);
+    assert_eq!(lines[4]["result"]["style"], "right_angle");
+    assert_eq!(lines[5]["result"]["style"], "straight", "{}", lines[5]);
+    assert_eq!(lines[5]["result"]["routed"], 1, "the connector follows the page and reroutes freely: {}", lines[5]);
+    assert_eq!(corners(&lines[6]), Some(2), "one leg: {}", lines[6]);
+    assert_eq!(lines[7]["result"]["routed"], 0, "the same call again asks nothing: {}", lines[7]);
+    assert_eq!(lines[8]["result"]["connector_to_shape"], json!({"x": 0.25, "y": 0.3}), "{}", lines[8]);
+    assert_eq!(lines[8]["result"]["held"]["connector_to_shape"], true);
+    assert_eq!(lines[9]["result"]["history"]["undo"], 4, "the two drops, the connector and the one call that changed the page: {}", lines[9]);
+    // A direction the style does not take is refused in words, and the run stops there.
+    let out =
+        cli(&["run", "--cmd", "file.new", "--cmd", "page.set_routing", "--params", r#"{"style":"right_angle","direction":"top_to_bottom"}"#], None);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = text(&out.stderr);
+    assert!(stderr.contains("step 1 (page.set_routing)") && stderr.contains("the style `right_angle` takes no direction"), "{stderr}");
+}
+
 /// The selection queries run as steps and answer the `ID`s a window would select. `select.choices` lists what the Select by Type dialog offers, `select.by_type` takes
 /// the shapes of a role or a type, `select.by_region` takes a net or a loop wholly inside or, with `partial`, touched, and none of them is an undo step.
 #[test]

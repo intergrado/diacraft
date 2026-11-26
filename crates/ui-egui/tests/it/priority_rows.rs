@@ -254,18 +254,12 @@ fn more_shapes_files_every_built_in_stencil_by_category_checks_the_open_ones_and
     open_more_shapes(&mut w);
     assert_eq!(
         drawn_names(&w, "shapes.category."),
-        ["Flowchart", "General", "Software and Database", "Business"],
+        ["Flowchart", "General", "Software and Database", "Business", "Network"],
         "the categories, the open ones' first"
     );
-    let all = [
-        "Arrow Shapes",
-        "Basic Flowchart",
-        "Basic Shapes",
-        "Cross-Functional Flowchart Shapes",
-        "Decorative Shapes",
-        "Gane-Sarson",
-        "Organization Chart Shapes",
-    ];
+    let mut all: Vec<&str> = diacraft_engine::stencil::stencils().iter().map(|s| s.name).collect();
+    all.sort_unstable();
+    assert!(all.len() >= 9 && all.contains(&"Network Devices"), "the shipped stencils: {all:?}");
     let mut rows: Vec<String> = drawn_names(&w, "shapes.more.").into_iter().filter(|n| n != "open").collect();
     rows.sort();
     assert_eq!(rows, all, "every built-in stencil has a row, open or not");

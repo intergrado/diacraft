@@ -79,6 +79,29 @@ fn each_stencil_the_engine_lists_has_a_row_and_a_click_shows_its_masters() {
     assert!(tile_names(&w).contains(&"Rectangle".to_owned()));
 }
 
+/// Every stencil the engine ships, the ones a new session leaves closed too (the second batch's: STENCIL2): opened, it has a row, and its tiles are its masters, each enabled. A stencil that
+/// ships later is covered by this test with no change to it.
+#[test]
+fn every_shipped_stencil_once_opened_shows_a_tile_for_each_of_its_masters() {
+    let mut w = window_with(None);
+    for stencil in diacraft_engine::stencil::stencils() {
+        if !stencil.default_open {
+            run_command(&mut w, "stencil.open", json!({ "id": stencil.id }));
+            w.rest();
+        }
+        run_command(&mut w, "window.stencil", json!({ "stencil": stencil.id }));
+        w.rest();
+        assert_eq!(w.state().window_state()["stencil"], stencil.id, "{}: the window shows it", stencil.id);
+        let mut shown = tile_names(&w);
+        shown.sort();
+        let mut wanted: Vec<String> = stencil.masters().iter().filter(|m| !m.is_hidden()).map(|m| m.name.to_owned()).collect();
+        wanted.sort();
+        assert_eq!(shown, wanted, "{}: a tile for each master and no other", stencil.id);
+        assert!(elements_named(&w, "shapes.tile.").iter().all(|(_, _, enabled)| *enabled), "{}: every master works", stencil.id);
+    }
+    assert_eq!(w.state().ui_panics(), 0);
+}
+
 /// More Shapes is a flyout that names every stencil; choosing one shows its masters.
 #[test]
 fn more_shapes_lists_the_stencils_and_a_choice_shows_its_masters() {
@@ -88,7 +111,7 @@ fn more_shapes_lists_the_stencils_and_a_choice_shows_its_masters() {
     click(&mut w, more.rect.center());
     w.rest();
     let names: Vec<String> = elements_named(&w, "shapes.more.").into_iter().map(|(n, ..)| n).filter(|n| n != "shapes.more.open").collect();
-    assert_eq!(names.len(), 7, "{names:?}");
+    assert_eq!(names.len(), diacraft_engine::stencil::stencils().len(), "a row for every shipped built-in stencil: {names:?}");
     // Open Stencil is in the flyout, and quiet when the app has no file dialog to ask (the web; this window has none).
     assert!(!w.state().element("shapes.more.open").expect("Open Stencil is drawn").enabled);
     assert!(names.contains(&"shapes.more.Basic Shapes".to_owned()) && names.contains(&"shapes.more.Basic Flowchart".to_owned()));

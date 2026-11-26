@@ -1,0 +1,59 @@
+[package]
+name = "diacraft-mxfile-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly: neither is in the workspace's Cargo.lock, which the `fuzz check` step of the gate starts each crate from, so a release of either
+# could turn the gate red with no change here. `arbitrary` is libfuzzer-sys's own dependency, named so that it is pinned too. Move both together, in
+# every fuzz crate (a test in xtask checks that they agree).
+libfuzzer-sys = "=0.4.13"
+arbitrary = "=1.5.0"
+diacraft-mxfile = { path = ".." }
+diacraft-container = { path = "../../container" }
+diacraft-doc = { path = "../../doc" }
+# The recipe makes a compressed page the way the editor does: deflate, with the crate the container inflates with.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+
+# A workspace of its own: cargo-fuzz needs nightly and sanitizer flags, so this crate stays out of DiaCraft's workspace and its lockfile
+# (`xtask/src/stats.rs` skips a nested `fuzz` folder).
+[workspace]
+
+# The input and the properties of the target, which the reader's tests include (`crates/mxfile/tests/it/fuzz.rs` includes `src/lib.rs`).
+[lib]
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mxfile_decode"
+path = "fuzz_targets/mxfile_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mxfile_read"
+path = "fuzz_targets/mxfile_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mxfile_style"
+path = "fuzz_targets/mxfile_style.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mxfile_label"
+path = "fuzz_targets/mxfile_label.rs"
+test = false
+doc = false
+bench = false

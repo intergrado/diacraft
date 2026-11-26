@@ -38,7 +38,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             ["Home", "Shapes", "More Shapes"],
             None,
             "path: the stencil file to open (.diacraft-stencil, .vssx or .vssm), and not a drawing or a template; \
-             id: text, the id of a built-in stencil that is not open (`available` in stencil.list: basic, flowchart, decorative, arrows, gane-sarson, cross-functional or orgchart) to open it, and give path or id and not both",
+             id: text, the id of a built-in stencil that is not open (`available` in stencil.list: basic, flowchart, decorative, arrows, gane-sarson, cross-functional, orgchart, uml-class, uml-usecase, uml-sequence, uml-activity, uml-state, uml-component, bpmn, c4, network, computers, cloud, crows-foot or chen, the thirteen after orgchart being there once they have masters) to open it, and give path or id and not both",
             always,
             open
         ),

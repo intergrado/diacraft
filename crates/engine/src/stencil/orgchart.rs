@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use diacraft_doc::{Cell, CellName, Row, Section, Sheet, Text, TextPart, Value};
 
-use super::{MasterSpec, Outline, SIDES, length, plain, put};
+use super::{MasterSpec, More, Outline, SIDES, length, plain, put};
 use crate::formatting::Rgb;
 
 /// The series number of the stencil's masters in their GUIDs (`MasterSpec::guid`): Basic Shapes 1, Basic Flowchart 2, 3 the GUID a copied master is given when its own is taken
@@ -58,6 +58,7 @@ struct Look {
 const fn master(at: u16, id: &'static str, name: &'static str, width: f64, height: f64) -> MasterSpec {
     MasterSpec {
         identity: (SERIES, at),
+        more: &More::NONE,
         id,
         name,
         width,
@@ -182,6 +183,8 @@ pub(super) fn decorate(spec: &MasterSpec, sheet: &mut Sheet) -> Text {
     put(&mut sheet.cells, "FillForegnd", Cell::with_formula(&look.fill.formula(), Some(Value::from_text(&look.fill.hex()))));
     put(&mut sheet.cells, "LinePattern", plain(look.pattern));
     put(&mut sheet.cells, "LineWeight", length(look.weight / 72.0));
+    // Owner 2026-11-25: a position is a shape people join, so a route goes round one dropped on it; the same cell as a `Dress` with `obj_type` writes.
+    put(&mut sheet.cells, "ObjType", plain(1.0));
     sheet.sections.push(Arc::new(property_section(name, title)));
     sheet.sections.push(Arc::new(field_section(name, title)));
     sheet.sections.push(Arc::new(character_section()));

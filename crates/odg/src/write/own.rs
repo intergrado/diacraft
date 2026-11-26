@@ -1105,10 +1105,15 @@ pub(crate) fn decide_line_end(edit: &mut super::stylemap::StyleEdit, new: &Sheet
         return;
     }
     edit.line.clear();
+    edit.diamonds.clear();
     for name in LINE_END_CELLS {
         let own = new.cell(name).and_then(|c| c.value.as_ref()).and_then(diacraft_doc::Value::number);
         if let Some(n) = own.or_else(|| resolved(name)) {
             edit.line.push((name, n));
+        }
+        // DiaCraft's filled diamond is a custom end (254) that names the master of that name: it has a marker of its own.
+        if new.cell(name).is_some_and(|c| crate::ext::fingerprint::is_filled_diamond(name, c)) {
+            edit.diamonds.push(name);
         }
     }
 }
@@ -1932,6 +1937,7 @@ mod tests {
             fx: None,
             fx_off: None,
             line: Vec::new(),
+            diamonds: Vec::new(),
             parent: None,
         }
     }

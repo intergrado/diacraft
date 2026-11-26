@@ -1,6 +1,6 @@
 //! Basic Gane-Sarson notation; original dimensions and contour recipes in
 //! –D5. One ordinary label per node.
-use super::{Co, MasterSpec, Outline, PathSpec, SIDES, Seg, TextBox, fh, fw, pt};
+use super::{Co, ConnectorLook, Flag, MasterSpec, More, Outline, PathSpec, SIDES, Seg, TextBox, fh, fw, pt};
 
 const Z: Co = fw(0.0);
 const W: Co = fw(1.0);
@@ -9,7 +9,7 @@ const H: Co = fh(1.0);
 /// A corner coordinate: shares of width, height and the shorter side. The radius
 /// is .12 of that shorter side even after a nonuniform resize.
 const fn corner(w: f64, h: f64, radius: f64) -> Co {
-    Co { w, h, min: radius * 0.12 }
+    Co { w, h, min: radius * 0.12, k: 0.0, rad: 0.0, rs: 0.0 }
 }
 const R: Co = corner(0.0, 0.0, 1.0);
 const WR: Co = corner(1.0, 0.0, -1.0);
@@ -28,8 +28,14 @@ pub(super) static MASTERS: [MasterSpec; 4] = [
         width: 1.6,
         height: 0.9,
         identity: (6, 1),
+        more: &More::PLACEABLE,
         outline: Outline::Paths {
-            paths: &[PathSpec { fill: true, segs: &[Seg::Move(Z, Z), Seg::Line(W, Z), Seg::Line(W, H), Seg::Line(Z, H), Seg::Line(Z, Z)] }],
+            paths: &[PathSpec {
+                fill: true,
+                segs: &[Seg::Move(Z, Z), Seg::Line(W, Z), Seg::Line(W, H), Seg::Line(Z, H), Seg::Line(Z, Z)],
+                no_show: Flag::Off,
+                no_line: Flag::Off,
+            }],
             text: LABEL,
         },
         points: &SIDES,
@@ -40,9 +46,12 @@ pub(super) static MASTERS: [MasterSpec; 4] = [
         width: 1.6,
         height: 1.0,
         identity: (6, 2),
+        more: &More::PLACEABLE,
         outline: Outline::Paths {
             paths: &[PathSpec {
                 fill: true,
+                no_show: Flag::Off,
+                no_line: Flag::Off,
                 segs: &[
                     Seg::Move(R, Z),
                     Seg::Line(WR, Z),
@@ -65,9 +74,15 @@ pub(super) static MASTERS: [MasterSpec; 4] = [
         width: 1.8,
         height: 0.8,
         identity: (6, 3),
+        more: &More::PLACEABLE,
         // One open, unfilled path: neither page rendering nor preview may close its right side.
         outline: Outline::Paths {
-            paths: &[PathSpec { fill: false, segs: &[Seg::Move(W, H), Seg::Line(Z, H), Seg::Line(Z, Z), Seg::Line(W, Z)] }],
+            paths: &[PathSpec {
+                fill: false,
+                segs: &[Seg::Move(W, H), Seg::Line(Z, H), Seg::Line(Z, Z), Seg::Line(W, Z)],
+                no_show: Flag::Off,
+                no_line: Flag::Off,
+            }],
             text: LABEL,
         },
         points: &[pt(0.5, 1.0, 0.0, 1.0), pt(0.0, 0.5, -1.0, 0.0), pt(0.5, 0.0, 0.0, -1.0), pt(1.0, 1.0, 1.0, 0.0)],
@@ -78,7 +93,8 @@ pub(super) static MASTERS: [MasterSpec; 4] = [
         width: 1.5,
         height: 0.0,
         identity: (6, 4),
-        outline: Outline::Connector,
+        more: &More::NONE,
+        outline: Outline::Connector(ConnectorLook::DATA_FLOW),
         points: &[],
     },
 ];

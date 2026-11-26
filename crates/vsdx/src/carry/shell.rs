@@ -5,7 +5,8 @@
 //! (`diacraft_sheetxml::model`, the fragment of one shape, page, master, style or document) and read back by it, so that whatever the codec can say, the carrier can carry.
 //!
 //! **Where a shell finds its place again** is by position and not by name, since the stamp of the native outputs beside it (`stamp.rs`) says that the file's structure is the one the
-//! shell was made beside: a section is its place in the sheet's list, a row its place in the section's, a connect its place in the list (a font is found by its name). The position is
+//! shell was made beside: a section is its place in the sheet's list, a row its place in the section's, a connect its place in the list (a font is found by its name, and by its place in the table when the table holds more than one of a name: the faces an `.odg` declares share a family, which
+//! is the name a table of VSDX calls a face by). The position is
 //! the `at` attribute of the element's `raw` attributes in the shell (the shell is thrown away once its slots are copied, so the attribute is the carrier's own and is never put on
 //! an object). A text part that rides (a bookmark, a field the `.odg` reader kept) sits between the characters, which VSDX writes natively; its place is the number of markers (`Cp`,
 //! `Pp`, `Tp`, `Fld`, VSDX's own `Raw`) before it and the bytes of characters since the last of them.
@@ -418,12 +419,14 @@ pub(crate) fn style_put(real: &mut Style, shell: &Style) -> usize {
 
 /// The shell of the document: its slot, the faces that hold something, and its sheet's places. `None` when nothing rides.
 pub(crate) fn document_shell(doc: &Document, sheets: &mut Sheets) -> Option<Document> {
-    // A face is found again by its name: a drawing that was never saved is given the faces its cells name beside its own, so the table's order is not the model's.
+    // A face is found again by its name, and by its place in the table among the faces of that name: a drawing that was never saved is given the faces its cells name beside its own, so the
+    // table's order is not always the model's, and the faces an `.odg` declares are several of one name (GATE1622-CROSS-FONTNAME: three declarations of one family were put on one face).
     let fonts: Vec<FaceName> = doc
         .fonts
         .iter()
-        .filter(|f| rides(&f.ext))
-        .map(|f| FaceName { name_u: Arc::clone(&f.name_u), raw: RawAttrs::new(), ext: carried(&f.ext) })
+        .enumerate()
+        .filter(|(_, f)| rides(&f.ext))
+        .map(|(i, f)| FaceName { name_u: Arc::clone(&f.name_u), raw: at(i), ext: carried(&f.ext) })
         .collect();
     work::carry_walked(doc.fonts.len());
     let sheet = sheets.shell(&doc.sheet);
@@ -450,24 +453,62 @@ pub(crate) fn parts_shell(doc: &Document, parts: &[Arc<Part>]) -> Option<Documen
     Some(shell)
 }
 
+/// Puts the faces of a document's shell on the faces of `real`'s table, **each on the face it stood on**: the face at the place the shell says, when it has the shell face's name, and else the first face
+/// of that name that no shell face took (a shell of an earlier build says no place). Two shell faces of one name are two faces: the faces an `.odg` declares are several of one family, the name a VSDX
+/// table finds a face by, and each is put on a face of its own (GATE1622-CROSS-FONTNAME: all three went on the first, and the last declaration was the only one left). **A shell face that the table has
+/// no face left for** (another program rewrote the table, and left fewer faces of the name) **is a face of the table's own again, at its end**, with the data it carried, as the shell of an `.odg` does
+/// (`faces_put` of the `odg` crate's shell): a style the model holds whole names its declaration, and a table without it would leave the name with no face to be written. → how many are left out, which is
+/// the ones past the most faces a table holds ([`diacraft_doc::MAX_DEFINITIONS`]). Each is a step, and each face of the table is looked at twice at most.
+fn faces_put(real: &mut Document, shell: &Document) -> usize {
+    let mut fonts: Vec<FaceName> = real.fonts.as_ref().clone();
+    let mut taken = vec![false; fonts.len()];
+    let mut lost = 0;
+    // The faces that stood where the shell says; the others are put by name below.
+    let mut unplaced: Vec<&FaceName> = Vec::new();
+    for face in shell.fonts.iter() {
+        work::carry_walked(1);
+        let place = position(&face.raw).filter(|&i| fonts.get(i).is_some_and(|f| f.name_u == face.name_u) && taken.get(i) == Some(&false));
+        match place.and_then(|i| fonts.get_mut(i).zip(taken.get_mut(i))) {
+            Some((target, slot)) => {
+                *slot = true;
+                put(&mut target.ext, &face.ext);
+            }
+            None => unplaced.push(face),
+        }
+    }
+    if !unplaced.is_empty() {
+        // The faces of the table by name, in its order, for the shell faces that stood nowhere the table says.
+        let mut by_name: HashMap<Arc<str>, std::collections::VecDeque<usize>> = HashMap::with_capacity(fonts.len());
+        for (i, face) in fonts.iter().enumerate() {
+            work::carry_walked(1);
+            if taken.get(i) == Some(&false) {
+                by_name.entry(Arc::clone(&face.name_u)).or_default().push_back(i);
+            }
+        }
+        for face in unplaced {
+            work::carry_walked(1);
+            let at = by_name.get_mut(&face.name_u).and_then(std::collections::VecDeque::pop_front);
+            if let Some(target) = at.and_then(|i| fonts.get_mut(i)) {
+                put(&mut target.ext, &face.ext);
+            } else if fonts.len() < diacraft_doc::MAX_DEFINITIONS {
+                let mut own = FaceName { name_u: Arc::clone(&face.name_u), raw: RawAttrs::new(), ext: Ext::default() };
+                put(&mut own.ext, &face.ext);
+                fonts.push(own);
+            } else {
+                lost += 1;
+            }
+        }
+    }
+    real.fonts = Arc::new(fonts);
+    lost
+}
+
 /// Puts what rides in a document's shell into `real` (the parts and the custom properties of the other formats are added by the caller, which judged them).
 pub(crate) fn document_put(real: &mut Document, shell: &Document) -> usize {
     put(&mut real.ext, &shell.ext);
     let mut lost = 0;
     if !shell.fonts.is_empty() {
-        let mut fonts: Vec<FaceName> = real.fonts.as_ref().clone();
-        let mut first: HashMap<Arc<str>, usize> = HashMap::with_capacity(fonts.len());
-        for (i, face) in fonts.iter().enumerate() {
-            first.entry(Arc::clone(&face.name_u)).or_insert(i);
-        }
-        for face in shell.fonts.iter() {
-            work::carry_walked(1);
-            match first.get(&face.name_u).and_then(|&i| fonts.get_mut(i)) {
-                Some(target) => put(&mut target.ext, &face.ext),
-                None => lost += 1,
-            }
-        }
-        real.fonts = Arc::new(fonts);
+        lost += faces_put(real, shell);
     }
     if !diacraft_sheetxml::build::sheet_is_empty(&shell.sheet) || !shell.sheet.ext.is_empty() {
         lost += sheet_put(Arc::make_mut(&mut real.sheet), &shell.sheet);
@@ -494,5 +535,131 @@ impl Sheets {
         let made = sheet_shell(sheet).map(Arc::new);
         self.shells.insert(key, made.clone());
         made
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A face called `name_u` that holds an `.odg` declaration named `declared` (`style:name`), as the `.odg` reader makes one.
+    fn declared_face(name_u: &str, declared: &str) -> FaceName {
+        let mut face = FaceName { name_u: Arc::from(name_u), raw: RawAttrs::new(), ext: Ext::default() };
+        face.ext.make_mut().odf = Kept { raw: RawAttrs::from_pairs([("style:name", declared)]), kept: Passthrough::new() };
+        face
+    }
+
+    /// A face of the file's table: a name and nothing more, as the VSDX reader makes one.
+    fn plain_face(name_u: &str) -> FaceName {
+        FaceName { name_u: Arc::from(name_u), raw: RawAttrs::new(), ext: Ext::default() }
+    }
+
+    fn document_of(faces: Vec<FaceName>) -> Document {
+        let mut doc = Document::empty();
+        doc.fonts = Arc::new(faces);
+        doc
+    }
+
+    /// The `style:name` of the declaration each face of the table holds, in the table's order (`-` for none).
+    fn declarations(doc: &Document) -> Vec<String> {
+        doc.fonts.iter().map(|f| f.ext.get().and_then(|d| d.odf.raw.get("style:name")).unwrap_or("-").to_owned()).collect()
+    }
+
+    /// Three declarations of one family, which a VSDX table names by the family: the faces an `.odg` of GATE1622-CROSS-FONTNAME's vector declares.
+    fn model() -> Document {
+        document_of(vec![
+            declared_face("DejaVu Sans", "DV"),
+            declared_face("Liberation Mono", "Mono"),
+            declared_face("Liberation Mono", "Mono1"),
+            declared_face("Liberation Mono", "Mono2"),
+        ])
+    }
+
+    /// The table a VSDX file holds of the model's: the names of the faces and nothing of the `.odg`'s data.
+    fn file_table(doc: &Document) -> Document {
+        document_of(doc.fonts.iter().map(|f| plain_face(&f.name_u)).collect())
+    }
+
+    #[test]
+    fn faces_of_one_name_are_each_put_on_a_face_of_their_own() {
+        let model = model();
+        let shell = document_shell(&model, &mut Sheets::default()).expect("the faces ride");
+        let mut file = file_table(&model);
+        assert_eq!(document_put(&mut file, &shell), 0);
+        assert_eq!(
+            declarations(&file),
+            ["DV", "Mono", "Mono1", "Mono2"],
+            "red on 1622f7c2: [\"DV\", \"Mono2\", \"-\", \"-\"], the last declaration on the first face"
+        );
+    }
+
+    #[test]
+    fn a_face_goes_where_it_stood_though_the_faces_before_it_hold_nothing_that_rides() {
+        // The second face of the name is a VSDX face of its own; only the first and the third ride.
+        let model =
+            document_of(vec![declared_face("Liberation Mono", "Mono"), plain_face("Liberation Mono"), declared_face("Liberation Mono", "Mono2")]);
+        let shell = document_shell(&model, &mut Sheets::default()).expect("two faces ride");
+        assert_eq!(shell.fonts.len(), 2);
+        let mut file = file_table(&model);
+        assert_eq!(document_put(&mut file, &shell), 0);
+        assert_eq!(declarations(&file), ["Mono", "-", "Mono2"]);
+    }
+
+    #[test]
+    fn a_shell_that_says_no_place_puts_its_faces_on_the_faces_of_the_name_in_order() {
+        // A shell an earlier build wrote has no `at` on a face.
+        let model = model();
+        let mut shell = document_shell(&model, &mut Sheets::default()).expect("the faces ride");
+        for face in Arc::make_mut(&mut shell.fonts).iter_mut() {
+            face.raw = RawAttrs::new();
+        }
+        let mut file = file_table(&model);
+        assert_eq!(document_put(&mut file, &shell), 0);
+        assert_eq!(declarations(&file), ["DV", "Mono", "Mono1", "Mono2"]);
+    }
+
+    #[test]
+    fn a_place_that_is_not_the_face_of_that_name_is_no_place() {
+        // Each `at` points at a face of another name, past the table, or at text: the faces are put by name, in order.
+        let model = model();
+        let mut shell = document_shell(&model, &mut Sheets::default()).expect("the faces ride");
+        for (face, at) in Arc::make_mut(&mut shell.fonts).iter_mut().zip(["2", "0", "99999999999999999999", "not a number"]) {
+            face.raw = RawAttrs::from_pairs([(AT, at)]);
+        }
+        let mut file = file_table(&model);
+        assert_eq!(document_put(&mut file, &shell), 0);
+        assert_eq!(declarations(&file), ["DV", "Mono", "Mono1", "Mono2"]);
+    }
+
+    #[test]
+    fn two_shell_faces_never_take_one_face_and_the_faces_the_table_lacks_are_added_to_it() {
+        // The file's table lost two of the three faces of the name (another program rewrote it): the first declaration goes on the face left, and the others are faces of the table again, at its end.
+        let model = model();
+        let shell = document_shell(&model, &mut Sheets::default()).expect("the faces ride");
+        let mut file = document_of(vec![plain_face("DejaVu Sans"), plain_face("Liberation Mono")]);
+        assert_eq!(document_put(&mut file, &shell), 0);
+        assert_eq!(declarations(&file), ["DV", "Mono", "Mono1", "Mono2"], "no declaration is left out");
+        assert_eq!(
+            file.fonts.iter().map(|f| &*f.name_u).collect::<Vec<_>>(),
+            ["DejaVu Sans", "Liberation Mono", "Liberation Mono", "Liberation Mono"]
+        );
+        // Two shell faces that name the same place: the second finds no face of the name left, and is added.
+        let mut shell = document_shell(&model, &mut Sheets::default()).expect("the faces ride");
+        for face in Arc::make_mut(&mut shell.fonts).iter_mut() {
+            face.raw = RawAttrs::from_pairs([(AT, "1")]);
+        }
+        let mut file = document_of(vec![plain_face("DejaVu Sans"), plain_face("Liberation Mono")]);
+        assert_eq!(document_put(&mut file, &shell), 0);
+        assert_eq!(declarations(&file), ["DV", "Mono", "Mono1", "Mono2"]);
+        // A face of a name the table has none of at all is added too.
+        let mut file = document_of(vec![plain_face("Arial")]);
+        assert_eq!(document_put(&mut file, &shell), 0);
+        assert_eq!(declarations(&file), ["-", "DV", "Mono", "Mono1", "Mono2"]);
+    }
+
+    #[test]
+    fn a_face_that_carries_nothing_leaves_the_table_as_it_is() {
+        let model = document_of(vec![plain_face("Arial"), plain_face("Arial")]);
+        assert!(document_shell(&model, &mut Sheets::default()).is_none());
     }
 }

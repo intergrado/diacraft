@@ -36,14 +36,14 @@ fn listed_warnings(first: Option<String>, reader: &[String], last: Option<String
 }
 
 pub(super) fn specs() -> Vec<CommandSpec> {
-    vec![
+    let mut specs = vec![
         cmd!(query "document.inspect", "Inspect Document", [], None, "none", has_document, inspect),
         cmd!(
             "file.new",
             "New",
             ["File"],
             Some("Cmd+N"),
-            "template: text, optional, the id of a template in template.list (basic_diagram, basic_flowchart, cross_functional_flowchart or organization_chart) or the path of a template file (.diacraft-template, .otg, .vstx or .vstm): \
+            "template: text, optional, the id of a template in template.list (basic_diagram, basic_flowchart, cross_functional_flowchart, organization_chart, gane_sarson, uml_class, uml_use_case, uml_sequence, uml_activity, uml_state_machine, uml_component, uml_deployment, bpmn_diagram, c4_diagram, basic_network, cloud_architecture, crows_foot or chen_notation, the ones after gane_sarson being there once their stencils have masters) or the path of a template file (.diacraft-template, .otg, .vstx or .vstm): \
              the new drawing has the template's page, styles and theme, and the stencils it opens (a blank drawing when left out)",
             always,
             new
@@ -99,7 +99,9 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             has_document,
             export
         ),
-    ]
+    ];
+    specs.extend(check_before::specs());
+    specs
 }
 
 /// The most pixels to the inch `file.export` takes for a PNG: the renderer's own limits (16,384 pixels a side, 64 million in all) stop a larger
@@ -288,7 +290,96 @@ fn status(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({ "dirty": s.is_dirty(), "has_file": s.path().is_some(), "format": format.map(FileFormat::word), "variant": variant, "kind": kind }))
 }
 
-/// The save both commands share. The file that would be written is settled first ([`save_target`]: a link is refused unless it leads to the
+/// **A save, with the file made in memory and not yet written** (plan PL8): `file.save` and `file.save_as` are [`make_save`] and then [`Made::commit`], and `file.check_compatibility`
+/// is [`make_save`] alone.
+fn save_to(s: &mut Session, cmd: &str, path: &Path, by_extension: bool, force: bool, options: Options) -> Result<Value> {
+    make_save(s, cmd, path, by_extension, force, options)?.commit(s, cmd)
+}
+
+/// The writer a save used: the five ways a file is made (`file.check_compatibility`'s `writer`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Writer {
+    /// DiaCraft's own format, written from the model (`save_native`).
+    Diacraft,
+    /// The VSDX writer, with no file to splice into: the file is written from the drawing alone.
+    VsdxModel,
+    /// The VSDX writer, splicing the edit into the bytes of the file the drawing was opened from.
+    VsdxSplice,
+    /// The `.odg` writer, with no package to splice into: the file is written from the drawing alone.
+    OdgModel,
+    /// The `.odg` writer, splicing the edit into the package the drawing was opened from.
+    OdgSplice,
+}
+
+impl Writer {
+    /// The word the answer of `file.check_compatibility` says: `diacraft`, `vsdx_model`, `vsdx_splice`, `odg_model` or `odg_splice`.
+    pub(crate) const fn word(self) -> &'static str {
+        match self {
+            Writer::Diacraft => "diacraft",
+            Writer::VsdxModel => "vsdx_model",
+            Writer::VsdxSplice => "vsdx_splice",
+            Writer::OdgModel => "odg_model",
+            Writer::OdgSplice => "odg_splice",
+        }
+    }
+}
+
+/// What the session is told when the file is on the disk: the file it now stands on, given the drawing's own file as the save made it (its path, stamp and link already set), and the model it reads as.
+type Settle = Box<dyn FnOnce(&mut Session, OpenFile)>;
+
+/// **A save made in memory and not yet written** (plan PL8): the bytes of the file, what the save will answer, and what the session is told once the file is on the disk.
+///
+/// A save is two halves. **Making** ([`make_save`]) is everything up to the disk: the target judged, the drawing given to the writer, the file written in memory and read back, and the check and `carried`
+/// made of what was read back. It reads the session and **changes nothing in it** (it is given `&Session`), so a caller that stops there has written no file and changed no state: the drawing, its
+/// history, the working file, the dirty flag, the identifier ledger and every baseline are as they were. (The one thing it may fill is a cache that the next save fills the same way: the pending
+/// content stamp, worked out when a model writer asks whether the drawing is as it was read.) **Committing** ([`Made::commit`]) is the disk write through the crash-safe replacement and then the
+/// session told the drawing is saved: the working file, the dirty flag, the adoption of the model the file reads as, the ledger and the baselines.
+pub(crate) struct Made {
+    writer: Writer,
+    format: FileFormat,
+    /// What the save answers: `{bytes, variant, dirty: false, carried, checked, warnings, warning_count, ..}`, as its command gives it.
+    result: Value,
+    bytes: Vec<u8>,
+    /// The path the caller named, which becomes the drawing's own, and the file that is written (the file a link led to).
+    path: std::path::PathBuf,
+    target: std::path::PathBuf,
+    settle: Settle,
+}
+
+impl Made {
+    fn new(writer: Writer, format: FileFormat, result: Value, bytes: Vec<u8>, path: &Path, target: std::path::PathBuf, settle: Settle) -> Made {
+        crate::file::note_save_made();
+        Made { writer, format, result, bytes, path: path.to_path_buf(), target, settle }
+    }
+
+    /// **What `file.check_compatibility` answers** (plan PL8): `{writer, format, variant, carried, checked, bytes}`, the fields of the save's own result that a person is asked about, and the writer that made the file.
+    pub(crate) fn answer(&self) -> Value {
+        let field = |name: &str| self.result.get(name).cloned().unwrap_or(Value::Null);
+        json!({
+            "writer": self.writer.word(),
+            "format": self.format.word(),
+            "variant": field("variant"),
+            "carried": field("carried"),
+            "checked": field("checked"),
+            "bytes": field("bytes"),
+        })
+    }
+
+    /// Writes the file (to a temporary file beside the target, renamed over it, so a disk that cannot be written leaves the old file as it was) and only then tells the session the drawing is saved.
+    /// → the save's result.
+    fn commit(self, s: &mut Session, cmd: &str) -> Result<Value> {
+        let Made { result, bytes, path, target, settle, .. } = self;
+        write_target(&target, &bytes).map_err(|e| failed(cmd, format!("the drawing could not be saved: {e}")))?;
+        // The file as it is now, and where the path led: the next save compares with this, and writes there.
+        let stamp = FileStamp::of_path(&target);
+        let led_to = (target != path).then_some(target);
+        settle(s, OpenFile::new(&path, bytes).with_stamp(stamp).with_target(led_to));
+        Ok(result)
+    }
+}
+
+/// **The first half of the save both commands share: the file made in memory** ([`save_to`] commits it, and `file.check_compatibility` stops here). It is given `&Session` and changes nothing in
+/// it, and writes no file. The file that would be written is settled first ([`save_target`]: a link is refused unless it leads to the
 /// drawing's own file), and for `file.save_as` the extension of that file says the kind. The file is made in memory, and the writer reads it back
 /// before it is returned, so a document the writer cannot write leaves the disk untouched; then it goes to a temporary file beside the target and
 /// is renamed over it, so a disk that cannot be written leaves the old file as it was. Only then is the session told the drawing is saved.
@@ -298,7 +389,7 @@ fn status(s: &mut Session, _: &Value) -> Result<Value> {
 /// file is compared with how it looked when the drawing was opened or last saved (its size and modified time, `FileStamp`); if something else has
 /// changed it, the save is [`crate::EngineError::ChangedOnDisk`] and nothing is written, unless `force` is true. Both commands judge the extension
 /// of the file that would be written; `file.save_as` takes the kind of file from it, and `file.save` keeps the kind the file had.
-fn save_to(s: &mut Session, cmd: &str, path: &Path, by_extension: bool, force: bool, options: Options) -> Result<Value> {
+fn make_save(s: &Session, cmd: &str, path: &Path, by_extension: bool, force: bool, options: Options) -> Result<Made> {
     if s.in_group() {
         return Err(failed(cmd, format!("`{cmd}` cannot run inside a batch or other undo group")));
     }
@@ -383,11 +474,11 @@ fn save_to(s: &mut Session, cmd: &str, path: &Path, by_extension: bool, force: b
         ));
     }
     let named = match route {
-        SavePath::Native(kind) => return save_native(s, cmd, path, target, kind),
+        SavePath::Native(kind) => return make_native(s, cmd, path, target, kind),
         // The kind a Save As names (`.odg` a drawing, `.otg` a template) is asked of the writer, and a Save keeps the kind the file has.
-        SavePath::OdgSplice(variant) => return save_odg(s, cmd, path, target, by_extension.then_some(variant), options),
+        SavePath::OdgSplice(variant) => return make_odg(s, cmd, path, target, by_extension.then_some(variant), options),
         // An `.odg` or `.otg` written from the model alone: the drawing's working file is a `.diacraft` file, or it has none.
-        SavePath::OdgModel(variant) => return save_odg_model(s, cmd, path, target, variant, options),
+        SavePath::OdgModel(variant) => return make_odg_model(s, cmd, path, target, variant, options),
         _ => named.ok_or_else(|| internal(cmd, "a save of a VSDX file with no type"))?,
     };
     // (No content stamp is made here: a pending one keeps the document the drawing was read as, and is made when something asks for it; and the blocker of its re-review.)
@@ -470,7 +561,6 @@ fn save_to(s: &mut Session, cmd: &str, path: &Path, by_extension: bool, force: b
     // **The check after the save**: a file written from the model is compared with the drawing it was written from, by the model the writer read it back as. A splice into the
     // drawing's own file is not checked in 0.2.
     let checked = from_model.then(|| check::compare(&to_write, &written.document, options.drop_macros));
-    write_target(&target, &written.bytes).map_err(|e| failed(cmd, format!("the drawing could not be saved: {e}")))?;
     // **What the file carries** (the design's 5.6): a structured field and never a warning, for a file written from the model. The warning the writer makes of the signatures is the field's.
     let carried = if from_model {
         let signatures = across::classes::signatures_of(&to_write, diacraft_doc::Format::Vsdx)
@@ -507,42 +597,43 @@ fn save_to(s: &mut Session, cmd: &str, path: &Path, by_extension: bool, force: b
         "warnings": warnings,
         "warning_count": said.len(),
     });
-    // The file as it is now, and where the path led: the next save compares with this, and writes there.
-    let stamp = FileStamp::of_path(&target);
-    let led_to = (target != path).then_some(target);
     // **The drawing keeps what it holds when the check found a difference**: the model the file reads as is then a lesser drawing, and the one in the session is the one that has it all.
     let check_clean = checked.as_ref().is_some_and(|outcome| matches!(outcome, check::Outcome::Checked(found) if found.classes.is_empty()));
-    let adopt = from_model && across::adopts_by_working_file(working, &given) && across::adopts(&written, &given) && check_clean;
-    // **A Save As that left something out**: the drawing becomes what the file reads as, with what was left out put back on it (`across::dropped::restore`), when that holds all the
-    // drawing did but what was left out, and the file's baseline is the drawing as the writer is given it. A save into the file that left the shapes of objects out gives the same again.
-    let restored =
-        (!adopt && !asked.is_empty() && (from_model || given.left.shapes > 0) && (!from_model || check_clean) && across::came_back(&written))
-            .then(|| across::dropped::restore(written.document.clone(), restore_from.as_ref().unwrap_or(&doc), given.left, &written.natively))
-            .flatten();
-    let file = OpenFile::new(path, written.bytes)
-        .with_stamp(stamp)
-        .with_target(led_to)
-        .with_extension(Some(named.extension()))
-        .with_written_here()
-        .with_asked(asked)
-        .with_natively(across::natively::union(&natively, &written.natively));
-    // **The drawing becomes what the file reads as** after a save across to VSDX, when that holds everything the drawing did (`across`, "the model after a save across"): the next save into the file
-    // is a splice that compares the drawing with the file as it reads, and a drawing that held an `.odg`'s frame where the file holds an embedding would be refused ("a change to the picture of a shape").
-    if adopt {
-        s.adopt_saved(written.document, file);
-    } else if let Some(kept) = restored {
-        // (The drawing as the writer is given it, of the drawing that is kept: the baseline the next save compares with.)
-        match across::dropped::given(&kept, asked, !macro_enabled && asked.drop_macros) {
-            Ok((baseline, _)) => {
-                let baseline = baseline.into_owned();
-                s.adopt_saved_with(kept, file, baseline);
+    let bytes = std::mem::take(&mut written.bytes);
+    // (The copy given to the writer is let go of before the closure takes the drawing: the copy may borrow it.)
+    drop(to_write);
+    let writer = if from_model { Writer::VsdxModel } else { Writer::VsdxSplice };
+    let settle: Settle = Box::new(move |s, file| {
+        let adopt = from_model && across::adopts_by_working_file(working, &given) && across::adopts(&written, &given) && check_clean;
+        // **A Save As that left something out**: the drawing becomes what the file reads as, with what was left out put back on it (`across::dropped::restore`), when that holds all the
+        // drawing did but what was left out, and the file's baseline is the drawing as the writer is given it. A save into the file that left the shapes of objects out gives the same again.
+        let restored =
+            (!adopt && !asked.is_empty() && (from_model || given.left.shapes > 0) && (!from_model || check_clean) && across::came_back(&written))
+                .then(|| across::dropped::restore(written.document.clone(), restore_from.as_ref().unwrap_or(&doc), given.left, &written.natively))
+                .flatten();
+        let file = file
+            .with_extension(Some(named.extension()))
+            .with_written_here()
+            .with_asked(asked)
+            .with_natively(across::natively::union(&natively, &written.natively));
+        // **The drawing becomes what the file reads as** after a save across to VSDX, when that holds everything the drawing did (`across`, "the model after a save across"): the next save into the file
+        // is a splice that compares the drawing with the file as it reads, and a drawing that held an `.odg`'s frame where the file holds an embedding would be refused ("a change to the picture of a shape").
+        if adopt {
+            s.adopt_saved(written.document, file);
+        } else if let Some(kept) = restored {
+            // (The drawing as the writer is given it, of the drawing that is kept: the baseline the next save compares with.)
+            match across::dropped::given(&kept, asked, !macro_enabled && asked.drop_macros) {
+                Ok((baseline, _)) => {
+                    let baseline = baseline.into_owned();
+                    s.adopt_saved_with(kept, file, baseline);
+                }
+                Err(_) => s.mark_saved(&doc, file, written.document),
             }
-            Err(_) => s.mark_saved(&doc, file, written.document),
+        } else {
+            s.mark_saved(&doc, file, written.document);
         }
-    } else {
-        s.mark_saved(&doc, file, written.document);
-    }
-    Ok(result)
+    });
+    Ok(Made::new(writer, FileFormat::Vsdx, result, bytes, path, target, settle))
 }
 
 /// Our rule: a template that is saved keeps the built-in stencils open at that moment, as the list in DiaCraft's part that names them, when they are not the ones its
@@ -718,12 +809,20 @@ fn refused_save(cmd: &str, why: Why, by_extension: bool) -> crate::EngineError {
     if by_extension { bad(cmd, words) } else { failed(cmd, own_file.unwrap_or(words)) }
 }
 
+/// A save as a `.diacraft` file made and committed in one call, for the tests that call it by name: [`make_native`] and then [`Made::commit`].
+#[cfg(test)]
+pub(crate) fn save_native(s: &mut Session, cmd: &str, path: &Path, target: std::path::PathBuf, kind: NativeKind) -> Result<Value> {
+    make_native(s, cmd, path, target, kind)?.commit(s, cmd)
+}
+
 /// The save of a drawing as a `.diacraft` file (`nativefile::save`): the bytes are made whole in memory, and what the package cannot hold is refused in its words, leaving the disk and the
 /// drawing as they were; then they go to a temporary file beside the target and are renamed over it. Only then is the session told the drawing is saved, and it keeps the package just written
 /// with what the next save copies from it: **an unchanged drawing saved again is the same file**.
 /// → `{bytes, variant, kind, format, macros_dropped: 0, dirty: false, copied, warnings, warning_count}`: `variant` is the extension of the type written (`diacraft`, `diacraft-stencil` or
 /// `diacraft-template`), `format` the version of the format (`1.1`) and `copied` how many entries of the package were copied as they were from the file the drawing was read from or last saved as.
-pub(crate) fn save_native(s: &mut Session, cmd: &str, path: &Path, target: std::path::PathBuf, kind: NativeKind) -> Result<Value> {
+///
+/// This is the making of it ([`make_save`]): the file in memory, the check after the save of a drawing that came from another format, and what the session is told when it is written. It writes no file and changes no session.
+fn make_native(s: &Session, cmd: &str, path: &Path, target: std::path::PathBuf, kind: NativeKind) -> Result<Made> {
     let crate::session::SaveInputs { doc, source, .. } = s.save_inputs().ok_or_else(|| failed(cmd, "no document open"))?;
     // A template keeps the built-in stencils open at that moment, as a VSDX template does.
     let (to_write, not_recorded) = with_template_stencils(s, &doc, kind == NativeKind::Template);
@@ -737,7 +836,6 @@ pub(crate) fn save_native(s: &mut Session, cmd: &str, path: &Path, target: std::
     // and came from the VSDX or the `.odg` reader all the same: it is checked as one opened from such a file is.
     let checked =
         native_save_checked(source.as_ref().and_then(OpenFile::format), &to_write).then(|| check::check_native(&to_write, &saved.bytes, false));
-    write_target(&target, &saved.bytes).map_err(|e| failed(cmd, format!("the drawing could not be saved: {e}")))?;
     let mut said: Vec<String> = Vec::new();
     if not_recorded {
         said.push(
@@ -759,23 +857,32 @@ pub(crate) fn save_native(s: &mut Session, cmd: &str, path: &Path, target: std::
         "warnings": warnings,
         "warning_count": said.len(),
     });
-    // The file as it is now, and where the path led: the next save compares with this, and writes there. The drawing's model is the one that was saved: no second model is kept (the
-    // baseline shares what the drawing holds), so the process counts it once.
-    let stamp = FileStamp::of_path(&target);
-    let led_to = (target != path).then_some(target);
-    let file = OpenFile::new(path, saved.bytes).with_stamp(stamp).with_target(led_to).with_native(saved.state);
+    // The drawing's model is the one that was saved: no second model is kept (the baseline shares what the drawing holds), so the process counts it once.
     // **The drawing leaves the `.odg` it stood on as the model the file holds**: the file was written with the package data of the `.odg` as it is now, which the drawing did not hold
     // (a splice into the `.odg` writes some of it anew), and the next save, which stands on this file, wrote the drawing's own: other bytes with no edit. The very model written becomes the
     // drawing, no undo step, so that the next save copies every entry of it.
-    if took_file_data {
-        let written = to_write.into_owned();
-        let baseline = Document::clone(&written);
-        s.adopt_saved_with(written, file, baseline);
+    let written = if took_file_data {
+        Some(to_write.into_owned())
     } else {
-        let baseline = Document::clone(&doc);
-        s.mark_saved(&doc, file, baseline);
-    }
-    Ok(result)
+        // (The copy given to the writer is let go of before the closure takes the drawing: the copy may borrow it.)
+        drop(to_write);
+        None
+    };
+    let state = saved.state;
+    let settle: Settle = Box::new(move |s, file| {
+        let file = file.with_native(state);
+        match written {
+            Some(written) => {
+                let baseline = Document::clone(&written);
+                s.adopt_saved_with(written, file, baseline);
+            }
+            None => {
+                let baseline = Document::clone(&doc);
+                s.mark_saved(&doc, file, baseline);
+            }
+        }
+    });
+    Ok(Made::new(Writer::Diacraft, FileFormat::Diacraft, result, saved.bytes, path, target, settle))
 }
 
 /// Whether a save was given the package data of the `.odg` the drawing stands on ([`with_file_package_data`]) rather than the drawing as it is: what it was given is a copy (`copied`), for a drawing
@@ -830,14 +937,16 @@ fn check_save_peak(cmd: &str, s: &Session, doc: &Document) -> Result<u64> {
 /// **The kind of document**. `wanted` is the kind the extension of a Save As names (`.odg` a drawing, `.otg` a template), `None` for a Save, which keeps the kind the
 /// package has. The kind is asked of the writer only when it is not the kind the package says it is (a package saved as the kind it is is saved as it was, byte for byte when nothing
 /// changed): the writer changes the media type in the two places a package states it and nothing else, and a package with no place to state the other kind is refused in words.
-fn save_odg(
-    s: &mut Session,
+///
+/// This is the making of it ([`make_save`]): the file in memory, which writes no file and changes no session.
+fn make_odg(
+    s: &Session,
     cmd: &str,
     path: &Path,
     target: std::path::PathBuf,
     wanted: Option<diacraft_odg::Variant>,
     options: Options,
-) -> Result<Value> {
+) -> Result<Made> {
     let crate::session::SaveInputs { doc, source, baseline } = s.save_inputs().ok_or_else(|| failed(cmd, "no document open"))?;
     let source = source.ok_or_else(|| internal(cmd, "an .odg drawing with no file"))?;
     let own = diacraft_odg::sniff(source.bytes());
@@ -849,7 +958,6 @@ fn save_odg(
     }
     // The comments of the drawing: an `.odg` does not hold them yet, and the save says so.
     saved.warnings.extend(crate::draw::comments::odg_words(&doc));
-    write_target(&target, &saved.bytes).map_err(|e| failed(cmd, format!("the drawing could not be saved: {e}")))?;
     // A flat drawing has no document file of DiaCraft's, which is where an `.odg` keeps the window settings: one whose settings were set is told so on every save.
     if source.is_flat() && doc.window_flags().is_some() {
         saved.warnings.push(crate::view::NOT_IN_A_FLAT_FILE.to_owned());
@@ -872,12 +980,13 @@ fn save_odg(
         "warning_count": saved.warnings.len(),
         "notes": saved.notes,
     });
-    let stamp = FileStamp::of_path(&target);
-    let led_to = (target != path).then_some(target);
-    let baseline = Document::clone(&doc);
-    let file = OpenFile::new(path, saved.bytes).with_stamp(stamp).with_target(led_to).with_odg(saved.state).with_extension(Some(kind.extension()));
-    s.mark_saved(&doc, file, baseline);
-    Ok(result)
+    let state = saved.state;
+    let settle: Settle = Box::new(move |s, file| {
+        let file = file.with_odg(state).with_extension(Some(kind.extension()));
+        let baseline = Document::clone(&doc);
+        s.mark_saved(&doc, file, baseline);
+    });
+    Ok(Made::new(Writer::OdgSplice, FileFormat::Odg, result, saved.bytes, path, target, settle))
 }
 
 /// The save of a drawing that has no `.odg` to splice into as an `.odg` or an `.otg` (the design's 4.1): a `.diacraft` drawing, or a new one. The bytes are made whole in memory by the
@@ -887,14 +996,9 @@ fn save_odg(
 /// drawing is no edit.
 /// → `{bytes, variant: "odg" | "otg", kind: "drawing" | "template", form: "package", edited, macros_dropped: 0, dirty: false, warnings, warning_count, notes}`, as `file.save` gives it for an `.odg`:
 /// `edited` is whether the content is not what a file it was read from held (a drawing made new has no such file, and is edited).
-fn save_odg_model(
-    s: &mut Session,
-    cmd: &str,
-    path: &Path,
-    target: std::path::PathBuf,
-    variant: diacraft_odg::Variant,
-    options: Options,
-) -> Result<Value> {
+///
+/// This is the making of it ([`make_save`]): the file in memory, which writes no file and changes no session.
+fn make_odg_model(s: &Session, cmd: &str, path: &Path, target: std::path::PathBuf, variant: diacraft_odg::Variant, options: Options) -> Result<Made> {
     let crate::session::SaveInputs { doc, source, .. } = s.save_inputs().ok_or_else(|| failed(cmd, "no document open"))?;
     // A drawing that stands on an `.odg` (a Save As of it to another `.odg` that leaves something out) takes the package data of that file as it is now, as every save from the model of one does, and
     // what the file was written without stays out of the file written.
@@ -905,10 +1009,10 @@ fn save_odg_model(
         Some(file) => Arc::new(with_file_package_data(cmd, Some(file), std::borrow::Cow::Borrowed(&*doc))?.into_owned()),
         None => Arc::clone(&doc),
     };
+    let stands_on_an_odg = working.is_some();
     let mut saved = crate::odgfile::save::save_model(cmd, s, &given_doc, variant, choice)?;
     // The comments of the drawing: an `.odg` does not hold them yet, and the save says so.
     saved.warnings.extend(crate::draw::comments::odg_words(&doc));
-    write_target(&target, &saved.bytes).map_err(|e| failed(cmd, format!("the drawing could not be saved: {e}")))?;
     let warnings: Vec<String> = saved.warnings.iter().take(WARNINGS_SHOWN).cloned().collect();
     let result = json!({
         "bytes": saved.bytes.len(),
@@ -924,24 +1028,24 @@ fn save_odg_model(
         "warning_count": saved.warnings.len(),
         "notes": saved.notes,
     });
-    // The file as it is now, and where the path led: the next save compares with this, and writes there. The content stamp the drawing has is the drawing's, and the file written keeps it
-    // (`Session::mark_saved`).
-    let stamp = FileStamp::of_path(&target);
-    let led_to = (target != path).then_some(target);
-    let file = OpenFile::new(path, saved.bytes).with_stamp(stamp).with_target(led_to).with_odg(saved.state).with_extension(Some(variant.extension()));
-    // **The drawing leaves the `.odg` it stood on as the model the file was written from**, as a Save As to `.diacraft` does (`save_native`): the model writer was given the package data
-    // of that `.odg` as it is now, with its parts, relationships and properties, which the drawing does not hold, and every save into the new file is given the drawing. A Save after a Save As with
-    // `drop_objects` was an edit: the first file holds the VSDX object as its own, so the model given lacked the part and kept the relationship that named it, and the drawing has the part, which
-    // `drop_objects` leaves out with the relationship. No undo step.
-    if working.is_some() {
-        let written = Arc::try_unwrap(given_doc).unwrap_or_else(|shared| Document::clone(&shared));
-        let baseline = Document::clone(&written);
-        s.adopt_saved_with(written, file, baseline);
-    } else {
-        let baseline = Document::clone(&doc);
-        s.mark_saved(&doc, file, baseline);
-    }
-    Ok(result)
+    let state = saved.state;
+    let settle: Settle = Box::new(move |s, file| {
+        // The content stamp the drawing has is the drawing's, and the file written keeps it (`Session::mark_saved`).
+        let file = file.with_odg(state).with_extension(Some(variant.extension()));
+        // **The drawing leaves the `.odg` it stood on as the model the file was written from**, as a Save As to `.diacraft` does (`save_native`): the model writer was given the package data
+        // of that `.odg` as it is now, with its parts, relationships and properties, which the drawing does not hold, and every save into the new file is given the drawing. A Save after a Save As with
+        // `drop_objects` was an edit: the first file holds the VSDX object as its own, so the model given lacked the part and kept the relationship that named it, and the drawing has the part, which
+        // `drop_objects` leaves out with the relationship. No undo step.
+        if stands_on_an_odg {
+            let written = Arc::try_unwrap(given_doc).unwrap_or_else(|shared| Document::clone(&shared));
+            let baseline = Document::clone(&written);
+            s.adopt_saved_with(written, file, baseline);
+        } else {
+            let baseline = Document::clone(&doc);
+            s.mark_saved(&doc, file, baseline);
+        }
+    });
+    Ok(Made::new(Writer::OdgModel, FileFormat::Odg, result, saved.bytes, path, target, settle))
 }
 
 /// Whether a save as `.diacraft` is checked: the drawing's working file is a VSDX file or an `.odg`, or it has none and **holds the data of one** (a drawing
@@ -1714,6 +1818,7 @@ fn describe(cmd: &str, s: &Session) -> Result<Value> {
     }))
 }
 
+mod check_before;
 mod save_types;
 pub use save_types::save_as_allows;
 

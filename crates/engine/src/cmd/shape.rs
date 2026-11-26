@@ -65,7 +65,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
              ids: array of whole numbers, instead of id: several shapes resized as one. Then x, y, width and height are the box on the page that the joint box of the shapes \
              (the box that holds their boxes, a connector counting by its two ends) is made, x and y its lower-left corner, and every shape is carried by the stretch that takes the old box to the new \
              one: its place by the stretch, its width and height by the lengths the stretch gives its own axes, its turn kept, a connector's free ends by the stretch, and a group is one shape whose members follow it. \
-             A shape with LockWidth or LockHeight set is left alone and listed in the result's locked, the resize is refused when every shape is locked, and one with LockAspect set is stretched by the same factor on both axes; \
+             A shape with LockHeight set keeps its height and is sized along its width and one with LockWidth the reverse, a shape with both locks or with one of them and LockAspect is left alone and listed in the result's locked, so is a connector with either lock, the resize is refused when every shape is left alone, and a shape with LockAspect alone is stretched by the same factor on both axes. With id a lock is read only for a size that is a formula, so a group of compartments keeps the formula of its height and is sized along its width, and any other shape is sized as before; \
              x: number, with id: inches from the page's left edge to the corner of the box that is at (0, 0) of the shape's own frame: the box's lower-left corner for a shape \
              that is not turned or flipped, but its lower-right corner for one flipped left to right (FlipX), its upper-left corner for one flipped top to bottom \
              (FlipY), and a corner that turns with the shape (after a quarter turn counterclockwise it is the lower-right corner on the page); \
@@ -169,7 +169,9 @@ fn drop_command(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((info, k, snapped, (notes, linked)))
     })?;
     let (notes, linked) = notes;
-    s.note_id(page, info.id);
+    // Every `ID` the drop gave, the members of a group master's instance included, is above the next shape's.
+    let highest = s.document().and_then(|doc| draw::page_stats(doc, page)).map_or(info.id, |(highest, _)| highest.max(info.id));
+    s.note_id(page, highest);
     if let Some(done) = &linked {
         s.note_id(page, done.linked.connector);
     }
@@ -398,7 +400,7 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Makes the joint box of the shapes `ids` the box `x`, `y`, `width`, `height` (paper inches on the page) → `{page, resized, locked?}`: how many shapes changed, and the
-/// shapes a `LockWidth` or `LockHeight` left alone. A resize to the box the shapes have is no undo step.
+/// shapes their locks left alone. A resize to the box the shapes have is no undo step.
 fn resize_set(s: &mut Session, p: &Value) -> Result<Value> {
     const ID: &str = "shape.resize";
     let ids = required_ids(p, "ids", ID)?;

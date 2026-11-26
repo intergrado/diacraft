@@ -411,11 +411,9 @@ fn vectors() -> Vec<(&'static str, Drawing)> {
     crate::model_measure::cases()
 }
 
-/// The vectors whose differences are **not** the shapes' elements, and why (said plainly, with the reason, in the report): text a text-writing task owns.
-const NOT_YET: [(&str, &str); 1] = [(
-    "bold text in a span",
-    "the run's automatic text style `T1` is written by the text writer with every attribute its cells give (the font size, the style, the variant), and the file's said only the weight",
-)];
+/// The vectors whose differences are **not** the shapes' elements, and why (said plainly, with the reason, in the report). None stays: the one that did, a bold span, whose run style the text
+/// writer wrote with every attribute its cells give (the font size, the style, the variant) where the file said only the weight, is written as the file had it.
+const NOT_YET: [(&str, &str); 0] = [];
 
 #[test]
 fn an_odg_visit_through_diacraft_has_the_same_content() {

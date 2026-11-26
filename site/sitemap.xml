@@ -1,17 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://diacraft.dev/</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/architecture-diagrams</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/browser</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/changelog</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/flowcharts</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/guides/</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/guides/agents</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/guides/command-line</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/guides/file-formats</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/guides/getting-started</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/guides/native-format</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/org-charts</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/privacy</loc><lastmod>2026-11-25</lastmod></url>
-  <url><loc>https://diacraft.dev/vsdx-editor</loc><lastmod>2026-11-25</lastmod></url>
+  <url><loc>https://diacraft.dev/</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/architecture-diagrams</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/browser</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/changelog</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/feature-comparison</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/features</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/flowcharts</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/guides/</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/guides/agents</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/guides/command-line</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/guides/file-formats</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/guides/getting-started</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/guides/native-format</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/org-charts</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/privacy</loc><lastmod>2026-11-26</lastmod></url>
+  <url><loc>https://diacraft.dev/vsdx-editor</loc><lastmod>2026-11-26</lastmod></url>
 </urlset>

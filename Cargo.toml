@@ -7,7 +7,7 @@ members = ["crates/*", "apps/*", "xtask"]
 default-members = ["crates/*", "apps/diacraft", "apps/diacraft-cli", "xtask"]
 
 [workspace.package]
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -27,11 +27,13 @@ diacraft-geom = { path = "crates/geom" }
 diacraft-layout = { path = "crates/layout" }
 diacraft-mcp = { path = "crates/mcp" }
 diacraft-metafile = { path = "crates/metafile" }
+diacraft-mxfile = { path = "crates/mxfile" }
 diacraft-native = { path = "crates/native" }
 diacraft-odg = { path = "crates/odg" }
 diacraft-opc = { path = "crates/opc" }
 diacraft-pdf = { path = "crates/pdf" }
 diacraft-render = { path = "crates/render" }
+diacraft-route = { path = "crates/route" }
 diacraft-sheetxml = { path = "crates/sheetxml" }
 diacraft-svg = { path = "crates/svg" }
 diacraft-testkit = { path = "crates/testkit" }

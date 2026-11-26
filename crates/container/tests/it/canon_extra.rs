@@ -44,6 +44,7 @@ const FREE: FreeNames = FreeNames {
 const RULES: Rules = Rules {
     keyed: &[Keyed { child: n("Def"), key: &[n("fam"), n("name")], fold: KeyFold::Exact }],
     ignored_when_extra: &[Q],
+    twinned: &[],
     free_names: &[FREE],
     ..Rules::NONE
 };

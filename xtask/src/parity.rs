@@ -213,6 +213,12 @@ fn read(text: &str) -> Result<(usize, usize, Vec<Row>), String> {
     Ok((a, b, rows))
 }
 
+/// The rows of a whole checklist file (`docs/parity-checklist.md`), read as `check` reads them: the file needs its `<!-- SUMMARY -->` marker before `## Rows`, a line under `## Rows` that looks
+/// like a row and does not read is an error, and no rows is an error. The feature comparison page (`cargo xtask site`) scores its DiaCraft column from them.
+pub fn checklist_rows(text: &str) -> Result<Vec<Row>, String> {
+    read(text).map(|(_, _, rows)| rows)
+}
+
 /// `text` with the summary between `<!-- SUMMARY -->` and `## Rows` recomputed from the rows below. Fails when a line that
 /// looks like a row cannot be read ([`rows`]).
 pub fn render(text: &str) -> Result<String, String> {

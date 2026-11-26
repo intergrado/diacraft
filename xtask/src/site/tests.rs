@@ -203,6 +203,62 @@ fn every_text_file_and_url_attribute_is_checked_for_foreign_hosts() {
     site.rejects("index.html");
 }
 
+/// A page may link the documentation it cites (the help of LibreOffice, the foundation's wiki, draw.io's documentation), and that is all the allowance is: another host is refused in a
+/// page, and those hosts are refused in a script, a style, the data of the site and any picture or script a page loads from them.
+#[test]
+fn a_page_may_link_the_documentation_it_cites_and_nothing_else_may_name_those_hosts() {
+    let sources = [
+        "https://help.libreoffice.org/latest/en-US/text/shared/02/18010000.html",
+        "https://wiki.documentfoundation.org/index.php?oldid=886199",
+        "https://www.drawio.com/docs/features/",
+    ];
+    let site = Fixture::new();
+    for url in sources {
+        site.write(
+            "index.html",
+            HTML.replace(
+                "<a href=\"/guides/g.html#open\">Open</a>",
+                &format!("<a href=\"/guides/g.html#open\">Open</a><a href=\"{url}\">Source</a>"),
+            ),
+        );
+        check(&site.0, DOMAIN).unwrap();
+    }
+    for url in [
+        "https://docs.libreoffice.org/x.html",
+        "https://drawio.com/docs/",
+        "https://www.drawio.com.unlisted.invalid/docs/",
+        "http://www.drawio.com/docs/",
+    ] {
+        site.write(
+            "index.html",
+            HTML.replace(
+                "<a href=\"/guides/g.html#open\">Open</a>",
+                &format!("<a href=\"/guides/g.html#open\">Open</a><a href=\"{url}\">Source</a>"),
+            ),
+        );
+        site.rejects("origin");
+    }
+    // A picture or a script from those hosts is a request the page makes: an external asset, refused.
+    for (from, to) in
+        [("src=\"/art.png\"", "src=\"https://www.drawio.com/art.png\""), ("src=\"/download.js\"", "src=\"https://help.libreoffice.org/download.js\"")]
+    {
+        site.write("index.html", HTML.replace(from, to));
+        site.rejects("external asset");
+    }
+    site.write("index.html", HTML);
+    // A file that is no page keeps the old rule.
+    for (name, body) in [
+        ("download.js", "fetch('https://www.drawio.com/docs/')"),
+        ("style.css", "body {background:url(https://help.libreoffice.org/p.png)}"),
+        ("site.json", r#"{"domain":"https://wiki.documentfoundation.org/"}"#),
+        ("robots.txt", "Sitemap: https://www.drawio.com/site.xml"),
+    ] {
+        let site = Fixture::new();
+        site.write(name, body);
+        site.rejects(name);
+    }
+}
+
 #[test]
 fn vendor_and_suite_bans_apply_to_names_and_content() {
     let site = Fixture::new();

@@ -33,6 +33,7 @@ pub mod odgfile;
 mod open_threads;
 pub mod print;
 mod session;
+pub mod sheetview;
 pub mod snap;
 pub mod stencil;
 pub mod template;

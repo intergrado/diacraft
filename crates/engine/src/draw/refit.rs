@@ -2121,6 +2121,8 @@ mod findings {
     fn connectors_on_crossover_glued_to_a_refitted_group_are_tested_within_the_tries_and_the_others_are_said() {
         // 2,000 connectors of ours set to reroute on crossover, glued to the group, whose routes cross no box. The test of each for a crossing
         // is a try as a routing is: the most are tested, and every other one keeps its route and is said. (The tests were made outside the limit.)
+        // A route that is not made again follows its ends square, and the refit moved the ends: each one tried is followed and written, none is
+        // made again by the style.
         let connectors = 2_000_u32;
         let mut before = DocBuilder::new().page(1, page_with_a_group()).build();
         glue_clones(&mut before, 1, connectors, true, false);
@@ -2138,7 +2140,7 @@ mod findings {
         assert_eq!(report.written, 1);
         let (attempted, routed) = (crate::draw::settle::ATTEMPTED.with(|c| c.get()), crate::draw::settle::ROUTED.with(|c| c.get()));
         assert_eq!(attempted, MAX_REROUTED, "a test is a try: {:?}", report.left.first());
-        assert_eq!(routed, 0, "no route crosses a box");
+        assert_eq!(routed, MAX_REROUTED, "no route crosses a box, so each one tried has its route followed to its ends and none is made again");
         let left = connectors as usize + 1 - MAX_REROUTED;
         assert_eq!((report.left.len(), report.unlisted), (MAX_LEFT_LISTED, left - MAX_LEFT_LISTED));
         assert!(report.left.iter().all(|l| l.kind == "connector" && l.why.contains("not routed again")), "{:?}", report.left.first());

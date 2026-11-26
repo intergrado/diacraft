@@ -35,9 +35,10 @@ fn open_stencils(s: &mut Session) -> Vec<String> {
     ids_of(&run(s, "stencil.list", json!({})), "stencils")
 }
 
-/// The ids of the built-in stencils that are not open.
+/// The ids of the built-in stencils of the first batches that are not open (the second batch's stencils are closed in every template but their own, and have their own tests).
 fn available_stencils(s: &mut Session) -> Vec<String> {
-    ids_of(&run(s, "stencil.list", json!({})), "available")
+    let first: Vec<&str> = diacraft_engine::stencil::stencils().iter().filter(|st| st.default_open).map(|st| st.id).collect();
+    ids_of(&run(s, "stencil.list", json!({})), "available").into_iter().filter(|id| first.contains(&id.as_str())).collect()
 }
 
 fn new_from(s: &mut Session, template: &str) -> Json {
@@ -83,12 +84,29 @@ fn parts(bytes: &[u8]) -> std::collections::BTreeMap<String, Vec<u8>> {
 // ---- the list ---------------------------------------------------------------------------------------------------------------------------
 
 #[test]
-fn template_list_tells_the_four_templates_with_their_page_theme_and_stencils_and_needs_no_document() {
+fn template_list_tells_the_templates_with_their_page_theme_and_stencils_and_needs_no_document() {
     let mut s = Session::new();
     let r = run(&mut s, "template.list", json!({}));
     let list = r["templates"].as_array().unwrap();
-    assert_eq!(list.len(), 4);
-    assert_eq!(r["categories"], json!(["General", "Flowchart", "Business"]));
+    // The listed templates (a template of the second stencil batch is listed when its stencils ship): the four of the first batches come first.
+    let ids: Vec<&str> = list.iter().map(|t| t["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, diacraft_engine::template::templates().iter().map(|t| t.id).collect::<Vec<_>>());
+    assert_eq!(&ids[..4], ["basic_diagram", "basic_flowchart", "cross_functional_flowchart", "organization_chart"]);
+    assert!(ids.contains(&"gane_sarson"), "the Gane-Sarson template is listed: its stencil ships");
+    let categories = r["categories"].as_array().unwrap();
+    assert_eq!(categories[..3], [json!("General"), json!("Flowchart"), json!("Business")]);
+    let mut distinct: Vec<&str> = Vec::new();
+    for t in list {
+        let category = t["category"].as_str().unwrap();
+        if !distinct.contains(&category) {
+            distinct.push(category);
+        }
+    }
+    assert_eq!(
+        categories.iter().map(|c| c.as_str().unwrap()).collect::<Vec<_>>(),
+        distinct,
+        "the distinct categories, in the order they first appear"
+    );
 
     let diagram = &list[0];
     assert_eq!(
@@ -115,7 +133,8 @@ fn template_list_tells_the_four_templates_with_their_page_theme_and_stencils_and
     assert!(info.enabled);
     assert_eq!(info.menu, ["File", "New"]);
     // The stencil and theme ids it names are the ones the other lists give.
-    let stencil_ids = open_stencils(&mut s);
+    let mut stencil_ids = open_stencils(&mut s);
+    stencil_ids.extend(ids_of(&run(&mut s, "stencil.list", json!({})), "available"));
     for t in list {
         for st in t["stencils"].as_array().unwrap() {
             assert!(stencil_ids.contains(&st["id"].as_str().unwrap().to_owned()));

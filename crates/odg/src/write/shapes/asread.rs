@@ -19,7 +19,7 @@
 
 use std::collections::HashSet;
 
-use diacraft_doc::{Document, Held, HeldGroup, RawAttrs, RawNode, Shape, Sheet};
+use diacraft_doc::{Document, Held, HeldGroup, RawAttrs, RawElement, RawNode, Shape, Sheet};
 
 use super::{Editor, Element, Kind, NewShape, NewWrote, TierCtx, WriteError, native, rebuilt_connection, refuse, static_name, turn_and_flips};
 use crate::read::names::Ns;
@@ -32,8 +32,11 @@ use crate::write::own::{self, Pose};
 use crate::write::scan::Fam;
 use crate::write::splice::has_bad_char;
 use crate::write::stylemap::Op;
-use crate::write::styles::{KeptAttrs, Written};
+use crate::write::styles::{KeptAttr, KeptAttrs, KeptRest, Written};
 use crate::write::transform::{translated, turned};
+
+/// The words of the refusal of an automatic style that keeps more than a shape's kept markup may be.
+const WORDS_KEPT_STYLE_BIG: &str = "an automatic style that keeps more than 1 MiB of the markup of the file it was read from beside what its cells say (its attributes and the elements kept whole)";
 
 /// The elements of ODF's drawing namespace a shape is written back as when its outline is its element's own.
 const PLAIN: [&str; 8] = ["rect", "ellipse", "circle", "regular-polygon", "polygon", "polyline", "path", "frame"];
@@ -63,6 +66,23 @@ fn attr_ns(name: &str) -> Option<(Ns, &str)> {
         _ => return None,
     };
     Some((ns, local))
+}
+
+/// What a kept style's remainder is made of while it is made ([`Editor::remainder_of`]).
+#[derive(Default)]
+struct StyleKeep {
+    attrs: Vec<(Ns, String, String)>,
+    complete: bool,
+    rest: KeptRest,
+}
+
+/// The element of a kept style an attribute is written on.
+#[derive(Clone, Copy)]
+enum KeepAt {
+    /// The `style:style` element.
+    Own,
+    /// Its graphic properties.
+    Graphic,
 }
 
 /// Why a shape is not written as it was read.
@@ -103,6 +123,10 @@ pub(crate) struct AsRead {
     pub corner: Vec<(String, String)>,
     /// A polygon's or polyline's `svg:viewBox`.
     pub view_box: Option<String>,
+    /// **The outline attributes of a polygon or polyline the reader could not read** (a view box with no width or height, or none, or one that is no four numbers; points that
+    /// are no points): it left them in the shape's kept attributes and gave the shape the rectangle of its frame for an outline. Those that the kept attributes hold, among `svg:viewBox` and
+    /// `draw:points`, are the file's and are written back as they were (`kept_tag`), while the `Geometry` sections are the stand-in the reader made. Empty for an outline the reader read.
+    pub unread_outline: Vec<&'static str>,
     /// A path's `svg:d` and `svg:viewBox`, while the rows are as they were read.
     pub path: Option<Vec<(String, String)>>,
     /// A connector's route (`svg:d`, `svg:viewBox`, `draw:line-skew`), while the rows are as they were read; and whether the file held one at all.
@@ -133,11 +157,30 @@ impl AsRead {
         if !found || !crate::write::kept::is_ncname(&out.element) {
             return Err(NotRead::NoElement);
         }
+        if matches!(out.element.as_str(), "polygon" | "polyline") {
+            out.unread_outline = ["svg:viewBox", "draw:points"].into_iter().filter(|name| odf.kept.raw.get(name).is_some()).collect();
+        }
         for h in &odf.held {
             out.take(h, shape);
         }
-        // Every name and value that is written is checked here, once: a name is a qualified name under a prefix the writer has, a value holds no character XML does not allow, and a unit is
-        // one of the six.
+        out.validated()
+    }
+
+    /// What a **group** of the model held when it was read, as far as the model writer writes it back: the automatic graphic style it named, and nothing else (a `draw:g` has
+    /// no frame, outline or layer of its own). `Ok(None)` for a group that names no style, or names the empty one, which is a new group with none. **The record is checked as a shape's is**
+    /// ([`AsRead::validated`]): a style name with a character XML 1.0 does not allow is `Err`, so that the group's own style, which the markup writes, is refused where the shape's is, and the
+    /// document file and the markup tell a styled group by this one answer ([`super::super::groups::names_a_style`]).
+    pub(crate) fn of_group(shape: &Shape) -> Result<Option<AsRead>, NotRead> {
+        let name = shape.ext.get().and_then(|data| data.odf.style_name.as_deref()).filter(|name| !name.is_empty());
+        let Some(name) = name else { return Ok(None) };
+        AsRead { style: Some(name.to_owned()), ..AsRead::default() }.validated().map(Some)
+    }
+
+    /// The record itself, when every name and value that is written from it is one the writer writes, else `Err` with how many are not: **the one check of what a shape's or a group's record
+    /// holds**, so that the two ways of making a record cannot differ in it. A name is a qualified name under a prefix the writer has, a value holds no character XML 1.0 does not allow, and a unit
+    /// is one of the six.
+    fn validated(self) -> Result<AsRead, NotRead> {
+        let out = self;
         let bad_pair = |(k, v): &(String, String)| attr_ns(k).is_none() || has_bad_char(v);
         let lists =
             [&out.outline, &out.corner].into_iter().chain([&out.frame2d, &out.frame1d, &out.centre, &out.path, &out.route].into_iter().flatten());
@@ -323,9 +366,12 @@ impl Editor<'_, '_> {
             .collect()
     }
 
-    /// What the file's automatic graphic style `name` kept that no cell reads and that is written with the style: the attributes of its graphic properties (the ones in a
-    /// namespace the writer has a prefix for, and not one a cell of the style writes), and whether that is all of it (`true`) or the model's kept style holds more that is not written (its own
-    /// attributes beyond its identity, other properties elements, children), which the note counts. A style that kept nothing is complete. Counted before anything is made.
+    /// What the file's automatic graphic style `name` kept that no cell reads and that is written with the style: the attributes of its graphic
+    /// properties in ODF's namespaces ([`KeptAttrs::attrs`]) and **the rest of what it kept, each where it stood** ([`KeptAttrs::rest`]): the style's own attributes beyond its identity, the
+    /// attributes of its graphic properties in other namespaces (with the declaration of their prefix), the children of its graphic properties, and its other children (the paragraph and text
+    /// properties it held, a `style:map`). `complete` says that is all of what the model's kept style of the name holds; what cannot be written (a name that is no qualified name, a value XML
+    /// cannot hold, a prefix whose namespace nothing says, a text or a comment among its children) is left out and the note counts the style. Counted before anything is made; **made once for
+    /// a name**, and shared by every shape that names it.
     fn remainder_of(&mut self, name: &str) -> Result<Option<std::sync::Arc<KeptAttrs>>, WriteError> {
         if let Some(made) = self.book.as_ref().and_then(|b| b.remainder_cache.get(name)) {
             return Ok(Some(std::sync::Arc::clone(made)));
@@ -340,42 +386,194 @@ impl Editor<'_, '_> {
                     index.entry(kept.name.to_string()).or_insert(at);
                 }
             }
+            // Where a prefix a style kept is bound when the style does not declare it: the root of `content.xml` and the container of its automatic styles, as the file had them.
+            let mut bound = crate::write::kept::Bindings::new();
+            for key in ["content.xml", "content.xml/office:automatic-styles"] {
+                if let Some((_, attrs)) = odf.roots.iter().find(|(n, _)| &**n == key) {
+                    self.work.charge_steps(attrs.len())?;
+                    crate::write::kept::declare_into(&mut bound, attrs.iter());
+                }
+            }
             if let Some(book) = self.book.as_mut() {
                 book.remainders = Some(index);
+                book.remainder_bound = Some(bound);
             }
         }
         let at = self.book.as_ref().and_then(|b| b.remainders.as_ref()).and_then(|m| m.get(name)).copied();
         let Some(kept) = at.and_then(|at| odf.styles.get(at)) else { return Ok(None) };
         let el = &kept.element;
         self.work.charge_steps(el.attrs.len().saturating_add(el.children.len()).saturating_add(1))?;
-        let mut complete = el.attrs.iter().all(|(k, _)| matches!(local(k), "name" | "family" | "parent-style-name"));
-        let mut extra: Vec<(Ns, String, String)> = Vec::new();
-        for child in &el.children {
-            let RawNode::Element(props) = child else {
-                complete = false;
-                continue;
-            };
-            if local(&props.name) != "graphic-properties" || !props.children.is_empty() {
-                complete = false;
+        let scope =
+            self.book.as_ref().and_then(|b| b.auto.as_ref()).map(|a| a.scope).ok_or(WriteError::Unsupported("a part with no automatic styles"))?;
+        let pfx = Pfx::of(&mut self.scopes, scope, self.work);
+        let bound = self.book.as_ref().and_then(|b| b.remainder_bound.clone()).unwrap_or_default();
+        let mut made = StyleKeep { complete: true, ..StyleKeep::default() };
+        // The style's own attributes: its identity is written by the style, and a declaration is no attribute (it binds what the others use).
+        let mut own_bound = crate::write::kept::Bindings::new();
+        crate::write::kept::declare_into(&mut own_bound, el.attrs.iter());
+        for (k, v) in el.attrs.iter() {
+            if crate::write::kept::declared_by(k).is_some() || matches!(local(k), "name" | "family" | "parent-style-name") {
                 continue;
             }
-            self.work.charge_steps(props.attrs.len())?;
+            self.kept_attribute(&mut made, KeepAt::Own, (k, v), [&own_bound, &bound], &pfx)?;
+            Self::bound_rest(&made)?;
+        }
+        let mut seen_graphic = false;
+        for child in &el.children {
+            let RawNode::Element(props) = child else {
+                // A text, a comment or an instruction among the children has no place in the style written, unless it is blank.
+                if !matches!(child, RawNode::Text(t) if t.trim().is_empty()) {
+                    made.complete = false;
+                }
+                continue;
+            };
+            if local(&props.name) != "graphic-properties" || seen_graphic {
+                // Another properties element, or any other child: written whole after the graphic properties.
+                match self.style_element(props, [&own_bound, &bound], &pfx)? {
+                    Some(text) => made.rest.after.push_str(&text),
+                    None => made.complete = false,
+                }
+                Self::bound_rest(&made)?;
+                continue;
+            }
+            seen_graphic = true;
+            self.work.charge_steps(props.attrs.len().saturating_add(props.children.len()))?;
+            let mut holder_bound = crate::write::kept::Bindings::new();
+            crate::write::kept::declare_into(&mut holder_bound, props.attrs.iter());
             for (k, v) in props.attrs.iter() {
+                if crate::write::kept::declared_by(k).is_some() {
+                    continue;
+                }
                 match attr_ns(k) {
                     Some((ns, l)) if !has_bad_char(v) => {
                         // The bytes of the value are charged before they are copied, once for the style (the copy is shared by every shape that names it).
                         self.work.charge_copy(v.len().saturating_add(l.len()), self.limits)?;
-                        extra.push((ns, l.to_owned(), v.to_owned()));
+                        made.attrs.push((ns, l.to_owned(), v.to_owned()));
                     }
-                    _ => complete = false,
+                    Some(_) => made.complete = false,
+                    None => self.kept_attribute(&mut made, KeepAt::Graphic, (k, v), [&holder_bound, &own_bound, &bound], &pfx)?,
                 }
+                Self::bound_rest(&made)?;
+            }
+            for inner in &props.children {
+                match inner {
+                    RawNode::Element(e) => match self.style_element(e, [&holder_bound, &own_bound, &bound], &pfx)? {
+                        Some(text) => made.rest.graphic_children.push_str(&text),
+                        None => made.complete = false,
+                    },
+                    RawNode::Text(t) if t.trim().is_empty() => {}
+                    _ => made.complete = false,
+                }
+                Self::bound_rest(&made)?;
             }
         }
-        let made = std::sync::Arc::new(KeptAttrs { attrs: extra, complete });
+        let made = std::sync::Arc::new(KeptAttrs { attrs: made.attrs, complete: made.complete, rest: made.rest });
         if let Some(book) = self.book.as_mut() {
             book.remainder_cache.insert(name.to_owned(), std::sync::Arc::clone(&made));
         }
         Ok(Some(made))
+    }
+
+    /// A style keeps no more beyond its graphic properties' attributes of ODF's namespaces than a shape's kept markup may be: past it the save is refused in words (checked as each piece is made, so
+    /// that one that is past it is never walked to its end).
+    fn bound_rest(made: &StyleKeep) -> Result<(), WriteError> {
+        if made.rest.bytes() > super::MOST_KEPT_PER_SHAPE {
+            return Err(WriteError::Unsupported(WORDS_KEPT_STYLE_BIG));
+        }
+        Ok(())
+    }
+
+    /// Takes one attribute `(name, value)` of a kept style into `made`, at `at`: one of ODF's own namespaces by the prefix the file spelled it with, any other by the namespace its prefix
+    /// stands for in `bound` (the declarations where it stood, the nearest first). **An attribute that cannot be written is left out and the style is not complete**: a name that is no
+    /// qualified name, a value XML cannot hold, a prefix nothing binds, or one the writer has for another namespace on the element it goes on.
+    fn kept_attribute<'a>(
+        &mut self,
+        made: &mut StyleKeep,
+        at: KeepAt,
+        (name, value): (&str, &str),
+        bound: impl IntoIterator<Item = &'a crate::write::kept::Bindings>,
+        pfx: &Pfx,
+    ) -> Result<(), WriteError> {
+        use crate::write::kept::is_qname;
+        let into = match at {
+            KeepAt::Own => &mut made.rest.own,
+            KeepAt::Graphic => &mut made.rest.graphic_foreign,
+        };
+        if !is_qname(name) || has_bad_char(value) {
+            made.complete = false;
+            return Ok(());
+        }
+        // The bytes of the value are charged before they are copied, once for the style.
+        self.work.charge_copy(name.len().saturating_add(value.len()), self.limits)?;
+        if let Some((ns, l)) = attr_ns(name) {
+            into.push(KeptAttr::Odf(ns, l.to_owned(), value.to_owned()));
+            return Ok(());
+        }
+        let (prefix, local) = name.split_once(':').unwrap_or(("", name));
+        // An attribute with no prefix is in no namespace, and needs no declaration.
+        if prefix.is_empty() {
+            into.push(KeptAttr::Foreign { prefix: String::new(), uri: String::new(), local: local.to_owned(), value: value.to_owned() });
+            return Ok(());
+        }
+        let uri = bound.into_iter().find_map(|b| b.get(prefix)).map(String::as_str).filter(|u| !u.is_empty());
+        let writer = [
+            (pfx.draw.as_str(), crate::write::scan::DRAW_URI),
+            (pfx.svg.as_str(), crate::write::scan::SVG_URI),
+            (pfx.fo.as_str(), crate::write::scan::FO_URI),
+            (pfx.style.as_str(), crate::write::scan::STYLE_URI),
+            (pfx.text.as_str(), crate::write::scan::TEXT_URI),
+            (crate::ext::names::PREFIX, crate::write::scan::DIACRAFT_URI),
+        ];
+        match uri {
+            // A prefix the writer has for another namespace on this element cannot be declared again.
+            Some(uri) if writer.iter().any(|(p, u)| *p == prefix && *u != uri) => made.complete = false,
+            Some(uri) => {
+                into.push(KeptAttr::Foreign { prefix: prefix.to_owned(), uri: uri.to_owned(), local: local.to_owned(), value: value.to_owned() })
+            }
+            None => made.complete = false,
+        }
+        Ok(())
+    }
+
+    /// The text of the kept element `el` as it stands in the style, with a declaration for each prefix it uses and does not declare itself that the writer does not bind to the same namespace
+    /// where the style is written; `None` when the namespace of a prefix is nowhere (the style is then not complete). **Bounded** to what a shape's kept markup may be, charged by what it walks
+    /// and copies before it is made, and refused in words past the bound or for markup XML cannot hold.
+    fn style_element<'a>(
+        &mut self,
+        el: &RawElement,
+        bound: impl IntoIterator<Item = &'a crate::write::kept::Bindings> + Clone,
+        pfx: &Pfx,
+    ) -> Result<Option<String>, WriteError> {
+        if !super::super::model::bounded_element(el, super::MOST_KEPT_PER_SHAPE) {
+            return Err(WriteError::Unsupported(WORDS_KEPT_STYLE_BIG));
+        }
+        let Some(free) = crate::write::kept::free_prefixes(el) else { return refuse(crate::write::splice::WORDS_XML_CHAR) };
+        self.work.charge_steps(free.steps)?;
+        let writer = [
+            (pfx.draw.as_str(), crate::write::scan::DRAW_URI),
+            (pfx.svg.as_str(), crate::write::scan::SVG_URI),
+            (pfx.fo.as_str(), crate::write::scan::FO_URI),
+            (pfx.style.as_str(), crate::write::scan::STYLE_URI),
+            (pfx.text.as_str(), crate::write::scan::TEXT_URI),
+        ];
+        let mut declare: Vec<(String, String)> = Vec::new();
+        for prefix in &free.prefixes {
+            // The default namespace of an element with no prefix is the one the file bound where it stood, when it bound one.
+            let uri = bound.clone().into_iter().find_map(|b| b.get(prefix.as_str())).map(String::as_str);
+            match uri {
+                None if prefix.is_empty() => {}
+                None => return Ok(None),
+                Some(uri) if writer.iter().any(|(p, u)| p == prefix && *u == uri) => {}
+                Some(uri) => declare.push((prefix.clone(), uri.to_owned())),
+            }
+        }
+        let estimate = crate::write::model::element_total(el, super::MOST_KEPT_PER_SHAPE).unwrap_or(super::MOST_KEPT_PER_SHAPE);
+        let declared = declare.iter().fold(0usize, |sum, (p, u)| sum.saturating_add(p.len()).saturating_add(u.len()).saturating_add(10));
+        self.work.charge_copy(estimate.saturating_add(declared), self.limits)?;
+        match crate::write::kept::element_text(el, &declare) {
+            Some(text) => Ok(Some(text)),
+            None => refuse(crate::write::splice::WORDS_XML_CHAR),
+        }
     }
 
     /// The unit the length attribute `attr` was written in: the unit the shape's `units` hold, else the one the cell `cell` shows, else the page's.
@@ -526,6 +724,7 @@ impl Editor<'_, '_> {
             self.work.graphic_remainders_written.insert(held.clone());
         }
         // The attributes a cell writes are the cell's; the others are the kept ones (borrowed: nothing is copied here).
+        let rest = kept.as_deref().map(|k| &k.rest);
         let extra: Vec<(Ns, &str, &str)> = kept
             .as_ref()
             .map(|k| {
@@ -538,7 +737,7 @@ impl Editor<'_, '_> {
             .unwrap_or_default();
         if let Some(held) = &name {
             // The file's name is written once, for the style the shape has; a shape whose style differs from the one written under it takes a name of its own.
-            let text = self.new_style_with(held, parent, &ops, &extra, dia, &mut attrs)?;
+            let text = self.new_style_with(held, parent, &ops, (&extra, rest), dia, &mut attrs)?;
             let book = self.book.as_mut().ok_or(WriteError::Mismatch("a new shape without the styles of the part"))?;
             match book.held_styles.get(held) {
                 Some(done) if *done == text => return Ok(Some(held.clone())),
@@ -557,7 +756,7 @@ impl Editor<'_, '_> {
         let fresh = book.names.next(Fam::Graphic);
         debug_assert!(name.is_none());
         let mut attrs = Vec::new();
-        let text = self.new_style_with(&fresh, parent, &ops, &extra, dia, &mut attrs)?;
+        let text = self.new_style_with(&fresh, parent, &ops, (&extra, rest), dia, &mut attrs)?;
         self.put_style(text)?;
         let book = self.book.as_mut().ok_or(WriteError::Mismatch("a new shape without the styles of the part"))?;
         book.written.push(Written { name: fresh.clone(), family: Fam::Graphic, attrs, prop: 0 });
@@ -683,7 +882,7 @@ impl Editor<'_, '_> {
             return false;
         }
         match read.element.as_str() {
-            "polygon" | "polyline" => read.view_box.is_some(),
+            "polygon" | "polyline" => read.view_box.is_some() || !read.unread_outline.is_empty(),
             "path" => read.path.is_some(),
             _ => true,
         }
@@ -728,9 +927,11 @@ impl Editor<'_, '_> {
             style: &style_names,
             display: Some(&display),
             geometry: true,
+            outline_sections: 1,
             picture: false,
             connection: rebuilt_connection(sheet, self.work.model_path),
             connector: false,
+            route: None,
             glued: [false, false],
             text: &plain,
             text_native,
@@ -759,6 +960,12 @@ impl Editor<'_, '_> {
             tag.push_str(&self.held_text(pfx, &read.corner, &mut Vec::new())?);
         }
         match element {
+            // An outline the reader could not read is the file's attributes, which `kept_tag` writes as they were; a view box it did read is written from what it held.
+            "polygon" | "polyline" if !read.unread_outline.is_empty() => {
+                if let Some(view_box) = read.view_box.as_deref().filter(|_| !read.unread_outline.contains(&"svg:viewBox")) {
+                    tag.push_str(&pfx.attr_checked(Ns::Svg, "viewBox", view_box)?);
+                }
+            }
             "polygon" | "polyline" => {
                 let view_box = read.view_box.as_deref().unwrap_or_default();
                 let vb = crate::read::geometry::view_box(view_box)
@@ -893,13 +1100,19 @@ pub(super) fn image_attrs(shape: &Shape, pfx: &Pfx) -> (String, usize) {
 /// Whether the `draw:type` a connector was read with (`None`: none was written) says what the route cells now say, `ShapeRouteStyle` and `ConLineRouteExt`: the reader's own map of the
 /// type to the two cells (`read::connectors::route_cells`).
 pub(crate) fn type_agrees(held: Option<&str>, (style, ext): (Option<f64>, Option<f64>)) -> bool {
-    let (want_style, want_ext) = match held {
+    let (want_style, want_ext) = route_of_type(held);
+    (style == Some(want_style) && ext == Some(want_ext)) || (held.is_none() && style.is_none() && ext.is_none())
+}
+
+/// The cells `ShapeRouteStyle` and `ConLineRouteExt` the reader makes of the `draw:type` of a connector (`None`: it wrote none): `standard` and any type the standard does not define give
+/// (1, 1), `line` and `lines` (2, 1) and `curve` (1, 2), as `read::connectors::route_cells` does.
+pub(crate) fn route_of_type(draw_type: Option<&str>) -> (f64, f64) {
+    match draw_type {
         None | Some("standard") => (1.0, 1.0),
         Some("line" | "lines") => (2.0, 1.0),
         Some("curve") => (1.0, 2.0),
         Some(_) => (1.0, 1.0),
-    };
-    (style == Some(want_style) && ext == Some(want_ext)) || (held.is_none() && style.is_none() && ext.is_none())
+    }
 }
 
 #[cfg(test)]
@@ -952,6 +1165,19 @@ mod tests {
         assert!(!type_agrees(None, (Some(2.0), Some(1.0))), "a type the file did not write, a route kind the cells now say");
         assert!(!type_agrees(Some("curve"), (None, None)));
         assert!(type_agrees(None, (None, None)), "a connector with no route cells says none");
+    }
+
+    /// The route kind a connector's `draw:type` gives the reader's cells (the writer carries the model's cells against it): the standard's three, and the default for any other
+    /// type or none.
+    #[test]
+    fn the_route_cells_a_type_gives_are_the_readers() {
+        assert_eq!(route_of_type(None), (1.0, 1.0));
+        assert_eq!(route_of_type(Some("standard")), (1.0, 1.0));
+        assert_eq!(route_of_type(Some("line")), (2.0, 1.0));
+        assert_eq!(route_of_type(Some("lines")), (2.0, 1.0));
+        assert_eq!(route_of_type(Some("curve")), (1.0, 2.0));
+        assert_eq!(route_of_type(Some("a type the standard does not define")), (1.0, 1.0));
+        assert_eq!(route_of_type(Some("")), (1.0, 1.0));
     }
 
     /// The names an attribute is written under: a qualified name of one of the five prefixes, and no other.

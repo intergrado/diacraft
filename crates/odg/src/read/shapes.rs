@@ -29,7 +29,7 @@ use super::custom;
 use super::geometry::{self, ArcAxes, Budget};
 use super::held;
 use super::layers;
-use super::names::{Names, Ns};
+use super::names::{Attrs, Names, Ns};
 use super::props::{self, Out, Serves, View};
 use super::sheets::{self, Sheets};
 use super::styles::{Family, File, Kind, P, Resolved, Resolver, StyleSet};
@@ -57,6 +57,10 @@ pub(crate) struct Cx<'a> {
     pub shared: &'a mut Shared,
     /// The values of the style set's texts shown in cells, for as long as `set` is borrowed (`texts.rs`).
     pub texts: StyleTexts<'a>,
+    /// The part declares ODF 1.0 or 1.1, or no version ([`crate::write::is_legacy`]): it names a shape by `draw:id` alone (`xml:id` is 1.2's), which the model holds as ODF
+    /// 1.2 and later say it, beside an `xml:id` of the same value (a visit writes ODF 1.4, which takes `draw:id` only so, and the file written then reads as the file
+    /// visited did).
+    pub legacy: bool,
 }
 
 /// The size of a shape's frame and the units of its `Width` and `Height`: the key its connection rows are shared by.
@@ -123,6 +127,15 @@ pub(super) const MOST_SHARED: usize = 4096;
 
 /// The most bytes a list of attributes or a name has to be shared by the pointer behind it.
 pub(super) const MOST_INTERNED_BYTES: usize = 256;
+
+/// The `xml:id` a shape of a part of ODF 1.0 or 1.1 is held with beside its `draw:id`: the value of the `draw:id` when the shape has no `xml:id` and the value is an NCName, the
+/// only kind of value an `xml:id` holds. `None` for a part of ODF 1.2 or later (it says the pair itself or holds what it holds), a shape with an `xml:id`, one with no `draw:id`, and a value that is no name.
+fn twin_of_draw_id<'t>(legacy: bool, attrs: &Attrs<'t>) -> Option<&'t str> {
+    if !legacy || attrs.peek(Ns::Xml, "id").is_some() {
+        return None;
+    }
+    attrs.peek(Ns::Draw, "id").filter(|id| !id.contains(':') && diacraft_container::xml::is_name(id))
+}
 
 /// What reading one page needs.
 pub(crate) struct PageCx {
@@ -974,6 +987,32 @@ fn take_declarations(r: &mut Reader, declared: &[(String, String)]) -> Result<()
     r.take_bytes(bytes)
 }
 
+/// The attributes of a shape's element that the reader did not map, kept as the file has them, **but for a `draw:id` of a part of ODF 1.0 or 1.1 that stands alone**, which is held beside an
+/// `xml:id` of the same value (the writer writes the pair, as ODF 1.4 takes `draw:id` only so, and the model read from the file written is then the one read from the file
+/// visited). The value must be one an `xml:id` can hold, an NCName: another is no id and is kept as it is. Charged, by count and by their bytes, before they are kept (the twin is one more,
+/// and no more than the `draw:id` it copies); an attribute whose prefix an element above it declares on its own start tag (a page's, a shape's) is kept with that declaration, which only the
+/// file's own start tag held.
+fn keep_attributes(r: &mut Reader, names: &Names<'_>, attrs: &Attrs<'_>, legacy: bool) -> Result<RawAttrs, OdgError> {
+    let twin = twin_of_draw_id(legacy, attrs);
+    let (kept, bytes) = attrs.untaken().fold((0usize, 0usize), |(n, b), a| (n + 1, b.saturating_add(a.name.len() + a.value.len())));
+    let (charged, bytes) = (kept + usize::from(twin.is_some()), bytes.saturating_add(twin.map_or(0, |id| "xml:id".len() + id.len())));
+    r.take_items(charged.saturating_mul(2))?;
+    r.take_bytes(bytes)?;
+    let declared = attribute_declarations(r, names, attrs.untaken().map(|a| a.name))?;
+    let mut raw = RawAttrs::from_pairs(declared.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    for a in attrs.untaken() {
+        if let (Some(id), Ns::Draw, "id") = (twin, a.ns, a.local) {
+            raw.push("xml:id", id);
+        }
+        raw.push(a.name, a.value);
+        if is_foreign(a.ns) {
+            r.keep("foreign_attribute");
+        }
+    }
+    r.keep_n("attribute", kept as u64);
+    Ok(raw)
+}
+
 /// The declarations the attributes `names_of` (the names as written, of attributes kept on a shape) need that the model does not hold, one for each prefix in the order the prefixes are
 /// first used, as the pairs `xmlns:p` and the URI: an attribute cannot declare its own prefix, so the shape's kept attributes carry the declaration beside them, and the
 /// writer puts it on the start tag it writes them on. Charged first.
@@ -1610,22 +1649,8 @@ fn read_shape<'t>(
         _ => Keep::NotText,
     };
     keep_children(r, names, el, &mut odf_kept.kept, keep)?;
-    // Attributes not mapped: kept as the file has them.
-    // Charged, by count and by their bytes, before they are kept.
-    let (kept, bytes) = attrs.untaken().fold((0usize, 0usize), |(n, b), a| (n + 1, b.saturating_add(a.name.len() + a.value.len())));
-    r.take_items(kept.saturating_mul(2))?;
-    r.take_bytes(bytes)?;
-    // An attribute whose prefix an element above it declares on its own start tag (a page's, a shape's) is kept with that declaration, which only the file's own start tag held.
-    let declared = attribute_declarations(r, names, attrs.untaken().map(|a| a.name))?;
-    let mut raw = RawAttrs::from_pairs(declared.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-    for a in attrs.untaken() {
-        raw.push(a.name, a.value);
-        if is_foreign(a.ns) {
-            r.keep("foreign_attribute");
-        }
-    }
-    r.keep_n("attribute", kept as u64);
-    odf_kept.raw = raw;
+    // Attributes not mapped: kept as the file has them (`keep_attributes`).
+    odf_kept.raw = keep_attributes(r, names, &attrs, cx.legacy)?;
     // Tier 2: what the shape's own automatic style carries over what its native markup gave. A copy is read without it
     // A group's own style carries none.
     let mut carries_tier2 = false;

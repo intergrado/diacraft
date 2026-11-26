@@ -1236,7 +1236,9 @@ fn turned_stock_place(i: usize) -> (f64, f64, f64) {
 /// to 94 seconds for 10,000 against the runner's 120. One of each master is dropped, so that the document holds the masters as a drop brings them, and the page is then made
 /// of instances by a builder, linear in `n` (a second or two for 10,000). [`turned_stock_page_one_at_a_time`] is the slow way, which a test holds this to.
 pub fn turned_stock_page(n: usize) -> Document {
-    let masters: Vec<_> = diacraft_engine::stencil::all_masters().filter(|m| !m.is_connector()).collect();
+    // The stock shapes: the masters of the seven stencils of the first batches (a page of the second batch's figures holds many more rows each).
+    let masters: Vec<_> =
+        diacraft_engine::stencil::stencils().iter().filter(|st| st.default_open).flat_map(|st| st.masters()).filter(|m| !m.is_connector()).collect();
     let mut doc = page_of(&[]);
     let held: Vec<u32> = masters.iter().map(|m| drop_shape(&mut doc, 1, m, 0.0, 0.0).unwrap().master).collect();
     let mut page = PageBuilder::new().cell("PageWidth", "20").cell("PageHeight", "20");
@@ -1256,7 +1258,9 @@ pub fn turned_stock_page(n: usize) -> Document {
 
 /// [`turned_stock_page`] as the commands make it: each shape dropped and then turned in the document, quadratic in `n`. Small pages only.
 fn turned_stock_page_one_at_a_time(n: usize) -> Document {
-    let masters: Vec<_> = diacraft_engine::stencil::all_masters().filter(|m| !m.is_connector()).collect();
+    // The stock shapes: the masters of the seven stencils of the first batches (a page of the second batch's figures holds many more rows each).
+    let masters: Vec<_> =
+        diacraft_engine::stencil::stencils().iter().filter(|st| st.default_open).flat_map(|st| st.masters()).filter(|m| !m.is_connector()).collect();
     let mut doc = page_of(&[]);
     for i in 0..n {
         let (x, y, angle) = turned_stock_place(i);

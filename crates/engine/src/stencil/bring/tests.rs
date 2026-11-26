@@ -707,3 +707,41 @@ fn a_master_brought_from_a_file_leaves_the_name_of_its_part_and_the_rel_of_its_r
     // The source keeps both.
     assert!(from.master(1).unwrap().part_name.is_some());
 }
+
+/// **Every declaration of a face's name comes with the master** (GATE1622-CROSS-FONTNAME): a source whose table holds three faces of one family (the name a cell calls them by), which an `.odg` declares
+/// each under a name of its own, gives a drawing that lacks the family all three, in the source's order, and one that has the family none.
+#[test]
+fn a_family_the_target_lacks_comes_with_each_declaration_the_source_has_of_it() {
+    let declared = |name_u: &str, style_name: &str| {
+        let mut face = FaceName { name_u: Arc::from(name_u), raw: RawAttrs::new(), ext: Default::default() };
+        face.ext.make_mut().odf = diacraft_doc::Kept { raw: RawAttrs::from_pairs([("style:name", style_name)]), kept: Default::default() };
+        face
+    };
+    let mut from = source_with_parts();
+    from.fonts = Arc::new(vec![
+        declared("Segoe Script", "Script"),
+        declared("Liberation Mono", "Mono"),
+        declared("Liberation Mono", "Mono1"),
+        declared("Liberation Mono", "Mono2"),
+    ]);
+    // The master names the family of the three.
+    let m = Arc::make_mut(from.masters.get_mut(0).unwrap());
+    let shape = Arc::make_mut(m.shapes.get_mut(0).unwrap());
+    let sheet = Arc::make_mut(&mut shape.sheet);
+    let section = Arc::make_mut(sheet.sections.get_mut(0).unwrap());
+    let row = Arc::make_mut(section.rows.get_mut(0).unwrap());
+    row.cells.insert(CellName::new("Font"), cell("Liberation Mono"));
+    let styles_of = |doc: &Document| -> Vec<String> {
+        doc.fonts.iter().map(|f| f.ext.get().and_then(|d| d.odf.raw.get("style:name")).unwrap_or("-").to_owned()).collect()
+    };
+    let mut doc = Document::new_blank();
+    let brought = bring_master(&mut doc, &from, 0, BOTH).unwrap();
+    assert_eq!(brought.faces_added, 3, "red on 1622f7c2: 1, the last declaration of the family");
+    assert_eq!(styles_of(&doc), ["Mono", "Mono1", "Mono2"]);
+    // A drawing that has the family is given none.
+    let mut has = Document::new_blank();
+    Arc::make_mut(&mut has.fonts).push(FaceName { name_u: Arc::from("Liberation Mono"), raw: RawAttrs::new(), ext: Default::default() });
+    let brought = bring_master(&mut has, &from, 0, BOTH).unwrap();
+    assert_eq!(brought.faces_added, 0);
+    assert_eq!(styles_of(&has), ["-"]);
+}

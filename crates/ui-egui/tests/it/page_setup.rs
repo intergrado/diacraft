@@ -217,9 +217,9 @@ fn a_drop_past_the_edge_grows_the_page_and_the_view_follows_a_drawing_that_was_c
 
 // ---- the Page Setup dialog -------------------------------------------------------------------------------------------------------------------
 
-/// The launcher opens the dialog with the six tabs in the order of the spec; the last two have no commands and are drawn quiet.
+/// The launcher opens the dialog with the six tabs in the order of the spec; the last has no commands and is drawn quiet.
 #[test]
-fn the_dialog_has_the_six_tabs_of_the_spec_and_the_last_two_are_quiet() {
+fn the_dialog_has_the_six_tabs_of_the_spec_and_the_last_is_quiet() {
     let mut w = design_window();
     press(&mut w, "ribbon.Design.PageSetupDialog");
     assert_eq!(w.state().window_state()["pageSetup"], "Page Size", "the launcher opens Page Size");
@@ -228,7 +228,7 @@ fn the_dialog_has_the_six_tabs_of_the_spec_and_the_last_two_are_quiet() {
     let names: Vec<&str> = tabs.iter().map(|(n, ..)| n.strip_prefix("pagesetup.tab.").unwrap()).collect();
     assert_eq!(names, ["Print Setup", "Page Size", "Drawing Scale", "Page Properties", "Layout and Routing", "Alt Text"]);
     let enabled: Vec<bool> = tabs.iter().map(|(.., e)| *e).collect();
-    assert_eq!(enabled, [true, true, true, true, false, false]);
+    assert_eq!(enabled, [true, true, true, true, true, false]);
     assert!(w.state_mut().execute("window.pageSetup", &json!({"tab": "Alt Text"})).is_err(), "a tab with nothing behind it cannot be opened");
     assert!(w.state_mut().execute("window.pageSetup", &json!({"tab": "Nonsense"})).is_err());
     // The launcher of the Backgrounds group opens Page Properties.

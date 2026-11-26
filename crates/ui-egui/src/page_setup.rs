@@ -4,8 +4,10 @@
 //! `docs/editing-commands.md` "Page setup") and are marked from `page.setup`'s state, read once for each revision of the drawing
 //! ([`DiacraftApp::refresh_page_view`]). **The dialog** has the tabs of (Print Setup, Page Size, Drawing Scale, Page
 //! Properties, Layout and Routing, Alt Text). It works on a **draft**: nothing reaches the drawing until OK, which sends what the person changed as
-//! the page commands (one command, or one `command.batch` that is one undo step), and Cancel or Escape sends nothing. The last two tabs have no
-//! commands behind them yet, so they are drawn quiet and cannot be opened.
+//! the page commands (one command, or one `command.batch` that is one undo step), and Cancel or Escape sends nothing. **The Layout and Routing tab**
+//! (`page_setup/routing.rs`, its Spacing dialog `routing_spacing.rs` and its preview `routing_preview.rs`) reads `page.routing` and adds a
+//! `page.set_routing` and a `connector.line_jumps` to what OK sends, always in a batch. The Alt Text tab has no command behind it yet, so it is drawn quiet and
+//! cannot be opened.
 //!
 //! **What the Print Setup tab cannot change yet** (the engine has no command for any of it: left print margins and centring out and the
 //! printing task reads the cells without writing them): print zoom (`ScaleX`, `OnPage`, `PagesX`, `PagesY`), the four margins, centring and the
@@ -25,6 +27,10 @@ use serde_json::{Value, json};
 
 use crate::app::DiacraftApp;
 use crate::theme::{self, Tokens, size};
+
+mod routing;
+mod routing_preview;
+mod routing_spacing;
 
 /// The tabs of the dialog, in the order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,9 +70,9 @@ impl DialogTab {
         DialogTab::ALL.into_iter().find(|t| t.name().eq_ignore_ascii_case(name.trim()))
     }
 
-    /// Whether the tab has controls that work: the last two have no engine command behind them yet.
+    /// Whether the tab has controls that work: the last has no engine command behind it yet.
     pub const fn works(self) -> bool {
-        !matches!(self, DialogTab::LayoutAndRouting | DialogTab::AltText)
+        !matches!(self, DialogTab::AltText)
     }
 }
 
@@ -121,6 +127,8 @@ pub struct Dialog {
     error: Option<String>,
     /// The tab whose lists have been scrolled to the choice they hold.
     scrolled_for: Option<DialogTab>,
+    /// The Layout and Routing tab's draft, read from `page.routing` when the dialog opened (`None`: the engine did not answer).
+    routing: Option<routing::Routing>,
 }
 
 /// The Reorder Pages dialog while it is open.
@@ -268,6 +276,10 @@ impl Dialog {
             params.insert("page".to_owned(), json!(page));
             out.push(("page.paper", Value::Object(params)));
         }
+        // The Layout and Routing tab's: a `page.set_routing` and a `connector.line_jumps` with only what was changed.
+        if let Some(routing) = &self.routing {
+            out.extend(routing.commands(page)?);
+        }
         Ok(out)
     }
 }
@@ -343,6 +355,8 @@ impl DiacraftApp {
         };
         let doc = self.session.document().ok_or_else(|| bad("no document open"))?;
         let base = read_setup(doc, page).map_err(|p| bad(format!("{p:?}")))?;
+        let routing = routing::Routing::read(&mut self.session, page, &base.scale.paper_unit);
+        let doc = self.session.document().ok_or_else(|| bad("no document open"))?;
         let print = PrintSetup::of(doc, page);
         let draft = Draft::of(&base);
         // The pages the Background box lists: the background pages, but the page itself and those that would make a loop (a background that has this page for its own).
@@ -354,7 +368,8 @@ impl DiacraftApp {
             .map(|p| (p.id, shown(&p.name, 40)))
             .collect();
         let can_be_background = base.background || doc.pages.iter().any(|p| p.id != page && !p.background);
-        self.ui.page_setup.dialog = Some(Dialog { tab, page, base, print, draft, backgrounds, can_be_background, error: None, scrolled_for: None });
+        self.ui.page_setup.dialog =
+            Some(Dialog { tab, page, base, print, draft, backgrounds, can_be_background, error: None, scrolled_for: None, routing });
         Ok(())
     }
 
@@ -393,9 +408,11 @@ impl DiacraftApp {
             }
         };
         let refit = commands.iter().any(|(id, _)| matches!(*id, "page.size" | "page.orientation"));
+        // A routing command goes in the batch whatever else is sent: the dialog's one undo step is labelled Page setup.
+        let routing = commands.iter().any(|(id, _)| matches!(*id, "page.set_routing" | "connector.line_jumps"));
         let result = match commands.as_slice() {
             [] => Ok(()),
-            [(id, params)] => self.execute(id, params).map(|_| ()),
+            [(id, params)] if !routing => self.execute(id, params).map(|_| ()),
             many => {
                 let steps: Vec<Value> = many.iter().map(|(id, params)| json!({"command": id, "params": params})).collect();
                 self.execute("command.batch", &json!({"commands": steps, "label": "Page setup"})).map(|_| ())
@@ -475,6 +492,10 @@ impl DiacraftApp {
         // Enter is OK, but not while a box has the keyboard: there Enter ends the typing.
         let typing = ctx.text_edit_focused();
         let Some(mut dialog) = self.ui.page_setup.dialog.take() else { return };
+        // While the Spacing dialog is open over this one it takes the keys, and so does a list that is open: Escape closes it, in the frame it is pressed, before the dialog could see
+        // it, so whether one was open is asked first.
+        let spacing_open = dialog.routing.as_ref().is_some_and(|r| r.dialog.is_some());
+        let list_open = egui::Popup::is_any_open(ctx);
         let mut ok = false;
         let mut cancel = false;
         let mut seen: Vec<(String, egui::Rect, bool)> = Vec::new();
@@ -499,7 +520,8 @@ impl DiacraftApp {
                         DialogTab::PageSize => size_tab(ui, &t, &mut dialog, list_h, &mut seen),
                         DialogTab::DrawingScale => scale_tab(ui, &t, &mut dialog, list_h, &mut seen),
                         DialogTab::PageProperties => properties_tab(ui, &t, &mut dialog, &mut seen),
-                        DialogTab::LayoutAndRouting | DialogTab::AltText => {}
+                        DialogTab::LayoutAndRouting => routing::tab(ui, &t, &mut dialog, &mut seen),
+                        DialogTab::AltText => {}
                     }
                 });
             seen.push(("pagesetup.content".to_owned(), content.inner_rect, true));
@@ -522,7 +544,7 @@ impl DiacraftApp {
         for (name, rect, enabled) in seen {
             self.note(name, rect, enabled);
         }
-        if !egui::Popup::is_any_open(ctx) {
+        if !list_open && !spacing_open {
             if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
                 cancel = true;
             }
@@ -536,10 +558,17 @@ impl DiacraftApp {
         } else if ok {
             self.apply_page_setup();
         }
+        // The Spacing dialog is drawn last, so that it is the one on top.
+        self.routing_spacing_dialog(ctx, t);
+    }
+
+    /// What the window reports of the Layout and Routing tab's draft, its Spacing dialog and its preview while the Page Setup dialog is open; `null` otherwise.
+    pub(crate) fn page_setup_routing_state(&self) -> Value {
+        self.ui.page_setup.dialog.as_ref().and_then(|d| d.routing.as_ref()).map_or(Value::Null, routing::Routing::state_json)
     }
 }
 
-/// The row of tabs. The two that have nothing behind them are drawn quiet.
+/// The row of tabs. The one that has nothing behind it is drawn quiet.
 fn tab_strip(ui: &mut Ui, t: &Tokens, dialog: &mut Dialog, seen: &mut Vec<(String, egui::Rect, bool)>) {
     ui.horizontal_wrapped(|ui| {
         for tab in DialogTab::ALL {

@@ -36,6 +36,8 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("file.print_preview", WithEmptyParams::Succeeds),
     ("file.save", WithEmptyParams::NeedsAFile),
     ("file.save_as", WithEmptyParams::NeedsParams),
+    // With no path it asks about the drawing's own file, as `file.save` does, which a new drawing does not have.
+    ("file.check_compatibility", WithEmptyParams::NeedsAFile),
     ("file.status", WithEmptyParams::Succeeds),
     ("edit.undo", WithEmptyParams::Succeeds),
     ("edit.redo", WithEmptyParams::Succeeds),
@@ -79,6 +81,8 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("connector.reroute", WithEmptyParams::NeedsParams),
     ("connector.reset", WithEmptyParams::NeedsParams),
     ("connector.line_jumps", WithEmptyParams::NeedsParams),
+    // The connector is named: the empty call is refused in words.
+    ("connector.path", WithEmptyParams::NeedsParams),
     ("shape.rotate", WithEmptyParams::NeedsParams),
     ("shape.flip", WithEmptyParams::NeedsParams),
     ("shape.order", WithEmptyParams::NeedsParams),
@@ -126,6 +130,11 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("shape.set_end", WithEmptyParams::NeedsParams),
     ("shape.set_length", WithEmptyParams::NeedsParams),
     ("shape.placement", WithEmptyParams::NeedsParams),
+    // A query of the edges of the shapes named.
+    ("shape.connection_edges", WithEmptyParams::NeedsParams),
+    // The Behavior dialog's Placement tab.
+    ("shape.behavior", WithEmptyParams::NeedsParams),
+    ("shape.set_behavior", WithEmptyParams::NeedsParams),
     ("template.list", WithEmptyParams::Succeeds),
     ("snap.settings", WithEmptyParams::Succeeds),
     // Naming no option changes nothing, which is no step and no error.
@@ -208,6 +217,9 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("shape.autospace", WithEmptyParams::NothingYet),
     ("page.spacing", WithEmptyParams::NeedsParams),
     ("page.avoid_page_breaks", WithEmptyParams::NeedsParams),
+    // The page's routing: the settings are read with `{}`, and what a call sets must be named: the empty call is refused in words.
+    ("page.routing", WithEmptyParams::Succeeds),
+    ("page.set_routing", WithEmptyParams::NeedsParams),
     ("shape.move_off_page_breaks", WithEmptyParams::NothingYet),
     ("page.breaks", WithEmptyParams::Succeeds),
     ("page_breaks.settings", WithEmptyParams::Succeeds),
@@ -221,6 +233,18 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("orgchart.picture_set", WithEmptyParams::NeedsParams),
     ("orgchart.picture_delete", WithEmptyParams::NeedsParams),
     ("orgchart.picture_hide", WithEmptyParams::NeedsParams),
+    // The ShapeSheet's queries: each names the sheet it reads, and the empty call is refused in words.
+    ("sheet.read", WithEmptyParams::NeedsParams),
+    ("sheet.cell", WithEmptyParams::NeedsParams),
+    ("sheet.sections", WithEmptyParams::NeedsParams),
+    ("sheet.evaluate", WithEmptyParams::NeedsParams),
+    ("sheet.set_cell", WithEmptyParams::NeedsParams),
+    ("sheet.set_cells", WithEmptyParams::NeedsParams),
+    // The ShapeSheet's rows and sections: each names the sheet and the section, and the empty call is refused in words.
+    ("sheet.add_row", WithEmptyParams::NeedsParams),
+    ("sheet.delete_row", WithEmptyParams::NeedsParams),
+    ("sheet.add_section", WithEmptyParams::NeedsParams),
+    ("sheet.delete_section", WithEmptyParams::NeedsParams),
 ];
 
 /// The commands that are enabled in a session with no document.
@@ -236,6 +260,7 @@ const QUERIES: &[&str] = &[
     "document.inspect",
     "file.print_preview",
     "file.status",
+    "file.check_compatibility",
     "shape.formatting",
     "shape.quick_styles",
     "stencil.list",
@@ -249,6 +274,8 @@ const QUERIES: &[&str] = &[
     "theme.colors",
     "theme.preview",
     "shape.placement",
+    "shape.behavior",
+    "shape.connection_edges",
     "template.list",
     "snap.settings",
     "snap.at",
@@ -273,10 +300,16 @@ const QUERIES: &[&str] = &[
     "window.settings",
     "autoconnect.settings",
     "page.layout",
+    "page.routing",
     "page.breaks",
     "page_breaks.settings",
     "orgchart.info",
+    "sheet.read",
+    "sheet.cell",
+    "sheet.sections",
+    "sheet.evaluate",
     "connector.neighbour",
+    "connector.path",
     "select.by_type",
     "select.by_region",
     "select.choices",
@@ -377,6 +410,10 @@ fn undoable_samples() -> Vec<(&'static str, Value)> {
         ("page.scale", json!({"preset": "arch_1_4"})),
         ("page.paper", json!({"kind": 5})),
         ("page.auto_size", json!({"on": true})),
+        (
+            "page.set_routing",
+            json!({"style": "flowchart", "direction": "left_to_right", "separate": "all", "connector_to_shape": {"x": 0.3, "y": 0.35}}),
+        ),
         ("page.delete", json!({"id": 2})),
         ("page.move", json!({"id": 2, "to": 0})),
         (
@@ -432,6 +469,12 @@ fn undoable_samples() -> Vec<(&'static str, Value)> {
         ("comment.delete", json!({"comment": 1})),
         ("shapedata.define", json!({"id": 1, "fields": [{"label": "Sweep", "type": "number", "value": "3"}]})),
         ("shapedata.set", json!({"id": 1, "row": "Setup", "value": "4"})),
+        ("sheet.set_cell", json!({"id": 1, "cell": "Width", "formula": "3"})),
+        ("sheet.set_cells", json!({"writes": [{"id": 1, "cell": "Width", "formula": "2.5"}, {"page": 1, "cell": "PageHeight", "formula": "9"}]})),
+        ("sheet.add_row", json!({"id": 1, "section": "Scratch"})),
+        ("sheet.delete_row", json!({"id": 1, "section": "Scratch", "row": 1})),
+        ("sheet.add_section", json!({"id": 1, "section": "Prop"})),
+        ("sheet.delete_section", json!({"id": 1, "section": "Scratch"})),
         ("callout.insert", json!({"ids": [1], "style": "speech_box"})),
         ("callout.attach", json!({"id": 3, "target": 1})),
         ("callout.detach", json!({"id": 3, "x": 7, "y": 7})),
@@ -475,6 +518,7 @@ fn undoable_samples() -> Vec<(&'static str, Value)> {
         ("shape.size", json!({"ids": [1, 2], "width": 3, "height": 2})),
         ("shape.set_end", json!({"id": 3, "end": "end", "x": 9, "y": 3})),
         ("shape.set_length", json!({"id": 3, "length": 2.5})),
+        ("shape.set_behavior", json!({"ids": [1], "placement": "none", "route_through_x": true})),
         ("page.relayout", json!({"style": "flowchart", "direction": "top_to_bottom", "spacing": 0.9})),
         ("orgchart.layout", json!({"layout": "left_to_right"})),
         ("orgchart.relayout", json!({})),
@@ -511,6 +555,19 @@ fn org_chart_setup(id: &str) -> Vec<(&'static str, Value)> {
 }
 
 /// The commands that must have run before a sample: the editing commands need shapes. Two shapes (1 and 2) and a connector between them (3).
+/// What the ShapeSheet's commands start from (and 5): a cell to write, a section to add: the shape alone (shape 1); a row to add or delete, a section to delete: the
+/// shape with a Scratch section of one row. `None` for any other command.
+fn sheet_setup(id: &str) -> Option<Vec<(&'static str, Value)>> {
+    let shape = ("shape.drop", json!({"master": "rectangle", "page": 1, "x": 2, "y": 2}));
+    match id {
+        "sheet.set_cell" | "sheet.set_cells" | "sheet.add_section" => Some(vec![shape]),
+        "sheet.add_row" | "sheet.delete_row" | "sheet.delete_section" => {
+            Some(vec![shape, ("sheet.add_section", json!({"id": 1, "section": "Scratch"}))])
+        }
+        _ => None,
+    }
+}
+
 fn setup_for(id: &str) -> Vec<(&'static str, Value)> {
     // A variant is a variant of a theme the page has.
     if id == "theme.variant" {
@@ -534,6 +591,9 @@ fn setup_for(id: &str) -> Vec<(&'static str, Value)> {
         if id == "layer.assign" {
             setup.push(("shape.drop", json!({"master": "rectangle", "page": 1, "x": 2, "y": 2})));
         }
+        return setup;
+    }
+    if let Some(setup) = sheet_setup(id) {
         return setup;
     }
     // A value to enter: a shape with a field (shape 1).
@@ -696,6 +756,7 @@ fn every_command_has_unique_id_and_doc() {
             "connector.edit_path",
             "connector.line_jumps",
             "connector.neighbour",
+            "connector.path",
             "connector.reconnect",
             "connector.reroute",
             "connector.reset",
@@ -721,6 +782,7 @@ fn every_command_has_unique_id_and_doc() {
             "edit.redo",
             "edit.replace",
             "edit.undo",
+            "file.check_compatibility",
             "file.export",
             "file.new",
             "file.open",
@@ -764,7 +826,9 @@ fn every_command_has_unique_id_and_doc() {
             "page.presets",
             "page.relayout",
             "page.rename",
+            "page.routing",
             "page.scale",
+            "page.set_routing",
             "page.setup",
             "page.size",
             "page.spacing",
@@ -776,9 +840,11 @@ fn every_command_has_unique_id_and_doc() {
             "select.choices",
             "shape.align",
             "shape.autospace",
+            "shape.behavior",
             "shape.change",
             "shape.close",
             "shape.combine",
+            "shape.connection_edges",
             "shape.delete",
             "shape.draw",
             "shape.drop",
@@ -800,6 +866,7 @@ fn every_command_has_unique_id_and_doc() {
             "shape.quick_styles",
             "shape.resize",
             "shape.rotate",
+            "shape.set_behavior",
             "shape.set_end",
             "shape.set_length",
             "shape.set_text",
@@ -812,6 +879,16 @@ fn every_command_has_unique_id_and_doc() {
             "shapedata.list",
             "shapedata.set",
             "shapedata.types",
+            "sheet.add_row",
+            "sheet.add_section",
+            "sheet.cell",
+            "sheet.delete_row",
+            "sheet.delete_section",
+            "sheet.evaluate",
+            "sheet.read",
+            "sheet.sections",
+            "sheet.set_cell",
+            "sheet.set_cells",
             "snap.at",
             "snap.set",
             "snap.settings",
@@ -883,6 +960,7 @@ fn the_params_docs_name_the_keys_of_the_page_file_and_batch_commands() {
     assert_eq!(keys("file.open"), ["path", "edit_template"]);
     assert_eq!(keys("file.save_as"), ["path", "force", "drop_macros", "drop_objects"]);
     assert_eq!(keys("file.save"), ["force"]);
+    assert_eq!(keys("file.check_compatibility"), ["path", "drop_macros", "drop_objects", "force"]);
     assert_eq!(keys("file.export"), ["path", "page", "dpi", "text", "transparent"]);
     assert_eq!(keys("file.print"), ["path", "page", "text", "color"]);
     assert_eq!(keys("file.print_preview"), ["page"]);
@@ -902,6 +980,27 @@ fn the_params_docs_name_the_keys_of_the_shape_and_connector_commands() {
     assert_eq!(keys("shape.set_text"), ["id", "text", "start", "end", "page"]);
     assert_eq!(keys("connector.add"), ["from", "to", "page", "snap"]);
     assert_eq!(keys("connector.reconnect"), ["id", "end", "target", "page", "snap"]);
+    // The routing styles with a direction and the route a connector has.
+    assert_eq!(keys("connector.style"), ["style", "direction", "ids", "page"]);
+    assert_eq!(keys("connector.path"), ["id", "page"]);
+    assert_eq!(keys("page.routing"), ["page"]);
+    assert_eq!(
+        keys("page.set_routing"),
+        [
+            "style",
+            "direction",
+            "separate",
+            "overlap",
+            "appearance",
+            "plow",
+            "split",
+            "between_shapes",
+            "shape_size",
+            "connector_to_connector",
+            "connector_to_shape",
+            "page"
+        ]
+    );
 }
 
 #[test]
@@ -1050,6 +1149,19 @@ fn the_params_docs_name_the_keys_of_the_size_and_position_commands() {
     assert_eq!(keys("shape.set_end"), ["id", "end", "x", "y", "page"]);
     assert_eq!(keys("shape.set_length"), ["id", "length", "page"]);
     assert_eq!(keys("shape.placement"), ["ids", "page"]);
+}
+
+#[test]
+fn the_params_docs_name_the_keys_of_the_behavior_commands() {
+    // The Behavior dialog's Placement tab: the shapes are `ids`, each box of the tab a key, `page` last.
+    assert_eq!(keys("shape.behavior"), ["ids", "page"]);
+    assert_eq!(keys("shape.set_behavior"), ["ids", "placement", "route_through_x", "route_through_y", "do_not_move", "allow_on_top", "plow", "page"]);
+}
+
+#[test]
+fn the_params_docs_name_the_keys_of_the_connection_point_commands() {
+    // The shapes are `id` or `ids`, then the page and the minimum distance between points.
+    assert_eq!(keys("shape.connection_edges"), ["id", "ids", "page", "min_gap"]);
 }
 
 #[test]
@@ -1361,8 +1473,8 @@ fn every_command_undoes_exactly() {
 
     // A query changes nothing. One that asks about shapes is given the shapes the editing commands start from (1 and 2, and the connector 3).
     for id in QUERIES {
-        // A query that needs params is run with them where its own tests are (`stencil_open.rs`).
-        if EMPTY_PARAMS.iter().any(|(i, expected)| i == id && matches!(expected, WithEmptyParams::NeedsParams)) {
+        // A query that needs params, or a file of the drawing's own, is run with them where its own tests are (`stencil_open.rs`, `save_check_before.rs`).
+        if EMPTY_PARAMS.iter().any(|(i, expected)| i == id && matches!(expected, WithEmptyParams::NeedsParams | WithEmptyParams::NeedsAFile)) {
             continue;
         }
         let mut s = rich_session();

@@ -20,6 +20,7 @@ mod callout;
 mod draw;
 pub mod geom;
 mod gesture;
+mod group_text;
 mod guides;
 mod keys;
 mod legs;
@@ -165,6 +166,8 @@ pub struct EditState {
     hover: Option<P>,
     /// Where the last right click on the page was, in inches: what Paste in the context menu pastes at.
     context: Option<P>,
+    /// The shape under the last right click on the page, by `ID`, if one was (Show ShapeSheet in the context menu opens its sheet).
+    context_hit: Option<u32>,
     told_unread: bool,
     /// Where the text block of the shape selected is, for the Text Block tool: read again when the drawing, the page or the shape changes.
     block: Option<block::BlockView>,
@@ -240,6 +243,11 @@ impl EditState {
     /// Where the right click that opened the context menu was, in inches of the page.
     pub(crate) fn context_at(&self) -> Option<(f64, f64)> {
         self.context
+    }
+
+    /// The shape under the right click that opened the context menu, if one was (the menu's Show ShapeSheet opens its sheet, or the page's when none was).
+    pub(crate) fn context_hit(&self) -> Option<u32> {
+        self.context_hit
     }
 
     /// Forgets the selection and the drag: the shapes were cut.
@@ -526,7 +534,13 @@ impl DiacraftApp {
         if let Some(scene) = &self.ui.edit.scene {
             // A shape whose layer was locked or hidden after it was picked is no longer selected.
             self.ui.edit.selection.retain(|id| scene.get(*id).is_some() && scene.selectable(*id));
-            if self.ui.edit.text.as_ref().is_some_and(|t| t.new.is_none() && scene.get(t.id).is_none()) {
+            if self
+                .ui
+                .edit
+                .text
+                .as_ref()
+                .is_some_and(|t| t.new.is_none() && scene.get(t.id).is_none() && !t.is_unread_member_still_there(self.session.document()))
+            {
                 self.ui.edit.text = None;
             }
         }
@@ -633,8 +647,10 @@ impl DiacraftApp {
         {
             let p = cx.page_at(at);
             self.ui.edit.context = Some(p);
+            self.ui.edit.context_hit = None;
             if self.ui.edit.text.is_none() && self.ensure_scene(cx.page) {
                 let hit = self.ui.edit.scene.as_ref().and_then(|s| s.hit(p, cx.reach(HIT_REACH))).map(|item| item.id);
+                self.ui.edit.context_hit = hit;
                 if let Some(id) = hit.filter(|id| !self.ui.edit.selection.contains(id)) {
                     self.set_selection(cx.page, vec![id]);
                 }
@@ -677,6 +693,10 @@ impl DiacraftApp {
         {
             self.update_gesture(cx, at, pointer.mods);
             if pointer.released || !pointer.down {
+                // The second click of a double click does not go in to the member under it: the double click is on the group (`edit_text_at`).
+                if response.double_clicked() && self.ui.edit.tool == Tool::Pointer {
+                    self.keep_group_for_double_click();
+                }
                 self.finish_gesture(cx, at, pointer.mods);
             } else {
                 ctx.request_repaint();

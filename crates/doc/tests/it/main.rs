@@ -10,6 +10,7 @@ mod cell;
 mod comments;
 mod crafted;
 mod diacraft_data;
+mod display;
 mod document;
 mod hostile;
 mod inheritance;

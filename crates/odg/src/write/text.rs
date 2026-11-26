@@ -906,10 +906,19 @@ pub(crate) struct TextStyles {
     pub(crate) faces_added: Vec<(String, String)>,
     /// The names of the faces of the part, with those this save adds: made once, the first time a name is wanted, so that a name is one look.
     face_names: Option<std::collections::HashSet<String>>,
+    /// The faces the cells of the paragraph being written put its own text in, as (the local name of the attribute that names the face, the family): the family a name in the text properties of its
+    /// style stands for while the part declares no face of that name ([`Editor::declared_face_of`]). Set for the paragraph's own style and empty for every other style (GATE1622-CROSS-FONTNAME).
+    pub(crate) own_faces: Vec<(&'static str, String)>,
     /// A paragraph was put in, taken out or made a list's: the paragraph count of the shape may differ from the file's, and the reader is asked what it reads.
     pub(crate) restructured: bool,
-    /// The automatic styles the model writer made under the name the file gave them, by family and name, with the key of the row each was made from.
-    pub(crate) held_made: HashMap<(Fam, String), String>,
+    /// The automatic styles the model writer made under the name the file gave them, by family and name, with what each was made from: the cells and the held values it says, and the
+    /// faces its text properties name as they were written.
+    pub(crate) held_made: HashMap<(Fam, String), (String, String)>,
+    /// The paragraph styles made for a held style asked for again with another content, by family, the name the file gave the style and the content, with the name each was given: one for each
+    /// content, whatever the number of paragraphs that ask for it.
+    pub(crate) held_variants: HashMap<(Fam, String, String), String>,
+    /// The names of held styles that said nothing and were made no style, by family and name, with the content each was asked for: a style asked for again, for each of a million spans, is one look.
+    pub(crate) held_none: HashMap<(Fam, String), String>,
     /// The list styles the part holds, by their content without their names: a list style the model writer would make that the part has already is that style.
     pub(crate) list_index: Option<HashMap<String, String>>,
     /// The colour and font tables of the document, indexed once for the save.
@@ -2430,6 +2439,43 @@ impl Editor<'_, '_> {
         self.add_face(family)
     }
 
+    /// The names of the part's faces, and those this save adds, as a set: made once, the first time a name is wanted.
+    fn index_face_names(&mut self) -> Result<(), WriteError> {
+        if self.texts.face_names.is_none() {
+            let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
+            names
+                .try_reserve(self.texts.faces.len())
+                .map_err(|_| WriteError::Limit { what: "memory for the font faces of a part", max: self.texts.faces.len() as u64 })?;
+            names.extend(self.texts.faces.iter().map(|f| f.name.clone()));
+            self.work.order_steps = self.work.order_steps.saturating_add(self.texts.faces.len() as u64);
+            self.texts.face_names = Some(names);
+        }
+        Ok(())
+    }
+
+    /// The name of a declared face for a name a held style gives a face, `local` being the attribute that gives it (`font-name`, `font-name-asian` or `font-name-complex`): **the name itself while
+    /// the part declares a face of it**, and when it does not, the declared face of the family the cells put the paragraph's own text in for that script, which a declaration is added for when the
+    /// part has none (GATE1622-CROSS-FONTNAME: a table that lost a declaration wrote the name of it, which no face answers to, and LibreOffice drew the text in its fallback face). A name no cell of
+    /// the paragraph stands for is the file's own and is written as it was. The look is one step.
+    pub(crate) fn declared_face_of(&mut self, local: &str, name: &str) -> Result<String, WriteError> {
+        if self.texts.own_faces.is_empty() {
+            return Ok(name.to_owned());
+        }
+        self.index_face_names()?;
+        if self.texts.face_names.as_ref().is_some_and(|names| names.contains(name)) {
+            return Ok(name.to_owned());
+        }
+        let Some(family) =
+            self.texts.own_faces.iter().find(|(l, _)| *l == local).map(|(_, f)| f.trim().trim_matches(|c| c == '\'' || c == '"').trim().to_owned())
+        else {
+            return Ok(name.to_owned());
+        };
+        if family.is_empty() {
+            return Ok(name.to_owned());
+        }
+        self.face_name(&family)
+    }
+
     /// Adds the declaration of a face of `family`, named by the family itself (and a number when a face of another family has the name).
     fn add_face(&mut self, family: &str) -> Result<String, WriteError> {
         if family.is_empty() || super::splice::has_bad_char(family) || family.contains('\r') {
@@ -2442,15 +2488,7 @@ impl Editor<'_, '_> {
         let scope = self.fonts.as_ref().map_or(auto.scope, |f| f.scope);
         // The name: the family, or the family and a number while a face of the part has the name. The names of the faces are indexed once (a look through all of
         // them for each number tried is quadratic in the faces), and each number tried is a step, charged before the next is made.
-        if self.texts.face_names.is_none() {
-            let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
-            names
-                .try_reserve(self.texts.faces.len())
-                .map_err(|_| WriteError::Limit { what: "memory for the font faces of a part", max: self.texts.faces.len() as u64 })?;
-            names.extend(self.texts.faces.iter().map(|f| f.name.clone()));
-            self.work.order_steps = self.work.order_steps.saturating_add(self.texts.faces.len() as u64);
-            self.texts.face_names = Some(names);
-        }
+        self.index_face_names()?;
         let mut name = family.to_owned();
         let mut number = 1u64;
         while self.texts.face_names.as_ref().is_some_and(|names| names.contains(&name)) {
@@ -2527,11 +2565,17 @@ impl Editor<'_, '_> {
 
     /// The attributes of `props` as ops, the faces it names resolved to the declarations of the part.
     fn style_ops(&mut self, props: &Props) -> Result<Vec<Op>, WriteError> {
-        let mut ops = props.ops.clone();
+        self.style_ops_without(props, &[])
+    }
+
+    /// [`Editor::style_ops`] but for the attributes of the groups in `skip` (the group names [`super::runs::owned`] knows): their ops are not made and **their faces are not declared**.
+    pub(crate) fn style_ops_without(&mut self, props: &Props, skip: &[&str]) -> Result<Vec<Op>, WriteError> {
+        let owned = |ns: Ns, local: &str| skip.iter().any(|id| super::runs::owned(id).contains(&(ns, local)));
+        let mut ops: Vec<Op> = props.ops.iter().filter(|o| !owned(o.ns, o.local)).cloned().collect();
         if props.faces.is_empty() {
             return Ok(ops);
         }
-        for (local, family) in &props.faces {
+        for (local, family) in props.faces.iter().filter(|(local, _)| !owned(Ns::Style, local)) {
             let wanted = family.trim().trim_matches(|c| c == '\'' || c == '"').trim();
             let name = self.face_name(wanted)?;
             ops.push(Op { prop: 2, ns: Ns::Style, local, val: Val::Text(name) });

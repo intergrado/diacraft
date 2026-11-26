@@ -103,12 +103,17 @@ fn the_undeclarations_are_planted_on_a_plain_part_and_a_broken_part_is_its_bytes
     harness::check(b"\x00<f><e b=\"2\"/></f>\xff\x04<w xmlns=\"urn:a\"><v xmlns=\"\"/></w>\xff");
     // A part that breaks a constraint of XML Namespaces 1.0 is its bytes: the properties that read it written another way as the same are not asked of it, and the rest hold.
     harness::check(b"\x00<f xmlns:z=\"\"><g/></f>\xff\x00<f/>\xff\x00\x05\x20");
+    // The first part may begin with a DOCTYPE that holds only an external id (it is read, and is no content); one with an internal subset, and a second part that
+    // begins with one, are not read. Children told by an identity, and one put in before them.
+    harness::check(b"\x00<!DOCTYPE f SYSTEM \"x.dtd\"><f><e b=\"2\"/></f>\xff\x00<!DOCTYPE f SYSTEM \"x.dtd\"><f/>\xff");
+    harness::check(b"\x00<!DOCTYPE f [<!ENTITY e \"x\">]><f/>\xff\x00<f/>\xff\x00\x01\x01");
+    harness::check(b"\x00<f><pg id=\"1\" v=\"1\"/><pg id=\"2\" v=\"1\"/><only v=\"1\"/></f>\xff\x00\x01\x01\x00\x01\x02\x01\x01\x02\x00");
 }
 
 /// Self-contained fragments of the parts of a generated input: markup of `urn:x` in every place it can stand (an element by a default declaration and by a prefix, an
 /// attribute, a declaration nothing uses), beside what every other rule of the target reads; and children that undeclare the default namespace where a rule reads
 /// their names, a declaration XML Namespaces 1.0 does not allow, and one attribute under two prefixes.
-const FRAGMENTS: [&str; 24] = [
+const FRAGMENTS: [&str; 32] = [
     "<r xmlns=\"urn:x\"/>",
     "<q:n xmlns:q=\"urn:x\" a=\"1\"/>",
     "<e xmlns:q=\"urn:x\" q:a=\"1\" b=\"2\"/>",
@@ -133,6 +138,16 @@ const FRAGMENTS: [&str; 24] = [
     "<v xmlns=\"\"/>",
     "<b xmlns:z=\"\"/>",
     "<k xmlns:p=\"urn:a\" xmlns:q=\"urn:a\" p:k=\"1\" q:k=\"2\"/>",
+    // Children told by an identity (`id`, and `urn:a`'s `k`), one name that two children share, children of one name with another identity or none, and
+    // the one child of a name that a list has.
+    "<pg id=\"1\" v=\"1\"/>",
+    "<pg id=\"2\" v=\"1\"><s/></pg>",
+    "<pg id=\"1\" v=\"2\"/>",
+    "<pg v=\"1\"/>",
+    "<only v=\"1\"/>",
+    "<only v=\"2\"><s/></only>",
+    "<z xmlns=\"urn:a\" k=\"1\"/>",
+    "<z xmlns=\"urn:a\" xmlns:p=\"urn:a\" p:k=\"1\" v=\"2\"/>",
 ];
 const ROOTS: [(&str, &str); 5] =
     [("<f>", "</f>"), ("<Shape>", "</Shape>"), ("<f xmlns:q=\"urn:x\" q:r=\"1\">", "</f>"), ("<Empty>", "</Empty>"), ("<w xmlns=\"urn:a\">", "</w>")];

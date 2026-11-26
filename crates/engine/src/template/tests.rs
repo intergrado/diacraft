@@ -24,13 +24,62 @@ fn number(doc: &Document, page: u32, cell: &str) -> f64 {
 
 // ---- the catalogue ----------------------------------------------------------------------------------------------------------------------
 
+/// Every stencil that a template names is a stencil of the catalogue, shipped or not: a template is registered at once and listed when they all ship.
+fn is_registered_stencil(id: &str) -> bool {
+    stencil::registered().iter().any(|s| s.id == id)
+}
+
 #[test]
-fn the_catalogue_names_four_templates_and_every_name_in_it_exists() {
-    let ids: Vec<&str> = templates().iter().map(|t| t.id).collect();
-    assert_eq!(ids, ["basic_diagram", "basic_flowchart", "cross_functional_flowchart", "organization_chart"]);
-    let names: Vec<&str> = templates().iter().map(|t| t.name).collect();
-    assert_eq!(names, ["Basic Diagram", "Basic Flowchart", "Cross-Functional Flowchart", "Organization Chart"]);
-    for t in templates() {
+fn the_catalogue_registers_eighteen_templates_in_order_and_every_name_in_it_exists() {
+    let ids: Vec<&str> = registered().iter().map(|t| t.id).collect();
+    assert_eq!(
+        ids,
+        [
+            "basic_diagram",
+            "basic_flowchart",
+            "cross_functional_flowchart",
+            "organization_chart",
+            "uml_class",
+            "uml_use_case",
+            "uml_sequence",
+            "uml_activity",
+            "uml_state_machine",
+            "uml_component",
+            "uml_deployment",
+            "bpmn_diagram",
+            "c4_diagram",
+            "basic_network",
+            "cloud_architecture",
+            "crows_foot",
+            "chen_notation",
+            "gane_sarson",
+        ]
+    );
+    let names: Vec<&str> = registered().iter().map(|t| t.name).collect();
+    assert_eq!(
+        names,
+        [
+            "Basic Diagram",
+            "Basic Flowchart",
+            "Cross-Functional Flowchart",
+            "Organization Chart",
+            "UML Class",
+            "UML Use Case",
+            "UML Sequence",
+            "UML Activity",
+            "UML State Machine",
+            "UML Component",
+            "UML Deployment",
+            "BPMN Diagram",
+            "C4 Model Diagram",
+            "Basic Network Diagram",
+            "Cloud Architecture Diagram",
+            "Crow's Foot Database Notation",
+            "Chen's Database Notation",
+            "Data Flow Model (Gane-Sarson)"
+        ]
+    );
+    for t in registered() {
         assert!(!t.description.is_empty() && !t.category.is_empty(), "{}", t.id);
         assert!(size_preset(t.size).is_some(), "{}: the size", t.id);
         if let Some((theme_id, variant)) = t.theme {
@@ -38,7 +87,7 @@ fn the_catalogue_names_four_templates_and_every_name_in_it_exists() {
         }
         assert!(!t.stencils.is_empty(), "{}: a template opens a stencil", t.id);
         for id in t.stencils {
-            assert!(stencil::builtin_stencil(id).is_some(), "{}: stencil {id}", t.id);
+            assert!(is_registered_stencil(id), "{}: stencil {id}", t.id);
         }
         let mut seen = t.stencils.to_vec();
         seen.sort_unstable();
@@ -49,6 +98,104 @@ fn the_catalogue_names_four_templates_and_every_name_in_it_exists() {
     unique.sort_unstable();
     unique.dedup();
     assert_eq!(unique.len(), ids.len());
+}
+
+#[test]
+fn the_fourteen_new_templates_open_the_stencils_of_the_design_in_the_shapes_window_order_and_say_what_they_are_based_on() {
+    let want: [(&str, &[&str], &str); 14] = [
+        ("uml_class", &["uml-class", "basic"], "UML 2.5.1"),
+        ("uml_use_case", &["uml-usecase", "basic"], "UML 2.5.1"),
+        ("uml_sequence", &["uml-sequence", "basic"], "UML 2.5.1"),
+        ("uml_activity", &["uml-activity", "cross-functional", "basic"], "UML 2.5.1"),
+        ("uml_state_machine", &["uml-state", "basic"], "UML 2.5.1"),
+        ("uml_component", &["uml-component", "uml-class", "basic"], "UML 2.5.1"),
+        ("uml_deployment", &["uml-component", "basic"], "UML 2.5.1"),
+        ("bpmn_diagram", &["bpmn", "basic"], "BPMN 2.0.2"),
+        ("c4_diagram", &["c4", "basic"], "C4 model"),
+        ("basic_network", &["network", "computers", "basic"], "network"),
+        ("cloud_architecture", &["cloud", "network", "computers"], "cloud"),
+        ("crows_foot", &["crows-foot", "basic"], "crow's foot"),
+        ("chen_notation", &["chen", "basic"], "Chen's"),
+        ("gane_sarson", &["gane-sarson", "basic"], "Gane-Sarson"),
+    ];
+    for (id, stencils, notation) in want {
+        let t = registered().iter().find(|t| t.id == id).unwrap_or_else(|| panic!("{id} is registered"));
+        assert_eq!(t.stencils, stencils, "{id}");
+        assert!(t.seed.is_none() && t.theme.is_none(), "{id}: a blank page with no theme");
+        assert_eq!((t.size, t.orientation), ("letter", Orientation::Landscape), "{id}");
+        assert!(t.description.contains("based on"), "{id}: {}", t.description);
+        assert!(t.description.contains(notation), "{id} names its notation `{notation}`: {}", t.description);
+        assert!(["Software and Database", "Flowchart", "Network"].contains(&t.category), "{id}: {}", t.category);
+    }
+    // The categories of the design: the software notations, BPMN under Flowchart, the network kinds under Network.
+    let category = |id: &str| registered().iter().find(|t| t.id == id).map(|t| t.category);
+    assert_eq!(category("bpmn_diagram"), Some("Flowchart"));
+    assert_eq!(category("basic_network"), Some("Network"));
+    assert_eq!(category("cloud_architecture"), Some("Network"));
+    assert_eq!(category("uml_class"), Some("Software and Database"));
+    assert_eq!(category("gane_sarson"), Some("Software and Database"));
+}
+
+#[test]
+fn a_template_is_listed_only_when_every_stencil_it_names_is_shipped() {
+    for t in registered() {
+        let ships = t.stencils.iter().all(|id| stencil::builtin_stencil(id).is_some());
+        assert_eq!(templates().iter().any(|listed| listed.id == t.id), ships, "{}", t.id);
+        assert_eq!(find(t.id).is_some(), ships, "{}: `find` finds the listed ones only", t.id);
+    }
+    for t in templates() {
+        assert!(!t.stencils.is_empty() && t.stencils.iter().all(|id| stencil::builtin_stencil(id).is_some()), "{}", t.id);
+    }
+    // The order of the listing is the order of the registration.
+    let registered_order: Vec<&str> = registered().iter().map(|t| t.id).filter(|id| templates().iter().any(|t| t.id == *id)).collect();
+    assert_eq!(templates().iter().map(|t| t.id).collect::<Vec<_>>(), registered_order);
+}
+
+#[test]
+fn the_gane_sarson_template_is_listed_and_opens_gane_sarson_then_basic() {
+    let t = find("gane_sarson").expect("the Gane-Sarson stencil ships today, so its template is listed");
+    assert_eq!((t.name, t.stencils), ("Data Flow Model (Gane-Sarson)", &["gane-sarson", "basic"][..]));
+    assert!(templates().iter().any(|t| t.id == "gane_sarson"));
+    assert_eq!(find("Data Flow Model (Gane-Sarson)").map(|t| t.id), Some("gane_sarson"));
+    // A drawing started from it has those two stencils open, in that order, and the names are read back from the template's own part.
+    let built = build_one(t);
+    assert_eq!(stencil_names(&built.document).map(|n| n.ids), Some(vec!["gane-sarson", "basic"]));
+    let mut s = crate::Session::new();
+    let started = s.execute("file.new", &serde_json::json!({ "template": "gane_sarson" })).unwrap();
+    assert_eq!(started["stencils"]["open"], serde_json::json!(["gane-sarson", "basic"]), "{started}");
+    assert_eq!(s.stencils().open_builtins(), ["gane-sarson", "basic"]);
+    // The listing a window reads has it, with its page and its stencils.
+    let listed = s.execute("template.list", &serde_json::json!({})).unwrap();
+    let entry = listed["templates"].as_array().unwrap().iter().find(|t| t["id"] == "gane_sarson").expect("listed");
+    assert_eq!(entry["stencils"], serde_json::json!([{ "id": "gane-sarson", "name": "Gane-Sarson" }, { "id": "basic", "name": "Basic Shapes" }]));
+    assert_eq!(entry["page"]["orientation"], "landscape");
+}
+
+#[test]
+fn a_template_whose_stencils_are_not_all_shipped_is_not_listed_and_file_new_says_it_is_no_template() {
+    let mut s = crate::Session::new();
+    let listed = s.execute("template.list", &serde_json::json!({})).unwrap();
+    let listed_ids: Vec<&str> = listed["templates"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
+    let mut checked = 0;
+    for t in registered() {
+        if t.stencils.iter().all(|id| stencil::builtin_stencil(id).is_some()) {
+            continue;
+        }
+        checked += 1;
+        assert!(!listed_ids.contains(&t.id), "{} is not listed", t.id);
+        for key in [t.id, t.name] {
+            let before = s.document().cloned();
+            let refused = s.execute("file.new", &serde_json::json!({ "template": key })).expect_err("an unlisted template is no template");
+            let said = refused.to_string();
+            assert!(said.contains("no template") && said.contains("template.list"), "{key}: {said}");
+            assert_eq!(s.document().cloned(), before, "{key}: the open drawing is left as it is");
+        }
+    }
+    // Until a family ships, the thirteen templates of the second batch wait for their stencils (the Gane-Sarson one is shown: its stencil ships today).
+    assert!(checked > 0 || registered().iter().all(|t| t.stencils.iter().all(|id| stencil::builtin_stencil(id).is_some())));
+    // An id that is no template at all says the same.
+    let unknown = s.execute("file.new", &serde_json::json!({ "template": "no_such_template" })).expect_err("no template").to_string();
+    assert!(unknown.contains("no template"), "{unknown}");
 }
 
 #[test]

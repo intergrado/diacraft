@@ -85,11 +85,18 @@ fn face(app: &DiacraftApp, ctl: &Ctl) -> icons::Icon {
 
 /// Whether a control can be used now.
 pub fn ctl_enabled(app: &DiacraftApp, ctl: &Ctl) -> bool {
+    // Show ShapeSheet's items share one command and differ by what they ask for: Shape needs a shape selected (`sheet/mod.rs`).
+    if ctl.command == Some("window.shapesheet") {
+        return app.sheet_open_verdict(ctl.args).is_ok();
+    }
     ctl.command.is_some_and(|c| app.command_enabled(c).is_ok()) || ctl.items.iter().any(|i| ctl_enabled(app, i))
 }
 
 /// Why a command a control holds cannot run now, if one of them can say.
 fn reason_of(app: &DiacraftApp, ctl: &Ctl) -> Option<String> {
+    if ctl.command == Some("window.shapesheet") {
+        return app.sheet_open_verdict(ctl.args).err();
+    }
     ctl.command
         .filter(|c| crate::commands::known(c))
         .and_then(|c| app.command_enabled(c).err())
@@ -325,7 +332,7 @@ fn menu_popup(app: &mut DiacraftApp, ui: &Ui, cx: Cx, resp: &egui::Response, ctl
     let control = *ctl;
     // A palette has a box to type a colour in, which a click must not close; an item closes the menu itself. So does the Themes gallery, whose tiles
     // take a right click (a context menu of their own).
-    let behaviour = if control.palette.is_some() || control.body == Body::Themes {
+    let behaviour = if control.palette.is_some() || matches!(control.body, Body::Themes | Body::SheetSections) {
         egui::PopupCloseBehavior::CloseOnClickOutside
     } else {
         egui::PopupCloseBehavior::CloseOnClick
@@ -365,6 +372,9 @@ fn menu_popup(app: &mut DiacraftApp, ui: &Ui, cx: Cx, resp: &egui::Response, ctl
         }
         if control.body == Body::Callouts {
             super::callouts::gallery_menu(app, ui, cx);
+        }
+        if control.body == Body::SheetSections {
+            crate::sheet::cards::sections_menu(app, ui, &cx.t);
         }
         if control.body == Body::Layouts {
             crate::relayout_ui::gallery_menu(app, ui, cx);
@@ -883,6 +893,8 @@ impl DiacraftApp {
             Some("window.shapes") => !self.ui.shapes_collapsed,
             Some("window.fullScreen") => self.is_full_screen(),
             Some("window.pane") => self.pane_checked(ctl.args),
+            // The View group of the ShapeSheet Design tab: Formulas and Values (`sheet/mod.rs`).
+            Some("window.sheetView") => self.sheet_view_checked(ctl.args),
             // Show Markup: the markers of the comments show on the page (`comments_ui.rs`).
             Some("comment.markers") => self.comment_markers_on(),
             _ => false,
@@ -900,8 +912,14 @@ impl DiacraftApp {
         } else {
             super::spec::CANVAS_MENU
         };
-        ui.set_width(menu_width(ui, rows, false));
-        for item in rows {
+        // While the Developer tab is on, the menu's first row is Show ShapeSheet: the shape's sheet, or the page's where the click was on no shape.
+        let mut all: Vec<Ctl> = Vec::with_capacity(rows.len() + 1);
+        if self.ui.developer_tab {
+            all.push(super::spec::CANVAS_SHOW_SHEET);
+        }
+        all.extend_from_slice(rows);
+        ui.set_width(menu_width(ui, &all, false));
+        for item in &all {
             menu_row(self, ui, cx, item);
         }
     }
@@ -924,6 +942,20 @@ impl DiacraftApp {
             && let Some((x, y)) = self.ui.edit.context_at()
         {
             self.run_ribbon_params(ctx, command, &json!({"x": x, "y": y}));
+            return;
+        }
+        // A box of the ShapeSheet window's View group sends the other way from how it is; the right-click row opens the sheet of the shape under the click, or the page's.
+        if command == "window.sheetView" {
+            let params = self.sheet_view_press(ctl.args);
+            self.run_ribbon_params(ctx, command, &params);
+            return;
+        }
+        if ctl.id == "CanvasShowShapeSheet" {
+            let params = match self.ui.edit.context_hit() {
+                Some(id) => json!({"of": "shape", "id": id}),
+                None => json!({"of": "page"}),
+            };
+            self.run_ribbon_params(ctx, command, &params);
             return;
         }
         // Delete acts on the selection and takes the connectors glued to it along (`edit/keys.rs`).

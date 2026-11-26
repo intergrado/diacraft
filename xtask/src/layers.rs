@@ -49,11 +49,12 @@ pub const TABLE: &[(&str, Class)] = &[
     // L1: the document model and the font database
     ("doc", Class::Layer(1)),
     ("fonts", Class::Layer(1)),
-    // L2: recalculation, text layout, shape operations, routing and layout, plug-ins, the ShapeSheet XML codec
+    // L2: recalculation, text layout, shape operations, graph layout, connector routing, plug-ins, the ShapeSheet XML codec
     ("calc", Class::Layer(2)),
     ("text", Class::Layer(2)),
     ("pathops", Class::Layer(2)),
     ("layout", Class::Layer(2)),
+    ("route", Class::Layer(2)),
     ("plugins", Class::Layer(2)),
     // The ShapeSheet XML codec carved out of `vsdx`: the cells, sections and rows of a sheet as XML, for the VSDX package and the OpenDocument
     // one. It uses the document model (layer 1) and the container's XML tree (layer 0, standalone), so a format crate of layer 3 uses it.
@@ -67,6 +68,10 @@ pub const TABLE: &[(&str, Class)] = &[
     // DiaCraft's own format (`.diacraft`): the package of the model. It uses the whole-model codec of layer 2 (`sheetxml`), the model (layer 1) and the
     // container (layer 0), and never `vsdx` or `odg`, crates of its own layer: no chain inside the layer.
     ("native", Class::Layer(3)),
+    // The draw.io reader: a file format like the rest of this layer, so layer 3. It finds a drawing in a file, decodes its pages and reads them into the model
+    // (layer 1) through the container (layer 0, standalone: the bounded XML tree and the bounded inflate), and never uses `vsdx`, `odg` or `native`, crates of its own layer: no chain
+    // inside the layer. Import only: the engine opens these files, and nothing writes them.
+    ("mxfile", Class::Layer(3)),
     ("vsd", Class::Layer(3)),
     ("vdx", Class::Layer(3)),
     ("svg", Class::Layer(3)),

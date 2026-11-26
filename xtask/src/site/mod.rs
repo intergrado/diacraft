@@ -13,6 +13,9 @@ mod cache_tests;
 mod cdp;
 #[cfg(test)]
 mod cdp_tests;
+mod compare;
+#[cfg(test)]
+mod compare_tests;
 mod downloads;
 mod dpr;
 #[cfg(test)]
@@ -172,6 +175,12 @@ fn run_with(dir: &Path, args: &[&str], env_app_url: Option<&str>) -> Result<(), 
     let root = dir.parent().ok_or_else(|| format!("{}: the site folder has no parent", dir.display()))?;
     let mut settings = settings::load(dir, &workspace_version(root)?)?;
     settings.licences = workspace_licences(root)?;
+    // The feature comparison page is made from the data in the docs: read where the folder has the page, and said in a line, for the DiaCraft column is computed.
+    if dir.join(compare::PAGE).is_file() {
+        let comparison = compare::load(root)?;
+        println!("{}", comparison.line());
+        settings.comparison = Some(std::sync::Arc::new(comparison));
+    }
     if mode == Mode::Release {
         settings::release(&settings)?;
     }

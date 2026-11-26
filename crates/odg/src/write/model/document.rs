@@ -11,7 +11,10 @@
 //! * **The layer set** (`draw:layer-set` of the master styles) is the model's list of layers, each with its attributes as read, when the model holds one.
 //! * **The other style families** the reader kept whole (`OdfDoc::styles`, by family and name: the common styles of `office:styles`, the automatic styles of the page layouts, the drawing pages, the
 //!   list styles and the data styles) are put in the container their family says. **The automatic styles of the graphic, paragraph and text families are the shapes' own** (what no cell
-//!   reads of the style a shape names): they are not written here.
+//!   reads of the style a shape names): they are not written here, **but for the ones nothing names** (the families `unused` and `unused-styles`: a style with no name, one no
+//!   shape, paragraph or run found, and the second of a name a container holds twice), which are kept whole and written in the automatic styles of the part they came from. **A style written whole is
+//!   written in the form ODF 1.4 takes** ([`super::forms`]): `text:enable-numbering` on its paragraph properties moves into an attribute of DiaCraft's, and a weight, a slant or a
+//!   variant 1.4 lists no value for is written as the value it lists nearest, with the value it had carried.
 //! * **The pages the `.odg` reader made** (a page that holds its master page's name) are written into `content.xml` as the elements they were, `draw:name`, the attributes the reader
 //!   kept and the children it kept whole, and each master page they name is written into `styles.xml` with the attributes it had. **The master page and the page layout the package was
 //!   made with are taken out** when such a page is there: the model's own are put in their place, and the page layout of a master page that the model holds no layout for is made from the
@@ -283,6 +286,10 @@ fn container_of(part: &str, family: &str) -> Option<&'static str> {
         ("styles.xml", "master", _) => None,
         // A shape's own style (graphic, paragraph, text): written with the shape.
         (_, "auto", "graphic" | "paragraph" | "text") => None,
+        // An automatic style of those families that nothing names is kept whole, in the part it came from.
+        ("content.xml", "unused", "graphic" | "paragraph" | "text") | ("styles.xml", "unused-styles", "graphic" | "paragraph" | "text") => {
+            Some("automatic-styles")
+        }
         ("styles.xml", "common", _) => Some("styles"),
         // A page layout is the styles part's own.
         ("styles.xml", "auto", "page-layout") => Some("automatic-styles"),
@@ -407,7 +414,9 @@ fn master_page(
     work.charge_copy(head, limits)?;
     let pairs: Vec<(&str, &str)> = held.map(|a| a.iter().collect()).unwrap_or_default();
     let (mut attrs, _) = kept_attrs(&pairs, outer, &mut out.containers)?;
-    if !attrs.iter().any(|(k, _)| local(k) == "name") {
+    // A master page the file wrote with no name is written with none, and the page that names it by `draw:master-page-name=""` still does: a name is made only for a page
+    // that holds none of the master page's attributes and names a master page of a name.
+    if !name.is_empty() && !attrs.iter().any(|(k, _)| local(k) == "name") {
         attrs.insert(0, ("style:name".to_owned(), name.to_owned()));
     }
     if !attrs.iter().any(|(k, _)| local(k) == "page-layout-name")
@@ -615,7 +624,11 @@ pub(super) fn put(
             continue;
         };
         match tree(&kept.element, bindings, work, limits, &mut left)? {
-            Some(made) => target.children.push(Node::El(made)),
+            Some(mut made) => {
+                // A style written whole holds what a file of an earlier version takes and 1.4 does not: the form 1.4 takes, the file's carried ([`super::forms`]).
+                out.styles = out.styles.saturating_add(super::forms::in_1_4_form(&mut made, bindings, work)?);
+                target.children.push(Node::El(made));
+            }
             None => out.styles = out.styles.saturating_add(1),
         }
     }

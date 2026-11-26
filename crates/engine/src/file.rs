@@ -283,6 +283,24 @@ pub fn save_file(path: &Path, bytes: &[u8], own: Option<&Path>) -> Result<(), Sa
     write_target(&target, bytes)
 }
 
+thread_local! {
+    /// How many files a save has made in memory in this thread: the count of the writer's runs, which a test holds a save and a dry run to (one each).
+    static SAVES_MADE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts a file made in memory by a save or by `file.check_compatibility` (`cmd::file::Made`).
+pub(crate) fn note_save_made() {
+    SAVES_MADE.with(|made| made.set(made.get().saturating_add(1)));
+}
+
+/// How many files a save, or `file.check_compatibility`, has made in memory in the calling thread. Test support, so that the work of a dry run is held to the save's by a count and not a time: the
+/// writer runs once for each, and the save does not make its file twice. `#[doc(hidden)]`: nothing in the engine reads it.
+#[doc(hidden)]
+#[must_use]
+pub fn saves_made() -> u64 {
+    SAVES_MADE.with(std::cell::Cell::get)
+}
+
 /// **The content stamp of a file, made when it is needed** (the design's 4.4): the fingerprint of the model as it was when the drawing was read from a foreign file.
 ///
 /// * **None**: the drawing never came from a foreign file (a new one, one made from a template, a `.diacraft` file that says none, a flat `.fodg`, which Save As does not take).

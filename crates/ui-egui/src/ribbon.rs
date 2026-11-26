@@ -76,6 +76,10 @@ impl DiacraftApp {
         if self.ui.tab == crate::ribbon::spec::CROSS_FUNCTIONAL_TAB && !self.swimlane_present() {
             self.ui.tab = crate::state::FIRST_TAB.to_owned();
         }
+        // The ShapeSheet Design tab goes when the sheet does not have the focus (it shows while its window is active).
+        if self.ui.tab == crate::ribbon::spec::SHEET_DESIGN_TAB && !self.sheet_tab_shown() {
+            self.ui.tab = crate::state::FIRST_TAB.to_owned();
+        }
         // The Org Chart tab goes with the chart.
         if self.ui.tab == "Org Chart" && !self.org_chart_present() {
             self.ui.tab = crate::state::FIRST_TAB.to_owned();

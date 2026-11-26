@@ -1027,6 +1027,18 @@ impl DiacraftApp {
         self.ui.edit.last_snap = answer.get("snap").cloned();
     }
 
+    /// The button is coming up on the second click of a double click: **it does not go in to the member under the pointer** (`OnClick::Select`). A press on a
+    /// selected group chooses the member only when the button comes up with no drag, so the double click that follows would find the member selected and edit it
+    /// in place of the group that was double clicked. With the group still selected, the double click sends the text where the group's
+    /// `IsTextEditTarget` says, while a member that was already selected by an earlier click is edited as itself (`edit_text_at`).
+    pub(super) fn keep_group_for_double_click(&mut self) {
+        if let Some(gesture) = self.ui.edit.gesture.as_mut()
+            && matches!(gesture.on_click, OnClick::Select(_))
+        {
+            gesture.on_click = OnClick::Nothing;
+        }
+    }
+
     /// The button came up: the drag ends, and the one command it makes goes.
     pub(super) fn finish_gesture(&mut self, cx: &Cx, at: Pos2, mods: Modifiers) {
         self.update_gesture(cx, at, mods);

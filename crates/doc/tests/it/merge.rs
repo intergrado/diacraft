@@ -655,3 +655,92 @@ fn a_master_shape_with_del_is_not_an_omitted_member() {
     let members = Resolver::new(&doc).effective_members(&page_shape(&[0])).unwrap();
     assert_eq!(members, [Member::Omitted(master_shape(1, &[0, 1]))]);
 }
+
+// ---- the rows of a section with no cell resolved ----------------------------------------------------------------
+
+/// A master with a `Scratch` section of rows 0 to 2 and an instance that adds a cell to row 1, a row 5 and deletes row 2.
+fn scratch_rows() -> diacraft_doc::Document {
+    let master = MasterBuilder::new().shape(
+        ShapeBuilder::new(5)
+            .row_cell("Scratch", None, RowKey::Ix(0), "X", "0")
+            .row_cell("Scratch", None, RowKey::Ix(1), "X", "1")
+            .row_cell("Scratch", None, RowKey::Ix(2), "X", "2")
+            .row_type("Scratch", None, RowKey::Ix(1), "Special"),
+    );
+    let instance = ShapeBuilder::new(10)
+        .master(1)
+        .row_cell("Scratch", None, RowKey::Ix(1), "Y", "11")
+        .row_cell("Scratch", None, RowKey::Ix(5), "A", "50")
+        .del_row("Scratch", None, RowKey::Ix(2));
+    DocBuilder::new().master(1, master).page(1, PageBuilder::new().shape(instance)).build()
+}
+
+#[test]
+fn the_rows_of_a_section_are_listed_with_their_types_and_cell_names_and_agree_with_the_merged_rows() {
+    let doc = scratch_rows();
+    let resolver = Resolver::new(&doc);
+    let key = SectionKey::new("Scratch", None);
+    let listed = resolver.effective_row_keys(&sheet(&[0]), &key).unwrap();
+    let merged = resolver.effective_rows(&sheet(&[0]), &key).unwrap();
+    assert_eq!(listed.iter().map(|r| r.key.clone()).collect::<Vec<_>>(), [RowKey::Ix(0), RowKey::Ix(1), RowKey::Ix(5)], "row 2 is deleted here");
+    assert_eq!(listed.iter().map(|r| r.key.clone()).collect::<Vec<_>>(), merged.iter().map(|r| r.key.clone()).collect::<Vec<_>>());
+    for (row, full) in listed.iter().zip(&merged) {
+        assert_eq!(row.row_type, full.row_type, "the type of {:?}", row.key);
+        let names: Vec<_> = full.cells.iter().map(|(name, _)| name.clone()).collect();
+        assert_eq!(row.cells, names, "the cells of {:?}", row.key);
+        assert_eq!(resolver.row_cell_names(&sheet(&[0]), &key, &row.key).unwrap(), names, "one row by itself");
+    }
+    // Row 1 holds the master's X and the instance's Y; its type is the master's.
+    assert_eq!(listed[1].cells.iter().map(|c| c.as_str()).collect::<Vec<_>>(), ["X", "Y"]);
+    assert_eq!(listed[1].row_type.as_deref(), Some("Special"));
+}
+
+#[test]
+fn a_row_that_is_deleted_or_not_there_and_a_sheet_that_is_not_there_have_no_cells_to_list() {
+    let doc = scratch_rows();
+    let resolver = Resolver::new(&doc);
+    let key = SectionKey::new("Scratch", None);
+    assert!(resolver.row_cell_names(&sheet(&[0]), &key, &RowKey::Ix(2)).unwrap().is_empty(), "deleted here: nothing of the master's is inherited");
+    assert!(resolver.row_cell_names(&sheet(&[0]), &key, &RowKey::Ix(99)).unwrap().is_empty(), "not there");
+    assert_eq!(resolver.row_cell_names(&sheet(&[9]), &key, &RowKey::Ix(0)), None, "no such shape");
+    assert_eq!(resolver.effective_row_keys(&sheet(&[9]), &key), None);
+    // A section deleted here has no rows at all, whatever the master holds.
+    let mut instance = ShapeBuilder::new(10).master(1);
+    instance = instance.del_section("Scratch", None);
+    let master = MasterBuilder::new().shape(ShapeBuilder::new(5).row_cell("Scratch", None, RowKey::Ix(0), "X", "0"));
+    let gone = DocBuilder::new().master(1, master).page(1, PageBuilder::new().shape(instance)).build();
+    let resolver = Resolver::new(&gone);
+    assert!(resolver.effective_row_keys(&sheet(&[0]), &key).unwrap().is_empty());
+    assert!(resolver.row_cell_names(&sheet(&[0]), &key, &RowKey::Ix(0)).unwrap().is_empty());
+}
+
+#[test]
+fn the_sheets_a_cell_is_looked_for_on_are_listed_nearest_first_by_the_class_of_the_cell() {
+    use diacraft_doc::CellClass;
+    let master = MasterBuilder::new().shape(ShapeBuilder::new(5).links(None, Some(2), None));
+    let doc = DocBuilder::new()
+        .style(2, StyleBuilder::new().links(None, Some(3), None))
+        .style(3, StyleBuilder::new())
+        .master(1, master)
+        .page(1, PageBuilder::new().shape(ShapeBuilder::new(10).master(1)))
+        .build();
+    let resolver = Resolver::new(&doc);
+    let sources = |class: CellClass| -> Vec<Source> { resolver.lookup_layers(&sheet(&[0]), class).unwrap().into_iter().map(|(s, _)| s).collect() };
+    let fill = diacraft_doc::Family::Fill;
+    // A fill cell: the shape, its master shape, then the chain of the fill style the master shape names, and no root.
+    assert_eq!(
+        sources(CellClass::FillFamily),
+        [
+            Source::Local,
+            Source::Master(master_shape(1, &[0])),
+            Source::Style { id: 2, family: Some(fill) },
+            Source::Style { id: 3, family: Some(fill) }
+        ]
+    );
+    // A cell of any style: the shape, the master shape and the root style.
+    assert_eq!(sources(CellClass::StyleAny), [Source::Local, Source::Master(master_shape(1, &[0])), Source::Style { id: 0, family: None }]);
+    // A cell of the shape only: no style at all. A page sheet takes no master step.
+    assert_eq!(sources(CellClass::ShapeOnly), [Source::Local, Source::Master(master_shape(1, &[0]))]);
+    assert_eq!(resolver.lookup_layers(&SheetRef::Page(1), CellClass::PageSheet).unwrap().len(), 2, "the page sheet and the root");
+    assert!(resolver.lookup_layers(&sheet(&[9]), CellClass::StyleAny).is_none());
+}

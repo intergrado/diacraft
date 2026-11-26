@@ -60,7 +60,11 @@ mod write;
 #[cfg(kani)]
 mod kani_proofs;
 
-pub use catalogue::{CellClass, CellInfo, Family, Keying, SECTION_NAMES, cell_info, keying, listed_cells, section_class};
+pub use catalogue::{
+    CellClass, CellInfo, DISPLAY_ORDER, DisplaySection, Family, Keying, SECTION_NAMES, SECTION_SPELLINGS, SectionKind, SectionRules, SheetKind,
+    cell_info, display_group, display_section, ix_to_row_number, keying, listed_cells, next_row_number, row_number_to_ix, section_class,
+    section_for_spelling, section_rules, section_spelling,
+};
 pub use cell::{Cell, CellExtra, FormulaSlot, INHERIT_MARKER, NO_FORMULA_MARKER, Origin};
 pub use comments::{
     Comment, CommentAuthor, CommentError, Comments, MAX_COMMENT_AUTHORS, MAX_COMMENT_TEXT_BYTES, MAX_COMMENTS, MAX_COMMENTS_TEXT_BYTES, NewComment,
@@ -80,7 +84,8 @@ pub use package::{ContentTypeRow, CustomProp, Ext, ExtData, Format, Kept, MAX_PA
 pub use part::{Connect, Connects, Master, Page, SchemeId, Style, Theme};
 pub use raw::{Passthrough, Placed, RawAttrs, RawElement, RawNode};
 pub use resolve::{
-    DefaultSpec, EffectiveRow, Located, MAX_STYLE_STEPS, MasterStep, Member, Rebind, Resolved, Resolver, ResolverStats, Source, Warnings, resolve,
+    DefaultSpec, EffectiveRow, Located, MAX_STYLE_STEPS, MasterStep, Member, Rebind, Resolved, Resolver, ResolverStats, RowShape, Source, Warnings,
+    resolve,
 };
 pub use shape::{ForeignData, MAX_SHAPE_DEPTH, Media, Shape, ShapeList, ShapeType, Text, TextPart};
 pub use shared::{CHUNK, Iter as SharedIter, OutOfRange, SharedVec};

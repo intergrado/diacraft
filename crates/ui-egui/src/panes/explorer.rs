@@ -5,6 +5,9 @@
 //! **The work is bounded** (counted by tests, `work.rs`): the tree is worked out from the document once for each revision of the drawing, in one pass that only
 //! counts; the names of a branch are built when the branch is first unfolded, and only the first [`ROWS_MAX`] of them.
 //!
+//! **A right click on the drawing (the first row), a style or a master opens its ShapeSheet** (the Drawing Explorer row): the document's, the style's, and
+//! the master's first top-level shape (DiaCraft has no master window, so the explorer opens the shape of the master, where its cells are).
+//!
 //! Choices no specification settles (ours): the tree stops at the names of the pages, masters and styles (the shapes of a page are not listed, and F2 does not
 //! rename an item: both are in the row of and not built); a branch lists at most [`ROWS_MAX`] rows and says how many it leaves out; a
 //! master whose pattern flags name a fill pattern, a line pattern or a line end is listed under that name and not under Masters;
@@ -154,12 +157,16 @@ impl Tree {
             Branch::ForegroundPages | Branch::BackgroundPages => {
                 let background = branch == Branch::BackgroundPages;
                 for page in doc.pages.iter().filter(|p| p.background == background).take(ROWS_MAX) {
-                    rows.push(Row { page: Some(page.id), name: diacraft_engine::shown(&page.name, 48) });
+                    rows.push(Row { page: Some(page.id), name: diacraft_engine::shown(&page.name, 48), sheet: None });
                 }
             }
             Branch::Styles => {
                 for style in doc.styles.iter().take(ROWS_MAX) {
-                    rows.push(Row { page: None, name: row_name(style.name.as_deref(), style.name_u.as_deref(), || format!("Style.{}", style.id)) });
+                    rows.push(Row {
+                        page: None,
+                        name: row_name(style.name.as_deref(), style.name_u.as_deref(), || format!("Style.{}", style.id)),
+                        sheet: Some(Sheet::Style(style.id)),
+                    });
                 }
             }
             kind => {
@@ -167,6 +174,7 @@ impl Tree {
                     rows.push(Row {
                         page: None,
                         name: row_name(master.name.as_deref(), master.name_u.as_deref(), || format!("Master.{}", master.id)),
+                        sheet: Some(Sheet::Master(master.id)),
                     });
                 }
             }
@@ -182,11 +190,20 @@ impl ExplorerState {
     }
 }
 
+/// What a row stands for besides a page: the object whose ShapeSheet its menu opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Sheet {
+    Style(u32),
+    Master(u32),
+}
+
 /// One row of a branch.
 struct Row {
     /// The page it goes to, for a page.
     page: Option<u32>,
     name: String,
+    /// The style or the master it is, whose sheet a right click opens.
+    sheet: Option<Sheet>,
 }
 
 impl DiacraftApp {
@@ -230,6 +247,7 @@ impl DiacraftApp {
         };
         let mut tree = tree;
         let current = self.current_page();
+        self.drawing_row(ui, t);
         for branch in Branch::ALL {
             let count = tree.counts[branch.at()];
             // A branch with nothing in it is not listed, except the foreground pages, which a drawing always has.
@@ -274,9 +292,59 @@ impl DiacraftApp {
         }
     }
 
+    /// The first row, the drawing: a right click opens its ShapeSheet.
+    fn drawing_row(&mut self, ui: &mut Ui, t: &Tokens) {
+        let name = self.display_name();
+        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListItem, true, &name));
+        paint_button_bg(ui, r, &resp, true, false, t, 3);
+        let clip = ui.painter().with_clip_rect(r);
+        clip.text(pos2(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, &name, theme::font_strong(size::LABEL), t.text);
+        self.note("explorer.drawing", r, true);
+        self.sheet_row_menu(&resp, None);
+    }
+
+    /// The right-click menu of a row that has a sheet: Show ShapeSheet (the drawing's when `of` is none).
+    fn sheet_row_menu(&mut self, resp: &egui::Response, of: Option<Sheet>) {
+        let t = Tokens::get(&resp.ctx);
+        let mut chosen = false;
+        resp.context_menu(|ui| {
+            ui.set_width(170.0);
+            let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+            widgets::name_button(&row, true, "Show ShapeSheet");
+            paint_button_bg(ui, rect, &row, true, false, &t, 3);
+            ui.painter().text(pos2(rect.left() + 12.0, rect.center().y), Align2::LEFT_CENTER, "Show ShapeSheet", theme::font(size::LABEL), t.text);
+            self.note("explorer.menu.sheet", rect, true);
+            if row.clicked() {
+                chosen = true;
+                ui.close();
+            }
+        });
+        if !chosen {
+            return;
+        }
+        let params = match of {
+            None => json!({"of": "document"}),
+            Some(Sheet::Style(id)) => json!({"of": "style", "style": id}),
+            Some(Sheet::Master(id)) => {
+                // The master's first top-level shape that is not deleted, where its cells are; a master with none has its page sheet.
+                let shape = self.session().document().and_then(|d| d.master(id)).and_then(|m| m.shapes.iter().find(|s| !s.del).map(|s| s.id));
+                match shape {
+                    Some(shape) => json!({"of": "master", "master": id, "id": shape}),
+                    None => json!({"of": "master", "master": id}),
+                }
+            }
+        };
+        if let Err(e) = self.execute("window.shapesheet", &params) {
+            self.set_notice(&e.to_string());
+        }
+    }
+
     fn tree_row(&mut self, ui: &mut Ui, t: &Tokens, row: &Row, current: bool) {
         let go = row.page.is_some();
-        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), if go { Sense::click() } else { Sense::hover() });
+        let sheet = row.sheet;
+        let (r, resp) =
+            ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), if go || sheet.is_some() { Sense::click() } else { Sense::hover() });
         if go {
             widgets::name_toggle(&resp, true, current, &row.name);
             if current {
@@ -285,7 +353,7 @@ impl DiacraftApp {
                 paint_button_bg(ui, r, &resp, true, false, t, 3);
             }
         } else {
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListItem, false, &row.name));
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListItem, sheet.is_some(), &row.name));
         }
         let clip = ui.painter().with_clip_rect(r);
         clip.text(
@@ -300,6 +368,14 @@ impl DiacraftApp {
             if resp.clicked() {
                 let _ = self.execute("page.select", &json!({ "id": id }));
             }
+        }
+        match sheet {
+            Some(Sheet::Style(id)) => self.note(format!("explorer.style.{id}"), r, true),
+            Some(Sheet::Master(id)) => self.note(format!("explorer.master.{id}"), r, true),
+            None => {}
+        }
+        if sheet.is_some() {
+            self.sheet_row_menu(&resp, sheet);
         }
     }
 }

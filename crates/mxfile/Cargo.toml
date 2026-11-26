@@ -1,0 +1,25 @@
+[package]
+name = "diacraft-mxfile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft draw.io reader: finds a drawing in a file, decodes its pages (plain and compressed), and reads them into the ShapeSheet model within budgets"
+publish = false
+
+[lints]
+workspace = true
+
+# Layer 3, a file format. It reads the file through the container (layer 0, standalone: the bounded XML tree and the bounded inflate) and builds the document model
+# (layer 1). It never uses `odg`, `vsdx` or `native`, crates of its own layer: no chain inside the layer. Every dependency builds for wasm32.
+[dependencies]
+diacraft-container = { workspace = true }
+diacraft-doc = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+# The tests' encoder (`diacraft_testkit::mxfile`) builds the files; the fuzz target's recipe (`fuzz/src/lib.rs`, which `tests/it/fuzz.rs` includes) deflates with the same crate the
+# container does. The testkit depends on the engine, which will depend on this crate; Cargo allows that cycle for a dev-dependency, and the tests that use it are integration tests
+# (`tests/it`), which link this crate once.
+diacraft-testkit = { workspace = true }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }

@@ -416,7 +416,7 @@ fn probe<'a>(bytes: &'a [u8], limits: &Limits, work: &mut Work) -> Result<Probe<
 /// The manifest's tree, read. The manifest alone may carry a DOCTYPE of an external id and no internal subset, which old
 /// writers put there and which is read and ignored; every other DTD, here and in every other part, is refused.
 fn parse_manifest(bytes: &[u8], limits: &Limits, work: &mut Work) -> Result<Manifest, OdgError> {
-    let options = xml::ParseOptions { allow_external_doctype: true };
+    let options = xml::ParseOptions { allow_external_doctype: true, ..xml::ParseOptions::default() };
     let root = match xml::parse_with_options(bytes, &limits.manifest_xml(), options, work) {
         Ok(root) => root,
         Err(XmlError::Malformed { offset, message }) => {

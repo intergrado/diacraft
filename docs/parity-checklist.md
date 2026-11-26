@@ -22,28 +22,28 @@ The first additional stencil batch (2026-11-12) moved the Gane-Sarson notation r
 
 The accepted stencil presentation is a compact chooser, fixed square icon cards and name-only tooltips. Its filter covers only the current stencil, and Enter in the box (or its magnifier) searches every stencil, which is what the Search for shapes row scores: that row and Quick Shapes are D, and Shape search options is P.
 
-**Scheduled next** (owner, 2026-11-25), after the 0.3 items, in the order the owner listed them ([roadmap](roadmap.md#current-focus)). None is designed or started, and each row keeps its score until the work lands:
+**Scheduled next** (owner, 2026-11-25), after the 0.3 items, in the order the owner listed them ([roadmap](roadmap.md#current-focus)). All four are designed and under way (the roadmap's Current focus says what each has built), and each row keeps its score until the work that closes it lands:
 
 1. Connectors that route around shapes, and are routed again when a shape moves: under Connectors: Routing, Automatic reroute on moving shapes (P0, P, the one open P0 item) and Route around placeable shapes (P1, M).
-2. The ShapeSheet window, with a command that sets any cell: the rows under ShapeSheet: Opening a sheet, Reading a sheet and Editing formulas (all M).
+2. The ShapeSheet window, with a command that sets any cell: the rows under ShapeSheet: Opening a sheet, Reading a sheet and Editing formulas (built the window's reading and its editing, and they scored the rows they cover; Insert Function, Insert Cell Name, Edit Formula, AutoComplete and reference by click stay M; built the commands that write rows and sections, and the window's Sections and Rows groups are still to build).
 3. Opening draw.io files and their compressed form: no row of the inventories names it, and the Common diagram formats row of [`file-format-parity.md`](file-format-parity.md) tracks it.
 4. DiaCraft's own UML, BPMN, C4, network and database stencils, drawn by the project with no copied art: they give shapes to the rows under Diagram kinds: UML, Networks and cloud and Database diagrams and to the BPMN rows under Diagram kinds: Flowcharts (all M but the Gane-Sarson row, which is P), and a stencil alone makes none of those rows done; no row names C4.
 
 <!-- SUMMARY -->
-**Weighted breadth parity: 34%** over 977 features.
+**Weighted breadth parity: 36%** over 977 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 56 | 55 | 1 | 0 | 99% |
-| P1 | 296 | 103 | 58 | 135 | 45% |
-| P2 | 625 | 25 | 31 | 569 | 6% |
+| P1 | 296 | 109 | 61 | 126 | 47% |
+| P2 | 625 | 33 | 37 | 555 | 8% |
 
 | Area | Parity |
 |---|---|
 | Document | 63% |
 | Shapes | 62% |
-| Connectors | 53% |
-| ShapeSheet | 0% |
+| Connectors | 57% |
+| ShapeSheet | 45% |
 | Styling | 66% |
 | Diagram kinds | 11% |
 | Data | 14% |
@@ -433,8 +433,8 @@ Open P0 items: Automatic reroute on moving shapes.
 | Connectors | Right-angle connectors | P0 | D |
 | Connectors | Straight connectors | P1 | P |
 | Connectors | Curved connectors | P1 | P |
-| Connectors | Default connector type for a page | P1 | P |
-| Connectors | Routing style per page and connector | P1 | M |
+| Connectors | Default connector type for a page | P1 | D |
+| Connectors | Routing style per page and connector | P1 | P |
 | Connectors | Automatic reroute on moving shapes | P0 | P |
 | Connectors | Route around placeable shapes | P1 | M |
 | Connectors | Reset Connector | P1 | D |
@@ -443,7 +443,7 @@ Open P0 items: Automatic reroute on moving shapes.
 | Connectors | Connector splits when a shape drops on it | P1 | M |
 | Connectors | Healing a connector when a shape is deleted | P1 | M |
 | Connectors | Move shapes away on drop | P2 | M |
-| Connectors | Page spacing for routing | P2 | M |
+| Connectors | Page spacing for routing | P2 | P |
 
 ### Connectors: Line jumps
 
@@ -452,7 +452,7 @@ Open P0 items: Automatic reroute on moving shapes.
 | Connectors | Show line jumps | P1 | P |
 | Connectors | Line jump style | P2 | P |
 | Connectors | Which connector carries the jump | P2 | P |
-| Connectors | Line jump size | P2 | P |
+| Connectors | Line jump size | P2 | D |
 | Connectors | Line jump direction on a connector | P2 | P |
 
 ### Connectors: Connector text
@@ -478,35 +478,35 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| ShapeSheet | Open the sheet of a shape, page or document | P1 | M |
-| ShapeSheet | Sheets of other objects | P2 | M |
+| ShapeSheet | Open the sheet of a shape, page or document | P1 | D |
+| ShapeSheet | Sheets of other objects | P2 | P |
 | ShapeSheet | Run in developer mode | P2 | M |
-| ShapeSheet | Sheet stays on the object it opened with | P2 | M |
+| ShapeSheet | Sheet stays on the object it opened with | P2 | D |
 | ShapeSheet | Open each sheet in the same window | P2 | M |
 
 ### ShapeSheet: Reading a sheet
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| ShapeSheet | Sections, rows and cells in a sheet window | P1 | M |
-| ShapeSheet | Drawing and sheet update together | P2 | M |
+| ShapeSheet | Sections, rows and cells in a sheet window | P1 | P |
+| ShapeSheet | Drawing and sheet update together | P2 | D |
 | ShapeSheet | Selecting a vertex cell marks it on the drawing | P2 | M |
-| ShapeSheet | Show formulas or values | P1 | M |
-| ShapeSheet | Local and inherited cell colours | P2 | M |
-| ShapeSheet | Error values in cells | P2 | M |
-| ShapeSheet | Move around a sheet with the keyboard | P2 | M |
-| ShapeSheet | Show or hide sections | P2 | M |
-| ShapeSheet | Collapse or expand a section | P2 | M |
+| ShapeSheet | Show formulas or values | P1 | D |
+| ShapeSheet | Local and inherited cell colours | P2 | D |
+| ShapeSheet | Error values in cells | P2 | D |
+| ShapeSheet | Move around a sheet with the keyboard | P2 | P |
+| ShapeSheet | Show or hide sections | P2 | D |
+| ShapeSheet | Collapse or expand a section | P2 | D |
 
 ### ShapeSheet: Editing formulas
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| ShapeSheet | Edit in the cell or the formula bar | P1 | M |
-| ShapeSheet | Type a new formula | P1 | M |
-| ShapeSheet | Empty formula returns to inheriting | P1 | M |
+| ShapeSheet | Edit in the cell or the formula bar | P1 | D |
+| ShapeSheet | Type a new formula | P1 | D |
+| ShapeSheet | Empty formula returns to inheriting | P1 | D |
 | ShapeSheet | Reference a cell by clicking it | P2 | M |
-| ShapeSheet | Copy a formula between cells | P2 | M |
+| ShapeSheet | Copy a formula between cells | P2 | D |
 | ShapeSheet | Formula AutoComplete | P2 | M |
 | ShapeSheet | Edit a long formula in a larger editor | P2 | M |
 | ShapeSheet | Insert a function from a list | P2 | M |
@@ -516,10 +516,10 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| ShapeSheet | Insert a section | P2 | M |
-| ShapeSheet | Delete a section | P2 | M |
-| ShapeSheet | Insert a row | P2 | M |
-| ShapeSheet | Delete a row | P2 | M |
+| ShapeSheet | Insert a section | P2 | P |
+| ShapeSheet | Delete a section | P2 | P |
+| ShapeSheet | Insert a row | P2 | P |
+| ShapeSheet | Delete a row | P2 | P |
 | ShapeSheet | Change a row's type | P2 | M |
 | ShapeSheet | Expand a row | P2 | M |
 | ShapeSheet | Row commands for shape data, hyperlinks and actions | P2 | M |
@@ -843,8 +843,8 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| Diagram kinds | Basic Network Diagram template | P1 | M |
-| Diagram kinds | Detailed Network Diagram template | P1 | M |
+| Diagram kinds | Basic Network Diagram template | P1 | P |
+| Diagram kinds | Detailed Network Diagram template | P1 | P |
 | Diagram kinds | Network backbone with built-in connectors | P2 | M |
 | Diagram kinds | Legend shape | P2 | M |
 | Diagram kinds | Label Shapes add-on | P2 | M |
@@ -1493,6 +1493,14 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-26 | minor | Scheduled next says the four features are designed and under way (it said none was designed or started) |
+| 2026-11-26 | minor | Sections, rows and cells in a sheet window and Move around a sheet with the keyboard are P, not the D that gave them (the coordinator's ruling: the reference puts a section's column titles on its header line and the window uses a separate line; Enter and Tab are project rules, R44 being unknown); the summary is recomputed by `cargo xtask parity` |
+| 2026-11-26 | minor | Sections, rows and cells in a sheet window, Type a new formula and Empty formula returns to inheriting move to D, and Edit in the cell or the formula bar, Copy a formula between cells, Move around a sheet with the keyboard and Drawing and sheet update together move from M to D (the window edits a cell through `sheet.set_cell`, moves by the keys of the spec and lays a display group out as pairs); the summary is recomputed by `cargo xtask parity` |
+| 2026-11-26 | minor | Default connector type for a page and Line jump size move from P to D, Routing style per page and connector and Page spacing for routing from M to P (the Layout and Routing tab sets them; the router does not read the spacing yet), and the summary is recomputed: P1 46%, P2 8%, Connectors 57% |
+| 2026-11-26 | minor | Basic Network Diagram template and Detailed Network Diagram template move from M to P (the network and computers stencils and the template are built; the backbone's connectors, the legend and equipment data from a source are not) |
+| 2026-11-26 | minor | The window reads a sheet, so seven ShapeSheet rows move from M to D (Open the sheet of a shape, page or document, Sheet stays on the object it opened with, Show formulas or values, Local and inherited cell colours, Error values in cells, Show or hide sections, Collapse or expand a section) and two to P (Sheets of other objects, Sections, rows and cells in a sheet window); the summary is the tool's |
+| 2026-11-26 | minor | Type a new formula and Empty formula returns to inheriting move from M to P (`sheet.set_cell` and `sheet.set_cells` do it in the engine; the window has no formula bar or cell editor yet), and the summary is recomputed by `cargo xtask parity` |
+| 2026-11-26 | minor | Insert a section, Delete a section, Insert a row and Delete a row move from M to P (`sheet.add_section`, `sheet.delete_section`, `sheet.add_row` and `sheet.delete_row` do it in the engine, with the rows after an insert numbered again and the formulas that name them following; the window has no Sections or Rows group wired yet), and the summary is recomputed by `cargo xtask parity` |
 | 2026-11-25 | minor | A paragraph above the summary names the rows of the four features scheduled next after the 0.3 items, in the order the owner listed them (owner, 2026-11-25); no row's score changes |
 | 2026-11-23 | trivial | Sentences reworded so that each reads whole on its own; nothing they say changes |
 | 2026-11-23 | minor | The reference product is named only in the format lists ("the reference app" or VSDX elsewhere), and the page keeps to the words of the public tree |

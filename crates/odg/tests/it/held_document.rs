@@ -120,7 +120,8 @@ fn the_layer_set_and_the_other_style_families_are_held() {
         ("common:text", "Emph", "style:style"),
         ("common:graphic", "", "style:default-style"),
         ("common:list-style", "L1", "text:list-style"),
-        ("auto:graphic", "gr1", "style:style"),
+        // A style no shape names is held whole, as an unused one.
+        ("unused:graphic", "gr1", "style:style"),
         ("auto:drawing-page", "dp1", "style:style"),
         ("auto:page-layout", "PM1", "style:page-layout"),
     ] {
@@ -146,6 +147,12 @@ fn an_automatic_style_is_kept_as_what_no_cell_reads() {
         r##"<style:style style:name="more" style:family="graphic" style:class="c"><style:graphic-properties draw:fill="solid" draw:textarea-horizontal-align="center" draw:auto-grow-height="false"><x:kid/></style:graphic-properties>"##,
         r##"<style:paragraph-properties fo:text-align="center" fo:border="1pt"/><style:map style:condition="c"/></style:style>"##,
         r##"<style:style style:name="T9" style:family="text"><style:text-properties fo:font-size="9pt" style:text-blinking="true"/></style:style>"##,
+    ));
+    // The shapes and the run name the styles (a style nothing names is held whole as an unused one, and its test is `visit_styles.rs`'s).
+    let d = d.page(concat!(
+        r#"<draw:rect draw:style-name="only" svg:x="1cm" svg:y="1cm" svg:width="1cm" svg:height="1cm"/>"#,
+        r#"<draw:rect draw:style-name="more" svg:x="3cm" svg:y="1cm" svg:width="1cm" svg:height="1cm"/>"#,
+        r#"<draw:frame svg:x="1cm" svg:y="5cm" svg:width="5cm" svg:height="2cm"><draw:text-box><text:p>a <text:span text:style-name="T9">b</text:span></text:p></draw:text-box></draw:frame>"#
     ));
     let mut d = d;
     d.ns = d.ns.replace("xmlns:diacraft", "xmlns:x=\"urn:example:extension\" xmlns:diacraft");

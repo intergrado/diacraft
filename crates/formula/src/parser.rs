@@ -9,7 +9,7 @@ mod literal;
 mod name;
 mod number;
 
-use crate::{BinaryOp, Expr, MAX_DEPTH, MAX_NESTING, MAX_NODES, MAX_SOURCE_BYTES, ParseError, ParseErrorKind, UnaryOp};
+use crate::{BinaryOp, Expr, MAX_DEPTH, MAX_NESTING, MAX_NODES, MAX_SOURCE_BYTES, ParseError, ParseErrorKind, RefSpan, SegmentSpan, UnaryOp};
 
 pub(crate) type Res<T> = Result<T, ParseError>;
 
@@ -23,6 +23,18 @@ pub(crate) struct Node {
     pub depth: usize,
 }
 
+/// What [`crate::reference_spans`] has the parser note as it reads: where each reference and each part of a path sits in the source. A parse that notes nothing
+/// (every parse but that one) holds none and pays for none of it.
+#[derive(Default)]
+pub(crate) struct Recorder {
+    /// One slot for each name chain begun, in the order they began; the slot is filled when what was read is a reference (a call and a `TRUE` leave it empty).
+    refs: Vec<Option<RefSpan>>,
+    /// The segments of the path being read.
+    segments: Vec<SegmentSpan>,
+    /// The segments of the last path read: the path of the reference that has just been read, if it is one.
+    last_path: Vec<SegmentSpan>,
+}
+
 pub(crate) struct Parser<'a> {
     src: &'a str,
     pos: usize,
@@ -32,6 +44,8 @@ pub(crate) struct Parser<'a> {
     nodes: usize,
     /// The most nodes there may be: `MAX_NODES`, or less by the caller's budget.
     max_nodes: usize,
+    /// Set by [`parse_spans`] only.
+    rec: Option<Recorder>,
 }
 
 /// Parses `source` as a formula: one leading `=` is allowed. At most `budget` nodes, and never more than `MAX_NODES`.
@@ -39,7 +53,17 @@ pub(crate) fn parse(source: &str, budget: usize) -> Result<Expr, ParseError> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(ParseError { kind: ParseErrorKind::TooLong, offset: MAX_SOURCE_BYTES });
     }
-    Parser { src: source, pos: 0, nesting: 0, nodes: 0, max_nodes: budget.min(MAX_NODES) }.formula()
+    Parser { src: source, pos: 0, nesting: 0, nodes: 0, max_nodes: budget.min(MAX_NODES), rec: None }.formula()
+}
+
+/// Parses `source` as [`parse`] does, with the limits of the crate, and gives where each cell reference sits in it, in the order they begin.
+pub(crate) fn parse_spans(source: &str) -> Result<Vec<RefSpan>, ParseError> {
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(ParseError { kind: ParseErrorKind::TooLong, offset: MAX_SOURCE_BYTES });
+    }
+    let mut parser = Parser { src: source, pos: 0, nesting: 0, nodes: 0, max_nodes: MAX_NODES, rec: Some(Recorder::default()) };
+    parser.formula()?;
+    Ok(parser.rec.map(|rec| rec.refs.into_iter().flatten().collect()).unwrap_or_default())
 }
 
 pub(crate) fn is_name_start(c: char) -> bool {

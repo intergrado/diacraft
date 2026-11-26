@@ -3,8 +3,13 @@ use serde_json::Value;
 
 const SITEMAP_NS: &str = "http://www.sitemaps.org/schemas/sitemap/0.9";
 
-/// The origins the pages may name: the site's own, the web app's (a site of its own) and GitHub's, over HTTPS. A preview of the build names the app on this machine, over
-/// plain HTTP (`settings::app_override`): that is the one origin that is not HTTPS.
+/// The hosts of the public documentation that the feature comparison page cites for the cells of the tools it compares: the help of LibreOffice, the foundation's wiki and
+/// draw.io's documentation (GitHub, which the pages may name anyway, holds the editor's published source). A page may *link* them and nothing else may: [`Origins::allows`] gives them to
+/// an `.html` file only, a picture or a style that names one is an external asset and refused, and the pages' policy keeps a script from connecting to them.
+pub(super) const SOURCE_HOSTS: [&str; 3] = ["help.libreoffice.org", "wiki.documentfoundation.org", "www.drawio.com"];
+
+/// The origins the pages may name: the site's own, the web app's (a site of its own) and GitHub's, over HTTPS, and the hosts of the documentation a comparison cites
+/// ([`SOURCE_HOSTS`]) in a page. A preview of the build names the app on this machine, over plain HTTP (`settings::app_override`): that is the one origin that is not HTTPS.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Origins {
     /// `https://host` of the pages, with no trailing slash.
@@ -23,10 +28,14 @@ impl Origins {
         self.domain.split_once("://").map_or(self.domain.as_str(), |(_, host)| host)
     }
 
-    /// Whether a link with this scheme (none for a protocol-relative one) to `host` is one the pages may have.
-    fn allows(&self, scheme: Option<&str>, host: &str) -> bool {
+    /// Whether a link with this scheme (none for a protocol-relative one) to `host` is one the pages may have. `page` says the text is a page's (an `.html` file), which may also name the
+    /// hosts of [`SOURCE_HOSTS`].
+    fn allows(&self, scheme: Option<&str>, host: &str, page: bool) -> bool {
         let https = scheme.is_none_or(|scheme| scheme.eq_ignore_ascii_case("https"));
         if https && ["github.com", "api.github.com", self.domain_host()].iter().any(|allowed| host.eq_ignore_ascii_case(allowed)) {
+            return true;
+        }
+        if https && page && SOURCE_HOSTS.iter().any(|allowed| host.eq_ignore_ascii_case(allowed)) {
             return true;
         }
         // The app's origin as it is written: the scheme it has (https, or http for a preview) and its host.
@@ -61,7 +70,7 @@ pub(super) fn hosts(text: &str, origins: &Origins, name: &str) -> Result<(), Str
         if namespace || schema {
             continue;
         }
-        if !origins.allows(scheme, host) {
+        if !origins.allows(scheme, host, name.ends_with(".html")) {
             return Err(format!("unapproved origin near //{host}"));
         }
     }
@@ -92,7 +101,7 @@ pub(super) fn resolve(from: &str, url: &str, origins: &Origins) -> Result<Option
     let mut path = url;
     if let Some((scheme, rest)) = url.split_once("://").filter(|(s, _)| !s.contains('/')) {
         let host = rest.split('/').next().unwrap_or("");
-        if !origins.allows(Some(scheme), host) {
+        if !origins.allows(Some(scheme), host, from.ends_with(".html")) {
             return Err("unapproved URL origin".into());
         }
         // The pages' own address is a local path; the app's and GitHub's are permitted addresses of other sites.

@@ -157,9 +157,9 @@ fn vsdx_shaped(id: u32, other: u32) -> Shape {
     row.cells.insert(CellName::new("Style"), cell(None, "1"));
     character.rows.push(Arc::new(row));
     sheet.sections.push(Arc::new(character));
-    // The outline has an arc row, which the reader would give as another row.
+    // The outline has a NURBS row, which the writer does not write as a path (an arc row is written).
     let geometry = sheet.sections.iter_mut().find(|g| g.name.as_str() == "Geometry").unwrap();
-    let mut arc = Row { row_type: Some(Arc::from("ArcTo")), ix: Some(9), ..Row::default() };
+    let mut arc = Row { row_type: Some(Arc::from("NURBSTo")), ix: Some(9), ..Row::default() };
     arc.cells.insert(CellName::new("X"), cell(Some("Width"), "1"));
     arc.cells.insert(CellName::new("Y"), cell(Some("Height"), "1"));
     arc.cells.insert(CellName::new("A"), cell(None, "0.25"));
@@ -175,7 +175,7 @@ fn a_vsdx_shaped_model_saved_as_odg_reads_back_the_same_cells_for_everything_tie
     push_shape(&mut o.doc, vsdx_shaped(a, b));
     push_shape(&mut o.doc, rectangle(b, "Target", (10.0, 3.0, 4.0, 2.0)));
     let saved = real(&o.doc, &o.bytes, &o.index).unwrap_or_else(|e| panic!("not saved: {e}"));
-    assert!(saved.notes.iter().any(|n| n.class() == "outline_approximated"), "the arc row is not a path of tier 1: {:?}", saved.notes);
+    assert!(saved.notes.iter().any(|n| n.class() == "outline_approximated"), "the NURBS row is not a path the writer writes: {:?}", saved.notes);
     let back = open_bytes(saved.bytes.clone());
     let shapes = &back.doc.pages.get(0).unwrap().shapes;
     let (ra, rb) = (shapes.get(1).unwrap(), shapes.get(2).unwrap());

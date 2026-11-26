@@ -123,6 +123,28 @@ pub(crate) fn spans_inside(news: &[NewShape], steps: &mut u64) -> Result<Vec<Spa
     Ok(inside)
 }
 
+/// Whether a group of the model was read with an automatic graphic style of its own (`draw:style-name`, held by the reader): the model writer writes that style back with the group
+/// As it writes a shape's, and the cells the style gives the group are the markup's.
+///
+/// **The one answer is [`super::shapes::AsRead::of_group`]'s**: the group names a style when its record is not `Ok(None)`, so a group whose name the writer refuses (a character XML
+/// 1.0 does not allow) is a styled group, as the markup sees it (it refuses the save), and the document file and the markup never tell two groups apart.
+pub(crate) fn names_a_style(shape: &Shape) -> bool {
+    !matches!(super::shapes::AsRead::of_group(shape), Ok(None))
+}
+
+/// The cells of a group that its own style says (the model path: [`names_a_style`]): **the cells the reader reads back from the style the writer writes**, which are no data of DiaCraft's for
+/// the group, and so no entry of the document file is made for them (`ext::docfile`). The same cells [`super::shapes`] writes natively for a shape of the file, but those a file's colour
+/// or number spells back as they are (a cell with a formula, or a colour the file does not spell as the cell does, is carried beside the style, as an entry says).
+pub(crate) fn style_cells(shape: &Shape) -> Vec<&'static str> {
+    if !names_a_style(shape) {
+        return Vec::new();
+    }
+    let (_, mut ops, mut names) = super::shapes::native_style_as(&shape.sheet, &[], true, true);
+    super::held::graphic_ops_said(shape, &mut ops, &mut names);
+    names.retain(|name| shape.sheet.cells.get(*name).is_some_and(|cell| crate::ext::native::style_reproduced_read(name, cell)));
+    names
+}
+
 /// The words of the refusal of a text on a group (a new one, or one of the file): writes it as one more member of the group, a custom shape on the
 /// group's frame whose own style carries a marker, which the reader folds back into the group's own sheet; that member is not written yet, and the text is not dropped.
 pub(crate) const WORDS_GROUP_TEXT: &str = "a new group with text of its own (a group's text is written as one more member of the group, which is not written yet: take the text off the group, or put it on a shape beside it)";

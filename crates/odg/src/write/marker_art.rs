@@ -750,6 +750,12 @@ fn box_of_all(pieces: &[Piece]) -> Option<(i64, i64, i64, i64)> {
     (x0 <= x1).then_some((x0, y0, x1, y1))
 }
 
+/// The marker of DiaCraft's filled diamond, the custom end of UML composition: a box of 1000 by 2000 with the tip at the middle of the top side, which is where a program
+/// that draws a marker puts the line's end, and the back at the bottom, so that it is twice as long as it is wide, as the master is. One closed path, filled by every rule alike.
+pub(crate) fn filled_diamond() -> Built {
+    Built { view_box: "0 0 1000 2000".to_owned(), d: "M 500 0 L 1000 1000 L 500 2000 L 0 1000 Z".to_owned() }
+}
+
 /// Builds the marker of number `n` at band class `band` (0 for a mark with no band): its view box and path, or `None` for a number that is not 1 to 45, a band
 /// class that does not belong to the number, or a union that could not be made. `steps` counts the work.
 pub(crate) fn build(n: u32, band: u32, steps: &mut u64) -> Option<Built> {

@@ -403,6 +403,7 @@ pub(super) fn strip(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, ctl: &Ctl, area:
         | Body::Layouts
         | Body::Masters
         | Body::ContainerStyles
+        | Body::SheetSections
         | Body::QuickStyles => {}
     }
 }
@@ -519,6 +520,7 @@ pub(super) fn gallery_menu(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, ctl: &Ctl
         | Body::Layouts
         | Body::Masters
         | Body::ContainerStyles
+        | Body::SheetSections
         | Body::QuickStyles => {}
     }
 }
@@ -574,7 +576,7 @@ pub(super) fn body_width(body: Body) -> f32 {
         Body::Layouts => crate::relayout_ui::WIDTH,
         Body::Masters => super::change_shape::GALLERY_WIDTH,
         Body::QuickStyles => super::quick_styles::WIDTH,
-        Body::None | Body::PageSizes | Body::VariantColours => 0.0,
+        Body::None | Body::PageSizes | Body::VariantColours | Body::SheetSections => 0.0,
         Body::ContainerStyles => crate::container_ui::menu_width(),
     }
 }

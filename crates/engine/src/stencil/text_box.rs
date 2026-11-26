@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use diacraft_doc::{Cell, Links, Section, Shape, ShapeType, Sheet, Text, TextPart};
 
-use super::{MASTERS, MasterSpec, Outline, flagged_section, geometry, length, length_formula, plain, put};
+use super::{MASTERS, MasterSpec, More, Outline, flagged_section, geometry, length, length_formula, plain, put};
 
 /// The width of a text box made without a size, in inches.
 pub const TEXT_BOX_WIDTH: f64 = 1.0;
@@ -56,6 +56,7 @@ pub(super) fn rectangle(width: f64, height: f64) -> Section {
         height,
         outline: Outline::Polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]),
         points: &[],
+        more: &More::NONE,
     };
     // A polygon is one section; the fallback is an empty one that still fills, which `geometry` cannot give.
     geometry(&spec).into_iter().next().unwrap_or_else(|| flagged_section(0, true))
@@ -64,7 +65,16 @@ pub(super) fn rectangle(width: f64, height: f64) -> Section {
 /// The `Connection` section of a text box: the Rectangle master's four, the middles of the sides.
 pub(super) fn sides(width: f64, height: f64) -> Section {
     let points = MASTERS.iter().find(|m| m.id == "rectangle").map_or(&[][..], |m| m.points);
-    super::connections(&MasterSpec { identity: (0, 0), id: "text_box", name: "Text Box", width, height, outline: Outline::Polygon(&[]), points })
+    super::connections(&MasterSpec {
+        identity: (0, 0),
+        id: "text_box",
+        name: "Text Box",
+        width,
+        height,
+        outline: Outline::Polygon(&[]),
+        points,
+        more: &More::NONE,
+    })
 }
 
 /// The shape `id`: a text box centred at (`x`, `y`) of the size `width` by `height`, holding `text` (none when it is empty). Lengths are in the

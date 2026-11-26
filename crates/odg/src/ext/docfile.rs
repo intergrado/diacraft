@@ -1204,6 +1204,20 @@ fn group_native(sheet: &Sheet, keyed: bool, model_path: bool) -> Sheet {
     native
 }
 
+/// [`group_native`] of a group `shape` of the model path, with the cells of the group's own automatic style (the model writer writes a style for a group the file read with one, and
+/// the reader reads the same cells back from it, so they are the markup's and need no entry).
+fn group_native_of(shape: &diacraft_doc::Shape, keyed: bool, model_path: bool) -> Sheet {
+    let mut native = group_native(&shape.sheet, keyed, model_path);
+    if model_path {
+        for name in crate::write::groups::style_cells(shape) {
+            if let Some(cell) = shape.sheet.cells.get(name) {
+                native.cells.insert(diacraft_doc::CellName::new(name), cell.clone());
+            }
+        }
+    }
+    native
+}
+
 /// The steps a walk of the model for the document file may still take: charged **before** the work is done, and held to what the save's step cap has left, so that a
 /// walk stops at the cap and does not run on to the end of a hostile model (the cap is consulted by the caller, which refuses the save when [`Steps::over`]).
 pub(crate) struct Steps {
@@ -1415,7 +1429,7 @@ fn group_entries_of(page: &diacraft_doc::Page, nth: u32, steps: &mut Steps, gate
             out.push((shape.id, super::items::group_item(keys, &shell, members)?));
         }
         // `delta_el` makes the element when it holds data or the attributes say something: a group with neither is none.
-        let data = delta_el("group", Vec::new(), &shape.sheet, &group_native(&shape.sheet, keyed, gate.model_path()), gate)?;
+        let data = delta_el("group", Vec::new(), &shape.sheet, &group_native_of(shape, keyed, gate.model_path()), gate)?;
         // A group with no key of its own keeps an `ID` that a shape names no longer (it would be found by its place): its entry is for data and a link to a master.
         let wanted = if keyed { data.is_some() || named.contains(&shape.id) || linked } else { data.is_some() || linked };
         if wanted {
@@ -1427,6 +1441,53 @@ fn group_entries_of(page: &diacraft_doc::Page, nth: u32, steps: &mut Steps, gate
         stack.extend(shape.children.iter().rev());
     }
     Ok(out)
+}
+
+/// Which groups of a page DiaCraft's document file carries data for ([`groups_needing_a_key`]).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct GroupKeys {
+    /// The `ID`s of the groups that [`group_entries_of`] makes an entry for, or the item of their VSDX data: **a group with data of its own** (a cell or a section the file's markup does not give
+    /// a group, on the model path), a link to a master, or an `ID` that another shape names.
+    pub ids: std::collections::HashSet<u32>,
+    /// The steps the walk took.
+    pub steps: u64,
+    /// The walk was asked for more steps than the room it was given, and stopped: `ids` is then not all of them.
+    pub over: bool,
+}
+
+/// The groups of `page` that DiaCraft's document file carries data for, and so need a key of their own, a name no other group of the page has. **The
+/// rule is the one [`group_entries_of`] makes an entry by** (the test of its `wanted`, for a group that is named): the engine names a new group only when it needs one, so that a group that
+/// holds no data (a `draw:g` the file had with no name, which only its members fill, and that holds the four connection points the reader gives every shape) stays as the file had it. **A
+/// group that holds no connection points is data**: the reader gives it the four, and its entry says it has none (a group of a VSDX drawing, a group made in DiaCraft). Every shape, cell,
+/// row and formula of the page is a step, charged before the work, within `room`.
+pub fn groups_needing_a_key(page: &diacraft_doc::Page, room: u64) -> GroupKeys {
+    let mut steps = Steps::new(room);
+    let mut ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    // A page whose top level holds no group holds none.
+    if !page.shapes.iter().all(|s| s.children.is_empty()) {
+        let named = named_ids(page, &mut steps);
+        let mut stack: Vec<&Arc<diacraft_doc::Shape>> = page.shapes.iter().rev().collect();
+        while let Some(shape) = stack.pop() {
+            if !steps.take(1) {
+                break;
+            }
+            if shape.children.is_empty() {
+                continue;
+            }
+            stack.extend(shape.children.iter().rev());
+            if !charge_sheet(&mut steps, &shape.sheet) {
+                break;
+            }
+            let linked = shape.master.is_some() || shape.master_shape.is_some();
+            let carried = super::shell::shape_shell(shape, &diacraft_doc::ShapeType::Group).is_some();
+            // As the group will be keyed once it is named: a group with no `Connection` section is given the standard one by the reader, and its entry says it has none.
+            let data = !sheet_delta(&shape.sheet, &group_native_of(shape, true, true)).is_empty();
+            if linked || carried || data || named.contains(&shape.id) {
+                ids.insert(shape.id);
+            }
+        }
+    }
+    GroupKeys { ids, steps: steps.used(), over: steps.over() }
 }
 
 /// Whether an element this build made for a group is the group's `group` entry, and not the item of its VSDX data, which [`group_entries_of`] makes beside it.
@@ -2473,6 +2534,46 @@ mod tests {
             [pair("A", None), pair("B", Some("1")), pair("B", Some("2"))],
             "the inner group has the name of the second: neither is keyed"
         );
+    }
+
+    /// The groups of a page that need a key are the ones [`group_entries_of`] makes an entry for: one with a cell beyond its frame, one that holds no connection points, one linked
+    /// to a master, one a `Connect` row names; a group that holds none of these (the four standard connection points the reader gives a group a file had, and its members) needs none, and the
+    /// walk costs a step for each shape and each cell, and stops past its room.
+    #[test]
+    fn a_group_needs_a_key_when_it_holds_data_no_connection_points_a_link_to_a_master_or_an_id_another_shape_names() {
+        // The groups of the page as a file gives them: each with the four standard connection points.
+        let as_read = |names: &[Option<&str>], cost: Option<&str>| {
+            let mut page = page_of_groups(names, cost);
+            for at in 0..page.shapes.len() {
+                let group = Arc::make_mut(page.shapes.get_mut(at).unwrap());
+                Arc::make_mut(&mut group.sheet).sections.push(Arc::new(four_rows("Connection")));
+            }
+            page
+        };
+        let ids = |page: &Page| {
+            let keys = groups_needing_a_key(page, u64::MAX);
+            assert!(!keys.over);
+            let mut ids: Vec<u32> = keys.ids.into_iter().collect();
+            ids.sort_unstable();
+            ids
+        };
+        assert_eq!(ids(&as_read(&[None, Some("A")], None)), Vec::<u32>::new(), "nothing on them but the four points");
+        assert_eq!(ids(&as_read(&[None, Some("A")], Some("1"))), [10, 20], "a cell of their own");
+        assert_eq!(ids(&page_of_groups(&[None, Some("A")], None)), [10, 20], "no connection points: the entry says so");
+        let mut linked = as_read(&[None, None], None);
+        Arc::make_mut(linked.shapes.get_mut(1).unwrap()).master_shape = Some(4);
+        assert_eq!(ids(&linked), [20], "a link to a master's shape");
+        let mut named = as_read(&[None, None], None);
+        named.connects =
+            diacraft_doc::Connects::from_vec(vec![diacraft_doc::Connect { from_sheet: 11, to_sheet: 10, ..diacraft_doc::Connect::default() }]);
+        assert_eq!(ids(&named), [10], "an `ID` a connection names");
+        // A page that holds no group costs nothing but the look at its top level, and a walk past its room stops and says so.
+        let plain = Page::new(1, "P");
+        assert_eq!(groups_needing_a_key(&plain, 0), GroupKeys::default());
+        let many = as_read(&[None; 50], Some("1"));
+        let full = groups_needing_a_key(&many, u64::MAX);
+        let short = groups_needing_a_key(&many, full.steps / 2);
+        assert!(short.over && short.ids.len() < full.ids.len() && short.steps <= full.steps / 2, "{short:?} {full:?}");
     }
 
     /// An `ID` that a `Connect` row names is kept for a group that has a key, and is not kept for one with none (it would be found by its place): the entry is for data and

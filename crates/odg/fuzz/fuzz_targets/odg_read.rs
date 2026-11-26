@@ -71,9 +71,22 @@ const STYLES: &str = concat!(
     r#"<style:style style:name="Z0" style:family="paragraph"><style:paragraph-properties fo:text-align="start" style:line-spacing="0.4cm"><style:tab-stops><style:tab-stop style:position="1cm" style:leader-text="."/></style:tab-stops></style:paragraph-properties><style:text-properties style:text-underline-style="wave" fo:text-transform="lowercase"/></style:style>"#,
     r#"<style:style style:name="Z1" style:family="graphic"><style:graphic-properties draw:stroke="dash" draw:stroke-dash="Nowhere" draw:marker-start="Nothing" draw:marker-start-width="0.5cm" svg:stroke-width="x" fo:padding="0.1cm" style:writing-mode="tb-rl"/></style:style>"#,
     r#"<style:style style:name="T0" style:family="text"><style:text-properties style:text-underline-style="dotted" fo:text-transform="lowercase" style:text-position="30%"/></style:style>"#,
+    // A style sheet that says the weight alone, one that underlines and says nothing else of the text, a common style with no name, and the second of a name.
+    r#"<style:style style:name="B0" style:family="graphic"><style:text-properties fo:font-weight="bold"/></style:style>"#,
+    r#"<style:style style:name="B1" style:family="graphic"><style:text-properties style:text-underline-style="solid"/></style:style>"#,
+    r#"<style:style style:name="B0" style:family="graphic"><style:graphic-properties draw:fill="none"/></style:style>"#,
+    r#"<style:style style:family="graphic"><style:graphic-properties draw:fill="solid"/></style:style>"#,
     r#"</office:styles><office:automatic-styles><style:page-layout style:name="PM1"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm"/></style:page-layout>"#,
+    // Automatic styles that nothing names (one in each of the three families, one that says nothing), one with no name, the second of a name, and one of attributes no field reads.
+    r#"<style:style style:name="U0" style:family="graphic"><style:graphic-properties draw:fill="solid" draw:fill-color="&#35;00ff00"/></style:style>"#,
+    r#"<style:style style:name="U0" style:family="text"><style:text-properties fo:color="&#35;ff0000"/></style:style>"#,
+    r#"<style:style style:name="U1" style:family="paragraph"><style:paragraph-properties fo:text-align="center"/></style:style>"#,
+    r#"<style:style style:name="U2" style:family="graphic"/>"#,
+    r#"<style:style style:name="U0" style:family="graphic"><style:graphic-properties draw:fill="none"/></style:style>"#,
+    r#"<style:style style:family="paragraph"><style:paragraph-properties fo:text-align="center"/></style:style>"#,
+    r#"<style:style style:name="U3" style:family="graphic"><style:graphic-properties draw:textarea-horizontal-align="justify"/><style:text-properties fo:language="en"/></style:style>"#,
     r#"</office:automatic-styles><office:master-styles><draw:layer-set><draw:layer draw:name="layout"/><draw:layer draw:name="L1"/></draw:layer-set>"#,
-    r#"<style:master-page style:name="Default" style:page-layout-name="PM1"/></office:master-styles></office:document-styles>"#
+    r#"<style:master-page style:name="Default" style:page-layout-name="PM1"/><style:master-page style:page-layout-name="PM1"/></office:master-styles></office:document-styles>"#
 );
 
 const MANIFEST: &str = concat!(
@@ -110,6 +123,44 @@ fn package(content: &[u8], template: bool) -> Option<Vec<u8>> {
     w.add("content.xml", content, Method::Deflated).ok()?;
     w.add("styles.xml", STYLES.as_bytes(), Method::Deflated).ok()?;
     w.add("META-INF/manifest.xml", manifest.as_bytes(), Method::Deflated).ok()?;
+    w.finish().ok()
+}
+
+/// The shapes a visit writes back as they were, as a page's first shapes: a rectangle that holds the id a connector names and a glue point of its own, a second target whose
+/// id is a `draw:id` alone, a connector between them, a group with no name whose own style and glue point are the file's, a polygon whose view box the reader cannot read and a polyline
+/// whose points it cannot, two shapes that claim one id, and two rectangles whose ids are a `draw:id` alone (`n1`, `n2`) with a connector that names them: with the
+/// flag byte of an ODF 1.0 file the input is the vector of that task, which ODF 1.4 takes only as a pair.
+const SEED_SHAPES: &str = concat!(
+    r#"<draw:rect draw:style-name="gr1" xml:id="s1" draw:id="s1" svg:x="1cm" svg:y="1cm" svg:width="4cm" svg:height="2cm"><draw:glue-point draw:id="5" svg:x="10%" svg:y="-20%" draw:escape-direction="horizontal"/></draw:rect>"#,
+    r#"<draw:rect draw:style-name="gr1" draw:id="s2" svg:x="8cm" svg:y="1cm" svg:width="4cm" svg:height="2cm"/>"#,
+    r#"<draw:connector draw:style-name="gr1" draw:start-shape="s1" draw:start-glue-point="5" draw:end-shape="s2" draw:end-glue-point="3" svg:x1="5cm" svg:y1="2cm" svg:x2="8cm" svg:y2="2cm"/>"#,
+    r#"<draw:g draw:style-name="gr1"><draw:glue-point draw:id="4" svg:x="1cm" svg:y="1cm"/><draw:rect draw:style-name="gr1" svg:x="1cm" svg:y="5cm" svg:width="2cm" svg:height="2cm"/><draw:rect draw:style-name="gr1" svg:x="4cm" svg:y="5cm" svg:width="2cm" svg:height="2cm"/></draw:g>"#,
+    r#"<draw:polygon draw:style-name="gr1" svg:x="1cm" svg:y="9cm" svg:width="4cm" svg:height="2cm" svg:viewBox="0 0 0 100" draw:points="0,0 100,0 50,100"/>"#,
+    r#"<draw:polyline draw:style-name="gr1" svg:x="6cm" svg:y="9cm" svg:width="4cm" svg:height="2cm" svg:viewBox="0 0 100 100" draw:points="zz"/>"#,
+    r#"<draw:rect draw:style-name="gr1" xml:id="s1" draw:id="s1" svg:x="11cm" svg:y="9cm" svg:width="2cm" svg:height="2cm"/>"#,
+    r#"<draw:rect draw:style-name="gr1" draw:id="n1" svg:x="1cm" svg:y="13cm" svg:width="4cm" svg:height="2cm"/>"#,
+    r#"<draw:rect draw:style-name="gr1" draw:id="n2" svg:x="8cm" svg:y="13cm" svg:width="4cm" svg:height="2cm"/>"#,
+    r#"<draw:connector draw:style-name="gr1" draw:start-shape="n1" draw:start-glue-point="1" draw:end-shape="n2" draw:end-glue-point="3" svg:x1="5cm" svg:y1="14cm" svg:x2="8cm" svg:y2="14cm"/>"#
+);
+
+/// An honest package whose one page holds [`SEED_SHAPES`] and then the shapes `rest` gives, on the package's own styles. `None` for text that is not UTF-8 or that the archive's
+/// writer refuses.
+fn package_shapes(rest: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(rest).ok()?;
+    let content = format!(
+        concat!(
+            r#"<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" "#,
+            r#"xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.3">"#,
+            r#"<office:automatic-styles><style:style style:name="gr1" style:family="graphic"><style:graphic-properties draw:fill="solid" draw:fill-color="&#35;336699"/></style:style></office:automatic-styles>"#,
+            r#"<office:body><office:drawing><draw:page draw:name="p">{}{}</draw:page></office:drawing></office:body></office:document-content>"#
+        ),
+        SEED_SHAPES, text
+    );
+    let mut w = ArchiveWriter::new();
+    w.add("mimetype", MEDIA.as_bytes(), Method::Stored).ok()?;
+    w.add("content.xml", content.as_bytes(), Method::Deflated).ok()?;
+    w.add("styles.xml", STYLES.as_bytes(), Method::Deflated).ok()?;
+    w.add("META-INF/manifest.xml", MANIFEST.as_bytes(), Method::Deflated).ok()?;
     w.finish().ok()
 }
 
@@ -262,6 +313,10 @@ fuzz_target!(|data: &[u8]| {
     // The kind a wrapped package is, which a read that succeeds says.
     let (bytes, kind) = match data.split_first() {
         Some((8, rest)) => match annotated(rest) {
+            Some(bytes) => (bytes, Some(Variant::Drawing)),
+            None => return,
+        },
+        Some((11, rest)) => match package_shapes(rest) {
             Some(bytes) => (bytes, Some(Variant::Drawing)),
             None => return,
         },

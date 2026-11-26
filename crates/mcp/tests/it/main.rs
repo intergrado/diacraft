@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod check_before;
 mod protocol;
 mod protocol_props;
 mod remote_props;

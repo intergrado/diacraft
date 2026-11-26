@@ -68,6 +68,9 @@ pub(crate) struct LineLook {
     pub end_arrow: i64,
     pub begin_size: i64,
     pub end_size: i64,
+    /// The name each end's `USE` holds when the end is a master (254 and `USE("Name")`): which master the end is drawn from (`custom_end.rs`).
+    pub begin_use: Option<std::sync::Arc<str>>,
+    pub end_use: Option<std::sync::Arc<str>>,
     pub compound: u8,
     pub gradient: Option<GradientSpec>,
 }
@@ -167,16 +170,19 @@ impl Looks {
             stops: gradient_stops(cx, at, "LineGradient"),
             rotate_with_shape: true,
         });
+        let (begin_arrow, end_arrow) = (byte(cx.num(at, "BeginArrow"), 0), byte(cx.num(at, "EndArrow"), 0));
         Some(LineLook {
             weight,
             color,
             pattern,
             cap: byte(cx.num(at, "LineCap"), 0).clamp(0, 2) as u8,
             rounding: cx.num(at, "Rounding").max(0.0),
-            begin_arrow: byte(cx.num(at, "BeginArrow"), 0),
-            end_arrow: byte(cx.num(at, "EndArrow"), 0),
+            begin_arrow,
+            end_arrow,
             begin_size: byte(cx.num_or(at, "BeginArrowSize", 2.0), 2),
             end_size: byte(cx.num_or(at, "EndArrowSize", 2.0), 2),
+            begin_use: if begin_arrow == 254 { crate::custom_end::used_name(cx, at, "BeginArrow") } else { None },
+            end_use: if end_arrow == 254 { crate::custom_end::used_name(cx, at, "EndArrow") } else { None },
             compound: byte(cx.num(at, "CompoundType"), 0).clamp(0, 4) as u8,
             gradient: gradient.filter(|g| !g.stops.is_empty()),
         })

@@ -21,6 +21,10 @@
 //! * [`connectors`]: add a connector glued at its ends, move an end. **Glue** is a `Connect` row and a formula on the end cell that names
 //!   the target's connection point (`PAR(PNT(Sheet.<id>!Connections.X<n>,Sheet.<id>!Connections.Y<n>))`), so a recalculation moves the end.
 //! * [`route`]: the right-angle route, written as `Geometry` rows with values after each recalculation.
+//! * [`obstacle`]: which shapes a route goes round (placeable by `ObjType`, a group of members, hidden layers, guides) and the write that gluing a connector makes
+//!   [`behavior`]: the Behavior dialog's Placement tab as cells, `shape.behavior` and `shape.set_behavior`.
+//! * [`routing`]: the page's routing settings, the Layout and Routing tab's cells, and the new route a new page style asks of the connectors that follow
+//!   the page; `style` holds the routing styles.
 //! * [`settle`]: after an edit, the recalculation of what it changed and what reads it (through `calc`, not of the whole page), and the routes
 //!   of the connectors it moved.
 //! * [`page_setup`], [`page_fit`], [`pages`] and [`paper`]: a page's size, orientation, drawing scale, printer paper and Auto Size, the growth of
@@ -34,11 +38,13 @@
 
 mod arrange;
 mod autoconnect;
+mod behavior;
 pub mod callout_preview;
 pub mod callouts;
 mod change;
 mod clipboard;
 pub mod comments;
+pub mod conn_points;
 mod connectors;
 pub mod container;
 pub mod fields;
@@ -57,6 +63,7 @@ mod local;
 #[cfg(test)]
 mod loops_cost;
 mod nested;
+mod obstacle;
 mod odg_glue;
 mod page_fit;
 mod page_setup;
@@ -75,6 +82,7 @@ pub mod route;
 mod route_clear;
 #[cfg(test)]
 mod route_cost;
+pub mod routing;
 mod rows;
 mod scale;
 mod scan;
@@ -83,6 +91,10 @@ mod settle;
 pub mod shapedata;
 mod shapeops;
 mod shapes;
+pub mod sheet;
+mod sheet_copy;
+mod sheet_follow;
+pub mod sheet_rows;
 mod style;
 mod text_block;
 mod text_box;
@@ -98,6 +110,7 @@ use crate::error::EngineError;
 pub(crate) use arrange::angle_text;
 pub use arrange::{Align, FlipAxis, Stack, Turn, Turned, align_shapes, flip_shapes, order_shapes, rotate_shapes, turn_shapes};
 pub use autoconnect::{AutoConnected, DEFAULT_GAP, autoconnect, autoconnect_centre, autoconnect_join, neighbour};
+pub use behavior::{Behavior, BehaviorChange, Placement as PlacementBehavior, Plow, set_behavior, shape_behavior};
 pub use change::{
     Changed, Glued, MAX_CHANGED_SHAPES, MAX_DATA_ROWS, MAX_NEW_MEMBERS, MAX_RECONNECTED_ENDS, Reglued, Replacement, Skipped, change_shapes,
     swapping_locked,
@@ -143,7 +156,10 @@ pub use shapeops::{MAX_OPERANDS as MAX_SHAPE_OPS_OPERANDS, MAX_PRODUCED as MAX_S
 pub use shapeops::{Made, Op, check as check_shape_ops, run as shape_ops};
 pub use shapes::{DropInfo, ShapesMoved, delete_shapes, drop_shape, drop_shape_above, move_shapes, move_shapes_leaving, resize_shape};
 pub(crate) use shapes::{left_words, page_stats};
-pub use style::{PathStyle, StyleChoice, page_style, set_connector_style, set_page_style};
+pub use style::{
+    ConnectorStyle, Flow, PathStyle, RouteStyle, StyleChoice, connector_style, lean_of, page_style, route_style_of, set_connector_route_style,
+    set_connector_style, set_page_route_style, set_page_style,
+};
 pub(crate) use style::{path_style, style_of};
 pub use text_block::{BlockPlace, move_text_block, resize_text_block, rotate_text_block, text_block_place};
 pub use text_box::{TextBoxInfo, add_text_box_above};

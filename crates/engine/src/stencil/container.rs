@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use diacraft_doc::{Cell, CellName, Links, Section, Shape, ShapeType, Sheet, Text, TextPart, Value};
 
-use super::{MASTERS, MasterSpec, Outline, flagged_section, length, length_formula, number_text, plain, put, row};
+use super::{MASTERS, MasterSpec, More, Outline, flagged_section, length, length_formula, number_text, plain, put, row};
 use crate::formatting::Rgb;
 
 /// The side of the box the heading strip lies along.
@@ -361,7 +361,16 @@ fn user_row(name: &str, value: Cell) -> Arc<diacraft_doc::Row> {
 /// The four middles of the sides, as the Rectangle master has them, so that a connector can be glued to a container (a connector dragged to its edge).
 fn sides(width: f64, height: f64) -> Section {
     let points = MASTERS.iter().find(|m| m.id == "rectangle").map_or(&[][..], |m| m.points);
-    super::connections(&MasterSpec { identity: (0, 0), id: "container", name: "Container", width, height, outline: Outline::Polygon(&[]), points })
+    super::connections(&MasterSpec {
+        identity: (0, 0),
+        id: "container",
+        name: "Container",
+        width,
+        height,
+        outline: Outline::Polygon(&[]),
+        points,
+        more: &More::NONE,
+    })
 }
 
 /// What a new container is made with.

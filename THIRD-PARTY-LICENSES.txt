@@ -24,7 +24,7 @@ This file is made by `cargo xtask licenses` from Cargo.lock and the crates' own 
   macOS (Apple silicon)  179 crates (diacraft 179, diacraft-cli 88), 9 licences, 102 texts
   macOS (Intel)          179 crates (diacraft 179, diacraft-cli 88), 9 licences, 102 texts
 
-The counts leave out DiaCraft's own 24 crates, which are under DiaCraft's licence. A crate that
+The counts leave out DiaCraft's own 25 crates, which are under DiaCraft's licence. A crate that
 offers a choice of licences (MIT OR Apache-2.0) is listed under the one DiaCraft uses it under:
 MIT where it is offered, then Apache-2.0. The programs also use the computer's own libraries
 (its C library, the window system and the graphics drivers), which are not part of the download.

@@ -13,7 +13,7 @@
 //! widening a symbol keeps its angles and its round ends. The sizes (1.5 inches by 0.8 for a rectangle-like symbol) are our choice, and so
 //! are the connection points: the middles of the four sides, moved onto the outline where a side is slanted or curved.
 
-use super::{Co, MasterSpec, Outline, PathSpec, SIDES, Seg, TextBox, Xy, fh, fw, mix, pc};
+use super::{Co, Flag, MasterSpec, More, Outline, PathSpec, SIDES, Seg, TextBox, Xy, fh, fw, mix, pc};
 
 /// The right and the top of the box.
 const W: Co = fw(1.0);
@@ -51,12 +51,12 @@ const fn half(to: Xy, via: Xy, rx: Co, ry: Co) -> Seg {
 
 /// A path that takes the fill.
 const fn solid(segs: &'static [Seg]) -> PathSpec {
-    PathSpec { fill: true, segs }
+    PathSpec { fill: true, segs, no_show: Flag::Off, no_line: Flag::Off }
 }
 
 /// A path that only strokes (`NoFill` 1), drawn inside the fill of another.
 const fn open(segs: &'static [Seg]) -> PathSpec {
-    PathSpec { fill: false, segs }
+    PathSpec { fill: false, segs, no_show: Flag::Off, no_line: Flag::Off }
 }
 
 const fn text(x: f64, y: f64, w: f64, h: f64) -> TextBox {
@@ -90,6 +90,7 @@ const SLANT: Co = y(0.25);
 pub(super) static FLOWCHART: [MasterSpec; 18] = [
     MasterSpec {
         identity: (2, 1),
+        more: &More::PLACEABLE,
         id: "process",
         name: "Process",
         width: 1.5,
@@ -99,6 +100,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 2),
+        more: &More::PLACEABLE,
         id: "decision",
         name: "Decision",
         width: 1.5,
@@ -112,6 +114,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 3),
+        more: &More::PLACEABLE,
         id: "terminator",
         name: "Terminator",
         width: 1.5,
@@ -125,6 +128,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 4),
+        more: &More::PLACEABLE,
         id: "data",
         name: "Data",
         width: 1.5,
@@ -143,6 +147,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 5),
+        more: &More::PLACEABLE,
         id: "document",
         name: "Document",
         width: 1.5,
@@ -156,6 +161,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 6),
+        more: &More::PLACEABLE,
         id: "multiple_documents",
         name: "Multiple Documents",
         width: 1.5,
@@ -197,6 +203,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 7),
+        more: &More::PLACEABLE,
         id: "predefined_process",
         name: "Predefined Process",
         width: 1.5,
@@ -210,6 +217,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 8),
+        more: &More::PLACEABLE,
         id: "manual_input",
         name: "Manual Input",
         width: 1.5,
@@ -223,6 +231,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 9),
+        more: &More::PLACEABLE,
         id: "manual_operation",
         name: "Manual Operation",
         width: 1.5,
@@ -236,6 +245,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 10),
+        more: &More::PLACEABLE,
         id: "preparation",
         name: "Preparation",
         width: 1.5,
@@ -257,6 +267,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 11),
+        more: &More::PLACEABLE,
         id: "on_page_reference",
         name: "On-Page Reference",
         width: 0.5,
@@ -266,6 +277,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 12),
+        more: &More::PLACEABLE,
         id: "off_page_reference",
         name: "Off-Page Reference",
         width: 0.6,
@@ -279,6 +291,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 13),
+        more: &More::PLACEABLE,
         id: "database",
         name: "Database",
         width: 1.0,
@@ -302,6 +315,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 14),
+        more: &More::PLACEABLE,
         id: "internal_storage",
         name: "Internal Storage",
         width: 1.0,
@@ -315,6 +329,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 15),
+        more: &More::PLACEABLE,
         id: "delay",
         name: "Delay",
         width: 1.2,
@@ -328,6 +343,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 16),
+        more: &More::PLACEABLE,
         id: "display",
         name: "Display",
         width: 1.5,
@@ -341,6 +357,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 17),
+        more: &More::PLACEABLE,
         id: "summing_junction",
         name: "Summing Junction",
         width: 0.5,
@@ -362,6 +379,7 @@ pub(super) static FLOWCHART: [MasterSpec; 18] = [
     },
     MasterSpec {
         identity: (2, 18),
+        more: &More::PLACEABLE,
         id: "or",
         name: "Or",
         width: 0.5,

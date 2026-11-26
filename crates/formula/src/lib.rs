@@ -33,6 +33,7 @@ mod error;
 mod parser;
 mod print;
 
+use std::ops::Range;
 use std::sync::Arc;
 
 pub use ast::{BinaryOp, Call, CellRef, Expr, ImplicitMeasure, Index, Number, PERCENT_FUNCTION, Qualifier, Segment, UnaryOp};
@@ -89,6 +90,36 @@ pub fn parse(source: &str) -> Formula {
 /// formula. The source is kept as given, as in `parse`.
 pub fn parse_with_budget(source: &str, max_nodes: usize) -> Formula {
     Formula { source: Arc::from(source), ast: parser::parse(source, max_nodes) }
+}
+
+/// Where one cell reference sits in the text of a formula ([`reference_spans`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RefSpan {
+    /// The first byte of the reference: its first qualifier, or its first name.
+    pub start: usize,
+    /// The byte after its last name.
+    pub end: usize,
+    /// The reference as the parser made it from those bytes.
+    pub reference: CellRef,
+    /// The segments of its path (not of its qualifiers), each with where it sits. As many as `reference.path` holds.
+    pub segments: Vec<SegmentSpan>,
+}
+
+/// Where one name of a path sits, and the row number in brackets after it, if it has one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SegmentSpan {
+    /// The bytes of the name as written, with its quotes if it is quoted.
+    pub name: Range<usize>,
+    /// The bytes of the digits of an `[index]` that is a row number (`[2]`): none for a name with no index, and for one that holds a name (`[Site-2]`).
+    pub index: Option<Range<usize>>,
+}
+
+/// Parses `source` as [`parse`] does (with its limits, and one leading `=` allowed) and says where each cell reference sits in it, in the order the references
+/// begin: a reference inside the arguments of a call that qualifies another comes after the one it is inside. A call, a `TRUE`, a string and a number are none.
+/// It is for a program that rewrites the numbers inside a formula's references and must leave every other byte of the formula as it was: the text a span
+/// covers, read alone, is the reference the parser made of it.
+pub fn reference_spans(source: &str) -> Result<Vec<RefSpan>, ParseError> {
+    parser::parse_spans(source)
 }
 
 /// Writes a tree as formula text, in a form that parses back to the same tree: names and numbers as the tree holds them,

@@ -424,7 +424,7 @@ fn the_extra_field_walk_of_a_copy_is_counted_in_the_unit_it_walks() {
 fn a_scan_that_is_asked_to_accepts_the_external_doctype_the_tree_reader_accepts_and_nothing_else() {
     use diacraft_container::xml::ParseOptions;
     use diacraft_container::xml_scan::scan_tags_with;
-    let asked = ParseOptions { allow_external_doctype: true };
+    let asked = ParseOptions { allow_external_doctype: true, ..ParseOptions::default() };
     let scan = |bytes: &[u8], options: ParseOptions| -> Result<usize, String> {
         let mut tags = 0usize;
         scan_tags_with::<()>(bytes, &XmlLimits::default(), options, &mut Work::default(), |_| {

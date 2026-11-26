@@ -21,6 +21,8 @@
 //! member, loses none and is not fitted. A command that would take a member out of it (Add Container round the member, Add to Underlying Container, Attach to Container Edge) is
 //! refused in words; a disband of a container inside it does not give it the members. A container that holds a shape on a locked layer is not disbanded.
 //!
+//! **A container master**: an instance of a master of the container role has no `DiaCraftContainerStyle` row, so no command makes its outline again (every outline is made again only for a container that holds the row: `Settings::style`), and `container.style` and `container.heading` refuse it in words (`restyling`).
+//!
 //! Only the shapes of a page's own list are members: a member of a group is not, and a group is one shape. A turned or flipped container is not fitted.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -412,6 +414,12 @@ fn restyling(doc: &Document, page: u32, ids: &[u32], need_style: bool) -> Result
     let mut out = Vec::new();
     for id in ids {
         let settings = Settings::read(&p, *id)?;
+        // A container that has a master and no style row of the gallery draws its master's outline, which a style or a heading would replace by the gallery's.
+        if settings.style.is_none() && p.shape_ref(*id).and_then(|at| p.doc.shape(&at)).is_some_and(|shape| shape.master.is_some()) {
+            return Err(Problem::failed(format!(
+                "shape {id} is an instance of a master and has no container style of the gallery, so its look is its master's: a style or a heading would replace it, and it is left as its master draws it"
+            )));
+        }
         if need_style && settings.style.is_none() {
             return Err(Problem::failed(format!(
                 "shape {id} was not made from the container gallery, so its heading is part of its own drawing: choose a container style for it first (`container.style`)"

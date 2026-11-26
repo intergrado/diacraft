@@ -864,9 +864,8 @@ pub(crate) fn paint_art(painter: &egui::Painter, rect: Rect, art: &Art, t: &Toke
                     painter.add(egui::Shape::closed_line(points.iter().map(at).collect(), pen));
                 }
             }
-            for line in &figure.lines {
-                painter.add(egui::Shape::line(line.iter().map(at).collect(), pen));
-            }
+            // The lines as the master's pattern says, and the marks of its line ends (`tile_ends.rs`).
+            crate::tile_ends::paint(painter, figure, &at, pen);
         }
     }
 }
@@ -1099,6 +1098,7 @@ impl DiacraftApp {
             stencil: stencil.map(str::to_owned),
             icon: false,
             home: None,
+            ends: None,
         }
         .key();
         if self.ui.stencils.icons.get(&key).is_some_and(Option::is_some) {
@@ -1376,6 +1376,7 @@ mod tests {
             stencil: None,
             icon: false,
             home: home.map(|(id, name)| stencils::Home { id: id.into(), name: name.into() }),
+            ends: None,
         }
     }
 

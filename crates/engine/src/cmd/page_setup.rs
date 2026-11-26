@@ -145,7 +145,7 @@ fn has_two_pages(s: &Session) -> std::result::Result<(), String> {
 }
 
 /// The page the command works on (see the module documentation).
-fn target_page(s: &Session, p: &Value, cmd: &str) -> Result<u32> {
+pub(super) fn target_page(s: &Session, p: &Value, cmd: &str) -> Result<u32> {
     let doc = s.document().ok_or_else(|| failed(cmd, "no document open"))?;
     match optional_whole(p, "page", cmd)? {
         Some(id) if doc.page(id).is_some() => Ok(id),

@@ -76,19 +76,30 @@ fn format_of(path: &Path, bytes: &[u8]) -> Option<Format> {
     }
 }
 
-/// Whether `out` names a type of `format`: a VSDX type, or `.odg`. The trip saves back in the format the input came in, and a name of another one would compare two formats.
-fn names_a_type_of(format: Format, out: &str) -> bool {
+/// Whether the input is an OpenDocument drawing template (an `.otg`, or a flat one), which the trip saves back as a template: `file.save_as` takes the kind from the
+/// name, so a template saved under an `.odg` name is a drawing, and the content check of the two would find the kind of the package (its `mimetype` and the root row of its manifest)
+/// and count it as a loss of content that no save made. Told by the file's own media type, as `file.open` tells it.
+fn is_template(format: Format, bytes: &[u8]) -> bool {
+    format == Format::Odg && diacraft_odg::sniff(bytes) == Some(diacraft_odg::Variant::Template)
+}
+
+/// Whether `out` names a type of `format`: a VSDX type, or `.odg` (`.otg` for a template, `template`). The trip saves back in the format and the kind the input came in, and a name of
+/// another one would compare two formats, or a template with a drawing.
+fn names_a_type_of(format: Format, template: bool, out: &str) -> bool {
     let Some(extension) = Path::new(out).extension().and_then(|e| e.to_str()) else { return false };
     match format {
         Format::Vsdx => Variant::from_extension(extension).is_some(),
-        Format::Odg => extension.eq_ignore_ascii_case("odg"),
+        Format::Odg => extension.eq_ignore_ascii_case(if template { "otg" } else { "odg" }),
     }
 }
 
 /// The words a name that is no type of the input's format is refused in.
-fn wrong_type_words(format: Format) -> &'static str {
+fn wrong_type_words(format: Format, template: bool) -> &'static str {
     match format {
         Format::Vsdx => "--out must end in .vsdx, .vsdm, .vssx, .vssm, .vstx or .vstm: the trip saves back in the format the file came in",
+        Format::Odg if template => {
+            "--out must end in .otg: the trip saves back in the format the file came in, and a template is saved back as a template"
+        }
         Format::Odg => "--out must end in .odg: the trip saves back in the format the file came in",
     }
 }
@@ -335,8 +346,9 @@ pub fn run(args: &RoundtripArgs, bytes: &[u8]) -> Result<(), Failure> {
             "the file is a .diacraft file already: --via diacraft sends a VSDX package or an OpenDocument drawing through it".to_owned(),
         ));
     };
-    if !names_a_type_of(format, &args.out) {
-        return Err(Failure::Message(wrong_type_words(format).to_owned()));
+    let template = is_template(format, bytes);
+    if !names_a_type_of(format, template, &args.out) {
+        return Err(Failure::Message(wrong_type_words(format, template).to_owned()));
     }
     let mut report = json!({
         "via": "diacraft",
@@ -447,17 +459,33 @@ mod tests {
     #[test]
     fn a_name_is_a_type_of_the_format_it_ends_in_whatever_its_case() {
         for name in ["a.vsdx", "a.VSDM", "a.vssx", "dir.d/a.Vssm", "a.vstx", "a.vstm"] {
-            assert!(names_a_type_of(Format::Vsdx, name), "{name}");
-            assert!(!names_a_type_of(Format::Odg, name), "{name}");
+            assert!(names_a_type_of(Format::Vsdx, false, name), "{name}");
+            assert!(!names_a_type_of(Format::Odg, false, name), "{name}");
         }
         for name in ["a.odg", "a.ODG", "dir.d/a.Odg"] {
-            assert!(names_a_type_of(Format::Odg, name), "{name}");
-            assert!(!names_a_type_of(Format::Vsdx, name), "{name}");
+            assert!(names_a_type_of(Format::Odg, false, name), "{name}");
+            assert!(!names_a_type_of(Format::Vsdx, false, name), "{name}");
         }
         // Not a type of either: another extension, none, a hidden name that is only an extension, a type that is a prefix of a name, and the other formats the trip is not to.
         for name in ["a", "a.", ".vsdx", "a.vsdxx", "a.diacraft", "a.fodg", "a.otg", "a.txt", "a.vsd", ""] {
-            assert!(!names_a_type_of(Format::Vsdx, name) && !names_a_type_of(Format::Odg, name), "{name:?}");
+            assert!(!names_a_type_of(Format::Vsdx, false, name) && !names_a_type_of(Format::Odg, false, name), "{name:?}");
         }
+    }
+
+    #[test]
+    fn a_template_is_saved_back_as_a_template_and_a_drawing_as_a_drawing() {
+        // The kind the input came in is the kind the trip writes, so that the content check does not count the kind as a difference.
+        for name in ["a.otg", "a.OTG", "dir.d/a.Otg"] {
+            assert!(names_a_type_of(Format::Odg, true, name), "{name}");
+            assert!(!names_a_type_of(Format::Odg, false, name), "{name}");
+        }
+        for name in ["a.odg", "a", "a.fotg", "a.fodg", "a.diacraft-template", "a.vstx", ""] {
+            assert!(!names_a_type_of(Format::Odg, true, name), "{name:?}");
+        }
+        assert!(wrong_type_words(Format::Odg, true).contains(".otg") && wrong_type_words(Format::Odg, false).contains(".odg"));
+        // The kind is the file's own media type: a package, and a flat file, by what each says.
+        assert!(!is_template(Format::Vsdx, b"anything"));
+        assert!(!is_template(Format::Odg, b"not a drawing"));
     }
 
     #[test]

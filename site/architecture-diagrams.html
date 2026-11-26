@@ -49,7 +49,7 @@
     <div class="wrap mast-inner">
       <a class="brand" href="/" aria-label="DiaCraft home"><img src="/assets/icon-64.png" alt="" width="64" height="64" />DiaCraft</a>
       <nav class="links" aria-label="Main navigation">
-        <a href="/#features">Features</a>
+        <a href="/features.html">Features</a>
         <a href="/guides/">Guides</a>
         <a href="/changelog.html">Changelog</a>
         <a class="nav-download" href="/#download">Downloads <span class="arrow arrow-down" aria-hidden="true"></span></a>
@@ -63,13 +63,13 @@
         <div class="page-title">
           <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Architecture diagrams</span></p>
           <h1>Enterprise and integration <em>architecture diagrams.</em></h1>
-          <p class="lead">Show how systems, applications and data connect, with the shapes DiaCraft has today: boxes and other basic shapes in containers, connectors with labels and arrowheads, layers for each view and Shape Data on each system.</p>
+          <p class="lead">Show how systems, applications and data connect, with the shapes DiaCraft has today: boxes and other basic shapes in containers, network devices and computers, connectors with labels and arrowheads, layers for each view and Shape Data on each system.</p>
           <p class="sub">DiaCraft has no stencil for a modelling notation such as ArchiMate, UML or BPMN, and no icon sets for cloud services or integration patterns. This page says what you can draw with the general shapes.</p>
           <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
         </div>
         <div class="title-block">
           <dl class="spec">
-            <div><dt>Shapes</dt><dd><b>58</b> in seven stencils</dd></div>
+            <div><dt>Shapes</dt><dd><b>86</b> in nine stencils</dd></div>
             <div><dt>Groups</dt><dd>14 container styles</dd></div>
             <div><dt>Views</dt><dd>Layers, pages and background pages</dd></div>
             <div><dt>Exports</dt><dd>SVG · PDF · PNG</dd></div>
@@ -81,9 +81,10 @@
       <article class="prose">
         <section id="systems">
           <h2>Systems, applications and data stores</h2>
-          <p>Draw each system or application as a shape. Basic Shapes has 12 figures, from the rectangle and the ellipse to the hexagon. For a database, use the Database shape of Basic Flowchart or the Data Store of Gane-Sarson.</p>
+          <p>Draw each system or application as a shape. Basic Shapes has 12 figures, from the rectangle and the ellipse to the hexagon. For a database, use the Database shape of Basic Flowchart or the Data Store of Gane-Sarson. For the infrastructure under them, use the network stencils.</p>
           <ul>
             <li><strong>Make your own shapes</strong> with the Rectangle, Ellipse, Line, Arc, Freeform and Pencil tools, and combine shapes with Union, Combine, Fragment, Intersect and Subtract.</li>
+            <li><strong>Network and computers.</strong> Network Devices and Computers and Devices have a router, a switch, a firewall, a cloud, the internet, servers for databases, the web, files, mail, applications and printing, desktops, laptops, phones and more. Each device has Shape Data for its equipment, and a networked device has fields for its network too, with a label that shows its network name over its IP address. The Basic Network Diagram template opens them.</li>
             <li><strong>Insert a picture</strong> for a logo or an icon you have the rights to use.</li>
             <li><strong>Open a stencil file</strong> (<code>.vssx</code>, <code>.vssm</code> or <code>.diacraft-stencil</code>) from More Shapes → Open Stencil to drag its shapes onto the page.</li>
           </ul>
@@ -130,7 +131,7 @@
         <section id="limits">
           <h2>What it does not have yet</h2>
           <ul>
-            <li><strong>Notations and icons.</strong> No stencil for a modelling notation such as ArchiMate, UML or BPMN, and no icon sets for cloud services, networks or integration patterns.</li>
+            <li><strong>Notations and icons.</strong> No stencil for a modelling notation such as ArchiMate, UML or BPMN, and no icon sets for cloud services or integration patterns.</li>
             <li><strong>External data.</strong> A shape cannot be linked to a spreadsheet or a database: its Shape Data is typed in.</li>
             <li><strong>An early release.</strong> Many controls of the window are shown but do not work yet.</li>
           </ul>
@@ -177,7 +178,7 @@
         <p>Free diagram software for Linux, Windows, macOS and the browser. Open source, under the MIT or Apache 2.0 licence.</p>
       </div>
       <nav aria-label="Footer">
-        <div><p class="label">Product</p><a href="/#features">Features</a><a href="/vsdx-editor.html">Visio alternative</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
+        <div><p class="label">Product</p><a href="/features.html">Features</a><a href="/feature-comparison.html">Feature comparison</a><a href="/vsdx-editor.html">Visio alternative</a><a href="/#download">Downloads</a><a href="/browser.html">In your browser</a><a href="/changelog.html">Changelog</a></div>
         <div><p class="label">Diagrams</p><a href="/flowcharts.html">Flowcharts</a><a href="/org-charts.html">Org charts</a><a href="/architecture-diagrams.html">Architecture</a></div>
         <div><p class="label">Guides</p><a href="/guides/">All guides</a><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
         <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>

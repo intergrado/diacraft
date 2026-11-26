@@ -9,6 +9,16 @@
 //! * a `text:list-style` with no `style:name` (which 1.4 asks for) is given one, `DiaCraft_20_list_20_<n>`, the least `n` from 1 that no list style of the style holds;
 //! * a negative `text:min-label-width` on a list level's properties (a non-negative length in 1.4) is written as 0 in the same unit.
 //!
+//! **Two forms ride in an attribute of DiaCraft's own on the same properties element**, the way `text:enable-numbering` of an automatic style a
+//! paragraph names does (`write/text/model.rs`), because a style that holds them is not one the document file carries an entry for (a style no shape or paragraph names is kept whole, and
+//! written whole):
+//!
+//! * **`text:enable-numbering` on the paragraph properties of a style kept whole** moves to `diacraft:older-enable-numbering` ([`carrier_on_properties`]), and any other attribute of the standard's
+//!   namespaces that the schemas have no place for on the properties is left out and counted ([`refused_on_properties`]);
+//! * **a weight, a slant or a variant that 1.4 lists no such value for** (`fo:font-weight="250"`: 1.4 takes `normal`, `bold` and 100 to 900 in steps of 100; the complex script's two, the slant
+//!   and the small caps are the same kind) is written as the value 1.4 takes nearest ([`form_14`]) and the value it had rides in `diacraft:older-<attribute>` ([`listed`]). A read gives the
+//!   value back **only while the attribute beside it is still the one the writer would have written for it**, so a weight another program changed is the program's.
+//!
 //! (A zero `fo:font-size` is a cell's, `Size`: the writer writes the least size it takes, `write::runs::LEAST_FONT_SIZE`, and the cells ride.)
 //!
 //! **What it costs** (the security scan of round 2, three findings). The writer works out each style's form once a save, before it writes ([`prepare`]): a walk of the style's kept children
@@ -48,6 +58,129 @@ const TEXT_URI: &str = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 /// [`NOT_IN_1_4`].)
 const CARRIED_ON_PROPERTIES: [(&str, &str, &str, &str, &str); 1] =
     [("paragraph-properties", TEXT_URI, "enable-numbering", "older-enable-numbering", "text:enable-numbering")];
+
+/// The namespace of the standard's `fo` vocabulary, and the pre-standard W3C one the reader takes for it.
+const FO_URI: &str = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0";
+const FO_URI_W3C: &str = "http://www.w3.org/1999/XSL/Format";
+
+/// The namespace of the standard's `style` vocabulary.
+const STYLE_URI: &str = "urn:oasis:names:tc:opendocument:xmlns:style:1.0";
+
+/// Which of the two vocabularies a style's text properties take an attribute of the group `Style` from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Space {
+    Fo,
+    Style,
+}
+
+/// The vocabulary a namespace URI is, for [`listed`]: `fo` (the standard's and the pre-standard W3C one) and `style`.
+pub(crate) fn space_of(uri: &str) -> Option<Space> {
+    match uri {
+        FO_URI | FO_URI_W3C => Some(Space::Fo),
+        STYLE_URI => Some(Space::Style),
+        _ => None,
+    }
+}
+
+/// What a list of values ODF 1.4 gives an attribute of the group `Style` of a text's properties is a list of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Listed {
+    /// `normal`, `bold` and 100 to 900 in steps of 100 (the schema's `fontWeight`).
+    Weight,
+    /// `normal`, `italic` and `oblique` (`fontStyle`).
+    Slant,
+    /// `normal` and `small-caps` (`fontVariant`).
+    Variant,
+}
+
+/// The five attributes of the group `Style` that a style's text properties may spell in a form 1.4 lists no value for (the schemas of 1.0 and 1.1 take any text there): the vocabulary, the
+/// local name, what 1.4 lists, and the local name of the attribute of DiaCraft's own that the value it had rides in on the same element.
+const LISTED: [(Space, &str, Listed, &str); 5] = [
+    (Space::Fo, "font-weight", Listed::Weight, "older-font-weight"),
+    (Space::Fo, "font-style", Listed::Slant, "older-font-style"),
+    (Space::Fo, "font-variant", Listed::Variant, "older-font-variant"),
+    (Space::Style, "font-weight-complex", Listed::Weight, "older-font-weight-complex"),
+    (Space::Style, "font-style-complex", Listed::Slant, "older-font-style-complex"),
+];
+
+/// What the attribute `local` of `space` on a style's **text properties** lists, and the local name of the attribute of DiaCraft's own its exact value rides in: `None` for any other attribute.
+pub(crate) fn listed(space: Space, local: &str) -> Option<(Listed, &'static str)> {
+    LISTED.iter().find(|(s, l, _, _)| *s == space && *l == local).map(|(_, _, kind, carrier)| (*kind, *carrier))
+}
+
+/// Whether `local` is the local name of a carrier of [`listed`]: an attribute of DiaCraft's own that stands for the value of another attribute and is no attribute of the style.
+pub(crate) fn is_value_carrier(local: &str) -> bool {
+    LISTED.iter().any(|(_, _, _, carrier)| *carrier == local)
+}
+
+/// Whether `local` is the local name of a carrier of [`CARRIED_ON_PROPERTIES`]: an attribute of DiaCraft's own that stands in the place of an attribute the schemas have no place for.
+pub(crate) fn is_move_carrier(local: &str) -> bool {
+    CARRIED_ON_PROPERTIES.iter().any(|(_, _, _, carrier, _)| *carrier == local)
+}
+
+/// The weights ODF 1.4 lists, lightest first, and their values as numbers.
+const WEIGHTS: [(&str, f64); 9] =
+    [("100", 100.0), ("200", 200.0), ("300", 300.0), ("400", 400.0), ("500", 500.0), ("600", 600.0), ("700", 700.0), ("800", 800.0), ("900", 900.0)];
+
+/// The first weight at which reads a weight as bold (`bold` or 600 to 900), and so the first of [`WEIGHTS`] that is on the bold side.
+const BOLD_FROM: f64 = 600.0;
+
+/// A text as a finite number, when it is one (a decimal, with a sign or an exponent if it has them).
+fn finite(text: &str) -> Option<f64> {
+    text.trim().parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
+/// The weight of [`WEIGHTS`] nearest to `n`, **on the side of 600 that `n` is on** (R22 reads 100 to 500 as not bold and 600 to 900 as bold, and a weight that is not bold stays so): a tie goes to
+/// the lighter weight, so that 250 is 200.
+fn nearest_weight(n: f64) -> &'static str {
+    let (from, to) = if n < BOLD_FROM { (0, 5) } else { (5, WEIGHTS.len()) };
+    let mut best: Option<(&'static str, f64)> = None;
+    for (text, weight) in WEIGHTS.iter().skip(from).take(to.saturating_sub(from)) {
+        let apart = (n - weight).abs();
+        // Strictly nearer: the lighter weight keeps a tie.
+        if best.is_none_or(|(_, so_far)| apart < so_far) {
+            best = Some((text, apart));
+        }
+    }
+    best.map_or("normal", |(text, _)| text)
+}
+
+/// The word of `words` that `text` is, when it differs from it by nothing but white space and letter case.
+fn listed_word(text: &str, words: &[&'static str]) -> Option<&'static str> {
+    let text = text.trim();
+    words.iter().copied().find(|word| text.eq_ignore_ascii_case(word))
+}
+
+/// **The value ODF 1.4 lists nearest to `value`** of an attribute of `kind`, or `None` when 1.4 takes `value` as it is. A weight is the nearest of 100 to 900 on the side of 600 it is on (a tie to the
+/// lighter: 250 is 200, 650 is 600), `bolder` is `bold` and `lighter` `normal`, and any other text is `normal`; a slant or a variant is the word it differs from by white space or letter case, and
+/// any other text is `normal` (the value the cells of a style write when the group has no bit of it).
+pub(crate) fn form_14(kind: Listed, value: &str) -> Option<&'static str> {
+    const SLANTS: [&str; 3] = ["normal", "italic", "oblique"];
+    const VARIANTS: [&str; 2] = ["normal", "small-caps"];
+    let taken: &[&str] = match kind {
+        Listed::Weight => &["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"],
+        Listed::Slant => &SLANTS,
+        Listed::Variant => &VARIANTS,
+    };
+    if taken.contains(&value) {
+        return None;
+    }
+    Some(match kind {
+        Listed::Weight => match value.trim().to_ascii_lowercase().as_str() {
+            "bold" | "bolder" => "bold",
+            "normal" | "lighter" => "normal",
+            other => finite(other).map_or("normal", nearest_weight),
+        },
+        Listed::Slant => listed_word(value, &SLANTS).unwrap_or("normal"),
+        Listed::Variant => listed_word(value, &VARIANTS).unwrap_or("normal"),
+    })
+}
+
+/// The value a carrier gives back, **when it is still the one the attribute beside it stands for**: the value the writer wrote for `carried` is `written`, which is the value of the attribute
+/// now. `None` for a carrier another program has outdated (it changed the attribute and left the carrier), and for a value 1.4 takes as it is (no carrier is written for one).
+pub(crate) fn carried_still<'a>(kind: Listed, carried: &'a str, written: &str) -> Option<&'a str> {
+    (form_14(kind, carried) == Some(written)).then_some(carried)
+}
 
 /// Whether `uri` is a namespace of the standard's own (ODF 1.4 Part 3's, and the W3C's and Dublin Core's that it takes names of): a schema of ODF says what an attribute of it may be where it
 /// stands. Every other namespace is a producer's own, foreign markup that a schema of ODF takes anywhere.
@@ -584,5 +717,88 @@ mod tests {
             assert_eq!(carried_on_properties(holder, carrier), Some((qname, uri)));
             assert_eq!(qname.split_once(':').map(|(_, l)| l), Some(local));
         }
+    }
+
+    /// **A weight 1.4 has no value for is the nearest it lists, on the side of 600 it is on** (100 to 500 are not bold, 600 to 900 are), a tie to the lighter weight; a value it lists is none.
+    #[test]
+    fn a_weight_is_the_nearest_the_schema_lists_on_the_side_of_600_it_is_on() {
+        let w = |v: &str| form_14(Listed::Weight, v);
+        for taken in ["normal", "bold", "100", "200", "300", "400", "500", "600", "700", "800", "900"] {
+            assert_eq!(w(taken), None, "{taken}");
+        }
+        for (value, nearest) in [
+            ("250", "200"),
+            ("251", "300"),
+            ("249.9", "200"),
+            ("350", "300"),
+            ("550", "500"),
+            ("650", "600"),
+            ("0", "100"),
+            ("-40", "100"),
+            ("1000", "900"),
+            ("1e9", "900"),
+            // Not bold stays not bold, and bold stays bold, though the other side is nearer.
+            ("599.9", "500"),
+            ("600.1", "600"),
+            // The words and the forms of a word.
+            ("bolder", "bold"),
+            ("Bold", "bold"),
+            (" bold ", "bold"),
+            ("NORMAL", "normal"),
+            ("lighter", "normal"),
+            // What is no weight.
+            ("", "normal"),
+            ("heavy", "normal"),
+            ("NaN", "normal"),
+            ("inf", "normal"),
+            ("-inf", "normal"),
+            ("1e999", "normal"),
+        ] {
+            assert_eq!(w(value), Some(nearest), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn a_slant_and_a_variant_are_the_word_they_differ_from_by_case_or_else_normal() {
+        let (s, v) = (|x: &str| form_14(Listed::Slant, x), |x: &str| form_14(Listed::Variant, x));
+        assert_eq!((s("normal"), s("italic"), s("oblique")), (None, None, None));
+        assert_eq!((v("normal"), v("small-caps")), (None, None));
+        assert_eq!((s("Italic"), s(" OBLIQUE"), s("slanted"), s("")), (Some("italic"), Some("oblique"), Some("normal"), Some("normal")));
+        assert_eq!((v("SMALL-CAPS"), v("small caps"), v("")), (Some("small-caps"), Some("normal"), Some("normal")));
+    }
+
+    /// Every value the function gives is one the schema lists (so a second pass changes nothing), and a carrier is still the value's only while the attribute beside it is what the writer wrote.
+    #[test]
+    fn what_form_14_gives_is_listed_and_a_carrier_is_used_only_while_it_stands_for_the_attribute() {
+        for kind in [Listed::Weight, Listed::Slant, Listed::Variant] {
+            for value in ["250", "x", "", "Bold", "1e3", "-1", "599.99", "italic ", "SMALL-CAPS"] {
+                if let Some(form) = form_14(kind, value) {
+                    assert_eq!(form_14(kind, form), None, "{kind:?} {value:?} gives {form:?}, which 1.4 takes");
+                }
+            }
+        }
+        assert_eq!(carried_still(Listed::Weight, "250", "200"), Some("250"));
+        assert_eq!(carried_still(Listed::Weight, "250", "bold"), None, "another program changed the weight");
+        assert_eq!(carried_still(Listed::Weight, "250", "250"), None, "the writer never writes the value it carries");
+        assert_eq!(carried_still(Listed::Weight, "bold", "bold"), None, "a value 1.4 takes has no carrier");
+        assert_eq!(carried_still(Listed::Slant, "slanted", "normal"), Some("slanted"));
+    }
+
+    #[test]
+    fn the_five_attributes_of_the_group_are_listed_with_their_own_carriers() {
+        for (space, local, kind, carrier) in LISTED {
+            assert_eq!(listed(space, local), Some((kind, carrier)));
+            assert!(is_value_carrier(carrier));
+            assert_eq!(carrier, format!("older-{local}"));
+            // The same name in the other vocabulary is another attribute.
+            let other = if space == Space::Fo { Space::Style } else { Space::Fo };
+            assert_eq!(listed(other, local), None, "{local}");
+        }
+        assert_eq!(listed(Space::Fo, "font-size"), None);
+        assert!(!is_value_carrier("older-enable-numbering") && !is_value_carrier("font-weight"));
+        assert_eq!(
+            (space_of(FO_URI), space_of(FO_URI_W3C), space_of(STYLE_URI), space_of(TEXT_URI)),
+            (Some(Space::Fo), Some(Space::Fo), Some(Space::Style), None)
+        );
     }
 }

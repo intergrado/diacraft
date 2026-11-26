@@ -12,8 +12,12 @@ workspace = true
 
 [dependencies]
 diacraft-engine = { workspace = true }
+# A reference as a formula spells it (`Geometry1.X2`) names a cell of a sheet: the ShapeSheet window selects one by it (`sheet/mod.rs`, `window.sheetSelect`).
+diacraft-calc = { workspace = true }
 # The pictures of the Re-Layout Page gallery are the engine's own layout of a small diagram (`relayout_ui.rs`).
 diacraft-layout = { workspace = true }
+# The preview on the Page Setup dialog's Layout and Routing tab is routed by the router the engine routes with (`page_setup/routing_preview.rs`).
+diacraft-route = { workspace = true }
 # The page's picture: drawn off the UI thread (`render_worker.rs`) and shown in the drawing area (`canvas/page_drawing.rs`).
 diacraft-fonts = { workspace = true }
 diacraft-render = { workspace = true }

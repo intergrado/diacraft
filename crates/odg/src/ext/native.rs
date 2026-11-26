@@ -61,6 +61,9 @@ pub(crate) struct Native<'a> {
     pub style: &'a [&'static str],
     /// The `Geometry` sections are written as the outline the reader reads back as the same rows.
     pub geometry: bool,
+    /// How many `Geometry` sections the reader makes of the outline written when `geometry` is false: a section for each subpath (a placeholder rectangle is one). None of them is the
+    /// model's own, which is carried (an outline written in sets and with arcs is several subpaths).
+    pub outline_sections: usize,
     /// The shape is a picture frame: the reader gives it no `Geometry` section at all, so `geometry` is not asked and every
     /// `Geometry` section the model holds is tier 2.
     pub picture: bool,
@@ -68,6 +71,10 @@ pub(crate) struct Native<'a> {
     pub connection: bool,
     /// The shape is a connector: the reader adds the `User` row `DiaCraftRoute` and the route kind, and rebuilds the glue formulas of its ends.
     pub connector: bool,
+    /// For a connector, **the route kind the reader makes of the `draw:type` written** (`ShapeRouteStyle` and `ConLineRouteExt`): a cell of the model that is not that number is
+    /// not reproduced, and is carried (the page's own route style a VSDX connector says as 0, a kind of the VSDX application's own). `None`: the cells are taken as the model holds them (the
+    /// writer wrote the type from them).
+    pub route: Option<(f64, f64)>,
     /// For a connector, whether each end is glued: the cells of a glued end and its trigger are rebuilt from the `Connect` row, whatever IDs the model had.
     pub glued: [bool; 2],
     /// The plain characters of the text, one paragraph after another between U+000A.
@@ -323,11 +330,7 @@ pub(crate) fn rebuilt(shape: &Shape, n: &Native<'_>) -> Sheet {
     }
     if n.connector {
         // The route kind and the triggers of a glued end are the reader's, from the file's own `draw:type` and `Connect` rows.
-        for name in ["ShapeRouteStyle", "ConLineRouteExt"] {
-            if let Some(c) = m.cells.get(name) {
-                p.cells.insert(CellName::new(name), c.clone());
-            }
-        }
+        put_route(&mut p, m, n.route);
         for (name, glued) in [("BegTrigger", n.glued[0]), ("EndTrigger", n.glued[1])] {
             if glued && let Some(c) = m.cells.get(name) {
                 p.cells.insert(CellName::new(name), c.clone());
@@ -355,8 +358,11 @@ pub(crate) fn rebuilt(shape: &Shape, n: &Native<'_>) -> Sheet {
             }
         }
     } else {
-        // The reader rebuilds section 0 of the outline that was written in its place (a placeholder rectangle).
-        p.sections.push(Arc::new(unlike_section(&geometry_key(0))));
+        // The reader rebuilds a section for each subpath of the outline that was written in place of the rows (a placeholder rectangle is one), and none is the model's.
+        for ix in 0..n.outline_sections.max(1) {
+            let Ok(ix) = u32::try_from(ix) else { break };
+            p.sections.push(Arc::new(unlike_section(&geometry_key(ix))));
+        }
     }
     // A text the file says whole: its rows are what the reader gives back (modulo the `IX`es it numbers anew). A size of 0 is written as the least the file takes, which the
     // reader gives back: the `Character` rows ride in tier 2, with the 0.
@@ -385,6 +391,28 @@ pub(crate) fn rebuilt(shape: &Shape, n: &Native<'_>) -> Sheet {
         }
     }
     p
+}
+
+/// The route kind cells of a connector the reader rebuilds from the `draw:type` written (`route`, the numbers the type gives them, `None` when the cells are taken as the
+/// model holds them): a cell of the model that is another number is carried against the reader's, and a model that holds one of the two cells and not the other is given both by the reader,
+/// so the cell it lacks is carried as gone.
+fn put_route(p: &mut Sheet, m: &Sheet, route: Option<(f64, f64)>) {
+    let kinds = [("ShapeRouteStyle", route.map(|r| r.0)), ("ConLineRouteExt", route.map(|r| r.1))];
+    let one_of_two = kinds.iter().filter(|(name, _)| m.cells.contains_key(*name)).count() == 1;
+    for (name, written) in kinds {
+        match (m.cells.get(name), written) {
+            (Some(c), _) => {
+                let reproduced = written.is_none_or(|w| constant_near(Some(c), w));
+                p.cells.insert(CellName::new(name), if reproduced { c.clone() } else { unlike(name) });
+            }
+            (None, Some(w)) if one_of_two => {
+                if let Some(value) = diacraft_doc::Value::from_number(w) {
+                    p.cells.insert(CellName::new(name), Cell::constant(value));
+                }
+            }
+            (None, _) => {}
+        }
+    }
 }
 
 /// The plain text the reader rebuilds from the characters written: one run of characters, and no text at all for none.
@@ -684,9 +712,11 @@ mod tests {
         frame: Frame::TwoD { cx: 1.0, cy: 0.5, w: 2.0, h: 1.0, angle: 0.0, flip: (false, false) },
         style: &[],
         geometry: true,
+        outline_sections: 1,
         picture: false,
         connection: true,
         connector: false,
+        route: None,
         glued: [false, false],
         text: "",
         text_native: false,
@@ -1128,9 +1158,11 @@ mod tests {
             frame: Frame::TwoD { cx: 1.0, cy: 0.5, w: 2.0, h: 1.0, angle: 0.0, flip: (false, false) },
             style: &[],
             geometry: true,
+            outline_sections: 1,
             picture: false,
             connection: true,
             connector: false,
+            route: None,
             glued: [false, false],
             text: "",
             text_native: false,
@@ -1163,9 +1195,11 @@ mod tests {
             frame: frame(angle, flip),
             style: &[],
             geometry: true,
+            outline_sections: 1,
             picture: false,
             connection: true,
             connector: false,
+            route: None,
             glued: [false, false],
             text: "",
             text_native: false,

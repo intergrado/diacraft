@@ -96,7 +96,7 @@ fn the_edited_route_is_fixed_the_ends_follow_their_shapes_and_the_last_row_follo
     let d = doc(&s);
     let (begin, end) = ends(d, c);
     assert!(near_point(end, (9.25, 6.5)), "the end follows B: {end:?}");
-    assert_eq!(geometry(d, c).len(), rows_before.len(), "The route is not made again");
+    assert_eq!(geometry(d, c).len(), rows_before.len(), "The route is not made again, it is followed");
     let r = route(d, c);
     assert!(near_point(r[0], begin) && near_point(r[r.len() - 1], end), "and still runs from the begin to the end: {r:?}");
 }

@@ -27,8 +27,8 @@ fn text_cell(v: &str) -> Cell {
     Cell::constant(Value::from_text(v))
 }
 
-/// A new shape that carries one of each item tier 3 judges, and two that it does not: tier-2 geometry (a section that is not filled, which the writer writes as
-/// a placeholder outline), a text with markers, a name that is not its `draw:name`, a link to a master, a colour in capitals, and a user row and a cell, which
+/// A new shape that carries one of each item tier 3 judges, and two that it does not: tier-2 geometry (a section that is not filled and has a coordinate that is a length
+/// beside the shape's width, which the writer writes as a placeholder outline), a text with markers, a name that is not its `draw:name`, a link to a master, a colour in capitals, and a user row and a cell, which
 /// rest on no native output.
 fn full_shape() -> Shape {
     let mut shape = rectangle(shape_id(), "rect.1", (2.0, 3.0, 4.0, 2.0));
@@ -44,6 +44,12 @@ fn full_shape() -> Shape {
     if let Some(at) = sheet.sections.iter().position(|s| s.name.as_str() == "Geometry") {
         let mut geometry = (*sheet.sections[at]).clone();
         geometry.cells.insert(CellName::new("NoFill"), Cell::constant(Value::from_number(1.0).unwrap()));
+        // A length beside the size (`Width+0.25-0.25`, the width as it was) is a form the writer does not write as a path: it writes the placeholder rectangle and carries the rows.
+        if let Some(r) = geometry.rows.get_mut(1) {
+            let row = Arc::make_mut(r);
+            let width = row.cells.get("X").and_then(|c| c.value.as_ref()?.number()).unwrap();
+            row.cells.insert(CellName::new("X"), Cell::read(Some("Width+0.25-0.25"), Some(&width.to_string()), Some("IN"), None, &mut 1_000));
+        }
         sheet.sections[at] = Arc::new(geometry);
     }
     let mut user = Section::new("User", None);

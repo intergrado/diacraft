@@ -1,6 +1,6 @@
 //! Templates: the templates DiaCraft ships, a drawing started from one, and how a template names the stencils it opens.
 //!
-//! * [`catalogue`]: two templates of our own (**originals**, `docs/provenance.md`): **Basic Diagram** and **Basic Flowchart**. A template is a
+//! * [`catalogue`]: the templates of our own (**originals**, `docs/provenance.md`): four from the first batches and fourteen registered for the second stencil batch, **listed once their stencils ship**. A template is a
 //!   small description in code (`TemplateSpec`: a page size, an orientation, a theme and the built-in stencils it opens), like the built-in
 //!   stencils, and not a file shipped with the app: it works on the web, it needs no asset row, and there is one place that says what it holds.
 //! * [`build`]: the description made into a document, then into the bytes of a `.vstx` **on demand**, by the one writer
@@ -21,7 +21,7 @@ mod catalogue;
 mod names;
 
 pub use build::{Built, build};
-pub use catalogue::{Seed, TemplateSpec, find, is_path, templates};
+pub use catalogue::{Seed, TemplateSpec, find, is_path, registered, templates};
 pub use names::{MAX_NAMES, STENCILS_CHILD, StencilNames, set_stencil_names, stencil_names, stencils_opened_by};
 
 #[cfg(test)]

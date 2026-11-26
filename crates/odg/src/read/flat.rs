@@ -109,6 +109,7 @@ impl Reader<'_> {
         let root_attrs = names.attrs(&tree);
         let claim = Claim::of(root_attrs.peek(Ns::Office, "mimetype"));
         self.report.office_version = root_attrs.peek(Ns::Office, "version").map(crate::report::shown);
+        let legacy = crate::write::is_legacy(root_attrs.peek(Ns::Office, "version"));
         match &claim {
             Claim::Other(media_type) => return Err(OdgError::NotADrawing { media_type: media_type.chars().take(64).collect() }),
             Claim::Absent => self.warn("mimetype_irregular", || "the document's office:mimetype is absent (read as a drawing)".to_owned()),
@@ -205,6 +206,7 @@ impl Reader<'_> {
                 styles: HashMap::new(),
                 shared: &mut shared,
                 texts: texts::StyleTexts::of(&set),
+                legacy,
             };
             pages::read_master_pages(self, &mut names, &masters, &mut cx, scale.as_ref())?
         };
@@ -219,9 +221,12 @@ impl Reader<'_> {
                 styles: HashMap::new(),
                 shared: &mut shared,
                 texts: texts::StyleTexts::of(&set),
+                legacy,
             };
             pages::read_content_pages(self, &mut names, &tree, &mut cx, &out, scale.as_ref(), Some(&taken))?
         };
+        // The automatic styles of the one container that no shape, paragraph or run named.
+        set.hold_unused(self, &mut names, &tree, styles::File::Content, one(Child::AutomaticStyles))?;
         // DiaCraft's extension, kept whole as the model's own data; charged before it is copied.
         let diacraft = match extension {
             Some(el) => {

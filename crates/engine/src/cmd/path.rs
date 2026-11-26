@@ -1,6 +1,7 @@
 //! The path of a connector: its style (`connector.style`), a leg moved by hand (`connector.edit_path`), Reset Connector (`connector.reset`),
-//! the line jumps (`connector.line_jumps`) and, when it may take a new path (`connector.reroute`). The rules are
-//! (`draw/style.rs`), `draw/hand.rs`, `draw/reroute.rs` and `draw/jumps.rs`.
+//! the line jumps (`connector.line_jumps`) and, when it may take a new path (`connector.reroute`); the routing styles with a direction
+//! (`connector.style`) and what the route is (`connector.path`, a query). The rules are `draw/style.rs`, `draw/hand.rs`,
+//! `draw/reroute.rs` and `draw/jumps.rs`.
 //!
 //! Lengths are paper inches, as for `shape.*`.
 
@@ -10,7 +11,7 @@ use super::params::{optional_number, optional_whole, page_for, required_ids, req
 use super::snap_params::{self, Ask, Words};
 use super::{CommandSpec, has_document, optional_text, required_u32};
 use crate::Session;
-use crate::draw::{self, JumpChange, Reroute, StyleChoice};
+use crate::draw::{self, JumpChange, PathStyle, Reroute, RouteStyle, StyleChoice};
 use crate::error::{Result, bad, failed, shown};
 use crate::snap::{Subject, Use};
 
@@ -21,11 +22,23 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "Connector Style",
             ["Design", "Layout", "Connectors"],
             None,
-            "style: text, right_angle, straight or curved; ids: array of whole numbers, optional, the connectors to give the style and route again (a path edited \
+            "style: text, right_angle, straight, curved, org_chart, flowchart, tree, network, centre_to_centre or simple (the last six write the style's code with straight legs); \
+             direction: text, optional, for an org_chart, a flowchart, a tree or a simple style top_to_bottom (the default), left_to_right, bottom_to_top or right_to_left, \
+             and for a simple style level_first or upright_first too (the other styles take none and refuse it); \
+             ids: array of whole numbers, optional, the connectors to give the style and route again (a path edited \
              by hand is undone), and when it is left out the style is the page's default for new connectors and nothing is routed again; \
              page: whole number, optional, the id of the page (default: the first page holding all the connectors)",
             has_document,
             style
+        ),
+        cmd!(
+            query "connector.path",
+            "Connector Path",
+            [],
+            None,
+            "id: whole number, the connector; page: whole number, optional, the id of the page (default: the first page with the connector)",
+            has_document,
+            path
         ),
         cmd!(
             "connector.edit_path",
@@ -94,27 +107,114 @@ fn target_page(s: &Session, p: &Value, ids: &[u32], cmd: &str) -> Result<u32> {
     page_for(doc, named, ids, cmd)
 }
 
-/// Sets the path style → `{page, style, styled, default_changed}`: how many connectors changed, and whether the page's default did.
+/// What `connector.style` was asked for: one of the Connectors menu's three, or a routing style with its direction.
+#[derive(Clone, Copy)]
+enum Asked {
+    Menu(StyleChoice, &'static str),
+    Route(RouteStyle),
+}
+
+/// The style and direction `p` names. A direction goes with the styles that take one: for the three of the menu and the others that take none it is refused in words.
+fn asked(p: &Value, cmd: &str) -> Result<Asked> {
+    let text = optional_text(p, "style", cmd)?.ok_or_else(|| bad(cmd, "missing `style`"))?;
+    let direction = optional_text(p, "direction", cmd)?;
+    let menu = match text.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
+        "right_angle" => Some((StyleChoice::RightAngle, "right_angle")),
+        "straight" => Some((StyleChoice::Straight, "straight")),
+        "curved" => Some((StyleChoice::Curved, "curved")),
+        _ => None,
+    };
+    if let Some((choice, name)) = menu {
+        if direction.is_some() {
+            return Err(bad(cmd, format!("the style `{name}` takes no direction: leave `direction` out")));
+        }
+        return Ok(Asked::Menu(choice, name));
+    }
+    // A word that is no style is refused with the words of all the styles there are, the menu's three among them.
+    RouteStyle::choose(Some(text), None, RouteStyle::RightAngle).map_err(|_| {
+        bad(
+            cmd,
+            format!(
+                "`style` must be right_angle, straight, curved, org_chart, flowchart, tree, network, centre_to_centre or simple, not `{}`",
+                shown(text)
+            ),
+        )
+    })?;
+    RouteStyle::choose(Some(text), direction, RouteStyle::RightAngle).map(Asked::Route).map_err(|words| bad(cmd, words))
+}
+
+/// Sets the path style → `{page, style, styled, default_changed}`, and `direction` for a style that has one: how many connectors changed, and whether the page's default did.
 fn style(s: &mut Session, p: &Value) -> Result<Value> {
     const ID: &str = "connector.style";
-    let (choice, name) = match optional_text(p, "style", ID)?.map(|t| t.trim().to_ascii_lowercase().replace(['-', ' '], "_")).as_deref() {
-        Some("right_angle") => (StyleChoice::RightAngle, "right_angle"),
-        Some("straight") => (StyleChoice::Straight, "straight"),
-        Some("curved") => (StyleChoice::Curved, "curved"),
-        Some(other) => return Err(bad(ID, format!("`style` must be right_angle, straight or curved, not `{}`", shown(other)))),
-        None => return Err(bad(ID, "missing `style`")),
-    };
+    let asked = asked(p, ID)?;
     let ids = optional_ids(p, ID)?;
     let page = target_page(s, p, ids.as_deref().unwrap_or(&[]), ID)?;
     s.edit_if("Connector style", |doc| {
-        let (styled, default_changed) = match &ids {
-            Some(ids) => (draw::set_connector_style(doc, page, ids, choice).map_err(|e| e.into_engine(ID))?, false),
-            None => (0, draw::set_page_style(doc, page, choice).map_err(|e| e.into_engine(ID))?),
+        let (styled, default_changed) = match (&ids, asked) {
+            (Some(ids), Asked::Menu(choice, _)) => (draw::set_connector_style(doc, page, ids, choice).map_err(|e| e.into_engine(ID))?, false),
+            (Some(ids), Asked::Route(style)) => (draw::set_connector_route_style(doc, page, ids, style).map_err(|e| e.into_engine(ID))?, false),
+            (None, Asked::Menu(choice, _)) => (0, draw::set_page_style(doc, page, choice).map_err(|e| e.into_engine(ID))?),
+            (None, Asked::Route(style)) => (0, draw::set_page_route_style(doc, page, style).map_err(|e| e.into_engine(ID))?),
         };
-        Ok((json!({ "page": page, "style": name, "styled": styled, "default_changed": default_changed }), styled > 0 || default_changed))
+        let mut said = json!({ "page": page, "styled": styled, "default_changed": default_changed });
+        if let Some(map) = said.as_object_mut() {
+            match asked {
+                Asked::Menu(_, name) => map.insert("style".to_owned(), json!(name)),
+                Asked::Route(style) => {
+                    if let Some(direction) = style.direction() {
+                        map.insert("direction".to_owned(), json!(direction));
+                    }
+                    map.insert("style".to_owned(), json!(style.family()))
+                }
+            };
+        }
+        Ok((said, styled > 0 || default_changed))
     })
     // (A curved style on a drawing saved as an `.odg` was told so here, while the save refused a curved connector: the writer writes it as cubics,
     // and the page's own style has been saved.)
+}
+
+/// The word of what a connector draws.
+fn draws_word(draws: PathStyle) -> &'static str {
+    match draws {
+        PathStyle::RightAngle => "right_angle",
+        PathStyle::Straight => "straight",
+        PathStyle::Curved => "curved",
+        PathStyle::CentreToCentre => "centre_to_centre",
+    }
+}
+
+/// A length on the page as paper inches, to nine places.
+fn inches(length: f64, k: f64) -> f64 {
+    let rounded = (length / k * 1.0e9).round() / 1.0e9;
+    if rounded.is_finite() { rounded } else { 0.0 }
+}
+
+/// What a connector's route is → `{page, id, points, style, route_style, reroute, hand_edited, editable}`. `points` are the corners of the route on the page, the begin first, in
+/// paper inches (`[x, y]` each), and `null` for a connector whose rows are no path of lines (a curve); `style` is what it draws (`right_angle`, `straight`, `curved` or
+/// `centre_to_centre`); `route_style` is the routing style it follows, `{style, direction, code, own}`: its own `ShapeRouteStyle` or the page's `RouteStyle` where its own is 0
+/// `direction` being `null` for a style with none and `own` whether it is the connector's own; `reroute` is its setting (`freely`, `as_needed`, `never` or
+/// `on_crossover`); `hand_edited` whether its `ConFixedCode` is 3 and `editable` whether `connector.edit_path` can move its legs (what `draw::connector_path` gives a window).
+fn path(s: &mut Session, p: &Value) -> Result<Value> {
+    const ID: &str = "connector.path";
+    let id = required_u32(p, "id", ID)?;
+    let page = target_page(s, p, &[id], ID)?;
+    let doc = s.document().ok_or_else(|| failed(ID, "no document open"))?;
+    let facts = draw::connector_style(doc, page, id).map_err(|e| e.into_engine(ID))?;
+    let reroute = draw::connector_reroute(doc, page, id).unwrap_or(Reroute::Freely);
+    let k = units_per_inch(doc, page);
+    let found = draw::connector_path(doc, page, id);
+    let points = found.as_ref().map(|f| f.points.iter().map(|(x, y)| json!([inches(*x, k), inches(*y, k)])).collect::<Vec<Value>>());
+    Ok(json!({
+        "page": page,
+        "id": id,
+        "points": points,
+        "style": draws_word(facts.draws),
+        "route_style": { "style": facts.route.family(), "direction": facts.route.direction(), "code": facts.route.code(), "own": facts.own },
+        "reroute": reroute.word(),
+        "hand_edited": found.as_ref().map_or(reroute == Reroute::OnCrossover, |f| f.hand_edited),
+        "editable": found.as_ref().is_some_and(|f| f.editable),
+    }))
 }
 
 /// Moves a leg of a connector by hand → `{page, id, changed}`; with `snap`, also `to` (the line the leg went to, inches) and `snap`.

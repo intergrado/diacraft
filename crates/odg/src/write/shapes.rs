@@ -3,8 +3,8 @@
 //!
 //! * **A 2-D shape** is a `draw:custom-shape` with `draw:style-name`, `draw:text-style-name`, `draw:layer` (the layer its `LayerMember` names, `layout` for none: [`super::layers`]), `draw:name` when it has a
 //!   `NameU`, and the frame as `svg:width`, `svg:height`, `svg:x` and `svg:y`; its text as `text:p` (an empty one when it has none); and a
-//!   `draw:enhanced-geometry` of `svg:viewBox="0 0 21600 21600"`, `draw:type="non-primitive"` and the `draw:enhanced-path` of its plain outline
-//!   ([`super::geometry::enhanced_path`]). It gets a new automatic graphic style (its style cells, and `draw:auto-grow-height="false"` when it holds text)
+//!   `draw:enhanced-geometry` of `svg:viewBox="0 0 21600 21600"`, `draw:type="non-primitive"` and the `draw:enhanced-path` of its outline
+//!   ([`super::geometry::new_outline`]: sets, and arcs as `A` and `W`). It gets a new automatic graphic style (its style cells, and `draw:auto-grow-height="false"` when it holds text)
 //!   and a new automatic paragraph style, named by [`super::styles::Names`].
 //! * **A connector** is a `draw:connector` with its style, layer, glue (`draw:start-shape`, `draw:start-glue-point`, and the end's) and ends
 //!   (`svg:x1` to `svg:y2`), its route as `svg:d` and `svg:viewBox` in LibreOffice's form, and its text as `text:p` (an empty one when it has none). A shape a connector names gets
@@ -34,7 +34,7 @@ use super::WriteError;
 use super::attrs::TagEdit;
 use super::compare::{NewShape, PageDiff};
 use super::frame::Editor;
-use super::geometry::enhanced_path;
+use super::geometry::new_outline;
 use super::kept::{Need, need_of};
 use super::lengths::length_text;
 use super::own::{self, POSE_CELLS};
@@ -220,6 +220,54 @@ const WORDS_ID_EMPTY: &str = "a connector glued to a shape whose id is empty (th
 /// The words of the refusal of a connector glued to a shape whose id an earlier shape of the page holds (the milestone-1 rerun's W2).
 const WORDS_ID_HELD: &str =
     "a connector glued to a shape whose id an earlier shape of the page holds (the file would read it as glued to that shape)";
+
+/// The number in an id of the form `id` and digits (`id12`): the ids the writer makes are of that form, and a new one is given the number above the largest the file holds.
+/// An id with more than 18 digits, or with none, has no number (the part scan of a file has the same rule: [`super::scan`]).
+pub(crate) fn id_number(id: &str) -> Option<u64> {
+    id.strip_prefix("id")
+        .filter(|digits| !digits.is_empty() && digits.len() <= 18 && digits.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|digits| digits.parse().ok())
+}
+
+/// The name the reader gives a shape of the file as the model writer writes it: its `xml:id`, else its `draw:id`, as it was read. A shape that holds neither has none.
+///
+/// **A `draw:id` that stands alone is written beside an `xml:id` of the same value** in a part of ODF 1.2 or later, which is every part the model writer makes: the schema of ODF 1.2 and later
+/// takes `draw:id` only there (a file of ODF 1.0 or 1.1 has no `xml:id` to say it with, so a visit of one raised it to 1.4 with the `draw:id` alone). Both are an NCName in every version, and
+/// **a value that is none is no id**: it is written in neither attribute, the shape has no name, and a connector glued to it is given one of the writer's own. A part that declares ODF 1.0 or
+/// 1.1 (`legacy`) says `draw:id` as the shape held it.
+fn held_name(shape: &diacraft_doc::Shape, legacy: bool) -> Option<&str> {
+    let raw = &shape.ext.get()?.odf.kept.raw;
+    match (raw.get("xml:id"), raw.get("draw:id")) {
+        (Some(xml), _) => Some(xml),
+        (None, Some(draw)) if legacy || super::kept::is_ncname(draw) => Some(draw),
+        _ => None,
+    }
+}
+
+/// A shape's attributes as pairs of name and value.
+type Attrs<'a> = Vec<(&'a str, &'a str)>;
+
+/// The attributes a shape kept, **with the `xml:id` a `draw:id` that stands alone needs beside it** (see [`held_name`]): put before the `draw:id`, equal to it, as the splice
+/// writes the pair, in a part of ODF 1.2 or later (`legacy` is false) and for a shape that holds no `xml:id` of its own. A `draw:id` that is no NCName is left out, and counted (the second
+/// of the pair that is given back): it is written in neither attribute. The list is made by `try_reserve`.
+fn with_paired_ids(raw: &diacraft_doc::RawAttrs, legacy: bool) -> Result<(Attrs<'_>, usize), WriteError> {
+    let pair = !legacy && raw.get("xml:id").is_none();
+    let mut held: Vec<(&str, &str)> = Vec::new();
+    held.try_reserve(raw.len().saturating_add(1))
+        .map_err(|_| WriteError::Limit { what: "memory for the attributes of a new shape", max: raw.len() as u64 })?;
+    let mut left = 0usize;
+    for (name, value) in raw.iter() {
+        if name == "draw:id" && pair {
+            if !super::kept::is_ncname(value) {
+                left = left.saturating_add(1);
+                continue;
+            }
+            held.push(("xml:id", value));
+        }
+        held.push((name, value));
+    }
+    Ok((held, left))
+}
 
 /// The words of the refusal of a new shape whose pin is not where its frame puts it.
 pub(crate) const WORDS_PIN_DISAGREES: &str = "a new shape whose pin is not where its size and the place of its pin put the frame (its cells disagree, as when `Width` was set and `LocPinX`, which is half of it, was not calculated again): the file would read it with the frame's centre as its pin";
@@ -611,6 +659,76 @@ impl Editor<'_, '_> {
         Ok(graphic.find(&mut self.scopes, Ns::Diacraft, "glue", self.work).is_some_and(|a| graphic.text(a) == "own"))
     }
 
+    /// The largest number among the ids of the form `id` and digits (`xml:id` and `draw:id`) that the shapes of the model hold, groups' members included: a walk of every page with a stack of its
+    /// own, a step for each shape.
+    fn largest_held_id(&mut self) -> Result<u64, WriteError> {
+        let doc = self.doc;
+        let mut best = 0u64;
+        for page in doc.pages.iter() {
+            let mut stack: Vec<&diacraft_doc::Shape> = Vec::new();
+            stack
+                .try_reserve(page.shapes.len())
+                .map_err(|_| WriteError::Limit { what: "memory for the ids of a page's shapes", max: page.shapes.len() as u64 })?;
+            stack.extend(page.shapes.iter().map(|s| &**s));
+            while let Some(shape) = stack.pop() {
+                self.work.charge_steps(1)?;
+                if let Some(data) = shape.ext.get() {
+                    for name in ["xml:id", "draw:id"] {
+                        if let Some(number) = data.odf.kept.raw.get(name).and_then(id_number) {
+                            best = best.max(number);
+                        }
+                    }
+                }
+                stack
+                    .try_reserve(shape.children.len())
+                    .map_err(|_| WriteError::Limit { what: "memory for the ids of a page's shapes", max: shape.children.len() as u64 })?;
+                stack.extend(shape.children.iter().map(|c| &**c));
+            }
+        }
+        Ok(best)
+    }
+
+    /// The name a connector gives the new shape `at` of `news`: **the id the shape holds** (the model path writes the ids a shape was read with), or a fresh `id<n>` above the
+    /// largest (`next_id`, which only grows). A shape of the file keeps the id it was read with, and a connector names it by that. The reader resolves a name to the first shape of the page that
+    /// holds it, and an empty name to none: a connector glued to a shape that is not the first holder of its id, or whose id is empty, would read back glued to another shape, or to none, and is
+    /// refused in the words of the file's own shapes. `holders` is the first new shape that holds each name, made when the first connector is glued to a shape that holds one (a step for each
+    /// shape).
+    fn new_target_id<'n>(
+        &mut self,
+        news: &'n [NewShape],
+        at: usize,
+        holders: &mut Option<HashMap<&'n str, usize>>,
+        next_id: &mut u64,
+    ) -> Result<String, WriteError> {
+        let legacy = self.legacy;
+        let held = news.get(at).filter(|_| self.work.model_path).and_then(|t| held_name(&t.shape, legacy));
+        let Some(name) = held else {
+            *next_id = next_id.saturating_add(1);
+            return Ok(format!("id{next_id}"));
+        };
+        if name.is_empty() {
+            return refuse(WORDS_ID_EMPTY);
+        }
+        if holders.is_none() {
+            self.work.charge_steps(news.len())?;
+            let mut first: HashMap<&'n str, usize> = HashMap::new();
+            first
+                .try_reserve(news.len())
+                .map_err(|_| WriteError::Limit { what: "memory for the ids of a page's new shapes", max: news.len() as u64 })?;
+            for (place, t) in news.iter().enumerate() {
+                if let Some(held) = held_name(&t.shape, legacy) {
+                    first.entry(held).or_insert(place);
+                }
+            }
+            *holders = Some(first);
+        }
+        if holders.as_ref().and_then(|first| first.get(name)).copied() != Some(at) {
+            return refuse(WORDS_ID_HELD);
+        }
+        self.work.charge_copy(name.len(), self.limits)?;
+        Ok(name.to_owned())
+    }
+
     /// The ordinal of the first shape element of the page, in the reader's order, whose `xml:id` (else `draw:id`) is `id`: what the reader resolves a connector's
     /// reference to. The page's ids are read once, into `holders`, the first time one is asked (one look at each shape's start tag, counted as the others are).
     fn first_holder(&mut self, scan: &ScanPage, id: &str, holders: &mut Option<HashMap<String, u32>>) -> Result<Option<u32>, WriteError> {
@@ -660,9 +778,18 @@ impl Editor<'_, '_> {
         // The ids, in the order the connectors name their shapes: the begin of each, then its end.
         let mut ids: HashMap<Target, String> = HashMap::new();
         let mut to_write: Vec<(u32, String)> = Vec::new();
+        // **The model writer writes the ids a shape was read with** (`Editor::kept_markup` puts them on its tag as the file had them), so a new target is given an id above every
+        // number the shapes of the model hold, found once for the save.
+        if self.work.model_path && self.work.held_id_max.is_none() {
+            let found = self.largest_held_id()?;
+            self.work.held_id_max = Some(found);
+            self.max_id = self.max_id.max(found);
+        }
         let mut next_id = self.max_id;
         // The first shape of the page that holds each id, made when a connector is glued to a shape that has one (the milestone-1 rerun's W2).
         let mut holders: Option<HashMap<String, u32>> = None;
+        // The first of the new shapes that holds each name the reader gives a shape, made when a connector is glued to a new shape that has one (the model path: a shape holds the id it was read with).
+        let mut new_holders: Option<HashMap<&str, usize>> = None;
         for n in news.iter().filter(|n| n.shape.sheet.cell("BeginX").is_some()) {
             let mut glued: Vec<&Connect> = by_connector.get(&n.shape.id).cloned().unwrap_or_default();
             glued.sort_by_key(|c| c.from_cell.as_deref().is_some_and(|f| f.starts_with("End")));
@@ -686,10 +813,7 @@ impl Editor<'_, '_> {
                             made
                         }
                     },
-                    Target::New(_) => {
-                        next_id += 1;
-                        format!("id{next_id}")
-                    }
+                    Target::New(i) => self.new_target_id(news, i, &mut new_holders, &mut next_id)?,
                 };
                 ids.insert(target, value);
             }
@@ -745,7 +869,8 @@ impl Editor<'_, '_> {
             // The element is a child of the page, whatever it follows: its prefixes are those the page binds, and not those a shape it follows
             // declares on its own start tag.
             let pfx = super::emit::Pfx::of(&mut self.scopes, scan.scope, self.work);
-            let id = ids.get(&Target::New(k)).cloned();
+            // A shape that holds the ids it was read with writes them as they were (`kept_markup`), and is not given one.
+            let id = if self.work.model_path && held_name(&n.shape, self.legacy).is_some() { None } else { ids.get(&Target::New(k)).cloned() };
             let z = zs.get(k).copied().flatten();
             let sheet = &*n.shape.sheet;
             // A 1-D shape that has a route (a connector's route cells), or that is glued to a shape (`connector.add` makes one with neither route cell), is a
@@ -961,8 +1086,8 @@ impl Editor<'_, '_> {
         if kept.raw.is_empty() && kept.kept.is_empty() {
             return Ok(out);
         }
-        // Counted before anything is made: each attribute and child is a step.
-        self.work.charge_steps(kept.raw.len().saturating_add(kept.kept.len()))?;
+        // Counted before anything is made: each attribute and child is a step (and the `xml:id` that may go beside a `draw:id`).
+        self.work.charge_steps(kept.raw.len().saturating_add(kept.kept.len()).saturating_add(1))?;
         let written = written_attributes(kind);
         let mut size = 0usize;
         // The declarations the reader kept beside the attributes whose prefix an element above the shape declared: each binds its prefix, for the attributes of this shape, to the
@@ -974,10 +1099,16 @@ impl Editor<'_, '_> {
                 super::kept::declared_by(name).filter(|prefix| super::kept::declaration_ok(prefix, value)).map(|prefix| (prefix, value))
             })
             .collect();
-        for (name, value) in kept.raw.iter() {
+        // The attributes the shape kept, with the `xml:id` a `draw:id` that stands alone needs beside it (see [`with_paired_ids`]); a `draw:id` that is no name is said in the note.
+        let (held, no_id) = with_paired_ids(&kept.raw, self.legacy)?;
+        out.left_attrs = out.left_attrs.saturating_add(no_id);
+        for (name, value) in held {
             // A shape read from a file keeps its own `draw:text-style-name`; a new shape names the paragraph style the writer makes it.
             let own_text_style = as_read && name == "draw:text-style-name";
-            if (written.contains(&name) && !own_text_style) || name == "draw:z-index" || name.starts_with("xmlns") {
+            // The ids a shape of the file held are written as the file had them: the model path never copies a shape, and the id of a shape no connector names is no
+            // less its own than one that is named.
+            let own_id = matches!(name, "xml:id" | "draw:id");
+            if (written.contains(&name) && !own_text_style && !own_id) || name == "draw:z-index" || name.starts_with("xmlns") {
                 continue;
             }
             if !super::kept::is_qname(name) || super::splice::has_bad_char(value) {
@@ -1343,24 +1474,33 @@ impl Editor<'_, '_> {
         if n.shape.name_u.as_deref().is_some_and(super::splice::has_bad_char) || n.shape.name.as_deref().is_some_and(super::splice::has_bad_char) {
             return refuse(super::splice::WORDS_XML_CHAR);
         }
-        if sheet.links.line.is_some_and(|l| l != 0) || sheet.links.fill.is_some_and(|l| l != 0) || sheet.links.text.is_some_and(|l| l != 0) {
-            return refuse("a new group on a style sheet (its links are written with a later task)");
-        }
+        // **A group the file read with an automatic style of its own** (`draw:style-name`) is written with it, as a shape of the file is: the style it named, its cells written
+        // natively and what the file's style kept beside them, on the style sheet its links name. The cells it says are the markup's, and DiaCraft's document file carries no entry for them
+        // (`groups::style_cells`). A group that names no style is a new group: it has none, and a link to a style sheet is refused.
+        // The record of the style it named is made and checked as a shape's is (`AsRead::of_group`): a name XML cannot carry is refused in words, here, and not by the splice that would meet it later.
+        let named = if self.work.model_path {
+            match AsRead::of_group(&n.shape) {
+                Ok(read) => read,
+                Err(_) => return refuse(super::splice::WORDS_XML_CHAR),
+            }
+        } else {
+            None
+        };
+        let graphic = if let Some(read) = named {
+            let parent = self.parent_of(sheet)?;
+            let (_, mut ops, mut said) = native_style_as(sheet, &[], true, true);
+            super::held::graphic_ops_said(&n.shape, &mut ops, &mut said);
+            let ops = self.in_cell_units(ops, sheet);
+            self.graphic_style(Some(&read), ops, &[], parent.as_deref())?
+        } else {
+            if sheet.links.line.is_some_and(|l| l != 0) || sheet.links.fill.is_some_and(|l| l != 0) || sheet.links.text.is_some_and(|l| l != 0) {
+                return refuse("a new group on a style sheet (its links are written with a later task)");
+            }
+            None
+        };
         let mut wrote: Vec<(Ns, &'static str)> = Vec::new();
         let mut tag = format!("<{0}:g{1}", pfx.draw, pfx.declare);
-        if let Some(z) = z {
-            tag.push_str(&pfx.attr(Ns::Draw, "z-index", &z.to_string()));
-            wrote.push((Ns::Draw, "z-index"));
-        }
-        if let Some(name) = n.shape.name_u.as_deref() {
-            tag.push_str(&pfx.attr(Ns::Draw, "name", name));
-        }
-        if let Some(id) = id {
-            if !self.legacy {
-                tag.push_str(&format!(" xml:id=\"{id}\""));
-            }
-            tag.push_str(&pfx.attr(Ns::Draw, "id", id));
-        }
+        tag.push_str(&self.head_attrs(n, pfx, (graphic.as_deref(), None, None), z, id, &mut wrote));
         self.work.charge_attribute(self.limits)?;
         // The attributes the file kept on the group, and its own glue points, the children that go before its members (the model path: `kept_markup`).
         self.kept_tag(&mut tag, pfx)?;
@@ -1551,9 +1691,12 @@ impl Editor<'_, '_> {
         let pose = own::pose_2d(sheet, &n.outer).ok_or(WriteError::Unsupported("a new shape whose frame is not numbers"))?;
         let (angle, flip) = turn_and_flips(sheet, &pose)?;
         // The outline: the rows of tier 1 as a path; any other rows are tier 2, with a placeholder rectangle in the file for a viewer that does not read it.
-        let (path, outline_native) = match enhanced_path(sheet) {
-            Ok(path) => (path, true),
-            Err(_) => (PLACEHOLDER_PATH.to_owned(), false),
+        let (path, outline_native, subpaths, reader_form) = match new_outline(sheet) {
+            Ok(outline) => {
+                self.work.charge_steps(outline.rows)?;
+                (outline.path, true, outline.subpaths, outline.reader_form)
+            }
+            Err(_) => (PLACEHOLDER_PATH.to_owned(), false, 1, false),
         };
         // **The geometry element the file held is written back while its stamp matches** (model path: the design's "written back while its stamp matches; otherwise made
         // again from the cells"): a shape of a file keeps its own `draw:enhanced-geometry`, which draws the shape in any program, where the rows alone give the placeholder above.
@@ -1590,10 +1733,12 @@ impl Editor<'_, '_> {
             display: Some(&display),
             // The rows the path is written from are the ones the reader gives back only in its own forms; otherwise they are carried beside the path. (The geometry element a
             // shape of a file kept is its own outline, and gives back its own rows.)
-            geometry: held_geometry.is_some() || (outline_native && super::geometry::rows_in_reader_form(sheet)),
+            geometry: held_geometry.is_some() || (outline_native && reader_form),
+            outline_sections: subpaths,
             picture: false,
             connection: rebuilt_connection(sheet, self.work.model_path),
             connector: false,
+            route: None,
             glued: [false, false],
             text: &plain,
             text_native,
@@ -1754,9 +1899,11 @@ impl Editor<'_, '_> {
             style: &style_names,
             display: Some(&display),
             geometry: false,
+            outline_sections: 1,
             picture: true,
             connection: rebuilt_connection(sheet, self.work.model_path),
             connector: false,
+            route: None,
             glued: [false, false],
             text: "",
             text_native: false,
@@ -1898,10 +2045,12 @@ impl Editor<'_, '_> {
             style: &style_names,
             display: Some(&display),
             geometry: is_line_outline(sheet),
+            outline_sections: 1,
             picture: false,
             // (A line, new or of the file, is read back with the four connection rows the reader gives every shape.)
             connection: !sheet.sections.iter().any(|s| s.name.as_str() == "Connection") || standard_connection(sheet),
             connector: false,
+            route: None,
             glued: [false, false],
             text: &plain,
             text_native,
@@ -1959,11 +2108,13 @@ impl Editor<'_, '_> {
         }
         let parent = self.parent_of(sheet)?;
         let kind = |name: &str| sheet.cell(name).and_then(|c| c.value.as_ref()?.number());
+        // **A route kind the standard's three types cannot say** (the page's own route style a VSDX connector says as 0, a kind of the VSDX application's own, any pair of the two cells that is no
+        // `standard`, `line` or `curve`) is written as the default type (it was refused, and `file.check_compatibility` gave the same refusal): the reader makes the
+        // standard kind of that, and the cells that say the kind the connector has ride in DiaCraft's data ([`native::Native::route`]), so that it reads back with them.
         let draw_type: Option<String> = match (kind("ShapeRouteStyle"), kind("ConLineRouteExt")) {
-            (Some(1.0), Some(1.0)) | (None, None) => None,
             (Some(2.0), Some(1.0)) => Some("line".to_owned()),
             (Some(1.0), Some(2.0)) => Some("curve".to_owned()),
-            _ => return refuse("a new connector of a route kind the writer does not write"),
+            _ => None,
         };
         let kept_body = std::mem::take(&mut self.kept.body);
         let kept_before = std::mem::take(&mut self.kept.before);
@@ -1973,6 +2124,8 @@ impl Editor<'_, '_> {
             Some(held) if asread::type_agrees(held.as_deref(), (kind("ShapeRouteStyle"), kind("ConLineRouteExt"))) => held.clone(),
             _ => draw_type,
         };
+        // The cells the reader makes of the type that is written, which the model's are carried against.
+        let route = Some(asread::route_of_type(draw_type.as_deref()));
         let ends = own::ends(sheet, &n.outer).ok_or(WriteError::Unsupported("a new connector whose ends are not numbers"))?;
         // **A route with line jumps is written without them** (a new connector that crossed another, as connectors glued to a flipped shape often do,
         // was refused): the file's path has no place for a hop and LibreOffice draws none, so the path is the route's corners, and the rows the session has (the
@@ -2021,9 +2174,11 @@ impl Editor<'_, '_> {
             style: &style_names,
             display: Some(&display),
             geometry: !hops,
+            outline_sections: 1,
             picture: false,
             connection: !sheet.sections.iter().any(|s| s.name.as_str() == "Connection") || standard_connection(sheet),
             connector: true,
+            route,
             glued: [glued_end(true), glued_end(false)],
             text: &plain,
             text_native,
@@ -2214,6 +2369,33 @@ fn static_name(local: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The number of an id: `id` and one to eighteen ASCII digits, and nothing else has one; the number is the digits' own, whatever zeros lead them.
+    #[test]
+    fn an_id_has_a_number_when_it_is_id_and_one_to_eighteen_digits() {
+        for (id, number) in [("id0", 0), ("id1", 1), ("id007", 7), ("id12", 12), ("id999999999999999999", 999_999_999_999_999_999)] {
+            assert_eq!(id_number(id), Some(number), "{id}");
+        }
+        for id in [
+            "",
+            "id",
+            "i",
+            "d1",
+            "ID1",
+            "id-1",
+            "id+1",
+            "id1a",
+            "id 1",
+            "id\u{0661}",
+            "xid1",
+            "id1000000000000000000",
+            "id00000000000000000001",
+            "1",
+            "other",
+        ] {
+            assert_eq!(id_number(id), None, "{id:?}");
+        }
+    }
 
     /// A row of the cells `cells`, each a constant, or with the formula it is given, and the type `kind`.
     fn row(kind: &str, cells: &[(&str, Option<&str>, &str)]) -> diacraft_doc::Row {

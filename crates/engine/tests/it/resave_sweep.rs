@@ -195,7 +195,7 @@ fn odg_page(flat: bool) -> String {
 
 /// The user-defined fields of a person's `.odg` (`meta:user-defined`, ODF 1.4 Part 3 §4.3.2.1): a string and a number. Names and values are made up (the vector, rebuilt from its note).
 const USER_FIELDS: &str = concat!(
-    r#"<meta:user-defined meta:name="Ledger code"></meta:user-defined>"#,
+    r#"<meta:user-defined meta:name="Ledger code">LC0042</meta:user-defined>"#,
     r#"<meta:user-defined meta:name="Review count" meta:value-type="float">3</meta:user-defined>"#
 );
 
@@ -208,7 +208,7 @@ fn custom_properties() -> Pkg {
             concat!(
                 r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" "#,
                 r#"xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Ledger code">"#,
-                r#"<vt:lpwstr></vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Review count"><vt:i4>3</vt:i4></property></Properties>"#
+                r#"<vt:lpwstr>LC0042</vt:lpwstr></property><property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="Review count"><vt:i4>3</vt:i4></property></Properties>"#
             ),
         )
         .rel("/", "rId9", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties", "docProps/custom.xml")
@@ -241,21 +241,21 @@ fn otg_fields() -> Vec<u8> {
 
 /// What the session adds to the drawing before the first step, each a command a person runs.
 #[derive(Clone, Copy, Debug, Default)]
-struct Live {
-    picture: bool,
-    group: bool,
-    connector: bool,
-    link: bool,
+pub(crate) struct Live {
+    pub(crate) picture: bool,
+    pub(crate) group: bool,
+    pub(crate) connector: bool,
+    pub(crate) link: bool,
 }
 
 impl Live {
-    fn any(self) -> bool {
+    pub(crate) fn any(self) -> bool {
         self.picture || self.group || self.connector || self.link
     }
 }
 
 /// The id of the drawing's first page.
-fn first_page(s: &Session) -> u32 {
+pub(crate) fn first_page(s: &Session) -> u32 {
     s.document().unwrap().pages.get(0).unwrap().id
 }
 
@@ -267,7 +267,7 @@ fn dropped(s: &mut Session, x: f64, y: f64) -> Result<u32, String> {
 }
 
 /// Runs what `live` asks on the drawing. `picture` is the path of the picture file.
-fn add_live(s: &mut Session, live: Live, picture: &str) -> Result<(), String> {
+pub(crate) fn add_live(s: &mut Session, live: Live, picture: &str) -> Result<(), String> {
     let page = first_page(s);
     let ex = |s: &mut Session, id: &str, params: Value| s.execute(id, &params).map(|_| ()).map_err(|e| format!("{id}: {e}"));
     if live.picture {
@@ -294,7 +294,7 @@ fn add_live(s: &mut Session, live: Live, picture: &str) -> Result<(), String> {
 
 /// A drawing a chain starts from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Start {
+pub(crate) enum Start {
     /// A new drawing.
     New,
     /// A drawing made from a person's `.otg` template.
@@ -346,9 +346,9 @@ const STARTS: [Start; 15] = [
 ];
 
 /// The files the starts open, made once for a run.
-struct Files {
-    dir: Dir,
-    picture: String,
+pub(crate) struct Files {
+    pub(crate) dir: Dir,
+    pub(crate) picture: String,
     made: BTreeMap<&'static str, Vec<u8>>,
 }
 
@@ -367,7 +367,7 @@ fn saved_as(s: &mut Session, dir: &Dir, name: &str, mut params: Value) -> Vec<u8
 }
 
 impl Files {
-    fn new() -> Files {
+    pub(crate) fn new() -> Files {
         let dir = Dir::new();
         let picture = dir.write("live-picture.png", &crate::across::png(LIVE_PICTURE_SHADE));
         for k in 0..8u8 {
@@ -393,7 +393,7 @@ impl Files {
     }
 
     /// A session holding `start`, opened from its file as `name` (with the extension added).
-    fn open(&self, start: Start, name: &str) -> Result<Session, String> {
+    pub(crate) fn open(&self, start: Start, name: &str) -> Result<Session, String> {
         let made = |key: &str| self.made.get(key).cloned().unwrap_or_default();
         let (extension, bytes) = match start {
             Start::New => return Ok(pinned()),
@@ -419,11 +419,12 @@ impl Files {
 // ---------------------------------------------------------------------------------------------------------------- the steps
 
 /// The types a Save As writes, as the extension of the name.
-const TARGETS: [&str; 11] = ["vsdx", "vsdm", "vstx", "vstm", "vssx", "vssm", "odg", "otg", "diacraft", "diacraft-template", "diacraft-stencil"];
+pub(crate) const TARGETS: [&str; 11] =
+    ["vsdx", "vsdm", "vstx", "vstm", "vssx", "vssm", "odg", "otg", "diacraft", "diacraft-template", "diacraft-stencil"];
 
 /// The edits a person makes between saves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Edit {
+pub(crate) enum Edit {
     /// A shape moved.
     Move,
     /// A shape's text set.
@@ -436,7 +437,7 @@ enum Edit {
 
 /// One step of a chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Step {
+pub(crate) enum Step {
     /// A Save As to `TARGETS[target]`, with the options.
     SaveAs { target: usize, drop_objects: bool, drop_macros: bool },
     /// A Save.
@@ -447,10 +448,10 @@ enum Step {
 
 /// A chain: where it starts, what the session adds first, and the steps.
 #[derive(Clone, Debug)]
-struct Chain {
-    start: Start,
-    live: Live,
-    steps: Vec<Step>,
+pub(crate) struct Chain {
+    pub(crate) start: Start,
+    pub(crate) live: Live,
+    pub(crate) steps: Vec<Step>,
 }
 
 fn step() -> impl Strategy<Value = Step> {
@@ -462,7 +463,7 @@ fn step() -> impl Strategy<Value = Step> {
     ]
 }
 
-fn chain() -> impl Strategy<Value = Chain> {
+pub(crate) fn chain() -> impl Strategy<Value = Chain> {
     let live = (any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>(), 0..3u8).prop_map(|(picture, group, connector, link, off)| {
         // A third of the chains add nothing before the first step.
         if off == 0 { Live::default() } else { Live { picture, group, connector, link } }
@@ -504,7 +505,7 @@ struct Current {
 }
 
 /// The characters of a shape's text, its fields' shown text included.
-fn plain(shape: &Shape) -> String {
+pub(crate) fn plain(shape: &Shape) -> String {
     shape
         .text
         .as_ref()
@@ -534,7 +535,7 @@ fn all_shapes(doc: &Document) -> Vec<&Shape> {
 }
 
 /// The pin of a shape of the first page.
-fn pin_of(doc: &Document, id: u32) -> Option<(f64, f64)> {
+pub(crate) fn pin_of(doc: &Document, id: u32) -> Option<(f64, f64)> {
     let page = doc.pages.get(0)?.id;
     diacraft_engine::draw::shape_frame(doc, page, id).map(|f| (f.pin_x, f.pin_y))
 }

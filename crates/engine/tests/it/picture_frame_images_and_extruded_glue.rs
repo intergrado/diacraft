@@ -378,9 +378,10 @@ fn ends(bytes: &[u8]) -> Vec<String> {
     list.iter().filter(|el| el.name == "draw:connector").map(|el| el.attr("draw:end-glue-point").unwrap_or_default().to_owned()).collect()
 }
 
-/// Whether the package's `content.xml` holds a style that says `diacraft:glue="own"`.
-fn says_own(bytes: &[u8]) -> bool {
-    crate::odg_build::part_of(bytes, "content.xml").contains(r#"diacraft:glue="own""#)
+/// Whether the package's `content.xml` holds a style that says `diacraft:glue="own"` **beyond the one the vector holds itself** (`gr3`, which no shape names: a visit keeps a style nothing names
+/// so that one comes back and is no marker the file did not have).
+fn wrote_a_marker(bytes: &[u8]) -> bool {
+    crate::odg_build::part_of(bytes, "content.xml").matches(r#"diacraft:glue="own""#).count() > 1
 }
 
 /// `visits` plain visits of `source`, an `.odg` called `v0.odg`: what each leg named, and the directory that holds `v0.odg`, `v1.odg`, ... and the `.diacraft` files between them.
@@ -407,7 +408,7 @@ fn an_extruded_shape_that_lists_glue_points_gets_no_marker_on_the_plain_visit() 
     for attrs in [r#" draw:extrusion="true""#, r#" draw:text-path="true""#] {
         let (legs, dir) = visits(&shapes(attrs, None, "gr1", false), 3);
         for k in 1..=3 {
-            assert!(!says_own(&dir.read(&format!("v{k}.odg"))), "{attrs}: visit {k} wrote a marker the file did not have");
+            assert!(!wrote_a_marker(&dir.read(&format!("v{k}.odg"))), "{attrs}: visit {k} wrote a marker the file did not have");
         }
         assert_eq!(about_glue(&legs), Vec::<&str>::new(), "{attrs}: the legs named {legs:?}");
     }
@@ -422,7 +423,7 @@ fn a_connector_end_on_an_extruded_shape_keeps_its_index_through_three_visits() {
             for k in 1..=3 {
                 let written = dir.read(&format!("v{k}.odg"));
                 assert_eq!(ends(&written), vec![end.to_string()], "{attrs}: the end {end} after {k} visits");
-                assert!(!says_own(&written), "{attrs}: the end {end} after {k} visits wrote a marker");
+                assert!(!wrote_a_marker(&written), "{attrs}: the end {end} after {k} visits wrote a marker");
             }
             assert_eq!(about_glue(&legs), Vec::<&str>::new(), "{attrs}: the end {end}: the legs named {legs:?}");
         }
@@ -437,7 +438,7 @@ fn a_connector_end_on_an_extruded_shapes_own_glue_point_keeps_its_index() {
         for k in 1..=3 {
             let written = dir.read(&format!("v{k}.odg"));
             assert_eq!(ends(&written), vec![end.to_string()], "the end {end} after {k} visits");
-            assert!(!says_own(&written), "the end {end} after {k} visits wrote a marker");
+            assert!(!wrote_a_marker(&written), "the end {end} after {k} visits wrote a marker");
         }
         assert_eq!(about_glue(&legs), Vec::<&str>::new(), "the end {end}: {legs:?}");
     }
@@ -451,7 +452,7 @@ fn a_shape_whose_view_box_is_empty_gets_no_marker_and_keeps_its_connector_end() 
         for k in 1..=3 {
             let written = dir.read(&format!("v{k}.odg"));
             assert_eq!(ends(&written), vec![end.to_string()], "the end {end} after {k} visits");
-            assert!(!says_own(&written), "the end {end} after {k} visits wrote a marker");
+            assert!(!wrote_a_marker(&written), "the end {end} after {k} visits wrote a marker");
         }
         assert_eq!(about_glue(&legs), Vec::<&str>::new(), "the end {end}: {legs:?}");
     }
@@ -465,7 +466,7 @@ fn the_flat_twin_of_the_extruded_shape_keeps_its_index() {
         for k in 1..=3 {
             let written = dir.read(&format!("v{k}.odg"));
             assert_eq!(ends(&written), vec![end.to_string()], "the end {end} after {k} visits");
-            assert!(!says_own(&written), "the end {end} after {k} visits");
+            assert!(!wrote_a_marker(&written), "the end {end} after {k} visits");
         }
         assert_eq!(about_glue(&legs), Vec::<&str>::new(), "{legs:?}");
     }

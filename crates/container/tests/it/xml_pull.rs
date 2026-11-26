@@ -242,3 +242,30 @@ fn the_limit_of_the_next_child_is_set_between_children_and_the_items_of_the_last
     }
     assert_eq!(seen, [10, 60, 200]);
 }
+
+#[test]
+fn a_stream_says_how_far_into_the_text_it_has_read() {
+    // A reader that caps the text of each child of the root (a page of a draw.io file) measures it by the position before and after the child.
+    let doc = "<a x=\"1\"><b/><c>text</c>  <d><e/></d></a>";
+    let text = XmlText::new(doc.as_bytes()).unwrap();
+    let (mut pull, _) = text.pull(&limits(), ParseOptions::default()).unwrap();
+    let head = pull.position();
+    assert_eq!(head, "<a x=\"1\">".len(), "the root's start tag is read, and nothing of its children");
+    let mut ends = Vec::new();
+    while let Some(child) = pull.next_child().unwrap() {
+        ends.push((child.name, pull.position()));
+    }
+    // Each child ends where its markup ends in the text, the text between children read with the next.
+    let want = |s: &str| doc.find(s).unwrap() + s.len();
+    assert_eq!(ends, [("b".to_owned(), want("<b/>")), ("c".to_owned(), want("</c>")), ("d".to_owned(), want("</d>"))]);
+    pull.finish().unwrap();
+    assert_eq!(pull.position(), doc.len(), "the whole document, once it is finished");
+    // In UTF-16 the position is in the decoded text, the same for the same document.
+    let mut bytes = vec![0xFF, 0xFE];
+    bytes.extend(doc.encode_utf16().flat_map(u16::to_le_bytes));
+    let text = XmlText::new(&bytes).unwrap();
+    let (mut pull, _) = text.pull(&limits(), ParseOptions::default()).unwrap();
+    while pull.next_child().unwrap().is_some() {}
+    pull.finish().unwrap();
+    assert_eq!(pull.position(), doc.len());
+}

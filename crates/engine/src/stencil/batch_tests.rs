@@ -5,12 +5,17 @@ use diacraft_doc::{CellAddr, Owner, Resolver, RowKey, SheetRef};
 use serde_json::json;
 
 use super::flowchart_tests::{Dir, blank, id_of, ink_near, instance_geometry, num, px, render, run};
-use super::{MasterSpec, Outline, all_masters, find_master, find_master_in, stencils};
+use super::{MasterSpec, Outline, find_master, find_master_in, stencils};
 use crate::Session;
 use crate::draw::text_view;
 
+/// The stencils of the first batches (the seven a new session opens). The second batch's stencils are shipped after them, and have their own tests (`network/tests.rs` and the like).
+fn first_seven() -> impl Iterator<Item = &'static super::StencilSpec> {
+    stencils().iter().filter(|s| s.default_open)
+}
+
 fn batch() -> impl Iterator<Item = &'static MasterSpec> {
-    stencils().iter().skip(2).flat_map(|stencil| stencil.masters())
+    first_seven().skip(2).flat_map(|stencil| stencil.masters())
 }
 
 fn drop_at(s: &mut Session, master: &str, x: f64, y: f64) -> u32 {
@@ -44,8 +49,8 @@ fn near(a: f64, b: f64) {
 
 #[test]
 fn catalogue_identity_and_process_lookup_remain_compatible() {
-    assert_eq!(stencils().iter().map(|s| s.masters().len()).collect::<Vec<_>>(), [12, 18, 8, 8, 4, 2, 6]);
-    assert_eq!(all_masters().count(), 58);
+    assert_eq!(first_seven().map(|s| s.masters().len()).collect::<Vec<_>>(), [12, 18, 8, 8, 4, 2, 6]);
+    assert_eq!(first_seven().map(|s| s.masters().len()).sum::<usize>(), 58);
     for (series, stencil) in stencils().iter().take(2).enumerate() {
         for (ordinal, master) in stencil.masters().iter().enumerate() {
             assert_eq!(master.guid(), format!("{{D1AC000{}-0000-4000-8000-{:012X}}}", series + 1, ordinal + 1));

@@ -136,7 +136,10 @@ fn a_control_is_enabled_only_if_a_command_is_wired_to_it() {
     let mut window = drawing_window([2400.0, 800.0]);
     let mut enabled_seen = Vec::new();
     // Developer, Org Chart, Container Format and Cross-Functional Flowchart are not on the row until their object is there (the last two are tested in `container.rs` and `swimlane.rs`).
-    for tab in all_tabs().into_iter().filter(|t| !matches!(t.label, "Developer" | "Org Chart" | "Container Format" | "Cross-Functional Flowchart")) {
+    for tab in all_tabs()
+        .into_iter()
+        .filter(|t| !matches!(t.label, "Developer" | "Org Chart" | "Container Format" | "Cross-Functional Flowchart" | "ShapeSheet Design"))
+    {
         run_command(&mut window, "window.tab", json!({ "tab": tab.label }));
         for group in tab.groups {
             let mut tops = group.top_level();
@@ -182,6 +185,8 @@ fn a_control_is_enabled_only_if_a_command_is_wired_to_it() {
         "AutoSizePage",
         "PageSetupDialog",
         "PageSetupPageDialog",
+        // The Layout group's launcher opens Page Setup on Layout and Routing.
+        "PageSetupLayoutAndRoutingDialog",
         "ObjectFormatDialog",
         "DynamicGrid",
         "ConnectionPoints",
@@ -209,7 +214,7 @@ fn a_control_is_enabled_only_if_a_command_is_wired_to_it() {
     ] {
         assert!(enabled_seen.contains(&id), "{id} should work: {enabled_seen:?}");
     }
-    assert_eq!(enabled_seen.len(), 39, "{enabled_seen:?}");
+    assert_eq!(enabled_seen.len(), 40, "{enabled_seen:?}");
 }
 
 /// A disabled control says so to assistive technology too, and an enabled one does not.
@@ -295,8 +300,9 @@ fn a_tab_opens_by_a_click_and_the_ribbon_folds_to_the_tab_row() {
 fn the_ribbon_folds_groups_rather_than_clipping_them() {
     for width in [480.0, 640.0, 800.0, 1024.0, 1280.0, 1920.0] {
         let mut window = drawing_window([width, 720.0]);
-        for tab in
-            all_tabs().into_iter().filter(|t| !matches!(t.label, "Developer" | "Org Chart" | "Container Format" | "Cross-Functional Flowchart"))
+        for tab in all_tabs()
+            .into_iter()
+            .filter(|t| !matches!(t.label, "Developer" | "Org Chart" | "Container Format" | "Cross-Functional Flowchart" | "ShapeSheet Design"))
         {
             run_command(&mut window, "window.tab", json!({ "tab": tab.label }));
             let prefix = format!("ribbon.{}.group.", tab.label);

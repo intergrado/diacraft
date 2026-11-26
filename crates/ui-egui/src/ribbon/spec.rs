@@ -85,6 +85,8 @@ pub enum Body {
     Masters,
     /// The Variant Styles and the Theme Styles of the Quick Styles gallery, for the first shape selected (`ribbon/quick_styles.rs`).
     QuickStyles,
+    /// The check boxes of the ShapeSheet window's Show Sections card, one for each section the sheet on top shows (`sheet/cards.rs`).
+    SheetSections,
 }
 
 /// What a row of a menu stands for in the state of the page on view, so that the row of the one the page has is marked.
@@ -804,9 +806,10 @@ const REROUTE_ITEMS: &[Ctl] = &[
 ];
 
 /// The rows of the menu a right click on a connector opens (Cut, Copy, Paste, Delete, Bring to Front and Send to Back are the rows the one-dimensional
-/// shape's menu pictures; Edit Text is not here, for want of a command that opens the box), and the two rows of a connector's own: **Reset Connector**, which "is on a
-/// connector's right-click menu", and the Reroute choices, which the specifications give no menu of their own (the report's
-/// Q2: they are put here, where Reset Connector is). **Their ids are ours.**
+/// shape's menu pictures; Edit Text is not here, for want of a command that opens the box), and the rows of a connector's own: **Right-Angle Connector**, **Straight Connector** and
+/// **Curved Connector** (each sends `connector.style` with the connectors selected, which routes them again; their place above Reset Connector and their words are ours,
+/// the design call), **Reset Connector**, which "is on a connector's right-click menu", and the Reroute choices, which the
+/// specifications give no menu of their own (the report's Q2: they are put here, where Reset Connector is). **Their ids are ours.**
 pub const CONNECTOR_MENU: &[Ctl] = &[
     c("ConnectorCut", i(Base::Scissors)).l("Cut").cmd("clipboard.cut"),
     c("ConnectorCopy", i(Base::Pages)).l("Copy").cmd("clipboard.copy"),
@@ -814,6 +817,9 @@ pub const CONNECTOR_MENU: &[Ctl] = &[
     c("ConnectorDelete", i(Base::Page).with(Badge::Cross)).l("Delete").cmd("shape.delete"),
     c("ConnectorBringToFront", i(Base::Front)).l("Bring to Front").menu(FRONT_ITEMS),
     c("ConnectorSendToBack", i(Base::Back)).l("Send to Back").menu(BACK_ITEMS),
+    c("ConnectorRightAngleConnector", i(Base::Connector)).g("Right-Angle Connector").cmd_with("connector.style", r#"{"style":"right_angle"}"#),
+    c("ConnectorStraightConnector", i(Base::Line)).g("Straight Connector").cmd_with("connector.style", r#"{"style":"straight"}"#),
+    c("ConnectorCurvedConnector", i(Base::Arc)).g("Curved Connector").cmd_with("connector.style", r#"{"style":"curved"}"#),
     c("ConnectorResetConnector", i(Base::Refresh)).l("Reset Connector").cmd("connector.reset"),
     c("ConnectorReroute", i(Base::Connector)).g("Reroute").menu(REROUTE_ITEMS),
 ];
@@ -1112,6 +1118,16 @@ static DRAW: Tab = Tab {
             i(Base::TextA),
             &[Slot::Big(c("DrawConvertInkToText", i(Base::TextA).with(Badge::Arrow)).g("Ink to Text"))],
         ),
+        // **A DiaCraft extra beyond the map** (owner, 2026-11-25): the shape operations are hard to find under Developer, Shape Design, so the Draw tab has a
+        // menu of the very same items ([`OPERATIONS`]), in a group of its own after Convert: it is the last group, so the row gives it up first when the
+        // window is narrow. The control has an id of its own (`DrawShapeOperations`); Developer keeps `OperationsMenu`, as the map has it.
+        g(
+            "GroupDrawShapeOperations",
+            "Shape Operations",
+            false,
+            i(Base::Rect),
+            &[Slot::Big(c("DrawShapeOperations", i(Base::Rect)).g("Operations").menu(OPERATIONS))],
+        ),
     ],
 };
 
@@ -1228,7 +1244,11 @@ static DESIGN: Tab = Tab {
                 Slot::Big(c("ConnectorsGallery", i(Base::Connector)).l("Connectors").menu(CONNECTOR_ITEMS)),
             ],
         )
-        .launch(c("PageSetupLayoutAndRoutingDialog", i(Base::Connector)).g("Layout and Routing")),
+        .launch(
+            c("PageSetupLayoutAndRoutingDialog", i(Base::Connector))
+                .g("Layout and Routing")
+                .cmd_with("window.pageSetup", r#"{"tab":"Layout and Routing"}"#),
+        ),
     ],
 };
 
@@ -1553,14 +1573,20 @@ static VIEW: Tab = Tab {
 
 // ------------------------------------------------------------------------------------------------ Developer
 
+/// The three items of Show ShapeSheet's menu: the sheet of the shape selected, of the page on view and of the document. Shape needs a shape selected (`sheet_open_verdict`).
 const SHEET_ITEMS: &[Ctl] = &[
-    c("ShowShapeSheetShape", i(Base::Table)).l("Shape"),
-    c("ShowShapeSheetPage", i(Base::Table)).l("Page"),
-    c("ShowShapeSheetDocument", i(Base::Table)).l("Document"),
+    c("ShowShapeSheetShape", i(Base::Table)).l("Shape").cmd_with("window.shapesheet", r#"{"of":"shape"}"#),
+    c("ShowShapeSheetPage", i(Base::Table)).l("Page").cmd_with("window.shapesheet", r#"{"of":"page"}"#),
+    c("ShowShapeSheetDocument", i(Base::Table)).l("Document").cmd_with("window.shapesheet", r#"{"of":"document"}"#),
 ];
+
+/// The first row of the right-click menus of a shape and of the page while the Developer tab is on: the sheet of the shape under the
+/// pointer, or the page's when the click was on no shape. **The id is ours.**
+pub const CANVAS_SHOW_SHEET: Ctl = c("CanvasShowShapeSheet", i(Base::Table)).l("Show ShapeSheet").cmd_with("window.shapesheet", "{}");
 /// The Operations menu. The first five run the window's `operations.*` commands on the shapes selected and are enabled when the engine
 /// says the operation can run on them (`operations.rs`); the other four are the (and the alignment box's) and have no command, so they are drawn
-/// quiet, with the tooltip "(not available yet)".
+/// quiet, with the tooltip "(not available yet)". **Two menus hold these items**, so that they run the same commands and are enabled alike: Developer's
+/// `OperationsMenu` (the map's) and the Draw tab's `DrawShapeOperations` (ours).
 const OPERATIONS: &[Ctl] = &[
     c("ShapesObjectUnion", i(Base::Rect)).g("Union").cmd("operations.union"),
     c("ShapesObjectCombine", i(Base::Rect)).g("Combine").cmd("operations.combine"),
@@ -1614,7 +1640,7 @@ static DEVELOPER: Tab = Tab {
             true,
             i(Base::Table),
             &[
-                Slot::Big(c("ShowShapeSheet", i(Base::Table)).l("Show ShapeSheet").menu(SHEET_ITEMS)),
+                Slot::Big(c("ShowShapeSheet", i(Base::Table)).l("Show ShapeSheet").cmd_with("window.shapesheet", "{}").split(SHEET_ITEMS)),
                 Slot::Stack(&[
                     c("DeveloperDrawingTools", i(Base::Rect)).g("Drawing Tools").menu(DRAWING_TOOLS),
                     c("OperationsMenu", i(Base::Rect)).l("Operations").menu(OPERATIONS),
@@ -1974,6 +2000,85 @@ static CROSS_FUNCTIONAL_FLOWCHART: Tab = Tab {
     ],
 };
 
+// ------------------------------------------------------------------------------------------------ ShapeSheet Design
+
+/// The label of the ShapeSheet Design tab.
+pub const SHEET_DESIGN_TAB: &str = "ShapeSheet Design";
+
+/// The contextual tab of the ShapeSheet window: View, Sections, Rows, Editing and
+/// Formula Tracing. It shows while the sheet has the focus. **The ids and the labels are the map's and the spec's** (the April 2025 image names Link and Style Explorer). In this
+/// feature View's Formulas, Values and Sections work; the Sections, Rows and Editing groups wait, and Style Explorer and Formula Tracing are later work
+/// (design 2): they are drawn quiet, with the tooltip "(not available yet)".
+static SHEET_DESIGN: Tab = Tab {
+    id: "TabShapeSheetDesign",
+    label: SHEET_DESIGN_TAB,
+    groups: &[
+        g(
+            "GroupShapeSheetView",
+            "View",
+            true,
+            i(Base::Table),
+            &[
+                Slot::Stack(&[
+                    c("ShapeSheetShowFormulas", i(Base::TextA)).l("Formulas").check().cmd_with("window.sheetView", r#"{"formulas":true}"#),
+                    c("ShapeSheetShowValues", i(Base::Table)).l("Values").check().cmd_with("window.sheetView", r#"{"values":true}"#),
+                    c("ShapeSheetShowSections", i(Base::Layers)).l("Sections").cmd("window.sheetSections").menu(NONE).body(Body::SheetSections),
+                ]),
+                Slot::Big(c("StyleExplorer", i(Base::Palette)).l("Style Explorer").check()),
+            ],
+        ),
+        g(
+            "GroupShapeSheetSections",
+            "Sections",
+            true,
+            i(Base::Layers),
+            &[Slot::Stack(&[
+                c("ShapeSheetInsertSection", i(Base::Layers).with(PLUS)).l("Insert"),
+                c("ShapeSheetDeleteSection", i(Base::Layers).with(Badge::Cross)).l("Delete"),
+            ])],
+        ),
+        g(
+            "GroupShapeSheetRows",
+            "Rows",
+            true,
+            i(Base::Table),
+            &[Slot::Stack(&[
+                c("ShapeSheetInsertRow", i(Base::Table).with(PLUS)).l("Insert"),
+                c("ShapeSheetDeleteRow", i(Base::Table).with(Badge::Cross)).l("Delete"),
+            ])],
+        ),
+        g(
+            "GroupShapeSheetEditing",
+            "Editing",
+            true,
+            i(Base::TextA),
+            &[
+                Slot::Big(c("ShapeSheetEditFormula", i(Base::TextA)).l("Edit Formula")),
+                Slot::Stack(&[
+                    c("ShapeData", i(Base::Database)).l("Shape Data"),
+                    c("HyperlinkInsert", i(Base::Link)).l("Link"),
+                    c("ShapeSheetShapeAction", i(Base::Gear)).l("Shape Action"),
+                ]),
+            ],
+        ),
+        g(
+            "GroupShapeSheetFormulaTracing",
+            "Formula Tracing",
+            true,
+            i(Base::Window),
+            &[
+                Slot::Big(c("ShowFormulaTracingWindow", i(Base::Window)).l("Show Window")),
+                Slot::Stack(&[
+                    c("TracePrecedentCells", i(Base::TurnLeft)).l("Trace Precedents"),
+                    c("TraceDependentCells", i(Base::TurnRight)).l("Trace Dependents"),
+                ]),
+                Slot::Big(c("TraceBack", i(Base::Undo)).l("Back")),
+                Slot::Big(c("TraceForward", i(Base::Redo)).l("Forward")),
+            ],
+        ),
+    ],
+};
+
 /// What decides which tabs are on the row beyond the default ones.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TabContext {
@@ -1985,6 +2090,8 @@ pub struct TabContext {
     pub container: bool,
     /// The page on view has swimlanes, which brings the Cross-Functional Flowchart tab after Help, before the Container Format tab.
     pub swimlane: bool,
+    /// A ShapeSheet window is open and has the focus, which brings the ShapeSheet Design tab at the right end of the row.
+    pub sheet: bool,
 }
 
 /// The name of the File tab, which comes first and opens the File view, not a ribbon body.
@@ -2008,6 +2115,9 @@ pub fn visible_tabs(cx: TabContext) -> Vec<&'static Tab> {
     if cx.container {
         tabs.push(&CONTAINER_FORMAT);
     }
+    if cx.sheet {
+        tabs.push(&SHEET_DESIGN);
+    }
     tabs
 }
 
@@ -2018,7 +2128,7 @@ pub fn tab_names(cx: TabContext) -> Vec<&'static str> {
 
 /// The tab with this label, whether or not it shows now.
 pub fn tab_by_label(label: &str) -> Option<&'static Tab> {
-    visible_tabs(TabContext { developer: true, org_chart: true, container: true, swimlane: true }).into_iter().find(|t| t.label == label)
+    visible_tabs(TabContext { developer: true, org_chart: true, container: true, swimlane: true, sheet: true }).into_iter().find(|t| t.label == label)
 }
 
 impl Ctl {
@@ -2076,7 +2186,7 @@ pub(crate) fn home_control(id: &str) -> Option<&'static Ctl> {
 
 /// Every tab that can show, for tests and the parity count.
 pub fn all_tabs() -> Vec<&'static Tab> {
-    visible_tabs(TabContext { developer: true, org_chart: true, container: true, swimlane: true })
+    visible_tabs(TabContext { developer: true, org_chart: true, container: true, swimlane: true, sheet: true })
 }
 
 /// The captions of the rows of the colour palettes that are ours and not confirmed by the map: the tab, the group, the control the palette

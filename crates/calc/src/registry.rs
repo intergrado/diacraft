@@ -2,7 +2,7 @@
 //!
 //! A name matches in any letter case. A name not here (a reserved one such as `_SHAPEMIN`, a name a file's
 //! extensions declare, or one no batch has landed yet) is [`crate::Value::Unsupported`]: the value is unknown and drawing uses the
-//! saved one, as it does when a formula does not parse (`functions-actions.md` is not written, so its names are not here; of
+//! saved one, as it does when a formula does not parse (is not written, so its names are not here; of
 //! `_ELLIPSE_THETA`, `_ELLIPSE_ECC` and `_MARKER` are, and the other reserved names are not).
 //!
 //! **Eager and lazy.** An eager function has every argument worked out left to right before it runs, and gives back the first

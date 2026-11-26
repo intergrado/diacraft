@@ -1,0 +1,17 @@
+[package]
+name = "diacraft-route"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "DiaCraft connector router: right-angle routes round boxes and other routes, found by A* over the Hanan grid within a work budget"
+publish = false
+
+[lints]
+workspace = true
+
+# Standard library only (no workspace crate, no dependency): the router knows nothing of a document, so that it can be carved into craft-libs.
+[dependencies]
+
+[dev-dependencies]
+proptest = { workspace = true }

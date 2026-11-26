@@ -22,6 +22,7 @@ use kurbo::{Affine, BezPath, ParamCurveArclen, Rect, Shape as _};
 
 use crate::clock::Clock;
 use crate::corners;
+use crate::custom_end::{self, Refusal, Sizing};
 use crate::dash;
 use crate::ends;
 use crate::geometry::{self, ShapeGeometry};
@@ -29,7 +30,7 @@ use crate::gradient::{self, GradFill};
 use crate::layers::{LayerColour, LayerTable, Verdict, members_of};
 use crate::limits::{
     Cancel, DRAWN_PIXELS_PER_WORK, Limits, MAX_BLUR_PIXELS_PER_FRAME, MAX_BLUR_SPREAD_PX, MAX_BLURS_PER_FRAME, MAX_STROKE_PX, WORK_PER_DASH,
-    WORK_PER_DRAWN_SHAPE, WORK_PER_MARK, WORK_PER_SHAPE,
+    WORK_PER_DRAWN_SHAPE, WORK_PER_END_ROW, WORK_PER_MARK, WORK_PER_SHAPE,
 };
 use crate::read::{Cx, sheet_of};
 use crate::share::Tally;
@@ -674,7 +675,7 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
         self.draw_fill(&fill, &paths.fill, sc.to_paper, who);
         self.draw_picture(sc, geom, who);
         if let Some(line) = &line {
-            self.draw_line(line, &paths.stroke, sc.to_paper, who);
+            self.draw_line(line, &paths.stroke, (sc.to_paper, sc.page.scale), who);
         }
     }
 
@@ -725,8 +726,10 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
         }
     }
 
-    /// The stroke of a shape's outline, `weight` wide on paper.
-    fn draw_line(&mut self, line: &LineLook, local: &BezPath, to_paper: Affine, who: &dyn Fn() -> String) {
+    /// The stroke of a shape's outline, `weight` wide on paper. `place` is the shape's frame to paper inches and the page's scale (paper inches to a drawing inch: what a scaled custom end
+    /// follows).
+    fn draw_line(&mut self, line: &LineLook, local: &BezPath, place: (Affine, f64), who: &dyn Fn() -> String) {
+        let (to_paper, page_scale) = place;
         if local.is_empty() || line.color.a == 0 && line.gradient.is_none() {
             return;
         }
@@ -754,37 +757,7 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
         // Line ends: the shaft is shortened under each mark, and the marks are drawn once, solid, whatever the pattern.
         // A path that was cut to the view has its ends somewhere else, so it has no line ends.
         let wants_ends = (line.begin_arrow != 0 || line.end_arrow != 0) && !clipped;
-        let ends = wants_ends.then(|| {
-            // A master as the end draws number 4 at the cell's size, and says so.
-            let custom = |n: i64| if n == 254 { 4 } else { n };
-            if [line.begin_arrow, line.end_arrow].iter().any(|n| ends::is_unmeasured(*n)) {
-                self.cx.note(SkipKind::LineEndApproximate, || format!("{}: a line end whose box no source measures", who()));
-            }
-            // A size class outside 0 to 6 is drawn as class 2, and the frame says so. A size with no mark to size is nothing to say: number 0, and any
-            // number no art is drawn for, draw nothing (the custom end is drawn as 4).
-            let bad_size = |number: i64, size: i64| ends::size_is_standin(size) && ends::is_drawn(custom(number));
-            if bad_size(line.begin_arrow, line.begin_size) || bad_size(line.end_arrow, line.end_size) {
-                self.cx.note(SkipKind::LineEndApproximate, || format!("{}: a line end size class outside 0 to 6, drawn as class 2", who()));
-            }
-            if line.begin_arrow == 254 || line.end_arrow == 254 {
-                self.cx.note(SkipKind::CustomLineEnd, || format!("{}: a master as a line end", who()));
-            }
-            let request = ends::Request {
-                begin: custom(line.begin_arrow),
-                end: custom(line.end_arrow),
-                begin_size: line.begin_size,
-                end_size: line.end_size,
-                weight: widths.weight,
-                see_through: line.color.a < 255,
-            };
-            let planned = ends::plan(&paper, &request);
-            // A path with no direction anywhere (every segment of no length) can hold no mark, and the frame says why.
-            self.cx.note_n(SkipKind::LineEndNoDirection, planned.directionless, || {
-                format!("{}: a line end left off a path with no direction (every segment has no length)", who())
-            });
-            planned.ends
-        });
-        let ends = ends.flatten();
+        let ends = if wants_ends { self.plan_ends(line, &paper, (widths, page_scale), who) } else { None };
         let shaft = ends.as_ref().map_or(&paper, |e| &e.shaft);
         let length = if line.pattern > 1 { path_length(shaft) } else { 0.0 };
         let plan = dash::plan(widths, line.pattern, line.cap, length, ppi);
@@ -813,10 +786,106 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
             if !ends.fill.is_empty() {
                 self.canvas.fill(&ends.fill, &paint, false);
             }
+            if !ends.fill_even_odd.is_empty() {
+                self.canvas.fill(&ends.fill_even_odd, &paint, true);
+            }
             if !ends.strokes.is_empty() {
                 let mark = kurbo::Stroke::new(widths.drawn).with_caps(kurbo::Cap::Round).with_join(kurbo::Join::Round);
                 self.canvas.stroke(&ends.strokes, &mark, &paint);
             }
+        }
+    }
+
+    /// The line ends of a stroke whose path is `paper` (paper inches): the marks of the numbers, and the custom ends drawn from their masters.
+    fn plan_ends(&mut self, line: &LineLook, paper: &BezPath, sizes: (dash::Widths, f64), who: &dyn Fn() -> String) -> Option<ends::Ends> {
+        let widths = sizes.0;
+        // A master as the end that cannot be drawn is number 4 at the cell's size, and says so.
+        let custom = |n: i64| if n == 254 { 4 } else { n };
+        if [line.begin_arrow, line.end_arrow].iter().any(|n| ends::is_unmeasured(*n)) {
+            self.cx.note(SkipKind::LineEndApproximate, || format!("{}: a line end whose box no source measures", who()));
+        }
+        // A size class outside 0 to 6 is drawn as class 2, and the frame says so. A size with no mark to size is nothing to say: number 0, and any
+        // number no art is drawn for, draw nothing (the custom end is drawn as a master, or as 4).
+        let bad_size = |number: i64, size: i64| ends::size_is_standin(size) && ends::is_drawn(custom(number));
+        if bad_size(line.begin_arrow, line.begin_size) || bad_size(line.end_arrow, line.end_size) {
+            self.cx.note(SkipKind::LineEndApproximate, || format!("{}: a line end size class outside 0 to 6, drawn as class 2", who()));
+        }
+        let begin = self.choose_end(line.begin_arrow, line.begin_use.as_ref(), line.begin_size, sizes, who);
+        let end = self.choose_end(line.end_arrow, line.end_use.as_ref(), line.end_size, sizes, who);
+        let request = ends::Request {
+            begin: begin.number,
+            end: end.number,
+            begin_size: line.begin_size,
+            end_size: line.end_size,
+            weight: widths.weight,
+            see_through: line.color.a < 255,
+            begin_custom: begin.custom,
+            end_custom: end.custom,
+        };
+        let planned = ends::plan(paper, &request);
+        // A path with no direction anywhere (every segment of no length) can hold no mark, and the frame says why.
+        self.cx.note_n(SkipKind::LineEndNoDirection, planned.directionless, || {
+            format!("{}: a line end left off a path with no direction (every segment has no length)", who())
+        });
+        let mut ends = planned.ends?;
+        // A custom end is sized by the master and not by a table: it is held to what a target takes, as any path is.
+        let margin = widths.drawn * self.px_per_inch.max(1.0e-9);
+        for path in [&mut ends.fill_even_odd, &mut ends.strokes] {
+            if !path.is_empty() && matches!(self.canvas.check(path, margin), Err(Refused::OutOfRange)) {
+                self.cx.note(SkipKind::OutOfRange, || format!("{}: a line end", who()));
+                *path = BezPath::new();
+            }
+        }
+        Some(ends)
+    }
+
+    /// What an end of a line is drawn as: its number, or a custom end drawn from its master. A custom end whose master cannot be drawn is number 4 and the frame says so
+    /// One whose box has no height draws nothing and says nothing; one the work budget has no room for draws nothing.
+    fn choose_end(
+        &mut self,
+        number: i64,
+        used: Option<&std::sync::Arc<str>>,
+        size: i64,
+        sizes: (dash::Widths, f64),
+        who: &dyn Fn() -> String,
+    ) -> EndChoice {
+        if number != 254 {
+            return EndChoice { number, custom: None };
+        }
+        match self.custom_end(used, size, sizes, who) {
+            Ok(custom) => EndChoice { number: 0, custom },
+            Err(Refusal::Budget) => EndChoice { number: 0, custom: None },
+            Err(_) => {
+                self.cx.note(SkipKind::CustomLineEnd, || format!("{}: a master as a line end", who()));
+                EndChoice { number: 4, custom: None }
+            }
+        }
+    }
+
+    /// The custom end `used` names, sized for a line of this weight at size class `size`: `Ok(None)` for an end that is not drawn (a weight of 0). The master's rows are counted before
+    /// they are built and charged as work (a custom end is built again for each line that holds it), and a master past the caps costs nothing (`custom_end::survey`).
+    fn custom_end(
+        &mut self,
+        used: Option<&std::sync::Arc<str>>,
+        size: i64,
+        sizes: (dash::Widths, f64),
+        who: &dyn Fn() -> String,
+    ) -> Result<Option<ends::CustomEnd>, Refusal> {
+        let (widths, page_scale) = sizes;
+        let master = used.and_then(|name| custom_end::master_named(self.cx.doc, name)).ok_or(Refusal::NotAnEnd)?;
+        let survey = custom_end::survey(self.cx, master)?;
+        if widths.weight <= 0.0 && !survey.scaled() {
+            return Ok(None);
+        }
+        let units = (survey.shapes as u64).saturating_mul(WORK_PER_DRAWN_SHAPE).saturating_add((survey.rows as u64).saturating_mul(WORK_PER_END_ROW));
+        if !self.charge(units, who) {
+            return Err(Refusal::Budget);
+        }
+        let form = custom_end::build(self.cx, &survey, self.limits.max_rows.saturating_sub(self.rows))?;
+        self.rows = self.rows.saturating_add(form.rows);
+        match form.sizing(size, widths.weight, page_scale)? {
+            Sizing::Nothing => Ok(None),
+            Sizing::By(factor) => form.sized(factor).map(Some).ok_or(Refusal::Unusable),
         }
     }
 
@@ -901,6 +970,12 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
             draw(self.canvas);
         }
     }
+}
+
+/// What an end of a line is drawn as: the number of a mark, or a custom end drawn from its master in place of one (`plan_ends`).
+struct EndChoice {
+    number: i64,
+    custom: Option<ends::CustomEnd>,
 }
 
 /// What the drawing of one shape needs to know about it.

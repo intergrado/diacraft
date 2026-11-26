@@ -729,17 +729,22 @@ fn plan_colours(doc: &Document, from: &Document, used: &BTreeSet<u32>, meter: &m
     Ok((map, added))
 }
 
-/// The faces of `names` that the target lacks and the source has, with the attributes they had.
+/// The faces of `names` that the target lacks and the source has, with the attributes they had. **Every face of a name comes, in the source's order**: the faces an `.odg` declares are several of
+/// one family, the name a cell calls a face by, and a text the master holds names one of them by the declaration's own name (GATE1622-CROSS-FONTNAME: one face of the name came, the last, and
+/// the names the other declarations gave were left with no face to be written).
 fn plan_faces(doc: &Document, from: &Document, names: &BTreeSet<String>) -> Result<Vec<FaceName>, Refusal> {
     let have: HashSet<&str> = doc.fonts.iter().map(|f| &*f.name_u).collect();
-    let source: HashMap<&str, &FaceName> = from.fonts.iter().map(|f| (&*f.name_u, f)).collect();
+    let mut source: HashMap<&str, Vec<&FaceName>> = HashMap::new();
+    for face in from.fonts.iter() {
+        source.entry(&*face.name_u).or_default().push(face);
+    }
     let mut added = Vec::new();
     for name in names {
         if have.contains(name.as_str()) {
             continue;
         }
-        if let Some(face) = source.get(name.as_str()) {
-            added.push((*face).clone());
+        if let Some(faces) = source.get(name.as_str()) {
+            added.extend(faces.iter().map(|face| (*face).clone()));
         }
     }
     // The cap is on what the copy adds: a drawing that already holds more faces than that can still take a master that names none of them.

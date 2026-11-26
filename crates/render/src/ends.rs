@@ -14,6 +14,9 @@
 //! * **The shaft** stops short of a solid or hollow mark, so that nothing shows through or past its back: 0.1 `S` inside the back of an opaque
 //!   solid mark, exactly at the back otherwise. The back is the rearmost solid or hollow part's. An open mark leaves the
 //!   stroke running on to the vertex.
+//! * **A custom end** (254) is a master the page names by `USE` (`custom_end.rs`). Here it is a [`CustomEnd`], its drawing already
+//!   sized and with its pin on the origin and its x axis along the way it points: [`plan`] puts the pin on the end vertex, turns the drawing to point out of the line there (or leaves it
+//!   upright), and for a turning end cuts the shaft where the drawing's back is. Any numbered end on the same path is as it was.
 //! * **Which paths.** Each open path of the stroke has its two ends; a closed path has none. A vertex that repeats at
 //!   an end (a `LineTo` onto the point the pen is on) is still the end: the mark sits on it, turned along the nearest segment that has a
 //!   direction. A path with no such segment has none to turn by, gets no marks, and the frame says so.
@@ -215,6 +218,25 @@ fn unit(size: i64, weight: f64) -> f64 {
     base + weight.max(0.0)
 }
 
+/// The share of the line's weight that a custom end's alignment box is tall at size class `size` (the project rule for the classes other than Medium): the unit `S` at that
+/// class over the unit at Medium (class 2), both at `weight`, so it is 1 at Medium. A class outside 0 to 6 is read as 2.
+pub(crate) fn box_share(size: i64, weight: f64) -> f64 {
+    let medium = unit(2, weight);
+    if medium > 0.0 { unit(size, weight) / medium } else { 1.0 }
+}
+
+/// A custom end, drawn and sized: the master's drawing in paper inches with **its pin on the origin and its x axis along the way the end points**, so that it is put
+/// on a line's end by one transform. The sections that paint a fill are one ring to be filled by the odd-crossings rule, the sections that paint an outline are strokes of the line's weight.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CustomEnd {
+    pub fill: BezPath,
+    pub strokes: BezPath,
+    /// The end keeps the page's orientation (`PatternFlags` 256) and does not trim the line.
+    pub upright: bool,
+    /// How far behind the pin the shaft is cut, in paper inches: where the drawing's back is for an end that turns with the line, and 0 for an upright one.
+    pub trim: f64,
+}
+
 /// What the line ends add to a stroke.
 pub(crate) struct Ends {
     /// The stroke path with each shaft shortened.
@@ -223,6 +245,8 @@ pub(crate) struct Ends {
     pub fill: BezPath,
     /// The strokes: open pieces and the outlines of hollow ones, to be stroked at the line weight.
     pub strokes: BezPath,
+    /// The sections of a custom end that are filled, to be filled by the odd-crossings rule as a shape's fill is (a hole in a section stays a hole).
+    pub fill_even_odd: BezPath,
 }
 
 /// What [`plan`] made of a stroke's path.
@@ -244,15 +268,19 @@ pub(crate) struct Request {
     pub weight: f64,
     /// Whether the line is see-through (the shaft stops exactly at the back then).
     pub see_through: bool,
+    /// A custom end drawn in place of the number at the begin or the end (`begin` or `end` is then 0).
+    pub begin_custom: Option<CustomEnd>,
+    pub end_custom: Option<CustomEnd>,
 }
 
 /// Plans the line ends of `path`, which is in paper inches.
 pub(crate) fn plan(path: &BezPath, request: &Request) -> Plan {
     let (end_art, begin_art) = (art(request.end), art(request.begin));
-    if end_art.is_none() && begin_art.is_none() {
+    let (end_custom, begin_custom) = (request.end_custom.as_ref(), request.begin_custom.as_ref());
+    if end_art.is_none() && begin_art.is_none() && end_custom.is_none() && begin_custom.is_none() {
         return Plan { ends: None, directionless: 0 };
     }
-    let mut out = Ends { shaft: BezPath::new(), fill: BezPath::new(), strokes: BezPath::new() };
+    let mut out = Ends { shaft: BezPath::new(), fill: BezPath::new(), strokes: BezPath::new(), fill_even_odd: BezPath::new() };
     let (mut any, mut directionless) = (false, 0usize);
     for sub in subpaths(path) {
         let open = match classify(&sub) {
@@ -272,14 +300,22 @@ pub(crate) fn plan(path: &BezPath, request: &Request) -> Plan {
         };
         let mut segs = sub;
         // The art for each end; an end is trimmed by the distance its mark's shaft stops at.
-        if let Some(art) = &end_art {
+        if let Some(custom) = end_custom {
+            any = true;
+            place_custom(custom, open.end, open.end_back, &mut out);
+            segs = trim_end(segs, custom.trim);
+        } else if let Some(art) = &end_art {
             let s = unit(request.end_size, request.weight);
             let stop = stop_distance(art, s, request);
             any = true;
             place(art, s, open.end, open.end_back, &mut out);
             segs = trim_end(segs, stop);
         }
-        if let Some(art) = &begin_art {
+        if let Some(custom) = begin_custom {
+            any = true;
+            place_custom(custom, open.begin, open.begin_back, &mut out);
+            segs = trim_start(segs, custom.trim);
+        } else if let Some(art) = &begin_art {
             let s = unit(request.begin_size, request.weight);
             let stop = stop_distance(art, s, request);
             any = true;
@@ -457,6 +493,17 @@ fn trim_start(segs: Vec<PathSeg>, mut distance: f64) -> Vec<PathSeg> {
     }
     out.extend(iter);
     out
+}
+
+/// Puts a custom end on the vertex `tip` of a path whose unit direction pointing back along the path from it is `back`: the pin on the vertex and the drawing pointing
+/// **out of the line**, away from its other vertices, at the begin as at the end; an upright end keeps the page's orientation, pointing right.
+fn place_custom(custom: &CustomEnd, tip: Point, back: Vec2, out: &mut Ends) {
+    // The drawing's x axis is the way it points, and its y axis that turned a quarter turn counterclockwise, so that the drawing is turned and never mirrored.
+    let ex = if custom.upright { Vec2::new(1.0, 0.0) } else { -back };
+    let ey = Vec2::new(-ex.y, ex.x);
+    let place = kurbo::Affine::new([ex.x, ex.y, ey.x, ey.y, tip.x, tip.y]);
+    out.fill_even_odd.extend((place * custom.fill.clone()).elements().iter().copied());
+    out.strokes.extend((place * custom.strokes.clone()).elements().iter().copied());
 }
 
 /// Draws `art` at `tip`, scaled by `s`, with its x axis along `back` (the unit direction pointing back along the path).
@@ -640,7 +687,7 @@ mod tests {
     /// The marks of `number` on one end of the straight line, in paper inches.
     fn marked(number: i64, at_begin: bool, size: i64, weight: f64, see_through: bool) -> Ends {
         let (begin, end) = if at_begin { (number, 0) } else { (0, number) };
-        let request = Request { begin, end, begin_size: size, end_size: size, weight, see_through };
+        let request = Request { begin, end, begin_size: size, end_size: size, weight, see_through, begin_custom: None, end_custom: None };
         plan(&straight(), &request).ends.expect("a mark is drawn")
     }
 

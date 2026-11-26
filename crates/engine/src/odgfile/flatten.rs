@@ -611,8 +611,11 @@ pub(crate) fn flatten_on(doc: &Document, held: Basis<'_>, before: &Flattened, wo
 
 /// The names the new groups of a page are given (review): a group's data, `ID` and link to a master are found in DiaCraft's
 /// document file by the group's `draw:name`, which must be unique among the page's groups, so each new group (those under a shape of `positions`, the top-level shapes
-/// the copy makes) that has no name, or has one another group of the page has, is named `Group_<ID>` (`Group_<ID>_2` and so on when a group of the page has that name
-/// already). A group with a name of its own that is unique keeps it. Nothing is done for a page with no new group; each shape of the page is a step.
+/// the copy makes) that has no name, or has one another group of the page has, **and that DiaCraft's document file carries data for** (a cell or a section of its own that
+/// the file's markup does not give a group, a link to a master, or an `ID` another shape names, `diacraft_odg::groups_needing_a_key`) is named `Group_<ID>` (`Group_<ID>_2` and so on when
+/// a group of the page has that name already). **A group that holds no data stays as it is**: a `draw:g` the file had with no name, which only its members fill, is written with none, as the
+/// file had it, and a group a person makes with nothing on it needs no key either. A group with a name of its own that is unique keeps it. Nothing is done for a page with no new group; each
+/// shape of the page is a step, and so is each of the walk that finds the groups that need a name.
 fn new_group_names(page: &diacraft_doc::Page, positions: &[usize], work: &mut Work) -> Result<HashMap<u32, Arc<str>>, String> {
     let starved = || "there is not enough memory to save the new shapes".to_owned();
     let mut names: HashMap<u32, Arc<str>> = HashMap::new();
@@ -639,10 +642,16 @@ fn new_group_names(page: &diacraft_doc::Page, positions: &[usize], work: &mut Wo
         stack.try_reserve(shape.children.len()).map_err(|_| starved())?;
         stack.extend(shape.children.iter().rev().map(|c| (c, new)));
     }
+    // Which groups need a key at all: one that holds no data is left as it is. The walk is charged here, in the steps of this copy, and past the room it is refused as any other is.
+    let keys = diacraft_odg::groups_needing_a_key(page, work.cap.saturating_sub(work.steps));
+    work.tick(keys.steps)?;
+    if keys.over {
+        work.tick(u64::MAX)?;
+    }
     let mut taken: HashSet<String> = HashSet::new();
     for (id, name, new) in groups {
         let unique = name.is_some_and(|n| !n.is_empty() && counts.get(n) == Some(&1));
-        if !new || unique {
+        if !new || unique || !keys.ids.contains(&id) {
             continue;
         }
         let mut candidate = format!("Group_{id}");
@@ -801,6 +810,21 @@ impl Flattener<'_, '_, '_> {
         })
     }
 
+    /// The cell of a line end that is a custom one (254) with the `USE("<master>")` it resolves to, and the value 254: the writer draws a marker of a master it knows by its name (DiaCraft's
+    /// filled diamond, `diacraft_odg` `markers.rs`), and a file read again has the formula on the shape as it has it on its master, so that the end is still drawn from the master
+    /// and not as number 4. Any other cell, a formula that is no `USE` and one longer than a name needs are the constant they were.
+    fn with_use(&self, at: &SheetRef, name: &str, cell: Cell) -> Cell {
+        const LONGEST_USE: usize = 512;
+        if cell.value.as_ref().and_then(Value::number) != Some(254.0) {
+            return cell;
+        }
+        let Some(found) = self.look.res.resolve(at, &CellAddr::direct(name)) else { return cell };
+        let Some(FormulaSlot::Local(formula)) = found.formula.cell.map(|c| &c.formula) else { return cell };
+        let source = formula.source.trim_start();
+        let is_use = source.len() <= LONGEST_USE && source.get(..4).is_some_and(|head| head.eq_ignore_ascii_case("USE("));
+        if is_use { Cell::read(Some(&formula.source), Some("254"), cell.unit.as_deref(), None, &mut 64) } else { cell }
+    }
+
     /// The pin of a shape that turns about its centre, as the formula the reader gives it (`Width*0.5`, `Height*0.5`): the copy holds it so, and the writer finds the
     /// pin what the file will give back and carries nothing of it in DiaCraft's extension. A pin anywhere else stays the constant it is.
     fn centred(&self, at: &SheetRef, cell: Cell, size: &str, work: &mut Work) -> Result<Cell, String> {
@@ -873,7 +897,7 @@ impl Flattener<'_, '_, '_> {
             for (arrow, size) in ARROW_CELLS {
                 if self.num(at, arrow, work)? != 0.0 {
                     if self.own(at, carried, arrow, work)? {
-                        put(arrow, self.number(at, arrow, work)?);
+                        put(arrow, self.number(at, arrow, work)?.map(|cell| self.with_use(at, arrow, cell)));
                     }
                     if self.own(at, carried, size, work)? {
                         put(size, self.number(at, size, work)?);

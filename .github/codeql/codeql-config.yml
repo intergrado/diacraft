@@ -1,0 +1,29 @@
+# What CodeQL leaves out (the owner, 2026-11-26), for `.github/workflows/codeql.yml`: test and fuzz code. Tests may unwrap, panic, print and hold made-up keys
+# (AGENTS.md); the default setup flagged 34 alerts there, every one dismissed as used in tests. Everything else is scanned: `crates/*/src`, `apps/*/src`, `xtask/src`, the
+# scripts of the website and of the web app, and the workflows.
+#
+# The filters are CodeQL's: `*` is a run of characters in one name, `**` stands alone between slashes or at an end, and the characters `? + [ ] !` are matched as they are, so none is
+# used. xtask/tests/it/codeql.rs holds them: every test and fuzz source is skipped, no other file is, each filter names a file, and each in-source test module skipped by its name
+# is declared under `#[cfg(test)]`. A test module of another name, and a `#[cfg(test)] mod tests { }` block inside a shipped file, are scanned: a path cannot skip them.
+
+name: "DiaCraft CodeQL configuration"
+
+paths-ignore:
+  # The integration tests of each crate and app, and of xtask: the general filter, and the places they are in, listed too so that no reading of `**` can leave one out.
+  - "**/tests/**"
+  - "xtask/tests/**"
+  - "apps/*/tests/**"
+  - "crates/*/tests/**"
+  # The test modules inside `src` that are folders (`apps/diacraft-cli/src/oracle/tests`, `crates/engine/src/stencil/bring/tests`).
+  - "apps/*/src/**/tests/**"
+  - "crates/*/src/**/tests/**"
+  # The test modules inside `src` that are files, by the names the project gives them (`tests.rs`, `batch_tests.rs`); each is declared under `#[cfg(test)]`.
+  - "**/tests.rs"
+  - "**/*_tests.rs"
+  # The fuzz crates, which hold the fuzz targets and the generators of their inputs.
+  - "**/fuzz/**"
+  - "crates/*/fuzz/**"
+  # The test-support crate (hostile values, ready-made documents and sessions): a dev-dependency of the others and published by none.
+  - "crates/testkit/**"
+  # The inputs that property tests keep from their failures: data, not code, and each sits beside the tests that read it.
+  - "**/proptest-regressions/**"

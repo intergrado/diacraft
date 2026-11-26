@@ -15,8 +15,9 @@
 //! * **Centre**: `draw:marker-start-center` and `-end-center` are `true` for the marks centres on the vertex (9, 10, 11, 20, 21 and 42), and
 //!   written by no other.
 //! * **The art is ours**: [`super::marker_art`] draws it, one path of the union of the pieces, the same at every size class that gives one band.
-//!   **A custom end** (254) is a master the file has no place for: number 4's marker is written for it and the cell is carried by DiaCraft's extension (   [`drawn_as`]);
-//!   a number past 45 and a size class outside 0 to 6 (read back as 2) have no art, and their cells are carried with no marker. A line weight past
+//!   **A custom end** (254) is a master the file has no place for: number 4's marker is written for it and the cell is carried by DiaCraft's extension (   [`drawn_as`]),
+//!   **but DiaCraft's own filled diamond** (a custom end that names the master `Filled Diamond`) is a marker of its own, [`DIAMOND`]: the diamond, as wide as ten
+//!   boxes of the master are tall ([`plan`]), with the cell carried all the same; a number past 45 and a size class outside 0 to 6 (read back as 2) have no art, and their cells are carried with no marker. A line weight past
 //!   [`MOST_WEIGHT_PT`] is a width no file can hold: a line end on it is refused in words. The 1,024-byte bound on a path is on the markers drawn here
 //!   ([`marker_art::MOST_PATH_BYTES`]); a held marker is used whatever its path.
 
@@ -28,7 +29,9 @@ use super::marker_art;
 use super::scan::{CommonStyles, MarkerDef, PartKind, scan_part};
 use super::{WriteError, WriteWork};
 use crate::limits::Limits;
-use crate::read::props::{BAND_SUFFIX, MARKER_PREFIX, SIZE_BASES, parse_marker, spread};
+use crate::read::props::{BAND_SUFFIX, MARKER_PREFIX, SIZE_BASES, diamond_width, parse_marker, spread};
+
+pub(crate) use crate::read::props::DIAMOND;
 
 /// The prefix of DiaCraft's own marker names.
 pub(crate) const PREFIX: &str = MARKER_PREFIX;
@@ -91,10 +94,6 @@ pub(crate) struct Art {
 /// The words of a refusal of a marker the art could not be made for (every number and band class is built by a test, so this is not met).
 const WORDS_ART: &str = "a line end whose marker could not be drawn";
 
-/// The words of a refusal of a custom line end where no tier 2 can carry its cell: it is a master drawn at the end, which one marker cannot
-/// be, and number 4's marker written in its place would lose the custom end when the file is opened again.
-pub(crate) const WORDS_CUSTOM: &str = "a custom line end (number 254, a master drawn at the end: a marker is one path in the line's colour, and saving it as an ordinary triangle would lose the custom end when the file is opened again)";
-
 /// The words of a refusal of a number that is no line end.
 const WORDS_NUMBER: &str = "a line end number that is not 0 to 45";
 
@@ -103,6 +102,10 @@ pub(crate) const WORDS_SIZE: &str = "a line end size that is not 0 to 6 (the fil
 
 /// The art of marker `key`, or the words of why there is none. `steps` counts the work.
 pub(crate) fn art(key: Key, steps: &mut u64) -> Result<Art, &'static str> {
+    if key.number == DIAMOND {
+        let diamond = marker_art::filled_diamond();
+        return Ok(Art { view_box: diamond.view_box, d: diamond.d, centred: false });
+    }
     let built = marker_art::build(key.number, key.band, steps).ok_or(WORDS_ART)?;
     Ok(Art { view_box: built.view_box, d: built.d, centred: marker_art::is_centred(key.number) })
 }
@@ -160,17 +163,22 @@ pub(crate) struct Plan {
 }
 
 /// The number whose marker is drawn for the end `number`: the custom end (254) is drawn as number 4, the cell itself being tier 2 (the reader rebuilds 4
-/// from the marker, so a save that wrote no cell would lose the custom end); every other number is its own.
+/// from the marker, so a save that wrote no cell would lose the custom end); every other number is its own. DiaCraft's filled diamond is [`DIAMOND`], which a caller that knows the
+/// master by its name asks for ([`crate::write::stylemap::StyleEdit::diamonds`]).
 pub(crate) fn drawn_as(number: u32) -> u32 {
     if number == 254 { 4 } else { number }
 }
 
 /// The marker and the width of the end of `number` at size class `class` and line weight `weight_pt`: the spread times `S`, in points. The
-/// words of a refusal for a number that is no line end (254, the custom end, in words of its own), for a class the specification gives no base for, and for a
-/// weight that is no number from 0 to [`MOST_WEIGHT_PT`] (so the width and the band class are always finite and the width at most seven whole digits).
+/// words of a refusal for a number that is no line end, for a class the specification gives no base for, and for a weight that is no number from 0 to [`MOST_WEIGHT_PT`] (so
+/// the width and the band class are always finite and the width at most eight whole digits). [`DIAMOND`] is the filled diamond: no band, and the width of [`diamond_width`].
 pub(crate) fn plan(number: u32, class: u32, weight_pt: f64) -> Result<Plan, &'static str> {
-    if number == 254 {
-        return Err(WORDS_CUSTOM);
+    if number == DIAMOND {
+        let base = usize::try_from(class).ok().and_then(|c| SIZE_BASES.get(c)).copied().ok_or(WORDS_SIZE)?;
+        if !weight_in_range(weight_pt) {
+            return Err(WORDS_WEIGHT);
+        }
+        return Ok(Plan { key: Key { number, band: 0 }, width: diamond_width(base, weight_pt) });
     }
     let spread = spread(number).ok_or(WORDS_NUMBER)?;
     let base = usize::try_from(class).ok().and_then(|c| SIZE_BASES.get(c)).copied().ok_or(WORDS_SIZE)?;

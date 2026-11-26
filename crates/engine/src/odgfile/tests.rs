@@ -11,7 +11,7 @@ use diacraft_doc::{Cell, CellName, Document, Master, Row, Section, Shape, Value}
 use serde_json::json;
 
 use super::flatten::{
-    Flat, Flattened, MAX_ROWS, MAX_STEPS, OBJECT_NOT_IN_FILE, Work, constant_colour, flatten, flatten_counted, is_object, without_ids,
+    Flat, Flattened, MAX_ROWS, MAX_STEPS, OBJECT_NOT_IN_FILE, Work, constant_colour, flatten, flatten_counted, flatten_model, is_object, without_ids,
 };
 use crate::Session;
 
@@ -2323,6 +2323,39 @@ fn a_new_group_with_no_name_or_a_name_another_group_has_is_named_after_its_id_in
     let (flat, with_one) = flat_of(&s, &Flattened::default());
     assert!(flat.unwrap().doc.is_some());
     assert!(with_one > plain, "{plain} {with_one}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// **A group that holds no data is not named** (it needs no key: DiaCraft's document file carries nothing for it), so a `draw:g` the file had with no name comes back with none;
+/// one that holds a cell of its own, no connection points (a group made in DiaCraft, or of a VSDX drawing), a link to a master or an `ID` a formula or a glue names is named as before.
+#[test]
+fn a_group_the_file_had_that_holds_no_data_is_left_with_no_name_and_one_that_holds_data_is_named() {
+    let two = rectangles(2);
+    let names_of = |s: &Session| -> Vec<Option<String>> {
+        let flat = flatten_model(s.document().unwrap(), &Flattened::default(), u64::MAX).unwrap();
+        let copy = flat.doc.as_ref().expect("a group the model writer finds no data of the file's on is new to it: flattened");
+        copy.pages.get(0).unwrap().shapes.iter().filter(|x| !x.children.is_empty()).map(|g| g.name_u.as_deref().map(str::to_owned)).collect()
+    };
+    let (mut s, dir) = opened_with(&drawing_of(&format!("<draw:g>{two}</draw:g><draw:g>{two}</draw:g>")));
+    assert_eq!(names_of(&s), [None, None], "a group of the file with no name and nothing of its own: none is made up");
+    // A cell of its own on the second: it is named after its `ID`; the first still is not.
+    let ids: Vec<u32> = s.document().unwrap().pages.get(0).unwrap().shapes.iter().map(|x| x.id).collect();
+    s.edit("Test data on a group", |doc: &mut Document| {
+        let page = Arc::make_mut(doc.pages.get_mut(0).unwrap());
+        let group = Arc::make_mut(page.shapes.get_mut(1).unwrap());
+        Arc::make_mut(&mut group.sheet).cells.insert(CellName::new("Cost"), inches("1"));
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(names_of(&s), [None, Some(format!("Group_{}", ids[1]))]);
+    // A link to a master is data too.
+    s.edit("Test a master link", |doc: &mut Document| {
+        let page = Arc::make_mut(doc.pages.get_mut(0).unwrap());
+        Arc::make_mut(page.shapes.get_mut(0).unwrap()).master = Some(77);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(names_of(&s), [Some(format!("Group_{}", ids[0])), Some(format!("Group_{}", ids[1]))]);
     let _ = std::fs::remove_dir_all(dir);
 }
 

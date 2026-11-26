@@ -68,7 +68,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             ["Container Format", "Container Styles"],
             None,
             "ids: array of whole numbers, the containers; style: text, one of the ids in container.styles: its frame, tint, heading strip and the heading's alignment replace what the container had, \
-             and its size, heading text, members and settings stay; page: whole number, optional, the id of the page (default: the first page holding all the shapes)",
+             and its size, heading text, members and settings stay (an instance of a master with no style of the gallery keeps its master's look and is refused in words); page: whole number, optional, the id of the page (default: the first page holding all the shapes)",
             has_document,
             style
         ),
@@ -77,7 +77,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "Heading Style",
             ["Container Format", "Container Styles"],
             None,
-            "ids: array of whole numbers, the containers (made from the gallery); side: text, optional, top, right, bottom or left, where the heading sits; \
+            "ids: array of whole numbers, the containers (made from the gallery, an instance of a master is refused in words); side: text, optional, top, right, bottom or left, where the heading sits; \
              rotate: true, optional, instead of side, moves the heading one side on, clockwise (Rotate Heading); \
              page: whole number, optional, the id of the page (default: the first page holding all the shapes)",
             has_document,

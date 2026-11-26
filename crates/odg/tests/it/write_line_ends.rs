@@ -382,6 +382,54 @@ fn odg_styles_a_line_of_the_file_set_to_the_custom_end_is_written_as_number_4_s_
     }
 }
 
+/// For DiaCraft's own custom end: a new line whose `BeginArrow` or `EndArrow` is `USE("Filled Diamond")` (value 254) is written with **its own marker**, the diamond
+/// (`DiaCraft_20_end_20_254`, a box 1000 by 2000, its tip at the middle of the top side where LibreOffice puts the line's end), as wide as the box is tall times 10: the weight times
+/// the unit over the Medium unit, 7.5 pt at 0.75 pt and size 2 and 10.8028 pt at size 4. The cell's formula and its value 254 are carried as tier 2 (a marker alone would read
+/// back as number 4), the model reads back as it was, the size class from the width, and a second save is no edit. A custom end that names any other master is number 4's marker.
+#[test]
+fn odg_styles_the_filled_diamond_is_written_as_its_own_marker_and_its_cell_is_carried() {
+    let o = open(&base());
+    let id = o.index.next_id(0).unwrap();
+    for (begin, size, width) in [(false, 2.0, "7.5pt"), (true, 2.0, "7.5pt"), (false, 4.0, "10.8028pt")] {
+        let mut c = arrowed(id, None, None, 0.75);
+        let (arrow, size_cell, local) = if begin { ("BeginArrow", "BeginArrowSize", "start") } else { ("EndArrow", "EndArrowSize", "end") };
+        Arc::make_mut(&mut c.sheet)
+            .cells
+            .insert(CellName::new(arrow), Cell::read(Some(r#"USE("Filled Diamond")"#), Some("254"), None, None, &mut 1_000));
+        set(&mut c, size_cell, size);
+        let mut doc = o.doc.clone();
+        push_shape(&mut doc, c);
+        let saved = real(&doc, &o.bytes, &o.index).unwrap_or_else(|e| panic!("begin {begin} size {size}: {e}"));
+        let content = part(&saved.bytes, "content.xml");
+        let what = format!("begin {begin} size {size}: {content}");
+        assert_eq!(attr(&content, &format!("draw:marker-{local}")).as_deref(), Some("DiaCraft_20_end_20_254"), "{what}");
+        assert_eq!(attr(&content, &format!("draw:marker-{local}-width")).as_deref(), Some(width), "{what}");
+        assert!(!content.contains(&format!("marker-{local}-center")), "{what}");
+        let held = markers(&saved.bytes);
+        assert_eq!(held.len(), 1, "{what}: {held:?}");
+        assert!(
+            held[0].contains(r#"draw:name="DiaCraft_20_end_20_254" draw:display-name="DiaCraft end 254" svg:viewBox="0 0 1000 2000" svg:d="M 500 0 L 1000 1000 L 500 2000 L 0 1000 Z""#),
+            "{what}: {}",
+            held[0]
+        );
+        let back = open_bytes(saved.bytes.clone());
+        let shape = back.doc.pages.get(0).unwrap().shapes.get(1).unwrap();
+        let cell = shape.sheet.cell(arrow).cloned().expect("the cell reads back");
+        assert_eq!(cell.value.as_ref().and_then(diacraft_doc::Value::number), Some(254.0), "{what}");
+        assert_eq!(cell.formula.text(), Some(r#"USE("Filled Diamond")"#), "{what}: the formula, verbatim");
+        assert_eq!(num_of(shape, size_cell), size, "{what}: the size class");
+        let again = real(&back.doc, &saved.bytes, &back.index).unwrap();
+        assert!(!again.edited && again.bytes == saved.bytes, "{what}: a second save is no edit");
+    }
+    // Another master's name is number 4's marker, as it was.
+    let mut c = arrowed(id, None, None, 0.75);
+    Arc::make_mut(&mut c.sheet).cells.insert(CellName::new("EndArrow"), Cell::read(Some(r#"USE("Fancy end")"#), Some("254"), None, None, &mut 1_000));
+    let mut doc = o.doc.clone();
+    push_shape(&mut doc, c);
+    let saved = real(&doc, &o.bytes, &o.index).unwrap();
+    assert_eq!(attr(&part(&saved.bytes, "content.xml"), "draw:marker-end").as_deref(), Some("DiaCraft_20_end_20_4"));
+}
+
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // Upkeep, reuse by name and edits of lines the file has.
 

@@ -1124,9 +1124,10 @@ fn fnv(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
 }
 
-/// The parts of the control's visit and their hashes on `5ce74a6e` (before round 2): the visit writes no document file.
+/// The parts of the control's visit and their hashes: the visit writes no document file. The hash of `styles.xml` was `b2c5995fe1947fd1` on `5ce74a6e` (before round 2) and until a later change,
+/// which writes the style's weight as the file spelled it (`fo:font-weight="normal"` alone, and not with the four attributes of its group that the file did not state).
 const CONTROL_PARTS: [(&str, Option<&str>); 3] =
-    [("styles.xml", Some("b2c5995fe1947fd1")), ("content.xml", Some("5bdea246fc9f3396")), ("DiaCraft/document.xml", None)];
+    [("styles.xml", Some("df64c943396ab4fa")), ("content.xml", Some("5bdea246fc9f3396")), ("DiaCraft/document.xml", None)];
 
 /// The files of the LibreOffice check of round 2 (run by hand): `SAFEF2_LO_DIR` gets each vector visited through `.diacraft`.
 #[test]

@@ -506,6 +506,24 @@ pub(crate) fn is_custom_end(name: &str, cell: &Cell) -> bool {
     matches!(name, "BeginArrow" | "EndArrow") && cell.value.as_ref().and_then(diacraft_doc::Value::number) == Some(254.0)
 }
 
+/// The `NameU` of the built-in master that is DiaCraft's filled diamond: a custom end whose `USE` names it is written as the diamond's own marker.
+pub(crate) const FILLED_DIAMOND: &str = "Filled Diamond";
+
+/// Whether the cell `name` is a custom line end (254) whose formula is `USE("Filled Diamond")`, DiaCraft's own filled diamond: the writer draws a marker of its form for it and not number
+/// 4's. The name is the master's `NameU`, as `calc` finds a master by it; another master of that name is drawn as the diamond in another program, and the cells
+/// that the file carries say the true one in DiaCraft.
+pub(crate) fn is_filled_diamond(name: &str, cell: &Cell) -> bool {
+    use diacraft_formula::Expr;
+    if !is_custom_end(name, cell) {
+        return false;
+    }
+    let FormulaSlot::Local(formula) = &cell.formula else { return false };
+    match formula.ast.as_ref() {
+        Ok(Expr::Call(call)) if call.is("USE") => matches!(call.args.first(), Some(Some(Expr::Str(used))) if &**used == FILLED_DIAMOND),
+        _ => false,
+    }
+}
+
 /// The cells whose native output is one style attribute with a value that stays what it is under a LibreOffice save: a number that is a whole number, or a
 /// colour, so that no rounding LibreOffice does (lengths and widths to a thousandth of a centimetre) reaches them.
 pub(crate) const CELLS: [&str; 11] = [

@@ -748,9 +748,10 @@ pub(crate) fn for_sheet(r: &mut Reader, set: &StyleSet, at: usize, sheet: &Sheet
 }
 
 /// The held style of a paragraph or a run: the name it named (`None` is held too), the stamp of its row, and the values its automatic style gives, each stamped by its group of the
-/// row. A `row` that the sheet does not hold (a row with no cell of its own is no row) stamps as an empty one. Charged by the caller.
-fn text_style(set: &StyleSet, style: Option<usize>, name: Option<std::sync::Arc<str>>, row: &Row) -> OdfTextStyle {
-    let held = style
+/// row, and `spelled`, the values of what the style stated that the cells say otherwise ([`super::spelled`]). A `row` that the sheet does not hold (a row with no cell of
+/// its own is no row) stamps as an empty one. Charged by the caller.
+fn text_style(set: &StyleSet, style: Option<usize>, name: Option<std::sync::Arc<str>>, row: &Row, spelled: Vec<HeldStyleValue>) -> OdfTextStyle {
+    let mut held = style
         .and_then(|at| set.get(at))
         .map(|s| {
             s.text_templates
@@ -764,6 +765,7 @@ fn text_style(set: &StyleSet, style: Option<usize>, name: Option<std::sync::Arc<
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    held.extend(spelled);
     OdfTextStyle { name, stamp: Some(stamp_text_row(row)), held }
 }
 
@@ -786,6 +788,7 @@ pub(crate) fn text_odf(r: &mut Reader, set: &StyleSet, sheet: &Sheet, paras: &[P
     let row_of = |section: &str, ix: u32| -> &Row {
         sheet.section(&SectionKey::new(section, None)).and_then(|s| s.row(&RowKey::Ix(ix))).map_or(&empty, |row| &**row)
     };
+    let mut spelling = super::spelled::Spelling::default();
     let mut paragraphs = Vec::with_capacity(paras.len());
     for para in paras {
         let mut runs = Vec::with_capacity(para.spans.len());
@@ -793,7 +796,16 @@ pub(crate) fn text_odf(r: &mut Reader, set: &StyleSet, sheet: &Sheet, paras: &[P
             // A run that is not a `text:span` names no style.
             let style = if span.span {
                 let row = span.row.map_or(&empty, |ix| row_of("Character", ix));
-                text_style(set, span.style, span.name.clone(), row)
+                let spelled = match span.style {
+                    Some(at) => {
+                        let values = spelling.run(r, set, at, span.row, row)?;
+                        let (count, values) = (values.len(), values.to_vec());
+                        r.take_items(count)?;
+                        values
+                    }
+                    None => Vec::new(),
+                };
+                text_style(set, span.style, span.name.clone(), row, spelled)
             } else {
                 OdfTextStyle::default()
             };
@@ -804,8 +816,15 @@ pub(crate) fn text_odf(r: &mut Reader, set: &StyleSet, sheet: &Sheet, paras: &[P
                 element: span.element.clone(),
             });
         }
+        let own = para.own_row.map(|ix| (ix, row_of("Character", ix)));
+        let spelled = {
+            let values = spelling.paragraph(r, set, para.style, own)?;
+            let (count, values) = (values.len(), values.to_vec());
+            r.take_items(count)?;
+            values
+        };
         paragraphs.push(OdfParagraph {
-            style: text_style(set, para.style, para.name.clone(), row_of("Paragraph", para.row)),
+            style: text_style(set, para.style, para.name.clone(), row_of("Paragraph", para.row), spelled),
             characters: Some(para.characters),
             runs,
             element: para.element.clone(),
@@ -815,7 +834,8 @@ pub(crate) fn text_odf(r: &mut Reader, set: &StyleSet, sheet: &Sheet, paras: &[P
     Ok(Some(OdfText { kept: diacraft_doc::Kept::default(), paragraphs }))
 }
 
-/// How many held values the style at `style` gives a paragraph or a run.
+/// How many held values the style at `style` gives a paragraph or a run by its templates (the values of what it stated that the cells say otherwise are charged where they are made,
+/// [`super::spelled::Spelling`]).
 fn held_count(set: &StyleSet, style: Option<usize>) -> usize {
     style.and_then(|at| set.get(at)).map_or(0, |s| s.text_templates.len())
 }

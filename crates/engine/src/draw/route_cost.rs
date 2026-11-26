@@ -351,10 +351,13 @@ fn placing_and_routing_ends_on_a_shape_of_ten_thousand_points_reads_its_points_o
 /// every route whole. Against the yardstick of the same page with routes of a hand path's six rows.
 #[test]
 fn the_jumps_of_one_connector_routed_read_the_routes_of_the_page_within_a_budget() {
+    // The connector added is glued to a shape of its own (D) and to B: moving D moves no end of the 10,000 fixed routes, which a move of A would follow, each a try, and the
+    // tries of the edit are counted in the order of the `ID`s (the crowd's come first): only the one connector is routed, as the test means.
     let page = |route: Route| {
-        let (mut s, a, b, _) = crowded(CROWD, route, "never");
-        run(&mut s, "connector.add", json!({"from": {"id": a, "point": 1}, "to": {"id": b, "point": 1}}));
-        (s, a)
+        let (mut s, _, b, _) = crowded(CROWD, route, "never");
+        let d = drop_rectangle(&mut s, 6.0, 9.0);
+        run(&mut s, "connector.add", json!({"from": {"id": d, "point": 2}, "to": {"id": b, "point": 1}}));
+        (s, d)
     };
     let (mut s, a) = page(Route::Hand);
     let yardstick = moved(&mut s, a, "one connector routed beside 10,000 of 6 rows");
@@ -397,7 +400,9 @@ fn the_floor_of_a_move_does_not_grow_with_the_rows_of_a_route_its_connectors_sha
         crowded.priced,
         yardstick.priced
     );
-    assert_eq!(crowded.attempted, 0);
+    // The ends of the connectors moved with A, and a route whose ends moved is followed square, which is a try; a route of 4,000 rows is not read, so it
+    // is not followed and not written (`a_fixed_route_of_more_rows_than_the_crossing_test_reads_is_not_followed_and_not_read`). Before, a connector set never to reroute was no try.
+    assert_eq!((crowded.attempted, crowded.routed), (CROWD as usize, 0));
 }
 
 /// Finding 5: a plain move has a budget of tries for the edit, as a refit has: of the connectors past it the ends follow their shapes, the routes stay as they were,
@@ -453,6 +458,78 @@ fn the_routings_of_one_edit_share_its_tries_and_say_what_they_left() {
     assert_eq!(super::settle::ATTEMPTED.with(std::cell::Cell::get), 8);
 }
 
+/// A fixed route whose ends moved is **followed square**, and the follow is a **try**, counted as the crossing test is. A move of the shape
+/// ten thousand connectors set to reroute never are glued to tries each once, writes each route once, searches the page for no shape, and passes over the page's `Connect` rows once;
+/// a route of more rows than the crossing test reads is not read at all and is not written. Against the yardstick of the same move with the connectors set freely, which are each
+/// routed again.
+#[test]
+fn following_ten_thousand_fixed_routes_is_a_try_each_and_searches_the_page_for_none() {
+    let (mut s, a, _, _) = crowded(CROWD, Route::Hand, "freely");
+    let routed_again = moved(&mut s, a, "10,000 connectors of 6 rows, freely");
+    drop(s);
+    let (mut s, a, _, ids) = crowded(CROWD, Route::Hand, "never");
+    let connects = s.document().unwrap().page(1).unwrap().connects.len();
+    let followed = moved(&mut s, a, "10,000 connectors of 6 rows, never");
+    assert_eq!((followed.attempted, followed.routed), (CROWD as usize, CROWD as usize), "every fixed route is a try, and is followed");
+    assert!(
+        followed.finds <= routed_again.finds,
+        "the follow searched the page: {} shapes visited, {} routing them again",
+        followed.finds,
+        routed_again.finds
+    );
+    assert!(followed.connects <= connects, "the follow passed over {} `Connect` rows, the page holds {connects}", followed.connects);
+    // Each route is read twice, within the rows of a hand path: as it was (its six rows) to follow it, and as it is now to see whether its rows already give the followed route
+    // (a file's one-leg route with `Width*1`); and the jump pass reads the routes of at most one more connector than take part in the jumps.
+    let jumps = (super::MAX_JUMP_PARTICIPANTS as u64 + 1) * 8;
+    let most = routed_again.rows + 2 * u64::from(CROWD) * 6 + jumps;
+    assert!(followed.rows <= most, "the follow merged {} rows, {} routing them again, at most {most}", followed.rows, routed_again.rows);
+    // The route is followed square: the first corner went up with the begin, the rest stayed (the routes of the copies are one hand path, jogging up an inch).
+    for id in [ids[0], ids[ids.len() / 2], ids[ids.len() - 1]] {
+        assert_eq!(own_route_rows(s.document().unwrap(), id), 6, "connector {id} keeps its six corners");
+    }
+}
+
+/// The follow reads **at most the crossing test's rows** of the route it had, and a route of more is not read, not followed and not written: it keeps the rows it has, as a route past
+/// the test's rows does for the test. A try all the same, so the edit's budget counts it.
+#[test]
+fn a_fixed_route_of_more_rows_than_the_crossing_test_reads_is_not_followed_and_not_read() {
+    let (mut s, a, _, _) = crowded(CROWD, Route::Hand, "never");
+    let yardstick = moved(&mut s, a, "10,000 connectors of 6 rows, never");
+    drop(s);
+    let rows = u32::try_from(super::MAX_CROSSING_ROWS).unwrap() + 1;
+    let (mut s, a, _, ids) = crowded(CROWD, Route::Zigzag(rows), "never");
+    let long = moved(&mut s, a, &format!("10,000 connectors of {rows} rows, never"));
+    assert_eq!((long.attempted, long.routed), (CROWD as usize, 0), "tried, and none is followed or written");
+    assert!(long.rows <= yardstick.rows, "a route past the rows is not read: {} rows merged, {} for routes of six", long.rows, yardstick.rows);
+    for id in [ids[0], ids[ids.len() - 1]] {
+        assert_eq!(own_route_rows(s.document().unwrap(), id), rows as usize, "connector {id} keeps its rows");
+    }
+}
+
+/// A move that moves no end a connector is glued to is no try for a fixed route set to never: a connector whose end stayed (the shape was resized about the glued point) costs
+/// nothing and is not written.
+#[test]
+fn a_fixed_route_whose_ends_did_not_move_is_no_try() {
+    let (mut s, a, _, _) = crowded(CROWD, Route::Hand, "never");
+    // A is wider to the right, its right point (3, glued) where the points of its right side are: the corner at (0, 0) of A's frame is its lower left, (2.25, 3.5).
+    let cost = counted(&mut s, "A wider to the left", "shape.resize", json!({"id": a, "x": 2.25, "y": 3.5, "width": 1.5, "height": 1.0}));
+    assert_eq!((cost.attempted, cost.routed), (0, 0), "no end moved: no try and no write");
+}
+
+/// The tries are the edit's budget: of the fixed routes past it the ends follow and the rows stay, and the answer says them, as it says the connectors it did not route again.
+#[test]
+fn a_move_follows_at_most_the_budget_of_fixed_routes_and_says_the_connectors_it_left() {
+    let budget = super::MAX_ROUTED_PER_EDIT;
+    let extra = 100_u32;
+    let (mut s, a, _, ids) = crowded(u32::try_from(budget).unwrap() + extra, Route::Hand, "never");
+    let cost = moved(&mut s, a, "a move of the shape 10,100 fixed connectors are glued to");
+    assert_eq!(cost.attempted, budget, "the tries of the edit");
+    let (listed, unlisted) = said_left(&cost.answer);
+    assert_eq!(listed.len() as u64 + unlisted, u64::from(extra), "every connector left is said: {}", cost.answer);
+    let last = *ids.last().unwrap();
+    assert!(listed.iter().all(|l| l["id"].as_u64().is_some_and(|id| id > u64::from(last - extra))), "{listed:?}");
+}
+
 // ---- the same pages, timed ----
 
 /// The time of a move of shape `id` up half an inch.
@@ -504,10 +581,13 @@ fn timed_ends_on_a_shape_of_ten_thousand_points_against_one_of_four() {
 #[test]
 #[ignore = "a timing, run by hand"]
 fn timed_jumps_beside_ten_thousand_long_routes_against_short_ones() {
+    // The connector added is glued to a shape of its own (D) and to B: moving D moves no end of the 10,000 fixed routes, which a move of A would follow, each a try, and the
+    // tries of the edit are counted in the order of the `ID`s (the crowd's come first): only the one connector is routed, as the test means.
     let page = |route: Route| {
-        let (mut s, a, b, _) = crowded(CROWD, route, "never");
-        run(&mut s, "connector.add", json!({"from": {"id": a, "point": 1}, "to": {"id": b, "point": 1}}));
-        (s, a)
+        let (mut s, _, b, _) = crowded(CROWD, route, "never");
+        let d = drop_rectangle(&mut s, 6.0, 9.0);
+        run(&mut s, "connector.add", json!({"from": {"id": d, "point": 2}, "to": {"id": b, "point": 1}}));
+        (s, d)
     };
     for route in [Route::Line(4_000), Route::Zigzag(4_000)] {
         let (mut s, a) = page(Route::Hand);

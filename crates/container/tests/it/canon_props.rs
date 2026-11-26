@@ -27,9 +27,12 @@ const RULES: Rules = Rules {
     ignored_attributes: &[],
     ignored_children: &[],
     ignored_when_extra: &[],
+    twinned: &[],
     free_names: &[],
     placed: &[],
     aliases: &[],
+    identified_by: &[],
+    doctype_parts: &[],
 };
 
 /// A generated document: elements, text, and instructions.

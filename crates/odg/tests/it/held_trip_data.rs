@@ -131,7 +131,9 @@ fn a_common_paragraph_style_holds_its_text_values_with_the_stamp_of_its_row_and_
     let (style, odf) = sheet_style(&doc, "Ps");
     let (paragraph, run) = (row0(&style.sheet, "Paragraph"), row0(&style.sheet, "Character"));
     let groups: Vec<TextGroup> = odf.text_held.iter().map(|h| h.group).collect();
-    assert_eq!(groups, [TextGroup::HorzAlign, TextGroup::SpLine, TextGroup::Underline, TextGroup::Case, TextGroup::Pos]);
+    // The last is the spelling of the group `Style`: the style underlines, so the cell `Style` says it, and says no weight, no style and no small caps, which the file did not spell
+    // either; the cells would write all five.
+    assert_eq!(groups, [TextGroup::HorzAlign, TextGroup::SpLine, TextGroup::Underline, TextGroup::Case, TextGroup::Pos, TextGroup::Style]);
     for value in &odf.text_held {
         let row = if value.group.is_paragraph() { &paragraph } else { &run };
         assert_eq!(value.stamp, Some(stamp_text_group(row, value.group)), "{:?}", value.group);
@@ -183,7 +185,11 @@ fn an_automatic_style_holds_its_text_values_and_its_tab_stops_in_its_remainder()
             r##"<style:paragraph-properties><style:tab-stops><style:tab-stop style:position="2cm" style:leader-text="L"/></style:tab-stops></style:paragraph-properties></style:style>"##,
             r##"<style:style style:name="p2" style:family="paragraph"><style:paragraph-properties><style:tab-stops><style:tab-stop style:position="2cm" style:type="right"/></style:tab-stops></style:paragraph-properties></style:style>"##
         ))
-        .page("")
+        // The shape and the paragraphs name the styles (a style nothing names is held whole as an unused one, and its test is `visit_styles.rs`'s).
+        .page(concat!(
+            r#"<draw:rect draw:style-name="g" svg:x="1cm" svg:y="1cm" svg:width="1cm" svg:height="1cm"/>"#,
+            r#"<draw:frame svg:x="1cm" svg:y="5cm" svg:width="5cm" svg:height="2cm"><draw:text-box><text:p text:style-name="p1">a</text:p><text:p text:style-name="p2">b</text:p></draw:text-box></draw:frame>"#
+        ))
         .read()
         .0;
     let styles = &doc.ext.get().expect("the slot").odf.styles;

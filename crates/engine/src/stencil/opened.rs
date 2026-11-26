@@ -407,9 +407,9 @@ fn entry_of(res: &Resolver<'_>, position: usize, master: &Master, icon_text_left
     MasterEntry { position, id: master.id, name, width: size(width), height: size(height), connection_points, one_d, hidden, top_shapes, icon, part }
 }
 
-/// The ids of every built-in stencil, in the order of the catalogue.
+/// The ids of the built-in stencils a new session has open, in the order of the catalogue: the shipped ones that are open by default.
 fn all_builtin_ids() -> Vec<&'static str> {
-    super::stencils().iter().map(|s| s.id).collect()
+    super::default_open_ids()
 }
 
 /// The stencils open in a session: the built-in ones that are (a drawing made from a template opens the ones that kind needs) and the
@@ -475,7 +475,7 @@ impl OpenedStencils {
         self.builtins = next;
     }
 
-    /// Every built-in stencil is open, in the order of the catalogue: what a new drawing, a drawing read from a file and a new session have.
+    /// The built-in stencils that are open by default are open, in the order of the catalogue: what a new drawing, a drawing read from a file and a new session have.
     pub fn reset_builtins(&mut self) {
         self.builtins = all_builtin_ids();
     }

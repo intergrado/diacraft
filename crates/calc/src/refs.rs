@@ -4,39 +4,26 @@
 //! `Pages[Site-2]!Sheet.9!EndY`, `LISTSHEETREF()!Width`, `ThePage!User.Origin`, `TheDoc!User.Count`, `Styles!Callout!LineWeight`.
 //! A path is a cell directly under the sheet, or a section, a row and a cell (`Scratch.B3`, `Char.Size[2]`, `Geometry2.X4`,
 //! `Prop.Cost.Label`), with the row numbers.
+//!
+//! **A reference outside a formula**: [`cell_address`] reads the text of one reference with no sheet before it, by the formula parser and
+//! the same mapping of its path, and [`reference_name`] is its inverse, so that a command names a cell as a formula does and gives back the name it was
+//! given. Both are bounded ([`MAX_REFERENCE_BYTES`]), and a refusal is a [`RefError`] that says why.
 
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
-use diacraft_doc::{CellAddr, Keying, Lookup, Owner, RowKey, SectionKey, ShapeRef, SheetRef, cell_info, keying, listed_cells};
-use diacraft_formula::{CellRef, Index, Qualifier, Segment};
+use diacraft_doc::{
+    CellAddr, Keying, Lookup, MAX_NAME_BYTES, Owner, RowKey, SECTION_SPELLINGS, SectionKey, ShapeRef, SheetRef, cell_info, ix_to_row_number, keying,
+    listed_cells, row_number_to_ix, section_spelling,
+};
+use diacraft_formula::{CellRef, Expr, Index, ParseError, ParseErrorKind, Qualifier, Segment};
 
 use crate::eval::{Env, Evaluator};
 use crate::row_names::{RowNames, Spelled, fold};
 use crate::rules::{KEY_BYTES, LOOP_ERROR, MISSING_ROW_ERROR, NAME_ENTRY_BYTES, UNITS_PER_STEP};
 use crate::shapes::{ShapeIndex, peer_names};
 use crate::value::{CellError, Value};
-
-/// The section a reference spells: the name in a reference against the `N` of a file's `Section`.
-const SECTION_SPELLINGS: &[(&str, &str)] = &[
-    ("SmartTags", "ActionTag"),
-    ("Actions", "Actions"),
-    ("Char", "Character"),
-    ("Connections", "Connection"),
-    ("Controls", "Control"),
-    ("Fields", "Field"),
-    ("FillGradientStops", "FillGradient"),
-    ("Hyperlink", "Hyperlink"),
-    ("Layers", "Layer"),
-    ("LineGradientStops", "LineGradient"),
-    ("Para", "Paragraph"),
-    ("Prop", "Property"),
-    ("Reviewer", "Reviewer"),
-    ("Scratch", "Scratch"),
-    ("Tabs", "Tabs"),
-    ("User", "User"),
-];
 
 /// The cell a named row reads when the reference gives none (the table).
 fn default_cell(section: &str) -> &'static str {
@@ -48,44 +35,51 @@ fn default_cell(section: &str) -> &'static str {
     }
 }
 
-/// A trailing number split off a name: `B3` is `B` and 3, `X` has none. A name that is all digits has no name part.
-fn split_digits(name: &str) -> (&str, Option<u32>) {
+/// A trailing number split off a name: `B3` is `B` and 3, `X` has none. A name that is all digits has no name part. Digits that do not fit a `u32` are
+/// an error, never a name with its digits left off: `A4294967296` was read as `A`, row 1, and a write to it would have landed on the wrong cell.
+fn split_digits(name: &str) -> Result<(&str, Option<u32>), RefError> {
     let cut = name.trim_end_matches(|c: char| c.is_ascii_digit()).len();
     match (name.get(..cut), name.get(cut..)) {
-        (Some(head), Some(tail)) if cut > 0 && !tail.is_empty() => (head, tail.parse().ok()),
-        _ => (name, None),
+        (Some(head), Some(tail)) if cut > 0 && !tail.is_empty() => Ok((head, Some(tail.parse().map_err(|_| RefError::NumberTooLarge)?))),
+        _ => Ok((name, None)),
     }
 }
 
 /// The section and its `IX`: `Char` is `Character`, `Geometry2` is `Geometry` with `IX` 1 (the section's own number is `IX` plus
 /// one). A name the table does not know is an extension section, which a reference may also name.
-fn section_of(name: &str) -> Option<(String, Option<u32>)> {
+fn section_of(name: &str) -> Result<(String, Option<u32>), RefError> {
     if let Some(number) = name.strip_prefix("Geometry") {
-        if number.is_empty() {
-            return None;
-        }
-        let n: u32 = number.parse().ok()?;
-        return Some(("Geometry".to_owned(), Some(n.checked_sub(1)?)));
+        let n: u32 = match number.parse() {
+            Ok(n) => n,
+            Err(_) if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) => return Err(RefError::NumberTooLarge),
+            Err(_) => return Err(RefError::GeometryNumber),
+        };
+        return Ok(("Geometry".to_owned(), Some(n.checked_sub(1).ok_or(RefError::GeometryNumber)?)));
     }
     match SECTION_SPELLINGS.iter().find(|(spelled, _)| *spelled == name) {
-        Some((_, n)) => Some(((*n).to_owned(), None)),
-        None => Some((name.to_owned(), None)),
+        Some((_, n)) => Ok(((*n).to_owned(), None)),
+        None => Ok((name.to_owned(), None)),
     }
 }
 
 /// The cell a dotted path names, or `None` for a form no row of the table has.
 pub(crate) fn address_of(path: &[Segment]) -> Option<CellAddr> {
+    read_path(path).ok()
+}
+
+/// The cell a dotted path names, or why the path names none: the words of [`cell_address`].
+fn read_path(path: &[Segment]) -> Result<CellAddr, RefError> {
     match path {
-        [] => None,
+        [] => Err(RefError::NotOneReference),
         [one] => {
             if one.index.is_some() {
-                return None;
+                return Err(RefError::CellTakesNoRow);
             }
-            Some(CellAddr::direct(&one.name))
+            Ok(CellAddr::direct(&one.name))
         }
         [section, rest @ ..] => {
             if section.index.is_some() {
-                return None;
+                return Err(RefError::SectionTakesNoRow);
             }
             let (section_name, section_ix) = section_of(&section.name)?;
             let is_geometry = section_name == "Geometry";
@@ -94,48 +88,211 @@ pub(crate) fn address_of(path: &[Segment]) -> Option<CellAddr> {
                     let indexed = match keying(&section_name) {
                         Keying::Indexed => true,
                         Keying::Named => false,
-                        // `Connection` and any section no spec lists: a number after the name makes it a row's place.
-                        Keying::Either => one.index.is_some() || split_digits(&one.name).1.is_some(),
+                        // `Connection` and any section no spec lists: a number after the name makes it a row's place. Digits too long to be a number
+                        // are part of a name here, as a row's name may end in them.
+                        Keying::Either => one.index.is_some() || matches!(split_digits(&one.name), Ok((_, Some(_)))),
                     };
                     if indexed {
                         let (name, number) = match &one.index {
                             Some(Index::Number(n)) => (one.name.as_ref(), Some(*n)),
-                            Some(Index::Name(_)) => return None,
-                            None => {
-                                let (head, tail) = split_digits(&one.name);
-                                (head, tail)
-                            }
+                            Some(Index::Name(_)) => return Err(RefError::RowNotANumber),
+                            None => split_digits(&one.name)?,
                         };
                         match (number, is_geometry) {
                             // `Geometry1.NoFill`: a cell of the section itself.
-                            (None, true) => Some(CellAddr::in_section(&section_name, section_ix, name)),
+                            (None, true) => Ok(CellAddr::in_section(&section_name, section_ix, name)),
                             // A missing row number is row 1.
-                            (None, false) => Some(CellAddr::in_row(&section_name, section_ix, RowKey::Ix(0), name)),
-                            // A Geometry row number is the row's `IX` itself, any other is its `IX` plus one.
-                            (Some(n), true) => Some(CellAddr::in_row(&section_name, section_ix, RowKey::Ix(n), name)),
-                            (Some(n), false) => Some(CellAddr::in_row(&section_name, section_ix, RowKey::Ix(n.checked_sub(1)?), name)),
+                            (None, false) => Ok(CellAddr::in_row(&section_name, section_ix, RowKey::Ix(0), name)),
+                            (Some(n), _) => Ok(CellAddr::in_row(
+                                &section_name,
+                                section_ix,
+                                RowKey::Ix(row_number_to_ix(is_geometry, n).ok_or(RefError::RowZero)?),
+                                name,
+                            )),
                         }
                     } else {
                         if one.index.is_some() {
-                            return None;
+                            return Err(RefError::NamedRowTakesNoRow);
                         }
-                        Some(CellAddr::in_row(&section_name, section_ix, RowKey::name(&one.name), default_cell(&section_name)))
+                        Ok(CellAddr::in_row(&section_name, section_ix, RowKey::name(&one.name), default_cell(&section_name)))
                     }
                 }
                 [row, cell] => {
                     if row.index.is_some() || cell.index.is_some() {
-                        return None;
+                        return Err(RefError::NamedRowTakesNoRow);
                     }
-                    Some(CellAddr {
+                    Ok(CellAddr {
                         section: Some(SectionKey::new(&section_name, section_ix)),
                         row: Some(RowKey::name(&row.name)),
                         cell: diacraft_doc::CellName::new(&cell.name),
                     })
                 }
-                _ => None,
+                _ => Err(RefError::TooManyParts),
             }
         }
     }
+}
+
+/// The longest text [`cell_address`] reads, in bytes: three names of the model's longest (1,024 bytes), each in single quotes with every character a
+/// quote that is doubled, and their dots, make 6,152, so no honest reference is refused. A project rule that bounds what a hostile text costs to parse.
+pub const MAX_REFERENCE_BYTES: usize = 8_192;
+
+/// The most nodes of the tree [`cell_address`] lets the parser build: a reference is a few, one name a segment.
+const MAX_REFERENCE_NODES: usize = 1_024;
+
+/// Why a text is not the reference of one cell, in words a person can act on (the `Display` of each).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RefError {
+    /// Nothing but white space.
+    Empty,
+    /// More than [`MAX_REFERENCE_BYTES`].
+    TooLong,
+    /// The text begins with `=`: a formula, not the name of a cell.
+    LeadingEquals,
+    /// The text does not parse as a formula's reference: what went wrong and where (the byte offset is into the text given).
+    Parse(ParseError),
+    /// The text parses and is no reference: a number, an operator, a call, `TRUE`.
+    NotOneReference,
+    /// A sheet is named before the reference (`Sheet.4!Width`); the sheet is named by the call's own parameters.
+    Qualified,
+    /// `Width[2]`: a cell directly under the sheet has no row.
+    CellTakesNoRow,
+    /// `Char[2].Size`: the row goes after the cell.
+    SectionTakesNoRow,
+    /// `Geometry.X1`, `Geometry0.X1`: a Geometry section is named with its number from 1.
+    GeometryNumber,
+    /// A number that does not fit 4,294,967,295.
+    NumberTooLarge,
+    /// `Scratch.A[x]`: the row of an indexed section is a whole number.
+    RowNotANumber,
+    /// `Scratch.A0`: rows are numbered from 1.
+    RowZero,
+    /// `Prop.Cost[2]`: a named row takes no `[index]`.
+    NamedRowTakesNoRow,
+    /// More than a section, a row and a cell.
+    TooManyParts,
+}
+
+impl std::fmt::Display for RefError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefError::Empty => f.write_str("name the cell by its reference, such as Width or Geometry1.X2"),
+            RefError::TooLong => write!(f, "a cell reference is at most {MAX_REFERENCE_BYTES} bytes long"),
+            RefError::LeadingEquals => f.write_str("a cell is named by its reference without a leading =: write Width, not =Width"),
+            RefError::Parse(e) => write!(f, "not a cell reference: {e}"),
+            RefError::NotOneReference => f.write_str("not one cell reference: give a reference such as Width, Geometry1.X2 or Prop.Cost.Label"),
+            RefError::Qualified => f.write_str("name the sheet with id, page, master, style or document, not in the reference"),
+            RefError::CellTakesNoRow => f.write_str("a cell directly under the sheet takes no [row]"),
+            RefError::SectionTakesNoRow => f.write_str("a section's name takes no [row]: the row goes after the cell, as in Char.Size[2]"),
+            RefError::GeometryNumber => f.write_str("a Geometry section is named with its number, from 1: Geometry1"),
+            RefError::NumberTooLarge => write!(f, "a number in the reference is larger than {}", u32::MAX),
+            RefError::RowNotANumber => f.write_str("a row of an indexed section is a whole number: Scratch.A3 or Char.Size[2]"),
+            RefError::RowZero => f.write_str("row numbers start at 1"),
+            RefError::NamedRowTakesNoRow => f.write_str("a named row takes no [index]: Prop.Cost.Label"),
+            RefError::TooManyParts => f.write_str("a reference has at most a section, a row and a cell: Prop.Cost.Label"),
+        }
+    }
+}
+
+impl std::error::Error for RefError {}
+
+/// The cell a text names: **one reference with no sheet before it**, as a formula spells it (`Width`, `Geometry1.X2`, `Scratch.B3`, `Char.Size[2]`,
+/// `Prop.Cost`, `Prop.Cost.Label`, `User.Total.Prompt`). The text is read by the formula parser and its path
+/// is mapped as a formula's reference is, so a cell is named in a command as in a formula. White space at the ends is allowed; a leading `=` is not,
+/// since the text names a cell and is no formula. A reference with a sheet (`Sheet.4!Width`) is refused: the sheet is named by the call.
+///
+/// The row of a named section is as the text spells it. A formula that names a row in another letter case finds the row the file spells, which
+/// needs a document, and a text read here has none. At most [`MAX_REFERENCE_BYTES`] are read, and nothing is evaluated.
+pub fn cell_address(text: &str) -> Result<CellAddr, RefError> {
+    if text.len() > MAX_REFERENCE_BYTES {
+        return Err(RefError::TooLong);
+    }
+    if text.trim_start().starts_with('=') {
+        return Err(RefError::LeadingEquals);
+    }
+    let formula = diacraft_formula::parse_with_budget(text, MAX_REFERENCE_NODES);
+    match formula.ast {
+        Ok(Expr::Ref(r)) if r.qualifiers.is_empty() => read_path(&r.path),
+        Ok(Expr::Ref(_)) => Err(RefError::Qualified),
+        Ok(_) => Err(RefError::NotOneReference),
+        Err(e) if e.kind == ParseErrorKind::Empty => Err(RefError::Empty),
+        Err(e) => Err(RefError::Parse(e)),
+    }
+}
+
+/// The reference a cell is spelled with, as a formula names it and [`cell_address`] reads it: the inverse of `cell_address`. `None` where no reference
+/// form exists: a name that is empty or longer than the model's 1,024 bytes, an unnamed row of a section whose rows are named, a Geometry section with
+/// no number, a flag of a section that is not Geometry, a number a reference cannot hold, and a section another spelling takes (`Prop`, which a
+/// reference reads as `Property`).
+///
+/// **The text is checked by reading it back**: it is given only when `cell_address` of it is exactly this cell, so a reference is never given for
+/// another cell. A name that is no plain name is in single quotes (`'My cell'`, a quote in it doubled), a row of an indexed section is spelled with its
+/// number (the row's `IX` plus one, a Geometry row's `IX`) as `Scratch.B3` for a cell of one letter and `Char.Size[2]` for any other, a row of a
+/// named section with its name and cell (`Prop.Cost.Value`, the cell always given), and a Geometry section's number is its `IX` plus one.
+pub fn reference_name(addr: &CellAddr) -> Option<String> {
+    let text = spell(addr)?;
+    (cell_address(&text).ok().as_ref() == Some(addr)).then_some(text)
+}
+
+/// The text `reference_name` tries, before it reads it back.
+fn spell(addr: &CellAddr) -> Option<String> {
+    let cell = addr.cell.as_str();
+    let Some(section) = &addr.section else {
+        return match addr.row {
+            None => name_text(cell, true),
+            Some(_) => None,
+        };
+    };
+    let spelled = section_text(section)?;
+    match &addr.row {
+        // A flag of a Geometry section: `Geometry1.NoFill`.
+        None if section.name.as_str() == "Geometry" => Some(format!("{spelled}.{}", name_text(cell, false)?)),
+        None => None,
+        Some(RowKey::Name(row)) => Some(format!("{spelled}.{}.{}", name_text(row, false)?, name_text(cell, false)?)),
+        Some(RowKey::Ix(n)) => {
+            let number = ix_to_row_number(section.name.as_str() == "Geometry", *n)?;
+            let cell_part = if is_one_letter(cell) { format!("{cell}{number}") } else { format!("{}[{number}]", name_text(cell, false)?) };
+            Some(format!("{spelled}.{cell_part}"))
+        }
+    }
+}
+
+/// How a reference spells a section: `Geometry3` for the one of `IX` 2, `Char` for `Character`, the name itself for a section no table lists.
+fn section_text(key: &SectionKey) -> Option<String> {
+    let name = key.name.as_str();
+    if name == "Geometry" {
+        return Some(format!("Geometry{}", key.ix?.checked_add(1)?));
+    }
+    if key.ix.is_some() {
+        return None;
+    }
+    match section_spelling(name) {
+        Some(spelled) => Some(spelled.to_owned()),
+        None => name_text(name, true),
+    }
+}
+
+/// Whether a cell's name is one ASCII letter, which a reference writes with the row's number after it (`B3`).
+fn is_one_letter(cell: &str) -> bool {
+    let mut chars = cell.chars();
+    matches!((chars.next(), chars.next()), (Some(c), None) if c.is_ascii_alphabetic())
+}
+
+/// A name as a reference writes it: as it is when it is plain (letters, digits and underscores, not starting with a digit where it is the first of a
+/// path, and no `TRUE` or `FALSE` there), else in single quotes with a quote in it doubled. `None` for a name the parser would refuse: empty, or more
+/// than the model's [`MAX_NAME_BYTES`].
+fn name_text(name: &str, first: bool) -> Option<String> {
+    if name.is_empty() || name.len() > MAX_NAME_BYTES {
+        return None;
+    }
+    let starts_well = !first || name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_');
+    let plain = starts_well && name.chars().all(|c| c.is_alphanumeric() || c == '_') && !(first && is_boolean_word(name));
+    Some(if plain { name.to_owned() } else { format!("'{}'", name.replace('\'', "''")) })
+}
+
+/// `TRUE` or `FALSE` in any case, which the parser reads as a Boolean when it stands alone and is not quoted.
+fn is_boolean_word(name: &str) -> bool {
+    name.eq_ignore_ascii_case("TRUE") || name.eq_ignore_ascii_case("FALSE")
 }
 
 /// What a qualifier's path has chosen so far besides the sheet: the part whose shapes, or the styles, a following `Sheet.<id>` or

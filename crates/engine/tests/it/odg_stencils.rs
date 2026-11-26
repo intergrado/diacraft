@@ -3,67 +3,18 @@
 //! again and the shape is compared with the session's by what it draws and where it connects.
 
 use diacraft_doc::Document;
-use diacraft_engine::draw::connection_points;
+#[allow(unused_imports)] // `Session` was used by the helpers that moved to the support file; a test added here may use it
 use diacraft_engine::{EngineError, Session};
-use diacraft_render::{Renderer, View};
 use serde_json::{Value, json};
 
-use crate::odg_build::{Dir, id_of, open_drawing};
+use crate::odg_build::{Dir, content_of, id_of, open_drawing};
 use crate::odg_file::{assert_reopens_as_saved, assert_saves_again_as_no_edit, four, save};
 use crate::odg_masters::assert_link_holds;
 use crate::run;
-
-/// The first page, drawn at 50 pixels to the inch on white paper: its size and its premultiplied pixels. Nothing may be left out of the frame.
-fn drawn(doc: &Document) -> (u32, u32, Vec<u8>) {
-    let page = doc.pages.get(0).unwrap().id;
-    let view = View::fit_page(doc, page, 50.0).unwrap();
-    let mut renderer = Renderer::new();
-    renderer.set_paper(Some(diacraft_color::Rgba::WHITE));
-    let frame = renderer.render(doc, page, &view);
-    assert!(frame.skipped.is_empty(), "everything was drawn: {:?}", frame.skipped);
-    (frame.width, frame.height, frame.rgba_premul)
-}
-
-/// The most the pixels of two drawings may differ by, in one channel: a path read back at the precision the file holds is the same path.
-const PIXEL_SLACK: i32 = 2;
-
-/// Asserts that the drawing `read` (a file read again) shows what `made` (the session's own) shows, and that the shape at `at` has the connection points it
-/// had: as many, at the same places, the same way out.
-#[track_caller]
-fn assert_reads_back_as_made(made: &Document, read: &Document, at: usize, what: &str) {
-    assert_reads_back_within(made, read, at, what, PIXEL_SLACK);
-}
-
-/// [`assert_reads_back_as_made`] with `slack` for the most a channel of a pixel may differ by. A route written as a path is in hundredths of a millimetre, which moves a
-/// hairline by a hundredth of a pixel and its anti-aliasing by a few levels.
-#[track_caller]
-fn assert_reads_back_within(made: &Document, read: &Document, at: usize, what: &str, slack: i32) {
-    let (a, b) = (drawn(made), drawn(read));
-    assert_eq!((a.0, a.1, a.2.len()), (b.0, b.1, b.2.len()), "{what}: the picture's size");
-    let worst = a.2.iter().zip(b.2.iter()).map(|(x, y)| (i32::from(*x) - i32::from(*y)).abs()).max().unwrap_or(0);
-    assert!(worst <= slack, "{what}: the file draws the shape differently from the session (the worst channel differs by {worst})");
-    assert!(a.2.iter().any(|v| *v != 255), "{what}: the picture is not blank");
-    let page = |d: &Document| d.pages.get(0).unwrap().id;
-    let id = |d: &Document| d.pages.get(0).unwrap().shapes.get(at).unwrap().id;
-    let (pa, pb) = (connection_points(made, page(made), id(made)), connection_points(read, page(read), id(read)));
-    // A connector a person made (a Data Flow, or what `connector.add` makes) has none, and the file says so, though the reader gives every shape the four standard rows
-    // Answered the question of the divergence every connector saved had, which read back with four.
-    assert_eq!(pa.len(), pb.len(), "{what}: the connection points, {pa:?} against {pb:?}");
-    for (x, y) in pa.iter().zip(pb.iter()) {
-        let near = |p: f64, q: f64| (p - q).abs() < 1e-3;
-        assert!(
-            x.index == y.index && near(x.x, y.x) && near(x.y, y.y) && near(x.dir_x, y.dir_x) && near(x.dir_y, y.dir_y),
-            "{what}: a connection point is {x:?} in the session and {y:?} in the file"
-        );
-    }
-}
-
-/// The session `dir`'s `a.odg` is read into.
-fn reopened(dir: &Dir) -> Session {
-    let mut again = Session::new();
-    run(&mut again, "file.open", json!({ "path": dir.path("a.odg") }));
-    again
-}
+// The helpers moved to the support file of the second batch's per-stencil checks, which runs the same checks on the stencils it adds. Every one that
+// this file's tests could use is imported, so a test added here keeps the names it had.
+#[allow(unused_imports)]
+use crate::stencils2_support::{PIXEL_SLACK, assert_reads_back_as_made, assert_reads_back_within, drawn, reopened};
 
 /// All fifty masters: dropped on their own into a drawing of four rectangles, saved (the save says nothing, but for an outline written as a rectangle for other
 /// programs), read back and compared, and saved again as no edit.
@@ -71,7 +22,7 @@ fn reopened(dir: &Dir) -> Session {
 fn each_of_the_fifty_masters_is_saved_reads_back_as_the_session_had_it_and_saves_again_as_no_edit() {
     let mut count = 0;
     let mut approximated = Vec::new();
-    for stencil in diacraft_engine::stencil::stencils() {
+    for stencil in diacraft_engine::stencil::stencils().iter().take(7) {
         for master in stencil.masters() {
             count += 1;
             let key = format!("{}/{}", stencil.id, master.id);
@@ -104,30 +55,36 @@ fn each_of_the_fifty_masters_is_saved_reads_back_as_the_session_had_it_and_saves
         }
     }
     assert_eq!(count, 58, "fifty-eight masters in seven stencils");
-    // The masters whose outline has an arc, a part that is not filled or another row that a path of lines and curves cannot say are written as a rectangle for
-    // other programs and carried as tier 2 (which the pictures above show is read back exactly): thirteen of Basic Flowchart's and two of the new
-    // ones, Gane-Sarson's Process (rounded corners) and Data Store (an open path). The other eighteen of the twenty new masters are tier 1.
-    assert_eq!(
-        approximated,
-        [
-            "flowchart/terminator",
-            "flowchart/data",
-            "flowchart/document",
-            "flowchart/multiple_documents",
-            "flowchart/predefined_process",
-            "flowchart/manual_operation",
-            "flowchart/preparation",
-            "flowchart/database",
-            "flowchart/internal_storage",
-            "flowchart/delay",
-            "flowchart/display",
-            "flowchart/summing_junction",
-            "flowchart/or",
-            "gane-sarson/gane-sarson.process",
-            "gane-sarson/gane-sarson.data-store",
-        ],
-        "the masters written as a rectangle for other programs"
-    );
+    // Every master's outline is written as the path it draws: the arcs of the rounded and curved ones as `A` and `W`, and a part that is not filled or not stroked in a set
+    // of its own. Before it, thirteen of Basic Flowchart's masters and two of Gane-Sarson's (Process, with rounded corners, and Data Store, an open path) were written as a rectangle
+    // for other programs, with a note, and carried exactly by DiaCraft's extension.
+    assert!(approximated.is_empty(), "the masters written as a rectangle for other programs: {approximated:?}");
+}
+
+/// Gane-Sarson's Process (rounded corners, four arcs) and Data Store (one open path with no fill) are written as the outlines they draw: no note says a rectangle
+/// stands in, the path of Data Store is its open three sides in a set with `F` (the right side left open), and the path of Process is its four sides and four arcs, each counterclockwise as seen, closed.
+#[test]
+fn the_gane_sarson_process_and_data_store_are_their_outlines_for_other_programs() {
+    for (master, check) in [("gane-sarson.process", true), ("gane-sarson.data-store", false)] {
+        let dir = Dir::new();
+        let mut s = open_drawing(&dir, &four());
+        run(&mut s, "shape.drop", json!({ "master": master, "stencil": "gane-sarson", "page": 0, "x": 4.0, "y": 2.0 }));
+        let saved = save(&mut s);
+        assert_eq!(saved["warnings"].as_array().unwrap().len(), 0, "{master}: no note that an outline stands in as a rectangle: {saved}");
+        let content = content_of(&dir.read("a.odg"));
+        let path = content.split("draw:enhanced-path=\"").last().unwrap().split('"').next().unwrap().to_owned();
+        assert_ne!(path, "M 0 0 L 21600 0 21600 21600 0 21600 Z N", "{master}: the outline is not the stand-in rectangle");
+        if check {
+            // The shape is 1.6 by 1 inch with corners of 0.12 inch: the bottom edge from (1620, 21600) to (19980, 21600), then an arc up to the right edge (counterclockwise as seen), and so round.
+            assert!(path.starts_with("M 1620 21600 L 19980 21600 A "), "{path}");
+            assert!(path.ends_with(" Z N"), "{path}");
+            assert_eq!(path.matches(" A ").count(), 4, "four corners, each an arc: {path}");
+            assert_eq!(path.matches(" W ").count(), 0, "{path}");
+        } else {
+            // 1.8 by 0.8 inch: from the top right corner round the left side, open, and no fill.
+            assert_eq!(path, "M 21600 0 L 0 0 0 21600 21600 21600 F N", "{master}");
+        }
+    }
 }
 
 /// The nth shape of the page at `page` in `doc`, by its place in the drawing order.
@@ -163,7 +120,14 @@ fn a_data_flow_between_two_shapes_with_a_label_keeps_its_arrow_its_label_and_its
     run(&mut s, "connector.reconnect", json!({ "page": 0, "id": flow_id, "end": "end", "target": { "id": b } }));
     assert_eq!(s.document().unwrap().pages.get(0).unwrap().connects.len(), 2, "the flow is glued at both ends");
     run(&mut s, "shape.set_text", json!({ "page": 0, "id": flow_id, "text": "Order data" }));
-    let before = number(s.document().unwrap(), 0, 4, "EndArrow");
+    // The instance inherits its end arrow from its master (a connector master keeps its look): it is read through the master.
+    let before = {
+        let doc = s.document().unwrap();
+        let at = doc.find_shape(diacraft_doc::Owner::Page(doc.pages.get(0).unwrap().id), id_at(doc, 0, 4)).unwrap();
+        let found =
+            diacraft_doc::Resolver::new(doc).resolve(&diacraft_doc::SheetRef::Shape(at), &diacraft_doc::CellAddr::direct("EndArrow")).unwrap();
+        found.value.cell.and_then(|c| c.value.as_ref().and_then(diacraft_doc::Value::number)).unwrap_or(f64::NAN)
+    };
     assert!(before > 0.0, "the master's end arrow is on the shape: {before}");
     let saved = save(&mut s);
     assert_eq!(saved["edited"], true, "{saved}");
@@ -185,7 +149,7 @@ fn a_data_flow_between_two_shapes_with_a_label_keeps_its_arrow_its_label_and_its
 /// edited), is saved each time, read back as the session has it, and saved again as no edit.
 #[test]
 fn each_of_the_fifty_masters_is_edited_before_and_after_its_first_save_and_still_reads_back_as_the_session_has_it() {
-    for stencil in diacraft_engine::stencil::stencils() {
+    for stencil in diacraft_engine::stencil::stencils().iter().take(7) {
         for master in stencil.masters() {
             let key = format!("{}/{}", stencil.id, master.id);
             let dir = Dir::new();

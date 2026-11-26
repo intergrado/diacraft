@@ -30,9 +30,12 @@ const RULES: Rules = Rules {
     ignored_attributes: &[],
     ignored_children: &[],
     ignored_when_extra: &[],
+    twinned: &[],
     free_names: &[],
     placed: &[],
     aliases: &[],
+    identified_by: &[],
+    doctype_parts: &[],
 };
 
 fn entry<'a>(name: &'a str, xml: bool, bytes: &'a [u8]) -> Entry<'a> {
@@ -113,10 +116,13 @@ fn two_ordered_siblings_swapped_fail() {
     only(&diff("<r><row><a/></row><row><b/></row></r>", "<r><row><b/></row><row><a/></row></r>"), Found::Order, "/r[0]");
     // What stands before and after them is matched, and the swap is still one difference, at their parent.
     only(&diff(r#"<r><x/><s ID="1"/><s ID="2"/><y/></r>"#, r#"<r><x/><s ID="2"/><s ID="1"/><y/></r>"#), Found::Order, "/r[0]");
-    // Not the same children in another order: the children are compared, place by place.
+    // Not the same children in another order: `2` is in both and is the same thing, so `1` is one taken out and `3` one put in (set side by side by what they
+    // are, they were set side by side by place and were two values, each compared with a child that is not its own).
     let d = diff(r#"<r><s ID="1"/><s ID="2"/></r>"#, r#"<r><s ID="2"/><s ID="3"/></r>"#);
     assert_eq!(d.count, 2, "{:?}", d.shown);
-    assert!(d.shown.iter().all(|x| x.found == Found::Value));
+    assert!(d.shown.iter().all(|x| x.found == Found::Element), "{:?}", d.shown);
+    let paths: Vec<&str> = d.shown.iter().map(|x| x.path.as_str()).collect();
+    assert_eq!(paths, ["/r[0]/s[0]", "/r[0]/s[1]"]);
 }
 
 #[test]
@@ -825,7 +831,9 @@ fn many_children_that_differ_at_every_level_cost_the_size_of_the_tree() {
     };
     let (d, work) = work_of(&list("a"), &list("bb"));
     assert!(d.count >= 1);
-    assert!(work.canon_steps <= 34 * n as u64, "{}", work.canon_steps);
+    // Measured: 46.7 steps for each sibling (the bound was 34 when they were set side by side by place; about twenty children of each name, so each name's
+    // run is sorted and the runs are matched).
+    assert!(work.canon_steps <= 47 * n as u64, "{}", work.canon_steps);
 }
 
 #[test]
@@ -882,8 +890,9 @@ fn siblings_that_stand_in_another_order_at_every_level_cost_the_siblings_of_all_
     let (d, work) = work_of(&build(false), &build(true));
     assert!(d.count >= 100, "{}", d.count);
     let siblings = 100 * 100;
-    // Measured: 23.1 steps for each sibling.
-    assert!(work.canon_steps <= 24 * siblings, "{} steps for {siblings} siblings", work.canon_steps);
+    // Measured: 34.7 steps for each sibling (23.1 when they were set side by side by place; each level now sorts its hashes to match them, and the next level, which
+    // differs, is matched by its name).
+    assert!(work.canon_steps <= 36 * siblings, "{} steps for {siblings} siblings", work.canon_steps);
 }
 
 // ------------------------------------------------------------------------------------------------- the hash only aligns
@@ -1021,9 +1030,12 @@ const NUMBER_KEYED: Rules = Rules {
     ignored_attributes: &[],
     ignored_children: &[],
     ignored_when_extra: &[],
+    twinned: &[],
     free_names: &[],
     placed: &[],
     aliases: &[],
+    identified_by: &[],
+    doctype_parts: &[],
 };
 
 #[test]
@@ -1068,11 +1080,15 @@ fn the_counts_of_small_inputs_are_pinned() {
         (r#"<r a="1"/>"#, r#"<r a="2"/>"#, &RULES, (9, 9)),
         (r#"<r a="1" b="22"/>"#, r#"<r b="22" a="1"/>"#, &RULES, (14, 15)),
         (r#"<r><c n="1" v="a"/><c n="2" v="b"/></r>"#, r#"<r><c n="2" v="b"/><c n="1" v="x"/></r>"#, &RULES, (36, 22)),
-        ("<r>xy<?p q?>z</r>", "<r>xy<?p r?>z</r>", &RULES, (11, 16)),
-        ("<r><a/><b/><c n=\"1\"/></r>", "<r><b/><a/><c n=\"1\"/></r>", &RULES, (27, 10)),
-        (&para("a <text:s text:c=\"2\"/>b<text:span>c</text:span>"), &para("a<text:s text:c=\"3\"/>b<text:span>d</text:span>"), &RULES, (30, 33)),
+        // One child against one is compared at once: it was asked, for two steps, whether they are the same children in another order, which one cannot be.
+        ("<r>xy<?p q?>z</r>", "<r>xy<?p r?>z</r>", &RULES, (9, 16)),
+        // Two children in another order are matched by their hashes (two sorts of two keys and the pass over the pairs; 27 steps when they were set side by side by place).
+        ("<r><a/><b/><c n=\"1\"/></r>", "<r><b/><a/><c n=\"1\"/></r>", &RULES, (45, 10)),
+        // The text before the span differs and the span differs: a text and a span, one each, are compared at once (30 steps when each pair was first asked whether it is the same children in another order).
+        (&para("a <text:s text:c=\"2\"/>b<text:span>c</text:span>"), &para("a<text:s text:c=\"3\"/>b<text:span>d</text:span>"), &RULES, (24, 33)),
         (r#"<r><c n="1.0cm"/><c n="2cm"/></r>"#, r#"<r><c n="2.0cm"/><c n="1cm"/></r>"#, &NUMBER_KEYED, (26, 82)),
-        (r#"<r><e len="1.50cm" x="1"/></r>"#, r#"<r><e len="1.5cm" x="2"/></r>"#, &RULES, (22, 30)),
+        // One child against one is compared at once, with no asking whether they are the same children in another order (two steps).
+        (r#"<r><e len="1.50cm" x="1"/></r>"#, r#"<r><e len="1.5cm" x="2"/></r>"#, &RULES, (20, 30)),
         ("<r><a/></r>", "<r><a/><z/></r>", &RULES, (14, 6)),
         // One attribute under two prefixes: its values are compared in the order written and not sorted, so the sort no longer reads them (17 bytes before).
         (r#"<r xmlns:p="u" xmlns:q="u" p:k="1" q:k="22"/>"#, r#"<r xmlns:p="u" xmlns:q="u" p:k="22" q:k="1"/>"#, &RULES, (14, 14)),

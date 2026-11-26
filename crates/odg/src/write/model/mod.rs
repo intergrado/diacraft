@@ -29,6 +29,7 @@
 
 mod containers;
 mod document;
+mod forms;
 mod layer_set;
 mod manifest;
 mod meta;
@@ -42,6 +43,7 @@ mod sheets;
 pub(crate) use document::Left;
 #[cfg(kani)]
 pub(crate) use layer_set::chosen_flags;
+pub(crate) use sheets::style_group_of_cells;
 
 use std::collections::HashSet;
 use std::sync::Arc;

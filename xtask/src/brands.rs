@@ -58,6 +58,10 @@ const ALLOW: &str = "brand-ok";
 /// allowlist keeps it.
 pub const TRADEMARK: &str = "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.";
 
+/// The notice of the feature comparison page, in one line of its body beside the footer's: the first sentence of the footer's, the marks of the two other tools compared, and that DiaCraft is
+/// not affiliated with or endorsed by their three owners. It is the one place the page names the company outside the footer, so it is an exact text of [`PRODUCT_USES`] for that page and no other.
+pub const COMPARE_NOTICE: &str = "Visio is a trademark of the Microsoft group of companies. draw.io is a registered trademark of draw.io Ltd. LibreOffice is a registered trademark of The Document Foundation. DiaCraft is not affiliated with or endorsed by Microsoft, draw.io Ltd or The Document Foundation.";
+
 /// The Save dialog's kinds (the desktop's own dialog, the browser's chooser and the window's name card take their labels from it).
 const SAVE_KINDS: &str = "crates/ui-egui/src/save_kinds.rs";
 /// The desktop app's Open dialog.
@@ -67,12 +71,17 @@ const CLI_HELP: &str = "apps/diacraft-cli/src/args.rs";
 /// The About box.
 const ABOUT: &str = "crates/ui-egui/src/splash.rs";
 
+/// The feature comparison page, which `cargo xtask site` makes parts of from the docs.
+pub const COMPARE_PAGE: &str = "site/feature-comparison.html";
+
 /// The website's pages, each of which has the trademark line in its footer.
-pub const SITE_PAGES: [&str; 15] = [
+pub const SITE_PAGES: [&str; 17] = [
     "site/404.html",
     "site/architecture-diagrams.html",
     "site/browser.html",
     "site/changelog.html",
+    COMPARE_PAGE,
+    "site/features.html",
     "site/flowcharts.html",
     "site/guides/agents.html",
     "site/guides/command-line.html",
@@ -127,6 +136,10 @@ pub const PRODUCT_USES: &[(&str, &str)] = &[
     (SITE_PAGES[12], TRADEMARK),
     (SITE_PAGES[13], TRADEMARK),
     (SITE_PAGES[14], TRADEMARK),
+    (SITE_PAGES[15], TRADEMARK),
+    (SITE_PAGES[16], TRADEMARK),
+    // The feature comparison page's own notice: the marks of the tools it compares, and that DiaCraft is not endorsed by their owners.
+    (COMPARE_PAGE, COMPARE_NOTICE),
 ];
 
 /// The texts of [`PRODUCT_USES`] that `path` may hold.

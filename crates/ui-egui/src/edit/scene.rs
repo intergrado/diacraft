@@ -339,6 +339,8 @@ struct Reading<'a> {
     res: &'a Resolver<'a>,
     page: u32,
     per_inch: f64,
+    /// Whether the members of a group are read whatever its `SelectMode` says (a tile draws them all).
+    all_members: bool,
 }
 
 /// Reads the members of `group` (at `path`, with its own pose first among `groups`) and, below them, the members of the groups among them, into
@@ -357,7 +359,7 @@ fn read_members(reading: &Reading<'_>, group: &Shape, path: &[u32], groups: &[Po
         let place = Place { path: child_path.clone(), groups, parent: Some(group.id) };
         let Some((item, pose)) = read_item(reading.res, reading.page, &place, child, reading.per_inch) else { continue };
         // A group set to group only has no members to offer, and none of the groups inside it either (every ancestor counts).
-        let has_members = item.kind == Kind::Group && item.select_mode != 0;
+        let has_members = item.kind == Kind::Group && (item.select_mode != 0 || reading.all_members);
         out.push(item);
         if has_members {
             let mut inner = vec![pose];
@@ -370,17 +372,27 @@ fn read_members(reading: &Reading<'_>, group: &Shape, path: &[u32], groups: &[Po
 impl Scene {
     /// The shapes of page `page` of `doc`, read at `revision`. `None` for a page the document does not have.
     pub fn build(doc: &Document, page: u32, revision: u64) -> Option<Scene> {
+        Scene::build_with(doc, page, revision, false)
+    }
+
+    /// [`Scene::build`] with **the members of every group read, whatever its `SelectMode` says**: a pointer is not offered a member of a group set to group only, but a
+    /// tile that draws the group draws them (`stencils.rs`).
+    pub fn build_all(doc: &Document, page: u32, revision: u64) -> Option<Scene> {
+        Scene::build_with(doc, page, revision, true)
+    }
+
+    fn build_with(doc: &Document, page: u32, revision: u64, all_members: bool) -> Option<Scene> {
         let part = doc.page(page)?;
         let per_inch = units_per_inch(doc, page);
         let res = Resolver::new(doc);
-        let reading = Reading { res: &res, page, per_inch };
+        let reading = Reading { res: &res, page, per_inch, all_members };
         let mut items = Vec::new();
         let mut members = Vec::new();
         for (index, shape) in part.shapes.iter().enumerate().take(MAX_ITEMS) {
             let Ok(at) = u32::try_from(index) else { continue };
             let place = Place { path: vec![at], groups: &[], parent: None };
             let Some((item, pose)) = read_item(&res, page, &place, shape, per_inch) else { continue };
-            let has_members = item.kind == Kind::Group && item.select_mode != 0;
+            let has_members = item.kind == Kind::Group && (item.select_mode != 0 || all_members);
             items.push(item);
             if has_members {
                 read_members(&reading, shape, &[at], &[pose], &mut members);

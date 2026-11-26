@@ -32,9 +32,12 @@ const RULES: Rules = Rules {
     ignored_attributes: &[],
     ignored_children: &[],
     ignored_when_extra: &[],
+    twinned: &[],
     free_names: &[],
     placed: &[],
     aliases: &[],
+    identified_by: &[],
+    doctype_parts: &[],
 };
 
 /// The peak resident memory of this process so far, in bytes.
@@ -48,19 +51,26 @@ fn peak_rss() -> u64 {
 }
 
 fn timed(a: &str, b: &str, limits: &XmlLimits) -> (Duration, ContentDiff, Work) {
+    timed_with(&RULES, a, b, limits)
+}
+
+fn timed_with(rules: &Rules, a: &str, b: &str, limits: &XmlLimits) -> (Duration, ContentDiff, Work) {
     let mut work = Work::default();
     let start = Instant::now();
     let d = compare_entries(
         &[Entry { name: "/p.xml", xml: true, bytes: a.as_bytes() }],
         &[Entry { name: "/p.xml", xml: true, bytes: b.as_bytes() }],
         true,
-        &RULES,
+        rules,
         limits,
         &mut work,
     )
     .unwrap();
     (start.elapsed(), d, work)
 }
+
+/// [`RULES`], and the attribute `id` says which thing an element is.
+const IDENTIFIED: Rules = Rules { identified_by: &[Name { ns: "", local: "id" }], ..RULES };
 
 fn deep_limits() -> XmlLimits {
     XmlLimits { max_depth: 512, ..XmlLimits::default() }
@@ -299,6 +309,75 @@ fn the_same_children_in_another_order_at_every_level() {
     assert!(d.count >= 190, "{}", d.count);
     eprintln!("steps {}", work.canon_steps);
     within("400 siblings reordered at each of 190 levels", time, yardstick_time(190 * 400 * 2));
+}
+
+/// `n` siblings of one name with an id each and a value, `changed` or not, with one more put in first when `put`.
+fn pages(n: usize, changed: bool, put: bool) -> String {
+    let mut s = String::from("<r>");
+    if put {
+        s.push_str("<page id=\"fresh\" v=\"0\"/>");
+    }
+    for i in 0..n {
+        s.push_str(&format!("<page id=\"{i}\" v=\"{}\"/>", if changed { "b" } else { "a" }));
+    }
+    s.push_str("</r>");
+    s
+}
+
+#[test]
+#[ignore = "seconds of CPU; run with --ignored, one at a time"]
+fn a_hundred_thousand_siblings_told_by_an_id_all_changed_with_one_put_in() {
+    // Set side by side by their ids, each of the hundred thousand is compared with its own (a hundred thousand and one differences), in three sorts of the children and a
+    // pass, and no more than five times the plain content of as many nodes.
+    let n = 100_000usize;
+    let (time, d, work) = timed_with(&IDENTIFIED, &pages(n, false, false), &pages(n, true, true), &deep_limits());
+    assert_eq!(d.count, n as u64 + 1);
+    assert_eq!(work.canon_by_place, 0);
+    eprintln!("steps {} ({:.1} for each sibling)", work.canon_steps, work.canon_steps as f64 / n as f64);
+    within("100,000 siblings told by an id, one put in", time, yardstick_time(2 * 3 * n));
+}
+
+#[test]
+#[ignore = "seconds of CPU; run with --ignored, one at a time"]
+fn a_hundred_thousand_siblings_of_one_name_all_changed_with_one_put_in() {
+    // Nothing tells them apart (one name, no id): nothing is matched by content, the name has a hundred thousand and one on one side, and they are set side by side by place.
+    let n = 100_000usize;
+    let (time, d, work) = timed_with(&RULES, &pages(n, false, false), &pages(n, true, true), &deep_limits());
+    assert!(d.count >= n as u64, "{}", d.count);
+    assert_eq!(work.canon_by_place, 0);
+    within("100,000 siblings of one name, one put in", time, yardstick_time(2 * 3 * n));
+}
+
+#[test]
+#[ignore = "seconds of CPU; run with --ignored, one at a time"]
+fn a_hundred_thousand_siblings_in_the_reverse_order_are_one_order() {
+    let n = 100_000usize;
+    let list = |reverse: bool| {
+        let mut ids: Vec<usize> = (0..n).collect();
+        if reverse {
+            ids.reverse();
+        }
+        let mut s = String::from("<r>");
+        for i in ids {
+            s.push_str(&format!("<g id=\"{i}\"/>"));
+        }
+        s.push_str("</r>");
+        s
+    };
+    let (time, d, _) = timed_with(&IDENTIFIED, &list(false), &list(true), &deep_limits());
+    assert_eq!(d.count, 1);
+    within("100,000 siblings in the reverse order", time, yardstick_time(2 * 2 * n));
+}
+
+#[test]
+#[ignore = "seconds of CPU; run with --ignored, one at a time"]
+fn a_list_past_the_cap_is_set_side_by_side_by_place_in_the_time_of_the_old_reading() {
+    // Past `MAX_ALIGNED` the list is set by place, as every list was: counted, and no slower than the plain content of as many nodes.
+    let n = diacraft_container::canon::MAX_ALIGNED + 50_000;
+    let (time, d, work) = timed_with(&IDENTIFIED, &pages(n, false, false), &pages(n, true, true), &deep_limits());
+    assert!(d.count >= n as u64);
+    assert!(work.canon_by_place >= 2 * n as u64, "{}", work.canon_by_place);
+    within("a list past the cap", time, yardstick_time(2 * 3 * n));
 }
 
 #[test]

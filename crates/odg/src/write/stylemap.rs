@@ -62,6 +62,9 @@ pub(crate) struct StyleEdit {
     /// line end are worked out from (the width is the mark's spread times `S`, which is the size class's base plus the weight). Set by
     /// [`crate::write::own::decide_line_end`] for an edit that changes a line-end cell.
     pub line: Vec<(&'static str, f64)>,
+    /// The line-end cells (`BeginArrow`, `EndArrow`) of the model whose end is DiaCraft's filled diamond (a custom end that names the master `Filled Diamond`): the writer draws
+    /// the marker of its own for each ([`super::markers::DIAMOND`]) and not number 4's, the cell carried all the same. Set with `line` by [`crate::write::own::decide_line_end`].
+    pub diamonds: Vec<&'static str>,
     /// The four margin cells' values in the model, for the paddings that are written together.
     pub margins: Vec<(&'static str, Option<CellVal>)>,
     /// The `draw:fill` the style must state when the edit sets a fill colour or turns a gradient off and says nothing of `FillPattern`: `solid`, when the
@@ -437,8 +440,8 @@ fn line_end_ops(cell: &'static str, new: Option<&CellVal>, edit: &StyleEdit) -> 
     )?;
     // The line's weight, in points: 0.75 pt where nothing says (the root style's), and a refusal in words past what a marker is written for.
     let weight_pt = super::markers::weight_pt(line("LineWeight"))?;
-    // The custom end (254) is drawn as number 4's marker; the cell is carried by the extension, which the caller sees to.
-    let drawn = super::markers::drawn_as(number);
+    // The custom end (254) is drawn as number 4's marker and the filled diamond as its own; the cell is carried by the extension, which the caller sees to.
+    let drawn = if edit.diamonds.contains(&arrow_cell) { super::markers::DIAMOND } else { super::markers::drawn_as(number) };
     let plan = super::markers::plan(drawn, class, weight_pt)?;
     Ok(vec![
         op(Ns::Draw, local_marker, Val::Text(plan.key.name())),
@@ -498,6 +501,7 @@ mod tests {
             fx: None,
             fx_off: None,
             line: Vec::new(),
+            diamonds: Vec::new(),
             parent: None,
         };
         let bkgnd = |v: Option<&str>, edit: &StyleEdit| ops_for("FillBkgndTrans", v.map(val).as_ref(), edit);
@@ -631,6 +635,7 @@ mod tests {
             fx: None,
             fx_off: None,
             line: Vec::new(),
+            diamonds: Vec::new(),
             parent: None,
         };
         let top = ops_for("TopMargin", edit.changes[0].1.as_ref(), &edit).unwrap();
@@ -690,6 +695,7 @@ mod tests {
             fx: None,
             fx_off: None,
             line: Vec::new(),
+            diamonds: Vec::new(),
             parent: None,
         };
         let ops =
@@ -732,6 +738,7 @@ mod tests {
                 fx: None,
                 fx_off: None,
                 line: vec![("EndArrowSize", class)],
+                diamonds: Vec::new(),
                 parent: None,
             };
             ops_for("EndArrow", Some(&val(arrow)), &edit)
@@ -763,6 +770,7 @@ mod tests {
             fx: None,
             fx_off: None,
             line: Vec::new(),
+            diamonds: Vec::new(),
             parent: None,
         };
         assert!(ops_for("EndArrowSize", Some(&val("3")), &no_end).unwrap().is_empty());

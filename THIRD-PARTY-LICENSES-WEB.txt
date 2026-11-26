@@ -19,7 +19,7 @@ This file is made by `cargo xtask licenses` from Cargo.lock and the crates' own 
 
   Web                    148 crates (diacraft-web 148), 8 licences, 80 texts
 
-The counts leave out DiaCraft's own 22 crates, which are under DiaCraft's licence. A crate that
+The counts leave out DiaCraft's own 23 crates, which are under DiaCraft's licence. A crate that
 offers a choice of licences (MIT OR Apache-2.0) is listed under the one DiaCraft uses it under:
 MIT where it is offered, then Apache-2.0. The web build also uses what the browser provides
 (WebAssembly, the canvas, WebGL and WebGPU), which is not part of the program.
