@@ -74,6 +74,7 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("shape.set_text", WithEmptyParams::NeedsParams),
     ("connector.add", WithEmptyParams::NeedsParams),
     ("connector.reconnect", WithEmptyParams::NeedsParams),
+    ("connector.reverse_ends", WithEmptyParams::NeedsParams),
     ("connector.autoconnect", WithEmptyParams::NeedsParams),
     ("connector.neighbour", WithEmptyParams::NeedsParams),
     ("connector.style", WithEmptyParams::NeedsParams),
@@ -109,6 +110,10 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("shape.fragment", WithEmptyParams::NeedsParams),
     ("shape.intersect", WithEmptyParams::NeedsParams),
     ("shape.subtract", WithEmptyParams::NeedsParams),
+    ("shape.join", WithEmptyParams::NeedsParams),
+    ("shape.trim", WithEmptyParams::NeedsParams),
+    ("shape.offset", WithEmptyParams::NeedsParams),
+    ("shape.fit_curve", WithEmptyParams::NeedsParams),
     ("text.box", WithEmptyParams::NeedsParams),
     ("shape.draw", WithEmptyParams::NeedsParams),
     ("shape.close", WithEmptyParams::NeedsParams),
@@ -132,6 +137,8 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("shape.placement", WithEmptyParams::NeedsParams),
     // A query of the edges of the shapes named.
     ("shape.connection_edges", WithEmptyParams::NeedsParams),
+    // Doubles or halves the connection points of the shapes named.
+    ("shape.connection_points", WithEmptyParams::NeedsParams),
     // The Behavior dialog's Placement tab.
     ("shape.behavior", WithEmptyParams::NeedsParams),
     ("shape.set_behavior", WithEmptyParams::NeedsParams),
@@ -193,6 +200,11 @@ const EMPTY_PARAMS: &[(&str, WithEmptyParams)] = &[
     ("shapedata.set", WithEmptyParams::NeedsParams),
     ("shapedata.define", WithEmptyParams::NeedsParams),
     ("shapedata.types", WithEmptyParams::Succeeds),
+    // Alt text: a shape and a master are named, and the empty call is refused in words; the page's reads the first page that is not a background; the check takes nothing.
+    ("shape.alt_text", WithEmptyParams::NeedsParams),
+    ("page.alt_text", WithEmptyParams::Succeeds),
+    ("master.alt_text", WithEmptyParams::NeedsParams),
+    ("review.check_accessibility", WithEmptyParams::Succeeds),
     // The callouts: the gallery takes nothing, and a callout with no shape and no place is one tied to nothing in the middle of the page; the others name a shape.
     ("callout.styles", WithEmptyParams::Succeeds),
     ("callout.insert", WithEmptyParams::Succeeds),
@@ -293,6 +305,7 @@ const QUERIES: &[&str] = &[
     "comment.author",
     "shapedata.list",
     "shapedata.types",
+    "review.check_accessibility",
     "callout.styles",
     "callout.list",
     "text.field_choices",
@@ -395,7 +408,7 @@ fn sweep_picture() -> String {
 
 /// Commands that change the document through history, each with params that must succeed and change
 /// something.
-fn undoable_samples() -> Vec<(&'static str, Value)> {
+pub(crate) fn undoable_samples() -> Vec<(&'static str, Value)> {
     vec![
         ("page.add", json!({})),
         ("page.add", json!({"name": "Extra"})),
@@ -433,6 +446,7 @@ fn undoable_samples() -> Vec<(&'static str, Value)> {
         ("edit.replace", json!({"what": "Hello", "with": "Jello", "scope": "all"})),
         ("connector.add", json!({"from": {"id": 1}, "to": {"id": 2}})),
         ("connector.reconnect", json!({"id": 3, "end": "end", "target": {"x": 9, "y": 1}})),
+        ("connector.reverse_ends", json!({"ids": [3]})),
         ("connector.autoconnect", json!({"from": 1, "direction": "right"})),
         ("connector.autoconnect", json!({"from": 2, "direction": "down", "master": "hexagon"})),
         ("connector.style", json!({"style": "curved", "ids": [3]})),
@@ -469,6 +483,9 @@ fn undoable_samples() -> Vec<(&'static str, Value)> {
         ("comment.delete", json!({"comment": 1})),
         ("shapedata.define", json!({"id": 1, "fields": [{"label": "Sweep", "type": "number", "value": "3"}]})),
         ("shapedata.set", json!({"id": 1, "row": "Setup", "value": "4"})),
+        ("shape.alt_text", json!({"id": 1, "title": "Sweep", "description": "A sweep shape"})),
+        ("page.alt_text", json!({"title": "Sweep"})),
+        ("master.alt_text", json!({"id": 1, "title": "Sweep"})),
         ("sheet.set_cell", json!({"id": 1, "cell": "Width", "formula": "3"})),
         ("sheet.set_cells", json!({"writes": [{"id": 1, "cell": "Width", "formula": "2.5"}, {"page": 1, "cell": "PageHeight", "formula": "9"}]})),
         ("sheet.add_row", json!({"id": 1, "section": "Scratch"})),
@@ -503,6 +520,10 @@ fn undoable_samples() -> Vec<(&'static str, Value)> {
         ("shape.fragment", json!({"ids": [1, 2]})),
         ("shape.intersect", json!({"ids": [1, 2]})),
         ("shape.subtract", json!({"ids": [1, 2]})),
+        ("shape.join", json!({"ids": [1, 2]})),
+        ("shape.trim", json!({"ids": [1, 2]})),
+        ("shape.offset", json!({"ids": [1, 2], "distance": 0.25})),
+        ("shape.fit_curve", json!({"ids": [1, 2], "tolerance": 0.5})),
         ("text.box", json!({"page": 1, "x": 4, "y": 4, "text": "Hi"})),
         ("shape.draw", json!({"page": 1, "tool": "pencil", "points": [[8, 1], [9, 1.5], [9.5, 3]]})),
         ("shape.draw", json!({"page": 1, "tool": "rectangle", "points": [[8, 5], [10, 6]], "shift": true})),
@@ -536,6 +557,8 @@ fn undoable_samples() -> Vec<(&'static str, Value)> {
         ("guide.delete", json!({"id": 1})),
         ("connector.autoconnect", json!({"from": 1, "direction": "up", "existing": true})),
         ("connector.autoconnect", json!({"from": 1, "direction": "up", "to": 2, "to_point": 1})),
+        // Both shapes get points in the middle of their portions, and the connector glued to them stays glued.
+        ("shape.connection_points", json!({"ids": [1, 2], "action": "double"})),
     ]
 }
 
@@ -560,7 +583,8 @@ fn org_chart_setup(id: &str) -> Vec<(&'static str, Value)> {
 fn sheet_setup(id: &str) -> Option<Vec<(&'static str, Value)>> {
     let shape = ("shape.drop", json!({"master": "rectangle", "page": 1, "x": 2, "y": 2}));
     match id {
-        "sheet.set_cell" | "sheet.set_cells" | "sheet.add_section" => Some(vec![shape]),
+        // Alt text to set: a shape (shape 1), and with it the master it is dropped from (master 1).
+        "sheet.set_cell" | "sheet.set_cells" | "sheet.add_section" | "shape.alt_text" | "master.alt_text" => Some(vec![shape]),
         "sheet.add_row" | "sheet.delete_row" | "sheet.delete_section" => {
             Some(vec![shape, ("sheet.add_section", json!({"id": 1, "section": "Scratch"}))])
         }
@@ -568,7 +592,7 @@ fn sheet_setup(id: &str) -> Option<Vec<(&'static str, Value)>> {
     }
 }
 
-fn setup_for(id: &str) -> Vec<(&'static str, Value)> {
+pub(crate) fn setup_for(id: &str) -> Vec<(&'static str, Value)> {
     // A variant is a variant of a theme the page has.
     if id == "theme.variant" {
         return vec![("theme.apply", json!({"theme": "tidepool"}))];
@@ -653,7 +677,18 @@ fn setup_for(id: &str) -> Vec<(&'static str, Value)> {
         return Vec::new();
     }
     // The shape operations need shapes that overlap: a second rectangle across the first (the others have an ellipse far from it).
-    let overlapping = matches!(id, "shape.union" | "shape.combine" | "shape.fragment" | "shape.intersect" | "shape.subtract");
+    let overlapping = matches!(
+        id,
+        "shape.union"
+            | "shape.combine"
+            | "shape.fragment"
+            | "shape.intersect"
+            | "shape.subtract"
+            | "shape.join"
+            | "shape.trim"
+            | "shape.offset"
+            | "shape.fit_curve"
+    );
     let second = if overlapping {
         json!({"master": "rectangle", "page": 1, "x": 2.5, "y": 2.3})
     } else {
@@ -760,6 +795,7 @@ fn every_command_has_unique_id_and_doc() {
             "connector.reconnect",
             "connector.reroute",
             "connector.reset",
+            "connector.reverse_ends",
             "connector.style",
             "container.add",
             "container.add_member",
@@ -804,6 +840,7 @@ fn every_command_has_unique_id_and_doc() {
             "layer.delete",
             "layer.list",
             "layer.set",
+            "master.alt_text",
             "orgchart.arrange",
             "orgchart.info",
             "orgchart.layout",
@@ -813,6 +850,7 @@ fn every_command_has_unique_id_and_doc() {
             "orgchart.picture_set",
             "orgchart.relayout",
             "page.add",
+            "page.alt_text",
             "page.auto_size",
             "page.avoid_page_breaks",
             "page.background",
@@ -835,20 +873,24 @@ fn every_command_has_unique_id_and_doc() {
             "page.type",
             "page_breaks.set",
             "page_breaks.settings",
+            "review.check_accessibility",
             "select.by_region",
             "select.by_type",
             "select.choices",
             "shape.align",
+            "shape.alt_text",
             "shape.autospace",
             "shape.behavior",
             "shape.change",
             "shape.close",
             "shape.combine",
             "shape.connection_edges",
+            "shape.connection_points",
             "shape.delete",
             "shape.draw",
             "shape.drop",
             "shape.duplicate",
+            "shape.fit_curve",
             "shape.flip",
             "shape.format",
             "shape.formatting",
@@ -856,8 +898,10 @@ fn every_command_has_unique_id_and_doc() {
             "shape.gradient",
             "shape.group",
             "shape.intersect",
+            "shape.join",
             "shape.move",
             "shape.move_off_page_breaks",
+            "shape.offset",
             "shape.order",
             "shape.pin",
             "shape.place",
@@ -873,6 +917,7 @@ fn every_command_has_unique_id_and_doc() {
             "shape.shadow",
             "shape.size",
             "shape.subtract",
+            "shape.trim",
             "shape.ungroup",
             "shape.union",
             "shapedata.define",
@@ -976,10 +1021,11 @@ fn the_params_docs_name_the_keys_of_the_shape_and_connector_commands() {
     assert_eq!(keys("shape.drop"), ["master", "stencil", "page", "x", "y", "snap"]);
     assert_eq!(keys("shape.move"), ["ids", "dx", "dy", "page", "snap"]);
     assert_eq!(keys("shape.resize"), ["id", "ids", "x", "y", "width", "height", "page", "snap"]);
-    assert_eq!(keys("shape.delete"), ["ids", "page"]);
+    assert_eq!(keys("shape.delete"), ["ids", "connectors", "page"]);
     assert_eq!(keys("shape.set_text"), ["id", "text", "start", "end", "page"]);
     assert_eq!(keys("connector.add"), ["from", "to", "page", "snap"]);
     assert_eq!(keys("connector.reconnect"), ["id", "end", "target", "page", "snap"]);
+    assert_eq!(keys("connector.reverse_ends"), ["id", "ids", "page"]);
     // The routing styles with a direction and the route a connector has.
     assert_eq!(keys("connector.style"), ["style", "direction", "ids", "page"]);
     assert_eq!(keys("connector.path"), ["id", "page"]);
@@ -1162,6 +1208,8 @@ fn the_params_docs_name_the_keys_of_the_behavior_commands() {
 fn the_params_docs_name_the_keys_of_the_connection_point_commands() {
     // The shapes are `id` or `ids`, then the page and the minimum distance between points.
     assert_eq!(keys("shape.connection_edges"), ["id", "ids", "page", "min_gap"]);
+    // The shapes, what to do, which edge (by number or by a place with its reach), then the page and the minimum distance.
+    assert_eq!(keys("shape.connection_points"), ["id", "ids", "action", "edge", "at", "reach", "page", "min_gap"]);
 }
 
 #[test]
@@ -1536,4 +1584,102 @@ fn hostile_command_ids_never_come_back_raw() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The params of a call that changes nothing, for the commands whose own sample changes something each time it is run (a move by an amount, a turn by an angle). Every other
+/// sample is run again as it stands, which is a call that changes nothing when the command sets and does not add (a format, a size, a name, a connector's end), and one that
+/// changes something (a page more, a shape more) when it adds.
+const CHANGE_NOTHING: &[(&str, &str)] = &[
+    ("shape.move", r#"{"ids": [1], "dx": 0, "dy": 0}"#),
+    ("shape.rotate", r#"{"ids": [1], "by": 0}"#),
+    ("text.block_move", r#"{"id": 1, "dx": 0, "dy": 0}"#),
+    ("text.block_rotate", r#"{"id": 1, "by": 0}"#),
+    ("command.batch", r#"{"commands": [{"command": "page.rename", "params": {"id": 1, "name": "First"}}], "label": "Nothing"}"#),
+];
+
+/// The keys of an answer that count (or say) what the call changed: a command that changed nothing answers 0 for each, `false`, or an empty list.
+const COUNTS_OF_CHANGES: &[&str] = &[
+    "moved",
+    "resized",
+    "styled",
+    "formatted",
+    "rotated",
+    "flipped",
+    "changed",
+    "changed_pages",
+    "written",
+    "reset",
+    "pinned",
+    "sized",
+    "renamed",
+    "cells_rewritten",
+    "shapes_linked",
+];
+
+/// The counts an answer gives of what a call changed that are not nothing, as `key: value`.
+fn counted_changes(answer: &Value) -> Vec<String> {
+    let Some(map) = answer.as_object() else { return Vec::new() };
+    map.iter()
+        .filter(|(key, value)| {
+            COUNTS_OF_CHANGES.contains(&key.as_str())
+                && match value {
+                    Value::Number(n) => n.as_f64() != Some(0.0),
+                    Value::Bool(b) => *b,
+                    Value::Array(list) => !list.is_empty(),
+                    _ => false,
+                }
+        })
+        .map(|(key, value)| format!("{key}: {value}"))
+        .collect()
+}
+
+/// What a session shows of its history and of its drawing's being changed: the steps, the revision, whether the drawing is unsaved.
+fn history_marks(s: &Session) -> (usize, usize, u64, bool) {
+    (s.history().map_or(0, |h| h.undo_len()), s.history().map_or(0, |h| h.redo_len()), s.revision(), s.is_dirty())
+}
+
+/// **An edit that leaves the drawing as it was is no undo step, moves no revision and does not make the drawing unsaved, whichever command made it** (a move by nothing and a
+/// reconnect to the place the end is at made a step of the history on a drawing that was the same, and a call of the sweep's commands run twice did so all over). Each sample is run, and
+/// then run again (or its call that changes nothing, `CHANGE_NOTHING`): when the second call leaves the document as it was it leaves the history, the revision and the unsaved mark as
+/// they were, and when it changes the document it is one step and the revision moves. A call that changes nothing counts nothing in its answer (`moved` 0, `changed` false).
+#[test]
+fn a_call_that_leaves_the_drawing_as_it_was_is_no_step_no_revision_and_no_unsaved_mark() {
+    let samples = undoable_samples();
+    let mut unchanged: Vec<String> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+    for (id, params) in samples {
+        let mut s = session_with_history();
+        for (setup_id, setup_params) in setup_for(id) {
+            run(&mut s, setup_id, setup_params);
+        }
+        s.execute(id, &params).unwrap_or_else(|e| panic!("{id} {params}: the sample params must succeed: {e}"));
+        let again = CHANGE_NOTHING.iter().find(|(c, _)| *c == id).map_or_else(|| params.clone(), |(_, p)| serde_json::from_str::<Value>(p).unwrap());
+        let (document, marks) = (s.document().cloned().unwrap(), history_marks(&s));
+        let Ok(answer) = s.execute(id, &again) else { continue };
+        let changed = s.document() != Some(&document);
+        let after = history_marks(&s);
+        let what = format!("{id} {again} -> {answer}");
+        if CHANGE_NOTHING.iter().any(|(c, _)| *c == id) && changed {
+            failures.push(format!("{what}: the call that is to change nothing changed the document"));
+        }
+        if changed {
+            if (after.0, after.1) != (marks.0 + 1, 0) || after.2 == marks.2 || !after.3 {
+                failures.push(format!("{what}: a call that changed the document is one step and a revision: {marks:?} then {after:?}"));
+            }
+        } else {
+            unchanged.push(id.to_owned());
+            let counted = counted_changes(&answer);
+            if !counted.is_empty() {
+                failures.push(format!("{what}: the document is as it was, and the answer counts a change: {}", counted.join(", ")));
+            }
+            if after != marks {
+                failures.push(format!(
+                    "{what}: the document is as it was, and the history, the revision or the unsaved mark moved: {marks:?} then {after:?}"
+                ));
+            }
+        }
+        check_session(&s).unwrap_or_else(|e| panic!("{what}: {e}"));
+    }
+    assert!(unchanged.len() >= 60, "the sweep found only {} calls that change nothing: {unchanged:?}", unchanged.len());
+    assert!(failures.is_empty(), "{} of {} calls:\n{}", failures.len(), unchanged.len(), failures.join("\n"));
 }

@@ -67,12 +67,12 @@ fn plan_paragraph<'r>(
     // The line cap may have stopped before the paragraph's end: what it left is counted, so the caller is told.
     let next = spans.last().map_or(0, |s| s.next);
     let left_out = shaped.clusters.get(next).map_or(0, |c| para.cells.len().saturating_sub(c.cells.start));
-    Planned { plan: ParaPlan { shaped, style, tab_adv, lines, bullet, z }, a_first, a_rest, gap, left_out }
+    Planned { plan: ParaPlan { shaped, style, tab_adv, lines, bullet, z, width }, a_first, a_rest, gap, left_out }
 }
 
 static DEFAULT_PARA: std::sync::LazyLock<ParaFormat> = std::sync::LazyLock::new(ParaFormat::default);
 
-/// How wide the block is when it is as wide as its widest line.
+/// How wide the block is when it is as wide as its widest line: the farthest a line reaches from its paragraph's near edge, whichever edge that is.
 fn natural_extent(planned: &[Planned]) -> f64 {
     let mut widest = 0.0f64;
     for p in planned {
@@ -181,8 +181,12 @@ fn background(lines: &[Line], block: &BlockStyle, has_text: bool) -> Option<Back
     }
     let first = lines.first()?;
     let last = lines.last()?;
+    // The bullet is on the line's left, or on its right in a right-to-left paragraph: the rectangle takes in both ends.
     let x0 = lines.iter().map(|l| l.bullet.as_ref().and_then(|b| b.glyphs.first()).map_or(l.x, |g| g.x.min(l.x))).fold(f64::INFINITY, f64::min);
-    let x1 = lines.iter().map(|l| l.x + l.width).fold(f64::NEG_INFINITY, f64::max);
+    let x1 = lines
+        .iter()
+        .map(|l| l.bullet.as_ref().and_then(|b| b.glyphs.last()).map_or(l.x + l.width, |g| (g.x + g.advance).max(l.x + l.width)))
+        .fold(f64::NEG_INFINITY, f64::max);
     Some(Background { rect: Rect::new(x0, last.bottom, x1.max(x0), first.top), color, opacity: 1.0 - trans })
 }
 
@@ -191,12 +195,13 @@ fn background(lines: &[Line], block: &BlockStyle, has_text: bool) -> Option<Back
 /// laid out one cluster to a line, and a width that isn't a number is read as `None`. With `TextDirection` 1 the characters
 /// run down the block: see [`crate::vertical`].
 pub fn lay_out(runs: &[Run], block: &BlockFormat, width: Option<f64>, db: &FontDb) -> Laid {
-    if block.text_direction == 1 { lay_out_down(runs, block, width, db) } else { lay_out_across(runs, block, width, db) }
+    if block.text_direction == 1 { lay_out_down(runs, block, width, db) } else { lay_out_across(runs, block, width, db, false) }
 }
 
 /// The layout across the block, for text of any direction: `width` is how far a line may run (see [`lay_out`]). Vertical text is laid out by this
-/// in a block turned the other way up.
-pub(crate) fn lay_out_across(runs: &[Run], block: &BlockFormat, width: Option<f64>, db: &FontDb) -> Laid {
+/// in a block turned the other way up, and `vertical` says so: the underline of a Japanese or Korean run is then kept apart for the turn
+/// to put on the other side.
+pub(crate) fn lay_out_across(runs: &[Run], block: &BlockFormat, width: Option<f64>, db: &FontDb, vertical: bool) -> Laid {
     let mut san = Sanitizer::default();
     let bs = BlockStyle::new(block, &mut san);
     if width.is_some_and(|w| !w.is_finite()) {
@@ -223,14 +228,16 @@ pub(crate) fn lay_out_across(runs: &[Run], block: &BlockFormat, width: Option<f6
     let natural = natural_extent(&planned);
     for p in &mut planned {
         let z = p.plan.z.unwrap_or(natural);
+        // A right-to-left paragraph is turned about the block's width, or about its widest line when it has none.
+        let edge = p.plan.width.unwrap_or(natural);
         let (a_first, a_rest, gap) = (p.a_first, p.a_rest, p.gap);
-        align(&mut p.plan, a_first, a_rest, gap, z);
+        align(&mut p.plan, a_first, a_rest, gap, z, edge);
     }
     let (baselines, total) = stack(&planned, &bs);
     let mut lines = Vec::with_capacity(baselines.len());
     let mut at = baselines.iter();
     for (pi, (p, para)) in planned.iter().zip(&prepared.paragraphs).enumerate() {
-        let env = Env { para: &p.plan, cells: para, entries: &sh.entries, styles: &styles };
+        let env = Env { para: &p.plan, cells: para, entries: &sh.entries, styles: &styles, vertical };
         for plan in &p.plan.lines {
             let mut line = emit_line(&env, plan, at.next().copied().unwrap_or(0.0));
             line.paragraph = pi;

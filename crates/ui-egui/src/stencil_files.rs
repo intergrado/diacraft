@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{TryRecvError, channel};
 use std::time::Duration;
 
+use diacraft_engine::file_access::ScopeHandle;
 use diacraft_engine::{EngineError, Result, Session, guard};
 use egui::Context;
 use serde_json::{Value, json};
@@ -33,15 +34,18 @@ const POLL: Duration = Duration::from_millis(250);
 /// gone, it changed into something that is not a stencil, or it does not fit the memory a read may use beside the drawing just read) is left out, and the list shows what is
 /// open. **What is left out is said** (a stencil near the budget dropped out unseen): one note for each, in words and by the file's name, for the window's
 /// message and the answer of the open.
-pub(crate) fn reopen(session: &mut Session, files: &[PathBuf]) -> Vec<String> {
+///
+/// **Each is opened again in the scope it was first opened in** (`ScopeHandle::run_replay`): a stencil a request opened is judged again under that request's roots, so that a link
+/// put in its place since is refused (and said), and one the person opened is the person's, so that a request that has a drawing read does not take it away.
+pub(crate) fn reopen(session: &mut Session, files: &[(PathBuf, ScopeHandle)]) -> Vec<String> {
     let mut notes = Vec::new();
-    for path in files {
+    for (path, scope) in files {
         let name = crate::file_open::name_of(path);
         let Some(text) = path.to_str() else {
             notes.push(format!("{name} was not opened again in the new drawing: its name is not text DiaCraft can use."));
             continue;
         };
-        if let Err(e) = session.execute("stencil.open", &json!({ "path": text })) {
+        if let Err(e) = scope.clone().run_replay(|| session.execute("stencil.open", &json!({ "path": text }))) {
             notes.push(not_opened_again(&name, &e));
         }
     }
@@ -83,7 +87,7 @@ impl DiacraftApp {
 
     /// Whether there is a chooser for a stencil file and none is on the screen now: whether Open Stencil can be used.
     pub fn can_pick_stencil(&self) -> bool {
-        (self.ui.stencils.picker.is_some() || self.has_file_host()) && !self.stencil_dialog_open()
+        (self.ui.stencils.picker.is_some() || self.has_file_host()) && self.file_dialog().is_none()
     }
 
     /// Whether the chooser of a stencil file is asked for or on the screen: a command has asked for it and the next frame has not started it yet, or its
@@ -160,9 +164,10 @@ impl DiacraftApp {
     pub(crate) fn noted_stencil_open(&mut self, params: &Value, answer: &Value) {
         let Some(id) = answer.get("id").and_then(Value::as_str) else { return };
         if let Some(path) = params.get("path").and_then(Value::as_str)
-            && !self.ui.stencils.files.iter().any(|(known, _)| known == id)
+            && !self.ui.stencils.files.iter().any(|(known, ..)| known == id)
         {
-            self.ui.stencils.files.push((id.to_owned(), PathBuf::from(path)));
+            // The scope this runs in is the one the command ran in: a request's roots, or none for the window's own.
+            self.ui.stencils.files.push((id.to_owned(), PathBuf::from(path), ScopeHandle::capture()));
         }
         self.ui.stencils.current = Some(id.to_owned());
         self.ui.stencils.forget_opened();
@@ -174,10 +179,10 @@ impl DiacraftApp {
     pub(crate) fn noted_stencil_close(&mut self, params: &Value) {
         let Some(id) = params.get("id").and_then(Value::as_str) else { return };
         // A stencil that is closed no longer needs what the host kept of its file.
-        if let Some((_, path)) = self.ui.stencils.files.iter().find(|(known, _)| known == id) {
+        if let Some((_, path, _)) = self.ui.stencils.files.iter().find(|(known, ..)| known == id) {
             self.release_file(path);
         }
-        self.ui.stencils.files.retain(|(known, _)| known != id);
+        self.ui.stencils.files.retain(|(known, ..)| known != id);
         if self.ui.stencils.current.as_deref() == Some(id) {
             self.ui.stencils.current = None;
         }
@@ -191,8 +196,8 @@ impl DiacraftApp {
     }
 
     /// The paths the window opened its stencils from, in the order opened: what a thread that reads a drawing opens again in the session it makes.
-    pub(crate) fn stencil_paths(&self) -> Vec<PathBuf> {
-        self.ui.stencils.files.iter().map(|(_, path)| path.clone()).collect()
+    pub(crate) fn stencil_paths(&self) -> Vec<(PathBuf, ScopeHandle)> {
+        self.ui.stencils.files.iter().map(|(_, path, scope)| (path.clone(), scope.clone())).collect()
     }
 
     /// A session read from a file replaced the old one, and opened the stencils again: the ids they have now are found by their files, and the stencil that was
@@ -200,7 +205,7 @@ impl DiacraftApp {
     pub(crate) fn stencils_after_open(&mut self) {
         let before = std::mem::take(&mut self.ui.stencils.files);
         let shown_before = self.ui.stencils.current.clone();
-        for (old, path) in before {
+        for (old, path, scope) in before {
             // The engine knows a stencil by the file its name leads to, links followed, and the window keeps the name it was given: the two differ through a
             // link, and on macOS every temporary folder is under one (`/var` is `/private/var`), where the stencil was lost here. A file that is gone
             // leads nowhere, and its stencil did not open again.
@@ -211,7 +216,7 @@ impl DiacraftApp {
             if shown_before.as_deref() == Some(old.as_str()) {
                 self.ui.stencils.current = Some(id.clone());
             }
-            self.ui.stencils.files.push((id, path));
+            self.ui.stencils.files.push((id, path, scope));
         }
         // A stencil whose file did not open again is not shown.
         let listed: Vec<String> = self.session.stencils().iter().map(|s| s.id().to_owned()).collect();
@@ -228,12 +233,12 @@ impl DiacraftApp {
             return self.open_stencil_file(Path::new(path));
         }
         if !self.can_pick_stencil() {
-            let why = if self.ui.stencils.picker.is_none() && !self.has_file_host() {
-                "there is no file dialog in this build: give a `path`"
-            } else {
-                "a stencil file is being chosen"
+            let why = match self.file_dialog_busy() {
+                _ if self.ui.stencils.picker.is_none() && !self.has_file_host() => "there is no file dialog in this build: give a `path`".to_owned(),
+                Some(words) => words,
+                None => "a stencil file is being chosen".to_owned(),
             };
-            return Err(EngineError::Disabled { cmd: "shapes.openStencil".to_owned(), reason: why.to_owned() });
+            return Err(EngineError::Disabled { cmd: "shapes.openStencil".to_owned(), reason: why });
         }
         self.ui.stencils.want_dialog = true;
         Ok(json!({"dialog": true}))

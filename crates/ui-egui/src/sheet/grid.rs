@@ -426,7 +426,7 @@ pub fn paint(ui: &mut Ui, list: Rect, tab: &mut SheetTab, input: GridIn<'_>) -> 
 
 /// The editor over the cell being edited, grown to the right for a text that is wider than the cell, and cut at the list's edge.
 fn paint_editor(ui: &mut Ui, fr: &Frame<'_>, edit: Option<&mut EditState>, out: &mut GridOut) {
-    let (Some(edit), Some((full, visible))) = (edit.filter(|e| !e.in_bar), out.edit_rect) else { return };
+    let (Some(edit), Some((full, visible))) = (edit.filter(|e| !e.in_bar && !e.in_card), out.edit_rect) else { return };
     if visible.width() <= 0.0 {
         return;
     }
@@ -462,6 +462,12 @@ fn paint_header(ui: &Ui, fr: &Frame<'_>, painter: &egui::Painter, at: &At<'_>, o
     if resp.clicked() {
         acts.out.toggled.push(info.name.clone());
         acts.out.select = Some(Sel::Header { section: info.name.clone() });
+        acts.out.pressed = true;
+    }
+    // A right click on a header is the menu of its section (Insert Section, Delete Section), and does not fold it.
+    if resp.secondary_clicked() {
+        let sel = Sel::Header { section: info.name.clone() };
+        acts.out.menu = Some((resp.interact_pointer_pos().unwrap_or(at.visible.left_bottom()), Some(sel)));
         acts.out.pressed = true;
     }
 }
@@ -630,6 +636,14 @@ fn paint_row_name(
         && let Some(r) = key_row
     {
         acts.out.select = Some(Sel::Row { section: info.name.clone(), row: r.clone() });
+        acts.out.pressed = true;
+    }
+    // A right click on a row's number selects the row and opens the menu (Insert Row, Delete Row).
+    if resp.secondary_clicked()
+        && let Some(r) = key_row
+    {
+        let sel = Sel::Row { section: info.name.clone(), row: r.clone() };
+        acts.out.menu = Some((resp.interact_pointer_pos().unwrap_or(rect.left_bottom()), Some(sel)));
         acts.out.pressed = true;
     }
 }

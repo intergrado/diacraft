@@ -59,7 +59,11 @@ pub(super) fn build(doc: &Document, plan: &Plan<'_>, options: &WriteOptions, wor
     let limits = &options.limits;
     // Each entry of the model is a step of the save: its row, its entry and its name.
     work.charge_steps(plan.parts.len())?;
-    let base = crate::base::parts(&plan.layout)?;
+    let mut base = crate::base::parts(&plan.layout)?;
+    // A drawing with a language and no default style of its own says its language on the default graphic style: the package it is written onto starts with it.
+    if let Some(style) = crate::lang::default_style(doc) {
+        base.styles = base.styles.replacen("<office:styles></office:styles>", &format!("<office:styles>{style}</office:styles>"), 1);
+    }
     // `meta.xml` and `settings.xml`: the bytes the model holds for them when it holds them as bytes, else written from its fields.
     let meta_own = if plan.meta_part.is_none() { Some(meta::write(doc, options.content_unchanged, limits, work)?) } else { None };
     let settings_own = if plan.settings_part.is_none() {

@@ -32,7 +32,7 @@
 //! (`diacraft-svg`, `diacraft-pdf`) implement the same trait, so a page is read, placed, dashed, shaded and laid out once, whatever it
 //! becomes. [`Renderer::draw_onto`] draws a page onto any target; [`export`] holds what the outputs share (the page's layout, the limits of
 //! an export, the errors) and the PNG. A target that writes letters as text says so ([`Target::wants_text`]) and is offered each run; one
-//! that cannot write a run as text answers `false` and the walk draws its outlines, counted as [`SkipKind::TextAsOutlines`].
+//! that cannot write a run as text answers `false` and the walk draws its outlines, counted as [`SkipKind::TextAsOutlines`]. **A target that writes what a shape says of itself** ([`Target::wants_labels`]: its alt text, which `diacraft_doc::alt_text` finds, and its name) is told where each drawn shape begins and ends, its members' inside it ([`Target::begin_shape`], [`Target::end_shape`]); the SVG writer makes a group of each, and a raster or a recording is never asked.
 //!
 //! **Cost.** A frame has a budget ([`Limits`]): a time for the whole frame and one for text layout, and counts of shapes, rows and
 //! characters. A frame that reaches one stops drawing, and [`Rendered::skipped`] says how much it left out. The time is read from the renderer's
@@ -87,6 +87,7 @@ mod skips;
 mod style;
 mod target;
 mod text;
+mod worked;
 
 #[cfg(kani)]
 mod kani_proofs;
@@ -102,12 +103,14 @@ use kurbo::Affine;
 pub use clock::Clock;
 pub use diacraft_fonts::Face;
 pub use face::{FaceReader, with_face_reader};
-pub use geometry::geom_rows;
+pub use geometry::{geom_rows, geom_rows_worked};
 pub use limits::{Cancel, Limits};
 pub use par::{MAX_THREADS, ParStats, Parallel, default_threads, threads_from};
+pub use read::{UNSAVED_STEPS, Val as CellValue, read_cell, read_cell_within};
 pub use skips::{SkipKind, Skipped};
-pub use target::{Gradient, GradientKind, GradientStop, Paint, Refused, Target, TextRun, TextSource};
+pub use target::{Gradient, GradientKind, GradientStop, Paint, Refused, ShapeLabel, Target, TextRun, TextSource};
 pub use vello_cpu::Pixmap;
+pub use worked::{MAX_KEPT_ANSWERS, MAX_STEPS_PER_DOCUMENT, WorkedCache};
 
 use crate::canvas::Canvas;
 use crate::frame::Frame;
@@ -206,6 +209,8 @@ pub struct Renderer {
     clock: Clock,
     /// The work the frames drawn so far were charged, in the units of `Limits::max_work`.
     work_done: u64,
+    /// What the frames of one document worked out for the cells that hold a formula and no saved value, when the caller keeps it.
+    worked: Option<Arc<WorkedCache>>,
 }
 
 impl Default for Renderer {
@@ -242,6 +247,7 @@ impl Renderer {
             stats: ParStats::default(),
             clock: Clock::system(),
             work_done: 0,
+            worked: None,
         }
     }
 
@@ -276,6 +282,20 @@ impl Renderer {
     pub fn clear_caches(&mut self) {
         self.caches.clear();
         self.share_caches.clear();
+        self.worked = None;
+    }
+
+    /// Keeps, for the frames drawn from now on, what they work out for the cells that hold a formula and no saved value in `cache` (a [`WorkedCache`]), until it is
+    /// replaced or taken away with `None`. **A frame uses it only for the document it was made for** ([`WorkedCache::is_for`]): the frames of any other document, or of
+    /// the same one after an edit, work out as they would with none. A window gives each new document value a cache of its own and has the frames of that value
+    /// share it, so that a page is worked out once for as long as it is not changed; an export draws once, and has none.
+    pub fn set_worked_cache(&mut self, cache: Option<Arc<WorkedCache>>) {
+        self.worked = cache;
+    }
+
+    /// The cache the frames keep their answers in, if the caller gave one.
+    pub fn worked_cache(&self) -> Option<&Arc<WorkedCache>> {
+        self.worked.as_ref()
     }
 
     /// Lets a newer request stop the frames drawn from now on, until it is replaced or cleared with `None`: see [`Cancel`]. A frame that was
@@ -474,7 +494,7 @@ impl Renderer {
     /// As [`Renderer::walk`] for a frame that began at `started` (a reading of the renderer's clock): the frame's time budget counts from there.
     fn walk_started<T: Target>(&mut self, doc: &Document, page: PageId, target: &mut T, started: std::time::Duration) -> Skips {
         let mut eval = eval_ctx();
-        let cx = Cx::new(doc, &mut eval);
+        let cx = Cx::new(doc, &mut eval).with_kept(self.worked.as_ref());
         let mut frame = Frame::new(&cx, target, &self.fonts, &mut self.caches, self.limits);
         frame.clock = self.clock.clone();
         frame.start = started;

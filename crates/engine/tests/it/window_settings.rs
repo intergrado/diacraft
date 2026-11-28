@@ -724,7 +724,9 @@ fn an_unnamed_group_given_data_in_diacraft_is_still_refused_in_words() {
     .unwrap();
     run(&mut s, "window.settings.set", json!({ "grid": false }));
     let said = s.execute("file.save", &json!({})).unwrap_err().to_string();
-    assert!(said.contains("a group with no name that is unique among the page's groups is given data of its own"), "{said}");
+    // The words name the group and what it needs, and do not tell a person to undo: the setting turned is what was done last, and undoing it would not help.
+    assert!(said.contains("the group with no name numbered 1 on the page") && said.contains("has data of its own or a link to a master"), "{said}");
+    assert!(!said.contains("Undo") && !said.contains("edit.undo"), "{said}");
     assert_eq!(std::fs::read(&path).unwrap(), drawing.bytes(), "nothing written");
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(run(&mut s, "file.save", json!({}))["edited"], true, "the data undone: the setting saves");

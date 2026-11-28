@@ -1897,3 +1897,183 @@ fn the_resolver_reads_the_rows_a_command_wrote() {
     let rows = Resolver::new(d).effective_rows(&sheet, &SectionKey::new("Geometry", Some(0))).unwrap();
     assert_eq!(rows.iter().map(|r| r.key.clone()).collect::<Vec<_>>(), [RowKey::Ix(1), RowKey::Ix(2), RowKey::Ix(3), RowKey::Ix(4)]);
 }
+
+// ---- the sheets no page works out ------------------------------------------------------------------------------------------------
+
+/// A formula on a sheet no page works out (the document's, a style's, a master's page sheet, the shape of a master no page holds an instance of) that names a row that went reads
+/// `#REF!` as one on a page does, with the value it had, and the cell that reads it follows. Nothing worked these sheets out, so the error was never recorded: the property test of
+/// found it by a full recalculation that disagreed with the drawing.
+#[test]
+fn a_formula_on_a_sheet_no_page_works_out_that_named_a_row_that_went_records_ref() {
+    let master = MasterBuilder::new().shape(ShapeBuilder::new(5).cell_u("Width", "1", "IN"));
+    let page = PageBuilder::new().name("Page-1").shape(ShapeBuilder::new(10).cell_u("Width", "2", "IN"));
+    let mut s = session_of(DocBuilder::new().master(1, master).style(1, StyleBuilder::new().name("S1")).page(1, page).build());
+    let on = |keys: &Value, extra: Value| {
+        let mut params = keys.clone();
+        params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        params
+    };
+    for (label, keys) in [
+        ("the document", json!({"document": true})),
+        ("a style", json!({"style": 1})),
+        ("a master's page", json!({"master": 1})),
+        ("the shape of a master no page holds an instance of", json!({"master": 1, "id": 5})),
+    ] {
+        run(&mut s, "sheet.add_section", on(&keys, json!({"section": "Scratch"})));
+        run(&mut s, "sheet.set_cell", on(&keys, json!({"cell": "Scratch.A1", "formula": "7"})));
+        run(&mut s, "sheet.add_section", on(&keys, json!({"section": "User"})));
+        run(&mut s, "sheet.add_row", on(&keys, json!({"section": "User", "name": "B"})));
+        run(&mut s, "sheet.set_cell", on(&keys, json!({"cell": "User.Row_1.Value", "formula": "Scratch.A1"})));
+        run(&mut s, "sheet.set_cell", on(&keys, json!({"cell": "User.B.Value", "formula": "User.Row_1.Value+1"})));
+        let cell = |s: &mut Session, name: &str| run(s, "sheet.cell", on(&keys, json!({"cell": name})));
+        assert_eq!(cell(&mut s, "User.B.Value")["value"], json!(8.0), "{label}");
+        // The row it names goes: the formula reads REF() and the error is recorded, with the value it had; the cell that reads it keeps reading that value.
+        run(&mut s, "sheet.delete_row", on(&keys, json!({"section": "Scratch", "row": 1})));
+        let a = cell(&mut s, "User.Row_1.Value");
+        assert_eq!((a["formula"].clone(), a["error"].clone(), a["value"].clone()), (json!("REF()"), json!("#REF!"), json!(7.0)), "{label}: {a}");
+        let b = cell(&mut s, "User.B.Value");
+        assert_eq!((b["error"].clone(), b["value"].clone()), (NULL, json!(8.0)), "{label}: {b}");
+        let report = diacraft_calc::recalc_all(doc(&s), &diacraft_calc::Budget::default());
+        assert!(report.differed.is_empty(), "{label}: a full recalculation differs from the drawing: {:?}", report.differed);
+        assert_eq!(check_session(&s), Ok(()));
+    }
+}
+
+// ---- rows whose names differ only in letter case ---------------------------------------------------------------------------
+
+/// Shape 10 with Shape Data rows as a file from another program may hold them: `Cost`, then `first` and `second`, which differ only in letter case, holding 1 and 2 in `Value`.
+fn twin_shape(first: &str, second: &str) -> ShapeBuilder {
+    ShapeBuilder::new(10)
+        .row_cell("Property", None, RowKey::name("Cost"), "Value", "9")
+        .row_cell("Property", None, RowKey::name(first), "Value", "1")
+        .row_cell("Property", None, RowKey::name(second), "Value", "2")
+        .row_cell("User", None, RowKey::name("Out"), "Value", "0")
+}
+
+/// Gives the named rows of shape 10's Shape Data the `IX`es a file may give a row of a named section.
+fn give_ix(s: &mut Session, ixes: &[(&str, u32)]) {
+    s.edit("ix", |d| {
+        let page = Arc::make_mut(d.pages.get_mut(0).unwrap());
+        let shape = Arc::make_mut(page.shapes.get_mut(0).unwrap());
+        let section = Arc::make_mut(&mut shape.sheet).section_mut(&SectionKey::new("Property", None)).unwrap();
+        for at in 0..section.rows.len() {
+            let name = section.rows[at].name.clone();
+            if let Some((_, ix)) = ixes.iter().find(|(n, _)| name.as_deref() == Some(*n)) {
+                Arc::make_mut(section.rows.get_mut(at).unwrap()).ix = Some(*ix);
+            }
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+
+/// What a formula on shape 10 that names `reference` reads, worked out where the formula is written.
+fn read_by_formula(s: &mut Session, reference: &str) -> f64 {
+    run(s, "sheet.set_cell", json!({"id": 10, "cell": "User.Out.Value", "formula": reference}));
+    num(s, "User.Out.Value")
+}
+
+/// Both orders of two rows that differ only in case, and each of them as the row the call names.
+fn twin_orders() -> [(&'static str, &'static str); 2] {
+    [("Row_5", "ROW_5"), ("ROW_5", "Row_5")]
+}
+
+/// A delete of a row given by name takes the row that spells the name exactly, and its twin in another case stays: whichever comes first in the section. A formula that names the row
+/// reads it, so the commands and the formulas agree on the row (the exact spelling wins).
+#[test]
+fn a_delete_takes_the_row_of_the_exact_spelling_and_not_its_twin_in_another_case() {
+    for (first, second) in twin_orders() {
+        for (gone, kept, kept_value) in [(first, second, 2.0), (second, first, 1.0)] {
+            let mut s = one_shape(twin_shape(first, second));
+            assert_eq!(
+                read_by_formula(&mut s, &format!("Prop.{gone}.Value")),
+                if gone == first { 1.0 } else { 2.0 },
+                "a formula reads {gone} of [{first}, {second}]"
+            );
+            delete_row(&mut s, "Prop", json!(gone));
+            assert_eq!(keys(&mut s, "Prop"), [json!("Cost"), json!(kept)], "deleting {gone} from [{first}, {second}]");
+            assert_eq!(num(&mut s, &format!("Prop.{kept}.Value")), kept_value, "the row {kept} is as it was");
+            assert_eq!(check_session(&s), Ok(()));
+        }
+    }
+}
+
+/// An insert that goes `after` or `before` a row given by name goes by the row of the exact spelling.
+#[test]
+fn an_insert_after_or_before_a_row_goes_by_the_row_of_the_exact_spelling() {
+    for (first, second) in twin_orders() {
+        for anchor in [first, second] {
+            for after in [true, false] {
+                let mut s = one_shape(twin_shape(first, second));
+                add_row(&mut s, "Prop", json!({"name": "Fresh", if after { "after" } else { "before" }: anchor}));
+                let mut want = vec![json!("Cost"), json!(first), json!(second)];
+                let at = want.iter().position(|k| k == &json!(anchor)).unwrap();
+                want.insert(if after { at + 1 } else { at }, json!("Fresh"));
+                assert_eq!(keys(&mut s, "Prop"), want, "a row {} {anchor} among [{first}, {second}]", if after { "after" } else { "before" });
+                assert_eq!(check_session(&s), Ok(()));
+            }
+        }
+    }
+}
+
+/// `sheet.cell` and `sheet.set_cell` address a row by its exact spelling first, and a formula that names the row reads that row.
+#[test]
+fn a_cell_addressed_through_a_row_name_is_the_exact_rows_whichever_comes_first() {
+    for (first, second) in twin_orders() {
+        for (named, value) in [(first, 1.0), (second, 2.0)] {
+            let mut s = one_shape(twin_shape(first, second));
+            assert_eq!(num(&mut s, &format!("Prop.{named}.Value")), value, "sheet.cell {named} of [{first}, {second}]");
+            assert_eq!(read_by_formula(&mut s, &format!("Prop.{named}.Value")), value, "a formula naming {named} of [{first}, {second}]");
+            run(&mut s, "sheet.set_cell", json!({"id": 10, "cell": format!("Prop.{named}.Value"), "formula": "7"}));
+            let other = if named == first { second } else { first };
+            assert_eq!(num(&mut s, &format!("Prop.{named}.Value")), 7.0, "sheet.set_cell wrote {named}");
+            assert_eq!(num(&mut s, &format!("Prop.{other}.Value")), if other == first { 1.0 } else { 2.0 }, "and left {other} as it was");
+        }
+    }
+}
+
+/// A name that no row spells exactly and that two rows spell in other cases names the row the formulas read: the lower `IX`, and with no `IX` the first in the section.
+/// The commands and the formulas read the same row.
+#[test]
+fn a_name_no_row_spells_exactly_is_the_row_a_formula_reads_in_every_command() {
+    for with_ix in [false, true] {
+        for (first, second) in twin_orders() {
+            // With no `IX` the first in the section wins; with `IX`es the second does.
+            let (wins, value) = if with_ix { (second, 2.0) } else { (first, 1.0) };
+            let build = || {
+                let mut s = one_shape(twin_shape(first, second));
+                if with_ix {
+                    give_ix(&mut s, &[(first, 7), (second, 2)]);
+                }
+                s
+            };
+            let mut s = build();
+            assert_eq!(read_by_formula(&mut s, "Prop.row_5.Value"), value, "a formula naming row_5 among [{first}, {second}], ix {with_ix}");
+            assert_eq!(num(&mut s, "Prop.row_5.Value"), value, "sheet.cell");
+            let mut s = build();
+            delete_row(&mut s, "Prop", json!("row_5"));
+            let left = if wins == first { second } else { first };
+            assert_eq!(keys(&mut s, "Prop"), [json!("Cost"), json!(left)], "a delete of row_5 takes {wins} among [{first}, {second}], ix {with_ix}");
+            let mut s = build();
+            add_row(&mut s, "Prop", json!({"name": "Fresh", "after": "row_5"}));
+            let at = [first, second].iter().position(|n| *n == wins).unwrap();
+            let mut want = vec![json!("Cost"), json!(first), json!(second)];
+            want.insert(at + 2, json!("Fresh"));
+            assert_eq!(keys(&mut s, "Prop"), want, "an insert after row_5 goes after {wins}");
+        }
+    }
+}
+
+/// A row of the exact spelling that is deleted here is the row the name means, and it is not there: the name is not read as its twin in another case (the formulas read the
+/// deleted row as nothing, as `Lookup::Deleted` says).
+#[test]
+fn a_name_spelled_exactly_by_a_deleted_row_is_not_read_as_its_twin() {
+    let shape = twin_shape("Row_5", "ROW_5").del_row("Property", None, RowKey::name("Row_5"));
+    let mut s = one_shape(shape);
+    assert_eq!(keys(&mut s, "Prop"), [json!("Cost"), json!("ROW_5")]);
+    let words = refused(&mut s, "sheet.delete_row", json!({"id": 10, "section": "Prop", "row": "Row_5"}));
+    assert!(words.contains("no row Row_5"), "{words}");
+    assert_eq!(keys(&mut s, "Prop"), [json!("Cost"), json!("ROW_5")], "the twin stays");
+    delete_row(&mut s, "Prop", json!("ROW_5"));
+    assert_eq!(keys(&mut s, "Prop"), [json!("Cost")]);
+}

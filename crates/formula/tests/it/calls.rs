@@ -122,3 +122,40 @@ fn the_examples_of_the_specs_parse_and_print_to_the_same_tree() {
         assert_eq!(&*parse(src).source, *src);
     }
 }
+
+// ---- Formula::calls ------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_formula_calls_a_function_when_the_call_is_anywhere_in_it_in_any_case() {
+    for (text, yes) in [
+        ("THEMEVAL()", true),
+        ("themeval(\"FillColor\")", true),
+        ("THEMEGUARD(THEMEVAL(\"AccentColor\"))", true),
+        ("MSOTINT(THEMEVAL(\"Dark\",RGB(0,0,0)),45)", true),
+        ("IF(Prop.External,1,THEMEVAL())", true),
+        ("-THEMEVAL()", true),
+        ("THEMEVAL()%", true),
+        ("1+THEMEVAL()*2", true),
+        ("LISTSHEETREF(THEMEVAL())!Width", true),
+        ("Sheet.1!THEMEVAL()", true),
+        ("THEMEVALUE()", false),
+        ("THEMEVAL", false),
+        ("\"THEMEVAL()\"", false),
+        ("RGB(1,2,3)", false),
+        ("Width*0.5", false),
+    ] {
+        assert_eq!(parse(text).calls("THEMEVAL"), yes, "{text}");
+    }
+}
+
+#[test]
+fn a_text_that_does_not_parse_calls_nothing_and_a_deep_formula_is_walked_without_recursion() {
+    assert!(!parse("THEMEVAL(").calls("THEMEVAL"), "no tree, no call");
+    // A chain of calls as deep as the parser allows is walked with no native recursion (the walk keeps its own stack), and the call at the bottom is found.
+    let depth = 200;
+    let text = format!("{}THEMEVAL(){}", "ABS(".repeat(depth), ")".repeat(depth));
+    let formula = parse(&text);
+    if formula.is_parsed() {
+        assert!(formula.calls("THEMEVAL"));
+    }
+}

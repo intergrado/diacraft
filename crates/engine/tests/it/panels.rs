@@ -1042,14 +1042,22 @@ fn random_command(r: &mut Rng, live: &[u32], lines: &[u32]) -> (&'static str, Js
     }
 }
 
-/// Every glued end of the page is on its connection point.
+/// Every glued end of the page is on its connection point, or, glued to the whole of a shape that has none, on its box.
 fn glued_ends_are_on_their_points(d: &Document) -> Result<(), String> {
     for c in &d.page(1).ok_or("no page")?.connects {
-        let index = c.to_part.and_then(|p| p.checked_sub(100)).ok_or("a Connect row with no ToPart")?;
-        let point =
-            connection_points(d, 1, c.to_sheet).into_iter().find(|p| p.index == index).ok_or("a Connect row names a point that is not there")?;
+        let part = c.to_part.ok_or("a Connect row with no ToPart")?;
         let (x_cell, y_cell) = if c.from_cell.as_deref() == Some("BeginX") { ("BeginX", "BeginY") } else { ("EndX", "EndY") };
         let (x, y) = (num(d, c.from_sheet, x_cell), num(d, c.from_sheet, y_cell));
+        if part == 3 {
+            let corners = diacraft_engine::draw::shape_corners(d, 1, c.to_sheet).ok_or("a whole-shape glue to a shape with no box")?;
+            if !crate::connect_whole::on_box(corners, (x, y)) {
+                return Err(format!("{x_cell} of {} is ({x}, {y}), which is not on the box {corners:?} of shape {}", c.from_sheet, c.to_sheet));
+            }
+            continue;
+        }
+        let index = part.checked_sub(100).ok_or("a Connect row with no ToPart")?;
+        let point =
+            connection_points(d, 1, c.to_sheet).into_iter().find(|p| p.index == index).ok_or("a Connect row names a point that is not there")?;
         if !((x - point.x).abs() < 1.0e-6 && (y - point.y).abs() < 1.0e-6) {
             return Err(format!("{x_cell} of {} is ({x}, {y}) and its point is ({}, {})", c.from_sheet, point.x, point.y));
         }

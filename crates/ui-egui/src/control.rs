@@ -33,6 +33,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use diacraft_engine::file_access::{self, Access, ScopeHandle};
 use diacraft_engine::{guard, shown};
 use egui::ColorImage;
 use serde_json::{Map, Value, json};
@@ -149,6 +150,8 @@ pub(crate) struct Shot {
     deadline: Option<Duration>,
     /// Where the integration's callback leaves the frame.
     slot: Arc<Mutex<Option<Arc<ColorImage>>>>,
+    /// The roots in force when it was asked for: the file is written in a later frame, and is judged again then, under the roots the request had.
+    scope: ScopeHandle,
 }
 
 impl DiacraftApp {
@@ -189,7 +192,10 @@ impl DiacraftApp {
     /// window goes on.
     fn answer(&mut self, ctx: &egui::Context, request: ControlRequest) {
         let reply = request.reply.clone();
-        let result = match guard::catch_panic(|| self.handle(ctx, &request)) {
+        // The roots (`--automation-read-root`, `--automation-write-root`) are in force for this request and for the threads it starts, and for nothing else the window does:
+        // what the person does in the window (its dialogs, a file named on the command line, a drop) is not a request, and is not kept to them.
+        let roots = self.automation_roots.clone();
+        let result = match guard::catch_panic(|| file_access::confine(roots.as_ref(), || self.handle(ctx, &request))) {
             Ok(Outcome::Reply(result)) => result,
             // The window kept the sender and will answer.
             Ok(Outcome::Deferred) => return,
@@ -333,6 +339,8 @@ impl DiacraftApp {
             "findings": self.findings_summary(),
             "panics": {"engine": self.session().panics_caught(), "ui": self.ui_panics},
             "screenshotPending": self.screenshot.is_some(),
+            // The folders the control channel may read and write, as `{read, write}`; null when it is kept to none (any path the person can reach).
+            "automation": self.automation_roots.as_ref().map(|roots| roots.to_json()),
             "quitRequested": self.quit_requested(),
         })
     }
@@ -354,7 +362,7 @@ impl DiacraftApp {
                     repaint.request_repaint();
                 });
                 let deadline = self.clock.now().checked_add(self.screenshot_timeout);
-                self.screenshot = Some(Shot { path, reply: request.reply.clone(), deadline, slot });
+                self.screenshot = Some(Shot { path, reply: request.reply.clone(), deadline, slot, scope: ScopeHandle::capture() });
                 ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
                 ctx.request_repaint();
                 Outcome::Deferred
@@ -369,7 +377,8 @@ impl DiacraftApp {
         let arrived = shot.slot.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some(image) = arrived {
             // The reply carries the outcome of the write; the caller may have gone, with nobody to tell.
-            let _ = shot.reply.send(write_png(&shot.path, &image));
+            let (path, scope) = (shot.path.clone(), shot.scope.clone());
+            let _ = shot.reply.send(scope.run(|| write_png(&path, &image)));
             return;
         }
         if shot.deadline.is_some_and(|deadline| self.clock.now() >= deadline) {
@@ -440,6 +449,8 @@ fn screenshot_path(value: Option<&Value>) -> Result<std::path::PathBuf, String> 
     if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) {
         return Err("`path` must name a .png file".to_owned());
     }
+    // Roots in force: a path outside the write roots is refused before the file system is asked anything about it (whether its folder is there, what stands at it).
+    file_access::allow(path, Access::Write).map_err(|why| format!("the screenshot was not taken: {why}"))?;
     if !path.parent().is_some_and(std::path::Path::is_dir) {
         return Err("the folder of `path` does not exist".to_owned());
     }
@@ -494,6 +505,9 @@ fn write_png(path: &std::path::Path, image: &ColorImage) -> ControlReply {
     // Whole or not at all: written beside the destination and renamed over it, so a full disk or a crash leaves the
     // old file, never half a picture. The destination is replaced, not opened, so even a file that turned into a
     // named pipe since the path was checked does not block the window.
-    craft_atomic::atomic_write(path, &encoded).map_err(|e| format!("cannot write the screenshot: {}", shown(&e.to_string(), 300)))?;
+    // Roots in force: judged again now, a frame after the request, and written at its folder's real path and its own name: a link that stands at the name by now is refused, and not
+    // written through.
+    let real = file_access::allow_entry(path, Access::Write).map_err(|why| format!("the screenshot was not written: {why}"))?;
+    craft_atomic::atomic_write(&real, &encoded).map_err(|e| format!("cannot write the screenshot: {}", shown(&e.to_string(), 300)))?;
     Ok(json!({"path": path.to_string_lossy(), "width": width, "height": height}))
 }

@@ -15,6 +15,7 @@
 //! | `text` | the shape's whole text: one `Text` fragment, its characters and its `cp`, `pp`, `tp` and `fld` markers |
 //! | `vsdx` | the shape's VSDX data that no ODF attribute says (its attributes and elements, `Data1` to `Data3`, its deleted flag, its kind, its slots): one `shape` fragment of the whole-model codec, with no cell in it (`shell.rs`) |
 //! | `foreign` | the shape's foreign data beyond its picture: one `shape` fragment that holds only it |
+//! | `connects` | the glue of the ends of a segment the file holds as a polyline or a path, which that element cannot say: up to two space-separated tokens, `b` or `e` for the end, the glued shape's `ID`, the part of that shape and of the end's cell, and the target's cell name escaped, each as `<end><shape>:<part>:<part>:<cell>` (`_` for no part) |
 //! | `gone` | what the reader would rebuild and the model lacks: space-separated `c.<name>` (a cell), `s.<name>.<ix>` (a section; `_` for no `IX`), `name`, `name-u`, `text` |
 //! | `fp-text`, `fp-format`, `fp-vsdx`, `fp-foreign`, `fp-name`, `fp-master`, `fp-s-<name>[-<ix>]`, `fp-c-<name>` | the fingerprint of the native outputs the item of that key determined (`fingerprint.rs`, tier 3): 16 lowercase hexadecimal digits. Any other `fp-` name is a newer build's: read as nothing, kept as it is |
 //!
@@ -43,6 +44,8 @@ pub(crate) const MASTER_SHAPE: &str = "master-shape";
 /// The kind of shape a shape is when it is not what the reader gives (`Shape`): `Guide`, which no ODF element is.
 pub(crate) const TYPE: &str = "type";
 pub(crate) const CELLS: &str = "cells";
+/// The glue of the ends of a segment written as a polyline or a path: the `Connect` rows the element has no place for.
+pub(crate) const CONNECTS: &str = "connects";
 pub(crate) const TEXT: &str = "text";
 pub(crate) const GONE: &str = "gone";
 /// The VSDX data of the shape that no ODF attribute says: its attributes and elements, `Data1` to `Data3`, its deleted flag, its kind and its slots, as one fragment of the
@@ -57,7 +60,7 @@ const SECTION: &str = "s-";
 /// again or takes it out, since one left as the file had it would call the item stale on the next read. `links`, `filled`, `glue`, `face` and `text-end`, the
 /// foreign names, an `fp-` name this build does not know and `version` are kept as the file has them.
 pub(crate) fn owned(local: &str) -> bool {
-    matches!(local, VERSION_ATTR | ID | NAME | NAME_U | MASTER | MASTER_SHAPE | TYPE | CELLS | TEXT | GONE | VSDX | FOREIGN)
+    matches!(local, VERSION_ATTR | ID | NAME | NAME_U | MASTER | MASTER_SHAPE | TYPE | CELLS | CONNECTS | TEXT | GONE | VSDX | FOREIGN)
         || section_of_attr(local).is_some()
         || super::fingerprint::Key::parse(local).is_some()
 }

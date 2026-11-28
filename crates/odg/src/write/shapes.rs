@@ -18,6 +18,7 @@
 //!   a reorder and with `draw:z-index` on a page whose shapes carry it ([`super::plan`]).
 
 mod asread;
+mod segment;
 
 pub(crate) use asread::entry_name_ok;
 
@@ -32,9 +33,10 @@ pub(crate) use asread::{AsRead, held_graphic_names};
 
 use super::WriteError;
 use super::attrs::TagEdit;
-use super::compare::{NewShape, PageDiff};
+use super::compare::{GlueEdit, GlueTo, NewShape, PageDiff};
 use super::frame::Editor;
 use super::geometry::new_outline;
+use super::glue::ModelPoints;
 use super::kept::{Need, need_of};
 use super::lengths::length_text;
 use super::own::{self, POSE_CELLS};
@@ -82,11 +84,15 @@ pub(crate) struct KeptMarkup {
     after: String,
     /// A custom shape's own `draw:enhanced-geometry`, as text, while its stamp matches and its namespaces are known.
     geometry: Option<String>,
+    /// The title and the description the shape has (its own, or its master's: `.odg` has no masters), already in `before` or `after` as `svg:title` and `svg:desc`; what the reader gives back as
+    /// rows of the `User` section, for the prediction of what DiaCraft's data has to carry (`native::Native::alt`).
+    alt: (String, String),
     /// A `draw:image` of the frame's kept children, written, is **the frame's own picture**: it names an entry of the model's that holds the picture's bytes (a carried object's replacement
     /// picture, which the model makes with the entry), so the frame needs no picture of its own ([`Editor::is_the_frames_picture`]). A kept image that is any other picture is another image of the frame.
     image: bool,
-    /// How many glue points that geometry element lists (`draw:glue-points`, a point being two numbers): what the file numbers 4 on, which a connector end names.
-    glue_listed: usize,
+    /// Whether the rows of the shape are its own glue points, numbered from its first listed point (`diacraft:glue="own"`), for a shape that writes the geometry element its file held: `Some`
+    /// exactly when that element is written ([`rows_are_own`]).
+    glue_own: Option<bool>,
     /// The paragraphs a picture's `draw:image` held (the words LibreOffice draws on a picture, kept whole on its foreign data by the reader), as text, each with the declarations it
     /// needs: written back inside the `draw:image` the frame is written with.
     in_image: String,
@@ -112,12 +118,28 @@ struct Prepared {
 /// it reads them (an extrusion or a fontwork, a view box with no width or height: [`crate::read::reads_no_glue_points`]). The shape then has the four standard rows and the points it lists
 /// make no row, so the rows a file's `draw:glue-point` elements did not make are not "the listed points from row 0" (the rows were counted as if they were, the marker was
 /// written and a connector's end went 4 on).
-fn listed_glue_points(el: &diacraft_doc::RawElement) -> usize {
+fn listed_glue_points(el: &diacraft_doc::RawElement) -> Listed {
     let value = |local: &str| el.attrs.iter().find(|(name, _)| local_of(name) == local).map(|(_, value)| value);
     if crate::read::reads_no_glue_points(value("extrusion"), value("text-path"), value("viewBox")) {
-        return 0;
+        return Listed { count: 0, shares: None };
     }
-    value("glue-points").map_or(0, |value| value.split_ascii_whitespace().count() / 2)
+    let Some(points) = value("glue-points") else { return Listed { count: 0, shares: None } };
+    let count = points.split_ascii_whitespace().count() / 2;
+    // Where they are, as shares of the frame, when the element's view box and its numbers say so plainly (a point that is `$0` or an equation is no place here): what tells a shape whose
+    // rows start with them from one that has the four standard rows first (`rows_are_own`).
+    let shares = value("viewBox").and_then(|text| crate::read::geometry::view_box(text)?.ok()).and_then(|vb| {
+        let numbers: Option<Vec<f64>> = points.split_ascii_whitespace().map(|t| t.parse::<f64>().ok().filter(|n| n.is_finite())).collect();
+        let numbers = numbers?;
+        (numbers.len() == 2 * count).then(|| numbers.as_chunks::<2>().0.iter().map(|[x, y]| vb.share(*x, *y)).collect())
+    });
+    Listed { count, shares }
+}
+
+/// The glue points a custom shape's geometry element lists that the reader makes rows of ([`listed_glue_points`]): how many, and where when the element says it plainly.
+#[derive(Debug, Default, PartialEq)]
+struct Listed {
+    count: usize,
+    shares: Option<Vec<(f64, f64)>>,
 }
 
 /// The geometry element `el` with each `draw:handle` given the attributes ODF 1.4 asks a handle for: **`draw:handle-position-x` and `-y`**, or, for a polar handle
@@ -351,6 +373,18 @@ enum Target {
     New(usize),
 }
 
+/// The names the shapes connectors are glued to are named by on one page, made as the connectors ask for them (`Editor::name_target`): by shape, the name each is named by; the shapes of the
+/// file that had none and are given one (their element's ordinal and the id); the first holder of each name among the file's shapes and among the new ones, indexed when the first
+/// connector asks; and the number the last id given has.
+#[derive(Default)]
+struct Names<'n> {
+    ids: HashMap<Target, String>,
+    to_write: Vec<(u32, String)>,
+    holders: Option<HashMap<String, u32>>,
+    new_holders: Option<HashMap<&'n str, usize>>,
+    next_id: u64,
+}
+
 /// The glue id ODF gives the row `row` of a shape: the four side middles map as DiaCraft's basic shapes order them, and beside exactly one flip of a shape
 /// whose standard points LibreOffice numbers on the frame it draws (`flipped`: `read::connectors::glue_row_beside`), rows 1 and 3 are its points 1 and 3.
 pub(crate) fn glue_id(row: u32, flipped: bool) -> u32 {
@@ -375,11 +409,40 @@ fn writes_own_glue(sheet: &Sheet) -> bool {
 /// the listed ones from row 4 (the reader's numbering: glue id *g* is row *g*) or, when its style said `own`, the listed ones from row 0. The rows apart from those a `draw:glue-point`
 /// element of the file made tell which: the first are 4 + *k* and the second are *k*. (The writer used to number every shape whose rows it could write as its own, and named the end 4 on a shape
 /// whose rows were 4 + *k* by 8: every visit moved it 4 more, past the shape's last point.) A shape that makes its geometry from the rows numbers them as its own when it writes them so.
-fn rows_are_own(sheet: &Sheet, held: Option<usize>) -> bool {
+fn rows_are_own(sheet: &Sheet, held: Option<&Listed>) -> bool {
     match held {
-        Some(listed) => listed > 0 && rows_beside_held_glue(sheet) == listed,
+        Some(listed) => listed.count > 0 && (rows_beside_held_glue(sheet) == listed.count || listing_leads_the_rows(sheet, listed)),
         None => writes_own_glue(sheet),
     }
+}
+
+/// Whether the rows of a shape that writes the geometry its file held **start with the points that geometry lists**: the first rows are those points, in place, and the
+/// rows 4 on are not (a shape whose rows are the four standard ones and then the listed points has them from row 4). Which a count cannot tell once the session added rows: a shape
+/// of *k* listed points that was doubled has more rows than the *k* the count asks for, and was taken for one with the four standard rows first, its marker dropped and its connectors' glue
+/// numbered as the other kind's. A shape with a row a `draw:glue-point` of the file made is judged by the count alone, as before, and so is one whose geometry says its points otherwise
+/// than as plain numbers.
+fn listing_leads_the_rows(sheet: &Sheet, listed: &Listed) -> bool {
+    let Some(shares) = listed.shares.as_ref().filter(|shares| shares.len() == listed.count) else { return false };
+    let Some(points) = super::geometry::glue_points_of(sheet) else { return false };
+    if rows_beside_held_glue(sheet) != points.len() {
+        return false;
+    }
+    let near = |p: f64, q: f64| (p - q).abs() <= 1e-6;
+    let at = |from: usize| {
+        points
+            .get(from..from.saturating_add(listed.count))
+            .is_some_and(|rows| rows.iter().zip(shares).all(|(p, (x, y))| near(p.x, *x) && near(p.y, *y)))
+    };
+    at(0) && !at(4)
+}
+
+/// Whether the connection rows of a shape the `.odg` reader made are **its own glue points**, listed from row 0 by its geometry (`diacraft:glue="own"`): the shape keeps the
+/// `draw:enhanced-geometry` its file had, which lists *k* glue points, and the rows no `draw:glue-point` element made are *k* in number. Such a shape has no standard rows 0 to 3, so
+/// the four standard points LibreOffice puts a connector glued to the whole of the shape on are not its rows (the engine's takes the middles of the frame's sides). The
+/// answer is the writer's own rule for the shape ([`rows_are_own`]): the count of the rows no element made, and, once a doubling has put the count out, the places the geometry lists ( a halving that leaves fewer rows than the geometry lists still puts it out until the file is read again).
+pub fn rows_are_listed_glue(shape: &diacraft_doc::Shape) -> bool {
+    let Some(el) = super::held::enhanced_geometry(shape, |e| local_of(&e.name) == "enhanced-geometry") else { return false };
+    rows_are_own(&shape.sheet, Some(&listed_glue_points(el)))
 }
 
 /// How many rows of the `Connection` section a `draw:glue-point` element of the file did not make (the row has no held element, or the element's stamp is not the row's now).
@@ -467,6 +530,10 @@ fn line_end_numbers(edit: &mut StyleEdit, sheet: &Sheet) {
     own::decide_line_end(edit, sheet, |_| None);
     if !edit.changes.iter().any(|(c, _)| *c == "LineWeight") {
         edit.line.retain(|(name, _)| *name != "LineWeight");
+    }
+    // The same for the cap, which the form of a dash follows: a cap the file does not state is the round one for the dash's name, as the reader's is.
+    if !edit.changes.iter().any(|(c, _)| *c == "LineCap") {
+        edit.line.retain(|(name, _)| *name != "LineCap");
     }
 }
 
@@ -602,23 +669,27 @@ impl Editor<'_, '_> {
         &mut self,
         scan: &ScanPage,
         news: &[NewShape],
-        connects: &[Connect],
+        glued: &[(u32, u32)],
         target_of: &dyn Fn(u32) -> Result<Target, WriteError>,
     ) -> Result<(HashSet<u32>, HashMap<usize, Prepared>), WriteError> {
         let mut own_glue: HashSet<u32> = HashSet::new();
         let mut prepared: HashMap<usize, Prepared> = HashMap::new();
         let mut judged: HashSet<u32> = HashSet::new();
-        for c in connects.iter().filter(|c| c.to_part.is_some_and(|p| p >= 100)) {
-            if !judged.insert(c.to_sheet) {
+        // `glued` is each connection's shape and part (`ToPart`): a connection to a connection point (100 and the row) is numbered by the shape it goes to.
+        for &(to_sheet, _) in glued.iter().filter(|(_, part)| *part >= 100) {
+            if !judged.insert(to_sheet) {
                 continue;
             }
-            let own = match target_of(c.to_sheet)? {
+            let own = match target_of(to_sheet)? {
                 Target::New(i) => match news.get(i) {
                     Some(t) if t.shape.children.is_empty() && !is_new_picture(&t.shape) && t.shape.sheet.cell("BeginX").is_none() => {
                         let made = self.prepare_custom(t, scan)?;
-                        let held = made.made.geometry.as_ref().map(|_| made.made.glue_listed);
                         // A shape written as the plain element it was read from has no glue points of its own to write.
-                        let own = made.kind == Kind::Custom && rows_are_own(&t.shape.sheet, held);
+                        let own = made.kind == Kind::Custom
+                            && match (made.made.geometry.as_ref(), made.made.glue_own) {
+                                (Some(_), Some(own)) => own,
+                                _ => rows_are_own(&t.shape.sheet, None),
+                            };
                         prepared.insert(i, made);
                         own
                     }
@@ -627,7 +698,7 @@ impl Editor<'_, '_> {
                 Target::Ord(o) => self.file_glue_own(scan, o)?,
             };
             if own {
-                own_glue.insert(c.to_sheet);
+                own_glue.insert(to_sheet);
             }
         }
         Ok((own_glue, prepared))
@@ -639,13 +710,13 @@ impl Editor<'_, '_> {
         let pfx = super::emit::Pfx::of(&mut self.scopes, scan.scope, self.work);
         let (read, refused, kind) = self.as_read_kind(n, Kind::Custom)?;
         let frame = read.as_ref().is_some_and(|r| r.element == "frame");
-        let made = self.kept_markup(n, (kind, frame), scan, &pfx, read.is_some())?;
+        let made = self.kept_markup(n, (kind, frame), scan, &pfx, read.as_ref())?;
         Ok(Prepared { read, refused, kind, made })
     }
 
     /// Whether the shape element `ord` of the file is a custom shape whose automatic style says its rows start at 0 with its first listed glue point (`diacraft:glue="own"`):
     /// a shape DiaCraft wrote so, read back. One look at its start tag and at its style's graphic properties.
-    fn file_glue_own(&mut self, scan: &ScanPage, ord: u32) -> Result<bool, WriteError> {
+    pub(super) fn file_glue_own(&mut self, scan: &ScanPage, ord: u32) -> Result<bool, WriteError> {
         let Some(shape) = scan.shape(ord) else { return Ok(false) };
         if shape.kind != super::scan::Kind::Custom {
             return Ok(false);
@@ -729,6 +800,39 @@ impl Editor<'_, '_> {
         Ok(name.to_owned())
     }
 
+    /// Names the shape `target`, once for the page: the name the reader finds it by. A shape of the file keeps its own (`xml:id`, else `draw:id`), and one that has none is given an id of the form
+    /// `id` and a number above every one the part holds (`to_write` lists it, for its element is given the attributes). A shape that is not the first holder of its name on the page, or whose
+    /// name is empty, is refused in words: the reader would read a connector glued to it as glued to the first holder, or to none. A new shape is named by [`Self::new_target_id`].
+    fn name_target<'n>(&mut self, scan: &ScanPage, news: &'n [NewShape], target: Target, names: &mut Names<'n>) -> Result<(), WriteError> {
+        if names.ids.contains_key(&target) {
+            return Ok(());
+        }
+        let value = match target {
+            Target::Ord(o) => match self.id_of(scan, o)? {
+                // The reader resolves a name to the first shape of the page that holds it (`read::shapes::number`): a connector that names an id another
+                // shape holds first would read back glued to that shape. No spec says what to write for such a shape, so the save is refused in words.
+                // An id that is empty names no shape to the reader (`read::connectors::end_of`): refused in words.
+                Some(existing) if existing.is_empty() => return refuse(WORDS_ID_EMPTY),
+                Some(existing) if self.first_holder(scan, &existing, &mut names.holders)? != Some(o) => return refuse(WORDS_ID_HELD),
+                Some(existing) => existing,
+                None => {
+                    names.next_id = names.next_id.saturating_add(1);
+                    let made = format!("id{}", names.next_id);
+                    names
+                        .to_write
+                        .try_reserve(1)
+                        .map_err(|_| WriteError::Limit { what: "memory for the ids of a page's shapes", max: names.to_write.len() as u64 })?;
+                    names.to_write.push((o, made.clone()));
+                    made
+                }
+            },
+            Target::New(i) => self.new_target_id(news, i, &mut names.new_holders, &mut names.next_id)?,
+        };
+        names.ids.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the names of a page's shapes", max: names.ids.len() as u64 })?;
+        names.ids.insert(target, value);
+        Ok(())
+    }
+
     /// The ordinal of the first shape element of the page, in the reader's order, whose `xml:id` (else `draw:id`) is `id`: what the reader resolves a connector's
     /// reference to. The page's ids are read once, into `holders`, the first time one is asked (one look at each shape's start tag, counted as the others are).
     fn first_holder(&mut self, scan: &ScanPage, id: &str, holders: &mut Option<HashMap<String, u32>>) -> Result<Option<u32>, WriteError> {
@@ -767,6 +871,11 @@ impl Editor<'_, '_> {
         for c in &diff.new_connects {
             by_connector.entry(c.from_sheet).or_default().push(c);
         }
+        // The segments of a geometry of their own that are written as the outline they draw, by the shape's place in the list: found before the elements are made. **Only a segment
+        // that is glued at no end**: a polyline has no glue another program keeps, so a segment glued at an end, at one or at both, is a connector of the type `line`
+        // ([`Editor::connector_text`]), whose glue is the element's own. A polyline has no glue, so the connections of the page are all the glue the elements are written with.
+        let new_ids: HashSet<u32> = news.iter().map(|n| n.shape.id).collect();
+        let polys = self.polys_of(news, diff, &by_connector)?;
         let target_of = |id: u32| -> Result<Target, WriteError> {
             match (new_at.get(&id), held.ordinal(id)) {
                 (Some(i), _) => Ok(Target::New(*i)),
@@ -774,10 +883,10 @@ impl Editor<'_, '_> {
                 _ => Err(WriteError::Unsupported("a connector glued to a shape the file does not hold")),
             }
         };
-        self.check_picture_glue(news, &new_at, &diff.new_connects)?;
+        // The glue of the connectors of the file that the model changed: the ends glued to a shape now, each as the connection the writer is to name.
+        let glued_now: Vec<(GlueEdit, GlueTo)> = diff.glue.iter().filter_map(|e| e.to.map(|to| (*e, to))).collect();
+        self.check_picture_glue(news, &new_at, &diff.new_connects, glued_now.iter().map(|(_, to)| *to))?;
         // The ids, in the order the connectors name their shapes: the begin of each, then its end.
-        let mut ids: HashMap<Target, String> = HashMap::new();
-        let mut to_write: Vec<(u32, String)> = Vec::new();
         // **The model writer writes the ids a shape was read with** (`Editor::kept_markup` puts them on its tag as the file had them), so a new target is given an id above every
         // number the shapes of the model hold, found once for the save.
         if self.work.model_path && self.work.held_id_max.is_none() {
@@ -785,39 +894,22 @@ impl Editor<'_, '_> {
             self.work.held_id_max = Some(found);
             self.max_id = self.max_id.max(found);
         }
-        let mut next_id = self.max_id;
-        // The first shape of the page that holds each id, made when a connector is glued to a shape that has one (the milestone-1 rerun's W2).
-        let mut holders: Option<HashMap<String, u32>> = None;
-        // The first of the new shapes that holds each name the reader gives a shape, made when a connector is glued to a new shape that has one (the model path: a shape holds the id it was read with).
-        let mut new_holders: Option<HashMap<&str, usize>> = None;
+        let mut names = Names { next_id: self.max_id, ..Names::default() };
         for n in news.iter().filter(|n| n.shape.sheet.cell("BeginX").is_some()) {
             let mut glued: Vec<&Connect> = by_connector.get(&n.shape.id).cloned().unwrap_or_default();
             glued.sort_by_key(|c| c.from_cell.as_deref().is_some_and(|f| f.starts_with("End")));
             for c in glued {
                 let target = target_of(c.to_sheet)?;
-                if ids.contains_key(&target) {
-                    continue;
-                }
-                let value = match target {
-                    Target::Ord(o) => match self.id_of(scan, o)? {
-                        // The reader resolves a name to the first shape of the page that holds it (`read::shapes::number`): a connector that names an id another
-                        // shape holds first would read back glued to that shape. No spec says what to write for such a shape, so the save is refused in words.
-                        // An id that is empty names no shape to the reader (`read::connectors::end_of`): refused in words.
-                        Some(existing) if existing.is_empty() => return refuse(WORDS_ID_EMPTY),
-                        Some(existing) if self.first_holder(scan, &existing, &mut holders)? != Some(o) => return refuse(WORDS_ID_HELD),
-                        Some(existing) => existing,
-                        None => {
-                            next_id += 1;
-                            let made = format!("id{next_id}");
-                            to_write.push((o, made.clone()));
-                            made
-                        }
-                    },
-                    Target::New(i) => self.new_target_id(news, i, &mut new_holders, &mut next_id)?,
-                };
-                ids.insert(target, value);
+                self.name_target(scan, news, target, &mut names)?;
             }
         }
+        // Then the shapes the connectors of the file are glued to now, in the order of the connectors and their ends.
+        self.work.charge_steps(glued_now.len())?;
+        for (_, to) in &glued_now {
+            let target = target_of(to.target)?;
+            self.name_target(scan, news, target, &mut names)?;
+        }
+        let Names { ids, to_write, .. } = names;
         for (ord, value) in to_write {
             let shape = scan.shape(ord).ok_or(WriteError::Mismatch("a shape the connector names is not in the part"))?;
             let mut tag = TagEdit::new(self.bytes, shape.open, shape.scope, self.work)?;
@@ -831,7 +923,13 @@ impl Editor<'_, '_> {
         }
         // The shapes glued to whose rows are their own glue points, so that row r is glue id r + 4 (`diacraft:glue="own"`), and the new custom shapes made ahead of
         // their turn for it (see [`Editor::glue_numbering`]; the loop below takes them).
-        let (own_glue, mut prepared) = self.glue_numbering(scan, news, &diff.new_connects, &target_of)?;
+        let glued_parts: Vec<(u32, u32)> = diff
+            .new_connects
+            .iter()
+            .filter_map(|c| Some((c.to_sheet, c.to_part?)))
+            .chain(glued_now.iter().map(|(_, to)| (to.target, to.part)))
+            .collect();
+        let (own_glue, mut prepared) = self.glue_numbering(scan, news, &glued_parts, &target_of)?;
         // The shapes another shape's formula or glue names keep their `ID`s in the file: the glue of the new connectors and the
         // formulas of the new shapes, but the cells of a glued end, which the reader rebuilds from the file's own glue whatever the model's `ID`s were.
         let mut referenced: HashSet<u32> = HashSet::new();
@@ -841,11 +939,11 @@ impl Editor<'_, '_> {
             // The shape a connector is glued to is named by it; the connector, which names, is not named.
             referenced.insert(c.to_sheet);
         }
+        referenced.extend(glued_now.iter().map(|(_, to)| to.target));
         for n in news {
             self.work.charge_compared(self.limits)?;
             referenced.extend(native::named_sheets(&n.shape.sheet, &GLUE_CELLS));
         }
-        let new_ids: HashSet<u32> = news.iter().map(|n| n.shape.id).collect();
         // The members of each new group, by the group's place in the list, made once: a group finds its members in its own list and does not look at every new shape
         // (review: 40,000 one-member groups took 34 s, 60,000 over 75).
         let too_many = || WriteError::Limit { what: "memory for the new shapes of a page", max: news.len() as u64 };
@@ -862,6 +960,33 @@ impl Editor<'_, '_> {
         // What the members of each new group take up in its frame, to the leaves: found once for the page (a pass over its new shapes), where a group's frame is judged.
         let inside = super::groups::spans_inside(news, &mut self.work.group_boxes)?;
         let tc = TierCtx { referenced: &referenced, new_ids: &new_ids, held };
+        // A shape glued to whose standard points are numbered the other way round: one with exactly one flip, of a kind the reader numbers so (a new 2-D shape is written as a custom shape).
+        let flipped = |c: u32| {
+            diff.one_flip.contains(&c)
+                && match target_of(c) {
+                    Ok(Target::New(i)) => news
+                        .get(i)
+                        .is_some_and(|t| t.shape.children.is_empty() && !is_new_picture(&t.shape) && t.shape.sheet.cell("BeginX").is_none()),
+                    Ok(Target::Ord(o)) => scan.shape(o).is_some_and(|t| glue_on_frame(t.kind)),
+                    Err(_) => false,
+                }
+        };
+        let names = |c: u32| target_of(c).ok().and_then(|t| ids.get(&t).cloned());
+        let glue_of = |c: u32, row: u32| if own_glue.contains(&c) { row.checked_add(4) } else { Some(glue_id(row, flipped(c))) };
+        // **The glue of the connectors of the file**: each end that is glued to a shape now names it, and the point of it, as a new connector's end does.
+        for (edit, to) in &glued_now {
+            let shape = scan.shape(edit.ord).ok_or(WriteError::Mismatch("a connector the model glued is not in the part"))?;
+            let name = names(to.target).ok_or(WriteError::Unsupported("a connector glued to a shape the writer cannot name"))?;
+            let point = match to.part {
+                3 => None,
+                part if part >= 100 => Some(
+                    glue_of(to.target, part - 100)
+                        .ok_or(WriteError::Unsupported("a connector glued to a connection point past the ones a shape can hold"))?,
+                ),
+                _ => return refuse("a connection of a kind the writer does not know"),
+            };
+            self.write_glue_end(shape, edit.start, &name, point)?;
+        }
         let mut texts: Vec<String> = Vec::new();
         texts.try_reserve_exact(news.len()).map_err(|_| WriteError::Limit { what: "memory for the new shapes of a page", max: news.len() as u64 })?;
         let mut wrote_all = Vec::with_capacity(news.len());
@@ -882,6 +1007,8 @@ impl Editor<'_, '_> {
                 Kind::Picture
             } else if sheet.cell("BeginX").is_none() {
                 Kind::Custom
+            } else if polys.get(k).is_some_and(Option::is_some) {
+                Kind::Poly
             } else if sheet.cell("ShapeRouteStyle").is_none() && sheet.cell("ConLineRouteExt").is_none() && !by_connector.contains_key(&n.shape.id) {
                 Kind::Line
             } else {
@@ -894,7 +1021,7 @@ impl Editor<'_, '_> {
                 None => {
                     let (read, refused, kind) = self.as_read_kind(n, kind)?;
                     let frame = kind == Kind::Picture || read.as_ref().is_some_and(|r| r.element == "frame");
-                    let made = self.kept_markup(n, (kind, frame), scan, &pfx, read.is_some())?;
+                    let made = self.kept_markup(n, (kind, frame), scan, &pfx, read.as_ref())?;
                     (read, refused, kind, made)
                 }
             };
@@ -915,32 +1042,21 @@ impl Editor<'_, '_> {
                     self.group_open(n, &pfx, id.as_deref(), z)?
                 }
                 Kind::Line => self.line_text(n, diff, &pfx, id.as_deref(), z, &tc)?,
-                Kind::Connector => {
-                    // A shape glued to whose standard points are numbered the other way round: one with exactly one flip, of a kind the reader numbers so (a new
-                    // 2-D shape is written as a custom shape).
-                    let flipped = |c: u32| {
-                        diff.one_flip.contains(&c)
-                            && match target_of(c) {
-                                Ok(Target::New(i)) => news.get(i).is_some_and(|t| {
-                                    t.shape.children.is_empty() && !is_new_picture(&t.shape) && t.shape.sheet.cell("BeginX").is_none()
-                                }),
-                                Ok(Target::Ord(o)) => scan.shape(o).is_some_and(|t| glue_on_frame(t.kind)),
-                                Err(_) => false,
-                            }
-                    };
-                    let names = |c: u32| target_of(c).ok().and_then(|t| ids.get(&t).cloned());
-                    let glue_of = |c: u32, row: u32| if own_glue.contains(&c) { row.checked_add(4) } else { Some(glue_id(row, flipped(c))) };
-                    self.connector_text(
-                        n,
-                        diff,
-                        &pfx,
-                        by_connector.get(&n.shape.id).map(Vec::as_slice).unwrap_or_default(),
-                        (id.as_deref(), z),
-                        &tc,
-                        (&names, &glue_of),
-                    )?
-                }
+                Kind::Connector => self.connector_text(
+                    n,
+                    diff,
+                    &pfx,
+                    by_connector.get(&n.shape.id).map(Vec::as_slice).unwrap_or_default(),
+                    (id.as_deref(), z),
+                    &tc,
+                    (&names, &glue_of),
+                )?,
                 Kind::Custom => self.custom_text(n, diff, &pfx, id.as_deref(), z, &tc)?,
+                Kind::Poly => {
+                    let placed =
+                        polys.get(k).and_then(Option::as_ref).ok_or(WriteError::Mismatch("a segment written as its outline that was not placed"))?;
+                    self.poly_text(n, diff, &pfx, id.as_deref(), z, &tc, placed)?
+                }
                 Kind::Picture => self.picture_text(n, diff, &pfx, id.as_deref(), z, &tc)?,
                 Kind::Plain => {
                     let read = self.kept.read.take().ok_or(WriteError::Mismatch("a plain shape that holds nothing it was read with"))?;
@@ -971,13 +1087,65 @@ impl Editor<'_, '_> {
             }
             let open = std::mem::take(texts.get_mut(k).ok_or(WriteError::Mismatch("a new group is not made"))?);
             let pfx = super::emit::Pfx::of(&mut self.scopes, scan.scope, self.work);
-            let whole = format!("{open}{inside}</{}:g>", pfx.draw);
+            // A group's title and description are its first children, before its members; its rows are carried by the document file's entry of it.
+            let (alt, _) = self.alt_elements(n, &pfx)?;
+            let whole = format!("{open}{alt}{inside}</{}:g>", pfx.draw);
             self.work.charge_copy(whole.len().saturating_sub(inside.len()), self.limits)?;
             if let Some(slot) = texts.get_mut(k) {
                 *slot = whole;
             }
         }
         Ok((texts, wrote_all))
+    }
+
+    /// The new shapes written as the outline they draw ([`Self::poly_of`]), by the shape's place in the list: **none for a segment glued at an end** (a polyline
+    /// has no glue another program keeps, so it is a connector, [`Self::connector_text`]).
+    fn polys_of(
+        &mut self,
+        news: &[NewShape],
+        diff: &PageDiff,
+        by_connector: &HashMap<u32, Vec<&Connect>>,
+    ) -> Result<Vec<Option<super::poly::Placed>>, WriteError> {
+        let mut polys: Vec<Option<super::poly::Placed>> = Vec::new();
+        polys.try_reserve_exact(news.len()).map_err(|_| WriteError::Limit { what: "memory for the new shapes of a page", max: news.len() as u64 })?;
+        for n in news {
+            let glued = by_connector.get(&n.shape.id).is_some_and(|own| !own.is_empty());
+            polys.push(if glued { None } else { self.poly_of(n, diff)? });
+        }
+        Ok(polys)
+    }
+
+    /// The route of a new one-dimensional shape **of a geometry of its own**, on the page ([`super::poly`]); `None` for any other shape. **Only a segment that is not routed**: its route
+    /// cells are none, or the fixed geometry's (`ShapeRouteStyle` 16, the style the master of such a figure holds, which a reroute leaves alone, with `ConLineRouteExt` beside it 1 when there is
+    /// one: the appearance the engine gives it); that is no group and no picture; and whose geometry is more than the plain line between its ends and is lines and cubic curves of one section (the
+    /// points [`super::poly::segs_of`] takes). It may be a member of a group (its points are put on the page by the groups around it). The rows looked at are charged.
+    fn own_route(&mut self, n: &NewShape) -> Result<Option<Vec<super::route::Seg>>, WriteError> {
+        let sheet = &*n.shape.sheet;
+        let number = |name: &str| sheet.cell(name).and_then(|c| c.value.as_ref()?.number());
+        // A route cell is no mark of a fixed figure unless it is the fixed geometry's own number (`ConLineRouteExt` beside it, when there is one, is the appearance the engine gives it).
+        let fixed_or_unrouted = match (sheet.cell("ShapeRouteStyle"), sheet.cell("ConLineRouteExt")) {
+            (None, None) => true,
+            (Some(_), other) => number("ShapeRouteStyle") == Some(16.0) && other.is_none_or(|_| number("ConLineRouteExt") == Some(1.0)),
+            (None, Some(_)) => false,
+        };
+        if !fixed_or_unrouted || sheet.cell("BeginX").is_none() || !n.shape.children.is_empty() || is_new_picture(&n.shape) || is_line_outline(sheet)
+        {
+            return Ok(None);
+        }
+        let mut steps: u64 = 0;
+        let route = super::poly::segs_of(sheet, &n.outer, &mut steps);
+        self.work.charge_steps(usize::try_from(steps).unwrap_or(usize::MAX))?;
+        Ok(route)
+    }
+
+    /// Where a new one-dimensional shape of a geometry of its own is written as the outline it draws, and what that is ([`super::poly`]); `None` for any other shape, which is
+    /// written as before. **A segment of [`Self::own_route`] that is on the page's top level** (a member of a group is measured from the group) **and is glued at no end** (the caller leaves a
+    /// glued one out, a polyline has no glue another program keeps, so it is a connector).
+    fn poly_of(&mut self, n: &NewShape, diff: &PageDiff) -> Result<Option<super::poly::Placed>, WriteError> {
+        if n.parent.is_some() || n.outer != Affine::IDENTITY {
+            return Ok(None);
+        }
+        Ok(self.own_route(n)?.and_then(|route| super::poly::placed(&route, diff.height)))
     }
 
     /// The text of a new shape from the model (the model path only: a save into a file writes a new shape's text as plain characters and carries the rest), for a shape that has text
@@ -990,7 +1158,7 @@ impl Editor<'_, '_> {
         pfx: &super::emit::Pfx,
         page_at: usize,
     ) -> Result<Option<super::text::model::Rich>, WriteError> {
-        if self.work.model_path && matches!(kind, Kind::Custom | Kind::Line | Kind::Connector | Kind::Plain) {
+        if self.work.model_path && matches!(kind, Kind::Custom | Kind::Line | Kind::Connector | Kind::Plain | Kind::Poly) {
             return self.rich_text(&n.shape, page, pfx, page_at);
         }
         Ok(None)
@@ -999,10 +1167,20 @@ impl Editor<'_, '_> {
     /// A frame has the four connection points ODF gives every shape, and no other this path writes from the rows: a connector glued to a later row of a new picture is
     /// refused in words, **but for a row a `draw:glue-point` of the file made and that is unchanged, on the model path**, which writes that element back with the picture's kept
     /// markup, so the file names the point and the reader makes the row of it again (an end glued to a frame's own glue point follows it).
-    fn check_picture_glue(&mut self, news: &[NewShape], new_at: &HashMap<u32, usize>, connects: &[Connect]) -> Result<(), WriteError> {
+    fn check_picture_glue(
+        &mut self,
+        news: &[NewShape],
+        new_at: &HashMap<u32, usize>,
+        connects: &[Connect],
+        file_glue: impl Iterator<Item = GlueTo>,
+    ) -> Result<(), WriteError> {
         let pictures: HashSet<u32> = news.iter().filter(|n| is_new_picture(&n.shape)).map(|n| n.shape.id).collect();
-        let past: Vec<(u32, u32)> =
-            connects.iter().filter(|c| pictures.contains(&c.to_sheet)).filter_map(|c| Some((c.to_sheet, past_frame_point(c.to_part)?))).collect();
+        let past: Vec<(u32, u32)> = connects
+            .iter()
+            .filter(|c| pictures.contains(&c.to_sheet))
+            .filter_map(|c| Some((c.to_sheet, past_frame_point(c.to_part)?)))
+            .chain(file_glue.filter(|to| pictures.contains(&to.target)).filter_map(|to| Some((to.target, past_frame_point(Some(to.part))?))))
+            .collect();
         if past.is_empty() {
             return Ok(());
         }
@@ -1053,8 +1231,56 @@ impl Editor<'_, '_> {
         (kind, frame): (Kind, bool),
         page: &ScanPage,
         pfx: &super::emit::Pfx,
-        as_read: bool,
+        read: Option<&AsRead>,
     ) -> Result<KeptMarkup, WriteError> {
+        let mut out = self.kept_markup_of_file(n, (kind, frame), page, pfx, read)?;
+        self.put_alt_text(&mut out, n, frame, pfx)?;
+        Ok(out)
+    }
+
+    /// The new shape's alt text as the elements `svg:title` and `svg:desc`: **before the shape's text** and the other children the schema puts before it
+    /// for a shape, after the frame's content and its event listeners and glue points for a frame. The texts are the shape's **effective** ones, its master's where it has none of its own
+    /// (`.odg` has no masters), written as they are, escaped, and in any save: a new shape of the model path and one put into a file.
+    fn put_alt_text(&mut self, out: &mut KeptMarkup, n: &NewShape, frame: bool, pfx: &super::emit::Pfx) -> Result<(), WriteError> {
+        let (text, texts) = self.alt_elements(n, pfx)?;
+        if frame {
+            out.after.push_str(&text);
+        } else {
+            out.before.insert_str(0, &text);
+        }
+        out.alt = texts;
+        Ok(())
+    }
+
+    /// The elements `svg:title` and `svg:desc` of a new shape's effective texts, and the texts: the markup and the title and the description it says (empty for none).
+    fn alt_elements(&mut self, n: &NewShape, pfx: &super::emit::Pfx) -> Result<(String, (String, String)), WriteError> {
+        let (title, description) = {
+            let found = diacraft_doc::alt_text::read(&self.resolver, &diacraft_doc::SheetRef::Shape(n.at.clone()));
+            (found.title.text.to_owned(), found.description.text.to_owned())
+        };
+        let mut text = String::new();
+        if title.is_empty() && description.is_empty() {
+            return Ok((text, (title, description)));
+        }
+        self.work.charge_steps(1 + (title.len() + description.len()) / 4096)?;
+        for (local, value) in [("title", &title), ("desc", &description)] {
+            if !value.is_empty() {
+                text.push_str(&super::alt::element(&pfx.svg, local, value)?);
+            }
+        }
+        Ok((text, (title, description)))
+    }
+
+    /// [`Editor::kept_markup`] without the alt text: what the shape keeps of the markup of the file it was read from.
+    fn kept_markup_of_file(
+        &mut self,
+        n: &NewShape,
+        (kind, frame): (Kind, bool),
+        page: &ScanPage,
+        pfx: &super::emit::Pfx,
+        read: Option<&AsRead>,
+    ) -> Result<KeptMarkup, WriteError> {
+        let as_read = read.is_some();
         let mut out = KeptMarkup::default();
         if !self.work.model_path {
             return Ok(out);
@@ -1171,25 +1397,22 @@ impl Editor<'_, '_> {
             kind == Kind::Custom && local_of(&e.name) == "enhanced-geometry" && ed.name_uri(e, page, pfx).as_deref() == Some(super::scan::DRAW_URI)
         };
         let held_geometry = if kind == Kind::Custom { super::held::enhanced_geometry(&n.shape, |e| is_geometry(self, e)) } else { None };
+        let mut held_first: Option<usize> = None;
         if let Some(el) = held_geometry
             && super::model::bounded_element(el, MOST_KEPT_PER_SHAPE)
         {
-            // Written back while its namespaces are known; else the outline is made again from the rows, as for an edited one. Its handles say their place as ODF 1.4 asks, the version
-            // the part says.
-            let stated = handles_of_1_4(el);
-            let el = stated.as_ref().unwrap_or(el);
-            out.geometry = match self.kept_element(el, page, pfx) {
-                Ok(found) => found.map(|(text, _)| text),
-                Err(WriteError::Unsupported(_)) => None,
-                Err(other) => return Err(other),
-            };
-            out.glue_listed = listed_glue_points(el);
+            held_first = self.held_geometry_markup(el, n, page, pfx, &mut out)?;
         }
         // The outline of a shape the file's element still says is made again from the rows when the element cannot be written (a prefix nothing binds, markup XML cannot hold, or more than
         // a shape may keep): the file's own markup of it is not written, and the save says so.
         if held_geometry.is_some() && out.geometry.is_none() {
             out.left_elements = out.left_elements.saturating_add(1);
         }
+        // **A custom shape written from its rows that lists them as its own glue points keeps no `draw:glue-point` element of its file**: a rectangle or an ellipse that was flipped is
+        // written as a custom shape, whose geometry lists every row; an element beside the list is a point more, with an id the list already holds.
+        // Worked out when the first such element is met, and once: a shape with none pays nothing.
+        let written_from_rows = kind == Kind::Custom && out.geometry.is_none();
+        let mut lists_rows: Option<bool> = None;
         // The children: elements, but the geometry element (written in another form: the one held, or one made from the rows), each with the namespaces it needs.
         let mut nodes: Vec<(&diacraft_doc::RawNode, u32)> = Vec::new();
         for placed in kept.kept.iter() {
@@ -1204,6 +1427,9 @@ impl Editor<'_, '_> {
         if !super::model::bounded(nodes.iter().map(|(node, _)| *node), MOST_KEPT_PER_SHAPE) {
             return Err(WriteError::Unsupported(WORDS_KEPT_BIG));
         }
+        // **The glue points of the rows the session changed**: the elements the file had stand for rows that are as they were read, and the rows it added have none.
+        let read_mirrors = held_geometry.filter(|el| !super::mirrors::is_object(el)).map_or((false, false), super::mirrors::mirrors_of);
+        let points = self.model_points(n, kind, read, held_first, read_mirrors, pfx)?;
         for (node, stood_after) in nodes {
             let diacraft_doc::RawNode::Element(el) = node else { continue };
             let own = frame && self.is_the_frames_picture(n, el, page, pfx)?;
@@ -1213,6 +1439,14 @@ impl Editor<'_, '_> {
                 Some((text, uri)) => {
                     if own && uri.as_deref() == Some(super::scan::DRAW_URI) {
                         out.image = true;
+                    }
+                    // An element of a row that was taken away or edited is taken out; the row is given its own, below.
+                    let is_point = uri.as_deref() == Some(super::scan::DRAW_URI) && local_of(&el.name) == "glue-point";
+                    let stale = is_point
+                        && (*lists_rows.get_or_insert_with(|| written_from_rows && rows_are_own(&n.shape.sheet, None))
+                            || points.as_ref().is_some_and(|p| !p.keeps(&el.attrs)));
+                    if stale {
+                        continue;
                     }
                     if goes_before_text(uri.as_deref(), local_of(&el.name)) {
                         if frame {
@@ -1232,7 +1466,105 @@ impl Editor<'_, '_> {
                 None => out.left_elements = out.left_elements.saturating_add(1),
             }
         }
+        if let Some(points) = &points {
+            out.before.push_str(&points.made);
+        }
         Ok(out)
+    }
+
+    /// A custom shape's own `draw:enhanced-geometry` `el`, written back while its namespaces are known (else the outline is made again from the rows, as for an edited one), into `out`; its
+    /// handles say their place as ODF 1.4 asks, the version the part says. **A shape whose rows are its own glue points lists every row again** (as the splice
+    /// writes it): the element it kept lists the points its file had, and the session may have added rows or moved one. Gives the row the glue point elements start at (past the four standard
+    /// ones and the points the geometry lists), `None` for a shape whose rows are its own, which has none, and for a geometry that is not written.
+    fn held_geometry_markup(
+        &mut self,
+        el: &diacraft_doc::RawElement,
+        n: &NewShape,
+        page: &ScanPage,
+        pfx: &super::emit::Pfx,
+        out: &mut KeptMarkup,
+    ) -> Result<Option<usize>, WriteError> {
+        let stated = handles_of_1_4(el);
+        let el = stated.as_ref().unwrap_or(el);
+        let listed = listed_glue_points(el);
+        let own = rows_are_own(&n.shape.sheet, Some(&listed));
+        self.work.charge_steps(listed.count)?;
+        let relisted = if own { super::glue::relisted(el, &n.shape.sheet) } else { None };
+        let el = relisted.as_ref().map_or(el, |(element, _)| element);
+        // **The element says the mirrors and the text turn the shape has now**: its stamp covers the rows and the equations, not the flips the session may have given the shape
+        // since the file was read, which the reader gives back from the mirrors the element says.
+        let flipped = self.mirrors_made(el, &n.shape)?;
+        let el = flipped.as_ref().unwrap_or(el);
+        out.geometry = match self.kept_element(el, page, pfx) {
+            Ok(found) => found.map(|(text, _)| text),
+            Err(WriteError::Unsupported(_)) => None,
+            Err(other) => return Err(other),
+        };
+        out.glue_own = Some(own);
+        Ok((!own && out.geometry.is_some()).then_some(listed.count.saturating_add(4)))
+    }
+
+    /// The held geometry element `el` with the mirrors and the turn of its text that `shape` has now ([`super::mirrors::mirrored`]), `None` when it says them already. The
+    /// copy is charged by the nodes it holds. A shape whose flips are not numbers is refused as every new shape of the model path is, and **so is what the file cannot give back of an object
+    /// geometry the reader does not draw** (a 3-D extrusion, a fontwork): a flip, since it keeps no mirror for it, and a text, since it reads none from the shape.
+    fn mirrors_made(&mut self, el: &diacraft_doc::RawElement, shape: &diacraft_doc::Shape) -> Result<Option<diacraft_doc::RawElement>, WriteError> {
+        let sheet = &*shape.sheet;
+        let flips = own::flips_of(sheet).ok_or(WriteError::Unsupported("a new shape whose frame is not numbers"))?;
+        // A turn that is no number (or no finite one) cannot be said as an attribute.
+        let txt = own::cell_number(sheet, "TxtAngle")
+            .map(f64::to_degrees)
+            .filter(|t| t.is_finite())
+            .ok_or(WriteError::Unsupported("a new shape whose text turn is not a number"))?;
+        let flip = (flips.0 == -1.0, flips.1 == -1.0);
+        if super::mirrors::is_object(el) {
+            if shape.text.as_ref().is_some_and(|t| !t.parts.is_empty()) {
+                return Err(WriteError::Unsupported(super::mirrors::WORDS_OBJECT_TEXT));
+            }
+            return if flip == (false, false) { Ok(None) } else { Err(WriteError::Unsupported(super::mirrors::WORDS_OBJECT_FLIP)) };
+        }
+        if !super::mirrors::differs(el, flip, txt) {
+            return Ok(None);
+        }
+        self.work.charge_steps(1usize.saturating_add(el.children.len()))?;
+        super::mirrors::mirrored(el, flip, txt).map_err(WriteError::Unsupported)
+    }
+
+    /// The glue point elements the model writer writes of a shape the `.odg` reader made, for the rows the session changed ([`ModelPoints`]): of a custom shape that writes the
+    /// geometry its file held, from the row the geometry's own points end at (`held_first`, `None` when the shape's rows are its own glue points, which the geometry lists), and of a rectangle,
+    /// an ellipse or a circle, from row 4. `None` for any other shape, and when the rows are not a list the elements can say.
+    fn model_points(
+        &mut self,
+        n: &NewShape,
+        kind: Kind,
+        read: Option<&AsRead>,
+        held_first: Option<usize>,
+        read_mirrors: (bool, bool),
+        pfx: &super::emit::Pfx,
+    ) -> Result<Option<ModelPoints>, WriteError> {
+        use crate::read::{Kindof, glue_box};
+        let Some(read) = read else { return Ok(None) };
+        let (first, boxed) = match (kind, read.element.as_str()) {
+            (Kind::Custom, _) => match held_first {
+                Some(first) => (first, glue_box(Kindof::Custom, None)),
+                None => return Ok(None),
+            },
+            (Kind::Plain, "rect") => (4, glue_box(Kindof::Rect, None)),
+            (Kind::Plain, element @ ("ellipse" | "circle")) => {
+                let draw_kind = read.outline.iter().find(|(name, _)| local_of(name) == "kind").map(|(_, value)| value.as_str());
+                (4, glue_box(if element == "ellipse" { Kindof::Ellipse } else { Kindof::Circle }, draw_kind))
+            }
+            _ => return Ok(None),
+        };
+        let Some(frame) = super::geometry::GlueFrame::of(&n.shape.sheet, boxed) else { return Ok(None) };
+        let rows: usize = n.shape.sheet.sections.iter().filter(|s| s.name.as_str() == "Connection").map(|s| s.rows.len()).sum();
+        self.work.charge_steps(rows)?;
+        // A turn or a flip made since the file was read leaves the elements it held in the old page axes: they are written again.
+        let (was_turn, was_flip) = asread::place_as_read(read, read_mirrors);
+        let turned = frame.place.angle - was_turn;
+        let moved = frame.place.flip != was_flip || turned.sin().abs() > 1e-9 || turned.cos() < 0.0;
+        let Some(points) = ModelPoints::of(&n.shape.sheet, first, &frame, moved, pfx) else { return Ok(None) };
+        self.work.charge_copy(points.made.len(), self.limits)?;
+        Ok(Some(points))
     }
 
     /// The `xlink:href` of the kept element `el`, when it is a `draw:image` and the attribute is XLink's, by the prefixes where the shape is written on `page`.
@@ -1666,7 +1998,14 @@ impl Editor<'_, '_> {
         if named.iter().any(|id| !tc.new_ids.contains(id) && tc.held.ordinal(*id).is_some()) {
             return refuse("a formula of a new shape that names a shape of the file (the file's shape keeps no ID the formula can rely on)");
         }
-        let attrs = match payload::encode(&tier2) {
+        // **The ends a line or a connector carries are written in the page's frame**: the file's markup is the page's, the reader judges a carried end against it and puts the
+        // group's corner off every member's ends, and the model holds a member's in the group's frame (`native::with_ends_on_page`). The tier 2 the check of the file made compares is the model's.
+        let on_page = if matches!(native.frame, native::Frame::OneD) {
+            own::ends(&n.shape.sheet, &n.outer).and_then(|page| native::with_ends_on_page(&tier2, &page))
+        } else {
+            None
+        };
+        let attrs = match payload::encode(on_page.as_ref().unwrap_or(&tier2)) {
             Ok(Some(attrs)) => attrs,
             Ok(None) => return refuse(super::splice::WORDS_XML_CHAR),
             Err(words) => return refuse(words),
@@ -1702,10 +2041,11 @@ impl Editor<'_, '_> {
         // again from the cells"): a shape of a file keeps its own `draw:enhanced-geometry`, which draws the shape in any program, where the rows alone give the placeholder above.
         // (Found by `kept_markup`, by its namespace, with the declarations it needs where it is written.)
         let held_geometry: Option<String> = self.kept.geometry.take();
-        let held_points = held_geometry.as_ref().map(|_| std::mem::take(&mut self.kept.glue_listed));
+        let held_own = held_geometry.as_ref().and_then(|_| self.kept.glue_own.take());
         let outline_native = outline_native || held_geometry.is_some();
         let kept_body = std::mem::take(&mut self.kept.body);
         let kept_before = std::mem::take(&mut self.kept.before);
+        let alt = std::mem::take(&mut self.kept.alt);
         let asread = self.kept.read.take();
         let (paragraphs, holds_text, read, plain, text_native) = self.paragraphs_text(n, pfx)?;
         // A custom shape of a file that held no paragraph of its own is written with none: the empty paragraph a new shape is written with is the writer's.
@@ -1728,6 +2068,7 @@ impl Editor<'_, '_> {
             None => (Some(layer.name.clone()), layer.row),
         };
         let native = native::Native {
+            alt: Some((alt.0.as_str(), alt.1.as_str())),
             frame: native::Frame::TwoD { cx: here.centre.0, cy: here.centre.1, w, h, angle, flip },
             style: &style_names,
             display: Some(&display),
@@ -1753,7 +2094,7 @@ impl Editor<'_, '_> {
         // Connection points that are not the four side middles are written as the geometry's own glue points, and the style says the rows start at 0 with the first of
         // them (`diacraft:glue="own"`): LibreOffice draws them with the geometry, mirrored and turned with it, where the session has them. (The geometry
         // element the file held has its own, and its numbering: a shape that writes it says its rows start at 0 only when they did, `rows_are_own`)
-        let rows_own = rows_are_own(sheet, held_points);
+        let rows_own = held_own.unwrap_or_else(|| rows_are_own(sheet, None));
         let own_glue = if rows_own && held_geometry.is_none() { super::geometry::glue_points_text(sheet) } else { None };
         if rows_own {
             dia.push(("glue".to_owned(), "own".to_owned()));
@@ -1880,6 +2221,7 @@ impl Editor<'_, '_> {
         }
         let kept_body = std::mem::take(&mut self.kept.body);
         let kept_after = std::mem::take(&mut self.kept.after);
+        let alt = std::mem::take(&mut self.kept.alt);
         let kept_behind = std::mem::take(&mut self.kept.behind);
         // The paragraphs the picture's `draw:image` held, for the `draw:image` written.
         let in_image = std::mem::take(&mut self.kept.in_image);
@@ -1895,6 +2237,7 @@ impl Editor<'_, '_> {
             None => (Some(layer.name.clone()), layer.row),
         };
         let native = native::Native {
+            alt: Some((alt.0.as_str(), alt.1.as_str())),
             frame: native::Frame::TwoD { cx: here.centre.0, cy: here.centre.1, w, h, angle, flip },
             style: &style_names,
             display: Some(&display),
@@ -2025,6 +2368,7 @@ impl Editor<'_, '_> {
         let parent = self.parent_of(sheet)?;
         let kept_body = std::mem::take(&mut self.kept.body);
         let kept_before = std::mem::take(&mut self.kept.before);
+        let alt = std::mem::take(&mut self.kept.alt);
         let asread = self.kept.read.take();
         let ends = own::ends(sheet, &n.outer).ok_or(WriteError::Unsupported("a new line whose ends are not numbers"))?;
         // Its text, as `text:p` (ODF lets a line hold some): plain characters, the rest of what a text holds being tier 2 (a Data Flow's label).
@@ -2041,6 +2385,7 @@ impl Editor<'_, '_> {
             None => (Some(layer.name.clone()), layer.row),
         };
         let native = native::Native {
+            alt: Some((alt.0.as_str(), alt.1.as_str())),
             frame: native::Frame::OneD,
             style: &style_names,
             display: Some(&display),
@@ -2118,12 +2463,19 @@ impl Editor<'_, '_> {
         };
         let kept_body = std::mem::take(&mut self.kept.body);
         let kept_before = std::mem::take(&mut self.kept.before);
+        let alt = std::mem::take(&mut self.kept.alt);
         let asread = self.kept.read.take();
         // The type the file wrote, as written, while it says what the cells say (an edit of the cells wins, and the type is written from them).
         let draw_type = match asread.as_ref().and_then(|r| r.conn_type.as_ref()) {
             Some(held) if asread::type_agrees(held.as_deref(), (kind("ShapeRouteStyle"), kind("ConLineRouteExt"))) => held.clone(),
             _ => draw_type,
         };
+        // **A segment of a geometry of its own that is glued is a connector of the type `line`** (the Comm-link between two shapes): another program routes a connector by its
+        // type and keeps no path of the file's (`svg:d`), so `line` is the one that draws what the figure runs along, the straight line between the glue points (`standard` and `lines`
+        // would bend it, `curve` too), and it keeps the end glued when a shape moves. The points of the figure are the path all the same (the standard asks it of a producer), and its geometry,
+        // the cells and the master ride in DiaCraft's data: a read of the file gives the zigzag back as it was, to the last digit, and not the path's, in hundredths of a millimetre.
+        let own = self.own_route(n)?;
+        let draw_type = if own.is_some() { Some("line".to_owned()) } else { draw_type };
         // The cells the reader makes of the type that is written, which the model's are carried against.
         let route = Some(asread::route_of_type(draw_type.as_deref()));
         let ends = own::ends(sheet, &n.outer).ok_or(WriteError::Unsupported("a new connector whose ends are not numbers"))?;
@@ -2137,6 +2489,8 @@ impl Editor<'_, '_> {
         let no_path = asread.as_ref().is_some_and(|r| !r.route_held) && is_line_outline(sheet);
         let (segs, hops) = if file_route.is_some() || no_path {
             (Vec::new(), false)
+        } else if let Some(figure) = own.clone() {
+            (figure, false)
         } else {
             match route::of(sheet, &n.outer) {
                 Some(segs) => (segs, false),
@@ -2170,10 +2524,12 @@ impl Editor<'_, '_> {
             None => (Some(layer.name.clone()), layer.row),
         };
         let native = native::Native {
+            alt: Some((alt.0.as_str(), alt.1.as_str())),
             frame: native::Frame::OneD,
             style: &style_names,
             display: Some(&display),
-            geometry: !hops,
+            // (The figure's own rows are carried: the reader makes rows of the path, which is in a coarser unit.)
+            geometry: !hops && own.is_none(),
             outline_sections: 1,
             picture: false,
             connection: !sheet.sections.iter().any(|s| s.name.as_str() == "Connection") || standard_connection(sheet),
@@ -2278,6 +2634,9 @@ enum Kind {
     Picture,
     /// A shape read from a plain element of an `.odg` (`draw:rect`, `draw:ellipse`, `draw:polygon`, a text frame, ...), written as that element.
     Plain,
+    /// A one-dimensional shape of a geometry of its own (a zigzag, a loop), written as the outline it draws: a `draw:polyline`, or a `draw:path` when a row is a curve, on the page
+    /// ([`super::poly`]). Its frame, its ends and its geometry in their own axes are tier 2.
+    Poly,
 }
 
 /// The attributes of the file's own, by the name the reader keeps them under, that a new element of this kind has no place for **and does not
@@ -2308,7 +2667,23 @@ fn written_attributes(kind: Kind) -> &'static [&'static str] {
         "svg:viewBox",
     ];
     const GROUP: &[&str] = &["draw:name", "xml:id", "draw:id", "draw:z-index"];
+    const POLY: &[&str] = &[
+        "draw:style-name",
+        "draw:text-style-name",
+        "draw:layer",
+        "draw:name",
+        "xml:id",
+        "draw:id",
+        "svg:x",
+        "svg:y",
+        "svg:width",
+        "svg:height",
+        "svg:viewBox",
+        "draw:points",
+        "svg:d",
+    ];
     match kind {
+        Kind::Poly => POLY,
         Kind::Custom | Kind::Picture | Kind::Plain => CUSTOM,
         Kind::Line => LINE,
         Kind::Connector => CONNECTOR,
@@ -2441,12 +2816,16 @@ mod tests {
             ("LeftMargin", "0.1", Some("IN")),
             ("RightMargin", "0.1", Some("IN")),
         ];
-        // A dash is left out, and the colour and the margins beside it are written.
+        // A custom pattern (254, which the table has no row for) is left out, and the colour and the margins beside it are written.
+        let mut with_custom = vec![("LinePattern", "254", None), ("LineColor", "#aabbcc", None)];
+        with_custom.extend(margins);
+        assert_eq!(names(&with_custom), ["BottomMargin", "LeftMargin", "LineColor", "RightMargin", "TopMargin"]);
+        let (edit, ..) = native_style(&sheet(&with_custom), &[]);
+        assert_eq!(edit.margins.len(), 4, "the margins are written whole");
+        // A pattern of the table is a dash of DiaCraft's own, written with them.
         let mut with_dash = vec![("LinePattern", "2", None), ("LineColor", "#aabbcc", None)];
         with_dash.extend(margins);
-        assert_eq!(names(&with_dash), ["BottomMargin", "LeftMargin", "LineColor", "RightMargin", "TopMargin"]);
-        let (edit, ..) = native_style(&sheet(&with_dash), &[]);
-        assert_eq!(edit.margins.len(), 4, "the margins are written whole");
+        assert_eq!(names(&with_dash), ["BottomMargin", "LeftMargin", "LineColor", "LinePattern", "RightMargin", "TopMargin"]);
         // A margin that is no length takes the other three with it, and the colour stays.
         assert_eq!(names(&[("TopMargin", "abc", None), ("LeftMargin", "0.1", Some("IN")), ("LineColor", "#aabbcc", None)]), ["LineColor"]);
         // A line end that is no number takes its size with it, and the colour stays.
@@ -2678,6 +3057,16 @@ mod tests {
     /// The side middles in the order the reader gives every shape (top, left, bottom, right) and four listed glue points, as the vector of lists them.
     const MIDDLES: [(f64, f64); 4] = [(0.5, 1.0), (0.0, 0.5), (0.5, 0.0), (1.0, 0.5)];
 
+    /// A geometry that lists `n` points and says nowhere they are.
+    fn count(n: usize) -> Listed {
+        Listed { count: n, shares: None }
+    }
+
+    /// How many points a geometry lists ([`super::listed_glue_points`]'s count).
+    fn listed_glue_points(el: &diacraft_doc::RawElement) -> usize {
+        super::listed_glue_points(el).count
+    }
+
     /// **A shape that writes the geometry its file held has the numbering its file had**: the four standard rows and the listed points from row 4 (the reader's numbering),
     /// or the listed points from row 0 when the style said so. A shape that makes its geometry from the rows numbers them as its own when it writes them so, as before.
     #[test]
@@ -2685,15 +3074,55 @@ mod tests {
         // The side middles, and four more points listed after them (the same places, which a shape may list as well as any).
         let beside_middles: Vec<(f64, f64)> = MIDDLES.iter().chain(MIDDLES.iter()).copied().collect();
         // The four standard rows and four listed ones: the reader's numbering when the geometry lists four.
-        assert!(!rows_are_own(&connection_sheet(&beside_middles), Some(4)), "4 + 4 rows, the file lists 4: glue id g is row g");
+        assert!(!rows_are_own(&connection_sheet(&beside_middles), Some(&count(4))), "4 + 4 rows, the file lists 4: glue id g is row g");
         // Four rows and four listed points: the style said `own`, whatever the rows are (here the side middles too).
-        assert!(rows_are_own(&connection_sheet(&MIDDLES), Some(4)), "4 rows, the file lists 4: glue id 4 + r is row r");
-        assert!(rows_are_own(&connection_sheet(&[(0.0, 0.0), (0.5, 0.0), (1.0, 1.0)]), Some(3)));
+        assert!(rows_are_own(&connection_sheet(&MIDDLES), Some(&count(4))), "4 rows, the file lists 4: glue id 4 + r is row r");
+        assert!(rows_are_own(&connection_sheet(&[(0.0, 0.0), (0.5, 0.0), (1.0, 1.0)]), Some(&count(3))));
         // A geometry that lists none has no rows of its own to number.
-        assert!(!rows_are_own(&connection_sheet(&MIDDLES), Some(0)));
+        assert!(!rows_are_own(&connection_sheet(&MIDDLES), Some(&count(0))));
         // The geometry made from the rows: own when the rows are not the four standard ones and can be written, as before.
         assert!(rows_are_own(&connection_sheet(&beside_middles), None), "4 + 4 rows are written as the geometry's own points");
         assert!(!rows_are_own(&connection_sheet(&MIDDLES), None), "the four standard rows are nothing to write");
+    }
+
+    /// **A shape of *k* listed points whose rows start with them is numbered as its own after the session added rows**: the count alone took a doubled shape (more rows than the *k*
+    /// it lists) for one that has the four standard rows first, and dropped its marker and numbered its connectors' glue the other way. The geometry's own places say which: the first rows are
+    /// them in place, and the rows 4 on are not.
+    #[test]
+    fn a_shape_whose_first_rows_are_the_listed_points_is_its_own_whatever_rows_the_session_added() {
+        // The geometry lists the four side middles and two points on the top, in the view box 21600 square: the places as shares, y from the bottom.
+        let geometry = diacraft_doc::RawElement {
+            name: std::sync::Arc::from("draw:enhanced-geometry"),
+            attrs: diacraft_doc::RawAttrs::from_pairs([
+                ("svg:viewBox", "0 0 21600 21600"),
+                ("draw:glue-points", "10800 0 0 10800 10800 21600 21600 10800 5400 0 16200 0"),
+            ]),
+            children: Vec::new(),
+        };
+        let listed = listed_glue_points_of(&geometry);
+        assert_eq!((listed.count, listed.shares.as_ref().map(Vec::len)), (6, Some(6)));
+        let six: Vec<(f64, f64)> = vec![(0.5, 1.0), (0.0, 0.5), (0.5, 0.0), (1.0, 0.5), (0.25, 1.0), (0.75, 1.0)];
+        assert!(rows_are_own(&connection_sheet(&six), Some(&listed)), "the six rows are the six listed points");
+        let mut more = six.clone();
+        more.extend([(0.0, 0.25), (0.0, 0.75)]);
+        assert!(rows_are_own(&connection_sheet(&more), Some(&listed)), "a doubling added two rows: the first six are still the listed points");
+        // Four standard rows first, then the listed points: not its own, however many rows the session added after.
+        let mut beside: Vec<(f64, f64)> = MIDDLES.to_vec();
+        beside.extend(six.iter().copied());
+        assert!(!rows_are_own(&connection_sheet(&beside), Some(&listed)), "the listed points are rows 4 on");
+        beside.push((0.5, 0.25));
+        assert!(!rows_are_own(&connection_sheet(&beside), Some(&listed)), "and a row more is still the reader's numbering");
+        // A geometry that says its points as anything but plain numbers is judged by the count alone.
+        let parametric = diacraft_doc::RawElement {
+            attrs: diacraft_doc::RawAttrs::from_pairs([("svg:viewBox", "0 0 21600 21600"), ("draw:glue-points", "$0 0 0 10800 10800 21600")]),
+            ..geometry.clone()
+        };
+        assert!(!rows_are_own(&connection_sheet(&more), Some(&listed_glue_points_of(&parametric))));
+    }
+
+    /// The same as [`listed_glue_points`], keeping where the points are.
+    fn listed_glue_points_of(el: &diacraft_doc::RawElement) -> Listed {
+        super::listed_glue_points(el)
     }
 
     #[test]

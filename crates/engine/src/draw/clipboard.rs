@@ -3,7 +3,8 @@
 //! **The clipboard** is the session's (`Session::clipboard`), one for a document: it holds the shapes copied and the masters they use. A paste
 //! is within one document (M3 second slice), so the masters a pasted shape uses are the document's already and are used by `ID`, never
 //! copied: the clipboard keeps the masters only so that a paste after an undo that took a master away (a dropped shape's, with the drop) puts it back,
-//! and a master the document has under the same `UniqueID` is that master. The system clipboard is the window's business.
+//! and a master the document has under the same `UniqueID` is that master, as is a built-in master the document holds under the same `BaseID` (a build before a change gave a built-in master
+//! a `UniqueID` of the `BaseID`'s text, and this one gives it another: the `BaseID` is what the two have in common). The system clipboard is the window's business.
 //!
 //! Our rule. *Copy* takes the shapes named (a shape named with a group it is in is left to the group), each with everything inside it, in
 //! the order of the drawing. A connector copied keeps its glue to a shape copied with it; a glue to a shape not copied is left out, and that end
@@ -279,8 +280,15 @@ pub struct Pasted {
     pub notes: Vec<String>,
 }
 
+/// The key a built-in master is known by in every build: its `BaseID`, in capitals, when it is the `BaseID` of a master of the built-in stencils (`stencil::is_builtin_guid`). A master of a file, whose
+/// `BaseID` may be on masters that differ (copies keep it), has none: it is matched by its `UniqueID` alone.
+fn built_in_key(m: &Master) -> Option<String> {
+    let base = m.raw.get("BaseID")?;
+    crate::stencil::is_builtin_guid(base).then(|| base.trim().to_ascii_uppercase())
+}
+
 /// The masters a paste uses, by the `ID` they had on the clipboard: the document's own master with that `ID` when it is the same master (same
-/// `UniqueID`, or the very same one), else a master of the document with the same `UniqueID`, else the clipboard's put back (under its `ID` when that is
+/// `UniqueID`, or the same built-in `BaseID`, or the very same one), else a master of the document with the same `UniqueID` or the same built-in `BaseID`, else the clipboard's put back (under its `ID` when that is
 /// free). Never a second copy of a master the document has.
 /// → the map, and how many references a master put back had to parts its file had for it and the drawing's package does not (`stencil::refs::leave_package_for_another`), which were left out.
 fn ensure_masters(doc: &mut Document, held: &[Arc<Master>]) -> Result<(HashMap<u32, u32>, usize), Problem> {
@@ -293,23 +301,30 @@ fn ensure_masters(doc: &mut Document, held: &[Arc<Master>]) -> Result<(HashMap<u
     // is the product of the two, which a document of tens of thousands of masters and a copy that uses thousands of them makes large.
     let mut by_id: HashMap<u32, Arc<Master>> = HashMap::with_capacity(doc.masters.len());
     let mut by_unique: HashMap<Arc<str>, u32> = HashMap::new();
+    let mut by_base: HashMap<String, u32> = HashMap::new();
     let mut highest = 0_u32;
     for d in doc.masters.iter() {
         by_id.entry(d.id).or_insert_with(|| Arc::clone(d));
         if let Some(unique) = &d.unique_id {
             by_unique.entry(Arc::clone(unique)).or_insert(d.id);
         }
+        if let Some(base) = built_in_key(d) {
+            by_base.entry(base).or_insert(d.id);
+        }
         highest = highest.max(d.id);
     }
     for m in held {
+        let held_base = built_in_key(m);
         let same = |d: &Arc<Master>| match (&d.unique_id, &m.unique_id) {
-            (Some(a), Some(b)) => a == b,
+            (Some(a), Some(b)) if a == b => true,
             (None, None) => d.name_u == m.name_u,
-            _ => false,
+            _ => held_base.is_some() && built_in_key(d) == held_base,
         };
         if by_id.get(&m.id).is_some_and(|d| Arc::ptr_eq(d, m) || same(d)) {
             map.insert(m.id, m.id);
-        } else if let Some(found) = m.unique_id.as_ref().and_then(|unique| by_unique.get(unique)) {
+        } else if let Some(found) =
+            m.unique_id.as_ref().and_then(|unique| by_unique.get(unique)).or_else(|| held_base.as_ref().and_then(|base| by_base.get(base)))
+        {
             map.insert(m.id, *found);
         } else {
             let id = if by_id.contains_key(&m.id) { highest.checked_add(1).ok_or_else(|| Problem::failed("no master ids are left"))? } else { m.id };
@@ -323,6 +338,9 @@ fn ensure_masters(doc: &mut Document, held: &[Arc<Master>]) -> Result<(HashMap<u
             by_id.insert(id, Arc::clone(&again));
             if let Some(unique) = &again.unique_id {
                 by_unique.entry(Arc::clone(unique)).or_insert(id);
+            }
+            if let Some(base) = built_in_key(&again) {
+                by_base.entry(base).or_insert(id);
             }
             highest = highest.max(id);
             map.insert(m.id, id);
@@ -493,7 +511,7 @@ pub fn paste_shapes(doc: &mut Document, page: u32, clip: &Clipboard, at: Placeme
     {
         let p = page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?;
         for copy in copies {
-            p.shapes.push(copy);
+            p.push_shape(copy);
         }
         for row in &rows {
             p.connects.push(row.clone());
@@ -657,5 +675,47 @@ mod tests {
         let root = copy.ext.get().and_then(|e| e.vsdx.0.iter().find(|(k, _)| &**k == "MasterContents").map(|(_, v)| v.clone())).unwrap();
         assert_eq!(root.raw, diacraft_doc::RawAttrs::from_pairs([("xmlns:zz", "urn:zz")]), "the root keeps its prefixes and nothing else");
         assert!(root.kept.is_empty());
+    }
+
+    /// A master with the ids given.
+    fn with_ids(id: u32, name: &str, unique: &str, base: &str) -> Arc<Master> {
+        let mut m = Master { id, name_u: Some(Arc::from(name)), unique_id: Some(Arc::from(unique)), ..Master::default() };
+        m.raw.push("BaseID", base);
+        Arc::new(m)
+    }
+
+    #[test]
+    fn a_built_in_master_held_with_the_unique_id_of_0_2_3_is_the_drawings_master_of_the_same_base_id() {
+        // A build before this one gave a built-in master a `UniqueID` that is its `BaseID`'s text, and this one gives it another. The two are one master by the `BaseID`.
+        let spec = crate::stencil::find_master("process").unwrap();
+        let base = spec.guid();
+        let mut doc = Document::new_blank();
+        let have = crate::stencil::ensure_master(&mut doc, spec).unwrap();
+        let held = [with_ids(have + 4, "Process", &base, &base)];
+        let (map, _) = ensure_masters(&mut doc, &held).unwrap();
+        assert_eq!(map.get(&(have + 4)), Some(&have), "the document's own master, by its BaseID");
+        assert_eq!(doc.masters.len(), 1, "no second copy");
+        // The same master held under the `ID` the document gives its own: the same master.
+        let held = [with_ids(have, "Process", &base, &base)];
+        let (map, _) = ensure_masters(&mut doc, &held).unwrap();
+        assert_eq!((map.get(&have), doc.masters.len()), (Some(&have), 1));
+        // A master of a file whose BaseID is no built-in's is matched by its `UniqueID` alone, as before.
+        let other = [with_ids(9, "Process", "{F0000000-0000-4000-8000-000000000009}", "{F0000000-0000-4000-8000-00000000000A}")];
+        let (map, _) = ensure_masters(&mut doc, &other).unwrap();
+        assert_eq!((map.get(&9), doc.masters.len()), (Some(&9), 2), "put back: another master");
+        let again = [with_ids(11, "Other", "{F0000000-0000-4000-8000-000000000009}", "{F0000000-0000-4000-8000-00000000000B}")];
+        let (map, _) = ensure_masters(&mut doc, &again).unwrap();
+        assert_eq!((map.get(&11), doc.masters.len()), (Some(&9), 2), "the same UniqueID is the same master");
+    }
+
+    #[test]
+    fn two_masters_of_a_file_that_share_a_base_id_that_is_no_built_in_ones_stay_two() {
+        let mut doc = Document::new_blank();
+        let held = [
+            with_ids(1, "A", "{A0000000-0000-4000-8000-000000000001}", "{B0000000-0000-4000-8000-000000000001}"),
+            with_ids(2, "B", "{A0000000-0000-4000-8000-000000000002}", "{B0000000-0000-4000-8000-000000000001}"),
+        ];
+        let (map, _) = ensure_masters(&mut doc, &held).unwrap();
+        assert_eq!((map.get(&1), map.get(&2), doc.masters.len()), (Some(&1), Some(&2), 2), "a copy that keeps a BaseID is another master");
     }
 }

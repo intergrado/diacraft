@@ -26,7 +26,7 @@ Every headline number has a Kind: `measured (source)` or `estimated (method)`. S
 
 ## Honesty
 
-Progress docs state that the reference app was not inspected and that our output has not been opened in it by the project. Claims about the real reference app stay marked unverified.
+Progress docs state that the reference app was never taken apart (what it does comes from public documentation and public sample files) and that the files DiaCraft writes are being tested by opening them in it, in LibreOffice Draw and in draw.io. Claims about how the real reference app behaves stay marked unverified.
 
 ## Revision history
 

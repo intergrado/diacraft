@@ -1,7 +1,8 @@
 //! Where text typed on a group goes.
 //!
 //! A group's `IsTextEditTarget` says whether the group takes the text typed on it (TRUE) or sends it to the member on top of the stack, the last in
-//! document order (FALSE). The cell is found by inheritance and reads TRUE where nothing gives one (the root style holds 1). **The window reads it
+//! document order (FALSE). The cell is found by inheritance and reads TRUE where nothing gives one (the root style holds 1); **a cell that holds a formula and no value saved
+//! anywhere on the way to it reads what its formula works out to** (`=FALSE` is FALSE, as the picture reads such a cell). **The window reads it
 //! when an edit begins** (the cell changes where later typing goes, and moves no text that is already there), so an edit that is open stays where
 //! it opened. The members hold the text of a group made from a master of stacked parts, such as a class with its name, attributes and operations:
 //! typing on the selected class edits its name, the last of its members (design call of the second stencil batch).
@@ -11,6 +12,7 @@
 //! from its master, or a guide) is passed over: typing cannot be seen there.
 
 use diacraft_engine::doc::{CellAddr, Document, Owner, Resolver, ShapeRef, ShapeType, SheetRef};
+use diacraft_engine::draw::worked::Worked;
 
 use super::scene::MAX_GROUP_DEPTH;
 
@@ -26,11 +28,14 @@ fn reads_true(value: Option<&str>) -> bool {
     }
 }
 
-/// Whether text typed on the group at `at` goes to the group itself: its `IsTextEditTarget`, found by inheritance, reads TRUE.
-fn takes_text_itself(res: &Resolver<'_>, at: &ShapeRef) -> bool {
-    let found = res.resolve(&SheetRef::Shape(at.clone()), &CellAddr::direct("IsTextEditTarget"));
-    let value = found.as_ref().and_then(|found| found.value.cell).and_then(|cell| cell.value.as_ref());
-    reads_true(value.map(|value| value.text()))
+/// Whether text typed on the group at `at` goes to the group itself: its `IsTextEditTarget`, found by inheritance, reads TRUE. A cell with a formula and no saved value is what
+/// the formula works out to (a number that is not 0, or a word that is not `FALSE`), and when the formula gives none it reads as the picture reads a formula that cannot be worked out
+/// (`Worked::unanswered`: the root style's cell, which is TRUE but for the file that holds 0 there).
+fn takes_text_itself(res: &Resolver<'_>, worked: &Worked<'_>, at: &ShapeRef) -> bool {
+    let sheet = SheetRef::Shape(at.clone());
+    let addr = CellAddr::direct("IsTextEditTarget");
+    let text = res.resolve(&sheet, &addr).and_then(|found| worked.text_of(&sheet, &addr, &found));
+    reads_true(text.as_deref())
 }
 
 /// The shape that text typed on shape `id` of page `page` reaches: `id` itself, unless it is a group whose `IsTextEditTarget` is FALSE, and then the
@@ -40,9 +45,10 @@ pub(super) fn text_target(doc: &Document, page: u32, id: u32) -> u32 {
     let owner = Owner::Page(page);
     let Some(mut at) = doc.find_shape(owner, id) else { return id };
     let res = Resolver::new(doc);
+    let worked = Worked::new(doc);
     for _ in 0..MAX_GROUP_DEPTH {
         let Some(shape) = doc.shape(&at) else { break };
-        if shape.kind != ShapeType::Group || takes_text_itself(&res, &at) {
+        if shape.kind != ShapeType::Group || takes_text_itself(&res, &worked, &at) {
             break;
         }
         let last = shape.children.iter().enumerate().rev().take(MAX_SCAN).find(|(_, member)| !member.del && member.kind != ShapeType::Guide);

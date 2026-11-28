@@ -212,7 +212,7 @@ fn a_template_is_asked_for_by_its_name_in_any_case_too() {
 }
 
 #[test]
-fn a_blank_new_drawing_opens_every_stencil_again_and_so_does_a_drawing_read_from_a_file() {
+fn a_blank_new_drawing_opens_every_stencil_again_and_so_does_a_drawing_read_from_a_file_that_names_none() {
     let dir = Dir::new();
     let mut s = Session::new();
     new_from(&mut s, "basic_diagram");
@@ -221,14 +221,22 @@ fn a_blank_new_drawing_opens_every_stencil_again_and_so_does_a_drawing_read_from
     assert!(r.get("template").is_none() && r.get("stencils").is_none(), "a blank drawing is answered as it always was: {r}");
     assert_eq!(open_stencils(&mut s), ["basic", "flowchart", "decorative", "arrows", "gane-sarson", "cross-functional", "orgchart"]);
     assert!(s.source().is_none(), "a blank drawing has no file and no template behind it");
-    // A drawing saved and opened again is not a template: its stencils are the default ones.
+    // A drawing saved and opened again opens the stencils it names, which a drawing made from a template does: the template's.
     new_from(&mut s, "basic_diagram");
     let saved = dir.path("drawing.vsdx");
     run(&mut s, "file.save_as", json!({"path": saved}));
     assert_eq!(open_stencils(&mut s), ["basic", "arrows"], "a save changes nothing about the stencils");
     let opened = run(&mut s, "file.open", json!({"path": saved}));
     assert_eq!(opened["file"]["new_from_template"], false);
-    assert!(opened.get("stencils").is_none(), "only a template says which stencils it opened");
+    assert_eq!(opened["stencils"], json!({"open": ["basic", "arrows"], "ignored": 0}), "a drawing that names its stencils says which it opened");
+    assert_eq!(open_stencils(&mut s), ["basic", "arrows"]);
+    // A drawing that names none has the stencils a new drawing has, and says nothing of them.
+    run(&mut s, "file.new", json!({}));
+    let plain = dir.path("plain.vsdx");
+    run(&mut s, "file.save_as", json!({"path": plain}));
+    new_from(&mut s, "basic_diagram");
+    let opened = run(&mut s, "file.open", json!({"path": plain}));
+    assert!(opened.get("stencils").is_none(), "a file that names none says nothing of the stencils: {opened}");
     assert_eq!(open_stencils(&mut s), ["basic", "flowchart", "decorative", "arrows", "gane-sarson", "cross-functional", "orgchart"]);
 }
 
@@ -248,8 +256,8 @@ fn a_new_shape_on_a_template_page_follows_the_page_theme_and_on_a_plain_page_fol
     new_from(&mut s, "basic_flowchart");
     let style = diacraft_engine::theme::theme_style_id(doc(&s)).unwrap();
     let id = drop_shape(&mut s, "process", 4.0, 5.0);
-    let shape = doc(&s).shape(&doc(&s).find_shape(Owner::Page(1), id).unwrap()).unwrap().sheet.links;
-    assert_eq!((shape.line, shape.fill, shape.text), (Some(style), Some(style), Some(style)));
+    // Through the master's shape.
+    assert_eq!(crate::theme_master_links::follows(doc(&s), 1, id), (Some(style), Some(style), Some(style)));
     let look = &run(&mut s, "shape.formatting", json!({"ids": [id]}))["shapes"][0];
     assert_ne!(look["fill"], "#ffffff", "the theme's fill and not the plain white: {look}");
 
@@ -480,11 +488,7 @@ fn a_drawing_made_from_a_template_saved_as_a_drawing_carries_the_list_and_reads_
     assert_eq!(opened["file"]["warning_count"], 0, "{opened}");
     assert_eq!(template::stencil_names(doc(&t)).map(|n| n.ids), Some(vec!["basic", "arrows"]), "the list the template gave it");
     assert_eq!(doc(&t).page(1).unwrap().shapes.len(), 1);
-    assert_eq!(
-        open_stencils(&mut t),
-        ["basic", "flowchart", "decorative", "arrows", "gane-sarson", "cross-functional", "orgchart"],
-        "a drawing is not a template: the stencils are the default ones"
-    );
+    assert_eq!(open_stencils(&mut t), ["basic", "arrows"], "a drawing opens the stencils its list names");
 }
 
 #[test]

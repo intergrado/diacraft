@@ -14,6 +14,8 @@ workspace = true
 diacraft-engine = { workspace = true }
 # A reference as a formula spells it (`Geometry1.X2`) names a cell of a sheet: the ShapeSheet window selects one by it (`sheet/mod.rs`, `window.sheetSelect`).
 diacraft-calc = { workspace = true }
+# What the page paints of a `Geometry` section (`SectionFlags::paint`, the renderer's own rule): the pointer's scene marks the paths a picture of a shape is drawn from with it (`edit/scene.rs`).
+diacraft-geom = { workspace = true }
 # The pictures of the Re-Layout Page gallery are the engine's own layout of a small diagram (`relayout_ui.rs`).
 diacraft-layout = { workspace = true }
 # The preview on the Page Setup dialog's Layout and Routing tab is routed by the router the engine routes with (`page_setup/routing_preview.rs`).
@@ -38,6 +40,8 @@ epaint_default_fonts = { workspace = true }
 eframe = { workspace = true, features = ["wayland", "x11"] }
 log = { workspace = true }
 png = { workspace = true }
+# The window's type of `config.toml` (`prefs_host.rs`).
+serde = { workspace = true }
 serde_json = { workspace = true }
 web-time = { workspace = true }
 

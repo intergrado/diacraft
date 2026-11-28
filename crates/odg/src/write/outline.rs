@@ -79,7 +79,7 @@ impl Editor<'_, '_> {
     }
 
     /// Sets the attribute `local` of `ns` on the tag, in its place, or adds it.
-    fn write(&mut self, tag: &mut TagEdit<'_>, ns: Ns, local: &str, text: &str) -> Result<(), WriteError> {
+    pub(super) fn write(&mut self, tag: &mut TagEdit<'_>, ns: Ns, local: &str, text: &str) -> Result<(), WriteError> {
         self.work.charge_attribute(self.limits)?;
         self.work.charge_copy(text.len(), self.limits)?;
         match tag.find(&mut self.scopes, ns, local, self.work) {

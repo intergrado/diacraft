@@ -6,8 +6,16 @@
 //! a guide it is pulled to, and the ghost that follows the pointer is shown where the engine's snap puts its box (`snapping.rs`), worked out once for
 //! each place of the pointer ([`TileLanding`]), with the master's own connection points pulled with it as `shape.drop` pulls the new shape's. Alt held
 //! drops it where it is.
+//!
+//! **The ghost is the shape the drop makes** (U49). A master is not dropped at the size it is listed at: beyond the range of eight of the page's drawing scale it keeps its size
+//! on paper, and a group whose height follows its text has the height of its text. So the engine drops the master on a copy of the document
+//! (`snap::drop_preview`) and the window keeps what that made ([`TileShape`]): the box's size on paper, which the ghost is drawn at and the snap's box has, and the places the
+//! master brings, moved with the pointer. It is worked out **once for a drag**, and again only when the drawing changes (its revision, which a change of the page's scale is), never for a frame.
 
-use diacraft_engine::snap::{Extras, Rect as SnapRect, dropped_points, dropped_points_of_file};
+use std::sync::Arc;
+
+use diacraft_engine::draw::units_per_inch;
+use diacraft_engine::snap::{DropMaster, DropPreview, Extras, Rect as SnapRect, drop_preview, size_on_paper};
 use egui::{CursorIcon, Id, LayerId, Order, Rect, Response, Stroke, Ui, vec2};
 use serde_json::json;
 
@@ -32,6 +40,22 @@ pub struct TileDrag {
 /// Where a master dropped now would land: the page, its centre there, and what the snap pulled it to.
 type DropLanding = (u32, P, Vec<Mark>);
 
+/// What dropping the master of the tile being dragged would make, on one page: the box's size on paper (the engine's drop on a copy of the document: `preview`, or, when the drop
+/// cannot be made there, the size the range of eight gives the master) and the preview, which gives the places the master brings.
+#[derive(Clone)]
+pub struct TileShape {
+    preview: Option<Arc<DropPreview>>,
+    /// The size of the new shape's box, in paper inches.
+    width: f64,
+    height: f64,
+}
+
+/// A [`TileShape`] and what it was made for: the master, the page, and the drawing's generation and revision. A frame with all of them as they were makes no drop.
+pub struct TileShapeKept {
+    key: (String, u32, u64, u64),
+    shape: TileShape,
+}
+
 /// Where the tile being dragged would land, and what that was worked out for: the master, the page and the place under the pointer, Alt, the zoom, the
 /// drawing's generation and revision, the view, and how many answers the page's reader has given. A frame with all of them as they were asks the snap nothing.
 pub struct TileLanding {
@@ -49,6 +73,11 @@ impl DiacraftApp {
         self.ui.edit.tile_landing.as_ref().map(|t| t.landing.1)
     }
 
+    /// The screen rectangle the ghost of the tile being dragged was drawn at in the last frame, for the tests. `None` with no tile dragged.
+    pub fn tile_ghost_rect(&self) -> Option<Rect> {
+        self.ui.edit.tile_ghost
+    }
+
     /// The pointer's work on one tile: the drag begins, a ghost of the shape follows the pointer, and the release over the page drops it.
     pub(crate) fn tile_input(&mut self, ui: &Ui, response: &Response, master: &MasterInfo) {
         let ctx = ui.ctx().clone();
@@ -58,10 +87,13 @@ impl DiacraftApp {
         if response.dragged() && self.ui.edit.tile.is_some() {
             let over = self.canvas_page_point(&ctx);
             ctx.set_cursor_icon(if over.is_some() { CursorIcon::Copy } else { CursorIcon::NoDrop });
-            let landing = over.map(|(page, at)| self.drop_landing(&ctx, page, master, at));
-            self.paint_tile_ghost(&ctx, master, landing.as_ref());
+            let shape = self.tile_shape(master, over.map(|(_, at)| (sent(at.0), sent(at.1))));
+            let landing = over.map(|(page, at)| self.drop_landing(&ctx, page, master, at, shape.as_ref()));
+            self.ui.edit.tile_ghost = self.paint_tile_ghost(&ctx, master, landing.as_ref(), shape.as_ref());
         }
         if response.drag_stopped() && self.ui.edit.tile.take().is_some() {
+            self.ui.edit.tile_ghost = None;
+            self.ui.edit.tile_shape = None;
             let shown = self.ui.edit.tile_landing.take();
             // A master let go inside the Shapes window changes its group (across the divider), and is not dropped on the page.
             if self.drop_in_gallery(&ctx, master) {
@@ -94,10 +126,39 @@ impl DiacraftApp {
         cx.area.contains(pointer).then(|| (page, cx.page_at(pointer)))
     }
 
-    /// Where a master dropped centred at `at` lands: its box snapped by the engine's snap on the kept page, as `shape.drop` snaps it, with the master's own connection
-    /// points pulled with it (`dropped_points`, and `dropped_points_of_file` for a master of a stencil file: the places the new shape will have, which the command reads off the
-    /// shape it makes). Alt held leaves it where it is. Worked out again only when the pointer, Alt, the zoom, the view or the drawing changed.
-    fn drop_landing(&mut self, ctx: &egui::Context, page: u32, master: &MasterInfo, at: P) -> DropLanding {
+    /// What dropping `master` on the page on view would make, worked out **once for a drag**: the engine drops the master on a copy of the document (`snap::drop_preview`, which
+    /// counts it: `snap::counts`), and the box and the places it makes are kept while the master, the page and the drawing (its generation and revision, which a change of the
+    /// page's scale is) stay as they are. `centre` is where the drop is made on the copy, the pointer's place over the page and the middle of the page elsewhere: the box and the
+    /// places are the same wherever the shape goes, moved by the distance (`DropPreview::rect_at`, `points_at`). `None` with no drawing, or no page.
+    fn tile_shape(&mut self, master: &MasterInfo, centre: Option<P>) -> Option<TileShape> {
+        let page = self.current_page()?;
+        let key = (master.key(), page, self.ui.generation, self.session.revision());
+        if let Some(kept) = self.ui.edit.tile_shape.as_ref().filter(|kept| kept.key == key) {
+            return Some(kept.shape.clone());
+        }
+        let doc = self.session.document()?;
+        let centre =
+            centre.or_else(|| crate::canvas::page_drawing::page_settings(doc, page).map(|s| (sent(s.size.0 / 2.0), sent(s.size.1 / 2.0))))?;
+        let preview = match &master.stencil {
+            None => diacraft_engine::stencil::find_master(&master.id).and_then(|spec| drop_preview(doc, page, DropMaster::Stock(spec), centre)),
+            Some(file) => {
+                self.session.stencils().get(file).and_then(|stencil| drop_preview(doc, page, DropMaster::File { stencil, key: &master.id }, centre))
+            }
+        };
+        // A drop that cannot be made on the copy (a page that is full, a master with no shape) is drawn at the size the range of eight gives the master.
+        let (width, height) = match &preview {
+            Some(p) => (p.width(), p.height()),
+            None => size_on_paper(master.width.max(0.0), master.height.max(0.0), units_per_inch(doc, page)),
+        };
+        let shape = TileShape { preview: preview.map(Arc::new), width, height };
+        self.ui.edit.tile_shape = Some(TileShapeKept { key, shape: shape.clone() });
+        Some(shape)
+    }
+
+    /// Where a master dropped centred at `at` lands: its box (`shape`'s size, which is the size of the shape the drop makes) snapped by the engine's snap on the kept page, as `shape.drop`
+    /// snaps it, with the master's own connection points pulled with it (the places the new shape will have, which the command reads off the shape it makes: `shape`'s preview, moved
+    /// to `at`). Alt held leaves it where it is. Worked out again only when the pointer, Alt, the zoom, the view or the drawing changed.
+    fn drop_landing(&mut self, ctx: &egui::Context, page: u32, master: &MasterInfo, at: P, shape: Option<&TileShape>) -> DropLanding {
         let at = (sent(at.0), sent(at.1));
         let alt = ctx.input(|i| i.modifiers.alt);
         let Some(cx) = self.cx_of(page) else { return (page, at, Vec::new()) };
@@ -106,28 +167,29 @@ impl DiacraftApp {
         if let Some(kept) = self.ui.edit.tile_landing.as_ref().filter(|t| t.key == key) {
             return kept.landing.clone();
         }
-        let (landing, snapped) = if alt {
-            ((page, at, Vec::new()), false)
-        } else {
-            // The master's size is drawing units, which the command divides by the page's scale to the paper inches the box is in.
-            let k = self.ui.edit.snap_page.as_ref().filter(|c| c.key().2 == page).map_or(1.0, |c| c.page.k);
-            let (w, h) = (master.width.max(0.0) / k, master.height.max(0.0) / k);
-            let rect = SnapRect { x0: at.0 - w / 2.0, y0: at.1 - h / 2.0, x1: at.0 + w / 2.0, y1: at.1 + h / 2.0 };
-            // The places the new shape will have, where it will be: a stock master's connection points, and a stencil file's master's, which the engine reads off the shape a
-            // drop on a copy of the document makes (`dropped_points_of_file`), as `shape.drop` reads them off the shape it makes.
-            let own: Vec<P> = match &master.stencil {
-                None => diacraft_engine::stencil::find_master(&master.id).map(|spec| dropped_points(spec, at, k)).unwrap_or_default(),
-                Some(file) => self
-                    .session
-                    .document()
-                    .zip(self.session.stencils().get(file))
-                    .map(|(doc, stencil)| dropped_points_of_file(doc, page, stencil, &master.id, at))
-                    .unwrap_or_default(),
-            };
-            match self.snap_box(page, rect, &[], &own, cx.view.scale(), Extras { view: Some(view), ..Extras::default() }) {
-                Some(snapped) => ((page, (at.0 + snapped.dx, at.1 + snapped.dy), snapped.marks), true),
-                None => ((page, at, Vec::new()), false),
+        let (landing, snapped) = match (alt, shape) {
+            (false, Some(shape)) => {
+                // The box of the shape the drop makes, on paper, where it will be, and the places it will have there: what the drop on a copy of the document made of the master (beyond
+                // the range of eight of the page's scale its size on paper, and for a group of compartments that follow their text the height their text makes it).
+                let (rect, own) = match &shape.preview {
+                    Some(preview) => (preview.rect_at(at), preview.points_at(at)),
+                    None => (
+                        SnapRect {
+                            x0: at.0 - shape.width / 2.0,
+                            y0: at.1 - shape.height / 2.0,
+                            x1: at.0 + shape.width / 2.0,
+                            y1: at.1 + shape.height / 2.0,
+                        },
+                        Vec::new(),
+                    ),
+                };
+                match self.snap_box(page, rect, &[], &own, cx.view.scale(), Extras { view: Some(view), ..Extras::default() }) {
+                    Some(snapped) => ((page, (at.0 + snapped.dx, at.1 + snapped.dy), snapped.marks), true),
+                    None => ((page, at, Vec::new()), false),
+                }
             }
+            // Alt held leaves it where it is, and a drag with nothing to drop on a copy of (no drawing) has nothing to snap.
+            _ => ((page, at, Vec::new()), false),
         };
         self.ui.edit.tile_landing = Some(TileLanding { key, landing: landing.clone(), snapped });
         landing
@@ -173,12 +235,14 @@ impl DiacraftApp {
         self.drop_master(page, master, centre, true);
     }
 
-    /// The outline of the shape that would be dropped, at the page's zoom: over the page where the snap puts it, with what it snapped to; elsewhere
+    /// The outline of the shape that would be dropped, at the page's zoom and the size the drop makes it: over the page where the snap puts it, with what it snapped to; elsewhere
     /// following the pointer.
-    fn paint_tile_ghost(&self, ctx: &egui::Context, master: &MasterInfo, landing: Option<&DropLanding>) {
-        let (Some(pointer), Some(scale)) = (ctx.input(|i| i.pointer.latest_pos()), self.current_scale()) else { return };
+    fn paint_tile_ghost(&self, ctx: &egui::Context, master: &MasterInfo, landing: Option<&DropLanding>, shape: Option<&TileShape>) -> Option<Rect> {
+        let (Some(pointer), Some(scale)) = (ctx.input(|i| i.pointer.latest_pos()), self.current_scale()) else { return None };
         let t = Tokens::get(ctx);
-        let size = vec2(master.width as f32 * scale as f32, master.height as f32 * scale as f32);
+        // The size of the shape the drop makes, in paper inches (`tile_shape`): the master's own only when there is no drawing to drop it on.
+        let (width, height) = shape.map_or((master.width, master.height), |s| (s.width, s.height));
+        let size = vec2(width as f32 * scale as f32, height as f32 * scale as f32);
         let over = landing.and_then(|(page, at, marks)| self.cx_of(*page).map(|cx| (cx, *at, marks)));
         let centre = over.as_ref().map_or(pointer, |(cx, at, _)| cx.screen_at(*at));
         let rect = Rect::from_center_size(centre, size);
@@ -196,6 +260,7 @@ impl DiacraftApp {
         if let Some((cx, _, marks)) = &over {
             super::paint::paint_marks(&painter.with_clip_rect(cx.area), &t, cx, marks);
         }
+        Some(rect)
     }
 
     /// Points to an inch on the page on view.

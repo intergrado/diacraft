@@ -120,6 +120,19 @@ impl Build {
         self
     }
 
+    /// A section made by hand from its rows (constants in the shape's own frame), numbered after those already there; `no_fill` 1 marks one that only strokes.
+    pub(crate) fn raw_section(mut self, rows: Vec<Arc<Row>>, no_fill: bool) -> Build {
+        let ix = self.sections;
+        self.sections += 1;
+        let mut section = Section::new("Geometry", Some(ix));
+        for flag in ["NoFill", "NoLine", "NoShow", "NoSnap", "NoQuickDrag"] {
+            section.cells.insert(CellName::new(flag), constant(if flag == "NoFill" && no_fill { 1.0 } else { 0.0 }));
+        }
+        section.rows = rows.into();
+        self.sheet().sections.push(Arc::new(section));
+        self
+    }
+
     pub(crate) fn build(self) -> Shape {
         self.shape
     }

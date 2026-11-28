@@ -432,7 +432,7 @@ fn each_master_of_the_built_in_stencils_is_saved_and_the_drop_of_none_warns() {
 /// a shape whose cells are what the reader rebuilds from the markup carries no cell, section or removal, and a document file holds the masters it links
 /// to. (A master whose connection points or outline are not the plain ones is the other thing: the extension carries them.) **The connector carries one removal and its
 /// outline**: `connector.add` gives it no connection points, and the reader gives every shape four; and its outline holds `NoFill` 1, which the reader gives a
-/// segment's outline nowhere.
+/// segment's outline nowhere. **And its two cells that make it one the VSDX application routes** (`ObjType` 2 and `GlueType` 2, which an `.odg` cannot say).
 #[test]
 fn what_the_engine_drops_and_draws_is_saved_with_the_links_to_its_masters_and_nothing_else_in_diacrafts_namespace() {
     let dir = Dir::new();
@@ -443,8 +443,16 @@ fn what_the_engine_drops_and_draws_is_saved_with_the_links_to_its_masters_and_no
     let saved = save(&mut s);
     assert_eq!(saved["edited"], true, "{saved}");
     let content = content_of(&dir.read("a.odg"));
-    // What the connector's glue names keeps its `ID`, and nothing else is carried: no cell, no section but the connector's outline, and no removal but its connection points.
-    for carried in ["diacraft:cells=", "diacraft:name=", "diacraft:text="] {
+    // What the connector's glue names keeps its `ID`, and nothing else is carried: no cell but the connector's two routable ones, no section but the connector's outline, and no
+    // removal but its connection points.
+    const ROUTABLE: &str =
+        r#"diacraft:cells="&lt;Sheet>&lt;Cell N=&quot;GlueType&quot; V=&quot;2&quot;/>&lt;Cell N=&quot;ObjType&quot; V=&quot;2&quot;/>&lt;/Sheet>""#;
+    assert_eq!(
+        (content.matches("diacraft:cells=").count(), content.matches(ROUTABLE).count()),
+        (1, 1),
+        "the connector's routable cells and no other: {content}"
+    );
+    for carried in ["diacraft:name=", "diacraft:text="] {
         assert!(!content.contains(carried), "{carried}: {content}");
     }
     assert_eq!(

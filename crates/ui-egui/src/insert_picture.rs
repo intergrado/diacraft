@@ -55,7 +55,7 @@ impl DiacraftApp {
 
     /// Whether there is a chooser for a picture file and none is on the screen now: whether Pictures can be used.
     pub fn can_pick_picture(&self) -> bool {
-        (self.ui.insert.picker.is_some() || self.has_file_host()) && !self.picture_dialog_open()
+        (self.ui.insert.picker.is_some() || self.has_file_host()) && self.file_dialog().is_none()
     }
 
     /// Whether the chooser of a picture file is asked for or on the screen: a command has asked for it and the next frame has not started it yet, or its thread has not answered yet.
@@ -168,12 +168,12 @@ impl DiacraftApp {
             };
         }
         if !self.can_pick_picture() {
-            let why = if self.ui.insert.picker.is_none() && !self.has_file_host() {
-                "there is no file dialog in this build: give a `path`"
-            } else {
-                "a picture file is being chosen"
+            let why = match self.file_dialog_busy() {
+                _ if self.ui.insert.picker.is_none() && !self.has_file_host() => "there is no file dialog in this build: give a `path`".to_owned(),
+                Some(words) => words,
+                None => "a picture file is being chosen".to_owned(),
             };
-            return Err(EngineError::Disabled { cmd: "window.insertPicture".to_owned(), reason: why.to_owned() });
+            return Err(EngineError::Disabled { cmd: "window.insertPicture".to_owned(), reason: why });
         }
         self.ui.insert.want_dialog = true;
         self.ui.insert.org_target = target;

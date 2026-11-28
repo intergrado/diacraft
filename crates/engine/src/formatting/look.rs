@@ -4,7 +4,8 @@
 //! **Read as the renderer reads** (`crates/render/src/read.rs`): the value saved, found by inheritance; a shape with no
 //! style link finds nothing for a cell and reads the root style's (the renderer's assumption, no specification settles it); a value that is the
 //! theme marker is asked of `calc` by running the cell's own formula on the sheet that asked, and a theme that cannot answer leaves the root
-//! style's cell. So the controls show what the picture draws. The face of a
+//! style's cell; a cell with a formula and no value saved anywhere on the way is worked out
+//! the same way. So the controls show what the picture draws. The face of a
 //! run is read by the renderer's own function (`diacraft_render::FaceReader`), not by a copy of its rules here (`face.rs`).
 //!
 //! **Units**: a weight and a size are points on paper (the cells hold inches on paper); `rounding` is in the page's drawing
@@ -16,7 +17,7 @@ use std::sync::Arc;
 
 use diacraft_calc::{Budget, CellAddress, CellError, EvalCtx, EvalOptions, Evaluator, OperandMode, Value as Calc};
 use diacraft_color::Rgba;
-use diacraft_doc::{CellAddr, Document, Reading, Resolver, RowKey, ShapeRef, SheetRef, Text, TextPart};
+use diacraft_doc::{CellAddr, Document, Reading, Resolved, Resolver, RowKey, ShapeRef, SheetRef, Text, TextPart, Value as Held};
 use diacraft_fonts::FontDb;
 use diacraft_render::with_face_reader;
 
@@ -25,7 +26,7 @@ use super::face::{Faces, query_fonts};
 use super::runs::{Kind, last_row, paragraph_bounds, rows_in_range, rows_when_empty};
 use super::text::{check_range, single, total_chars};
 use super::{Rgb, leaf_below};
-use crate::draw::Problem;
+use crate::draw::{Problem, shown_parts};
 
 /// The steps `calc` may spend on the themed cells of one reading: a `THEMEVAL()` is a handful, and the answers are kept.
 const THEME_STEPS: u64 = 4_000_000;
@@ -36,6 +37,29 @@ const BIG: f64 = 1.0e15;
 /// The state `calc`'s evaluator borrows for a reading: cached operands, which is all a themed cell's formula needs (it names no cell).
 pub(crate) fn eval_ctx() -> EvalCtx {
     EvalCtx::new(EvalOptions { operands: OperandMode::Cached, ..EvalOptions::default() }, Budget::with_steps(THEME_STEPS))
+}
+
+/// The state `calc`'s evaluator borrows for the cells that hold a formula and no saved value: worked out with the cells they read worked out as well, with steps of
+/// their own ([`diacraft_render::UNSAVED_STEPS`], as the renderer's frame has) beside the themed cells'.
+fn unsaved_ctx(steps: u64) -> EvalCtx {
+    EvalCtx::new(EvalOptions { operands: OperandMode::Live, ..EvalOptions::default() }, Budget::with_steps(steps))
+}
+
+/// The steps for the cells with no saved value that **one command** may spend in all, lent to the readers it makes in turn (the security scan's
+/// finding): a gallery of 46 tiles makes a reader for each, and a budget for each reader would be 93 of them. Each reader takes what is left when it is made and gives back
+/// what it did not spend when it ends, so the first exhaustion is the end for the readers after it, which read their cells as they were before, as the picture does.
+#[derive(Debug)]
+pub(crate) struct UnsavedBudget(std::cell::Cell<u64>);
+
+impl UnsavedBudget {
+    pub(crate) fn new(steps: u64) -> UnsavedBudget {
+        UnsavedBudget(std::cell::Cell::new(steps))
+    }
+
+    /// The steps left.
+    pub(crate) fn left(&self) -> u64 {
+        self.0.get()
+    }
 }
 
 /// What a cell holds, read for display.
@@ -53,25 +77,116 @@ pub(crate) struct Reader<'a, 'c> {
     pub res: Resolver<'a>,
     ev: RefCell<Evaluator<'a, 'c>>,
     themed: RefCell<HashMap<(SheetRef, CellAddr), Val>>,
+    /// The context the cells with a formula and no saved value are worked out in, with steps of its own.
+    own: RefCell<EvalCtx>,
+    /// The command's budget this reader took its steps from, and gives back what it did not spend to when it ends.
+    lent: Option<&'c UnsavedBudget>,
+}
+
+impl Drop for Reader<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(budget) = self.lent
+            && let Ok(own) = self.own.try_borrow()
+        {
+            budget.0.set(own.steps_left());
+        }
+    }
 }
 
 impl<'a, 'c> Reader<'a, 'c> {
     pub(crate) fn new(doc: &'a Document, ctx: &'c mut EvalCtx) -> Reader<'a, 'c> {
-        Reader { doc, res: Resolver::new(doc), ev: RefCell::new(Evaluator::new(doc, ctx)), themed: RefCell::new(HashMap::new()) }
+        Reader {
+            doc,
+            res: Resolver::new(doc),
+            ev: RefCell::new(Evaluator::new(doc, ctx)),
+            themed: RefCell::new(HashMap::new()),
+            own: RefCell::new(unsaved_ctx(diacraft_render::UNSAVED_STEPS)),
+            lent: None,
+        }
+    }
+
+    /// A reader that takes the steps for the cells with no saved value from `budget`, the command's, and gives back what it does not spend when it ends.
+    pub(crate) fn lending(doc: &'a Document, ctx: &'c mut EvalCtx, budget: &'c UnsavedBudget) -> Reader<'a, 'c> {
+        let mut reader = Reader::new(doc, ctx);
+        *reader.own.get_mut() = unsaved_ctx(budget.left());
+        reader.lent = Some(budget);
+        reader
+    }
+
+    /// What the cell holds **as a saved value would say it**, for the planners that decide what to write: its saved value, found by inheritance, and for a cell that holds a
+    /// formula and no value saved anywhere on the way the answer of the formula, worked out as the picture does (`None` when it gives none: an error, a cell the theme
+    /// leaves empty). A cell that holds the marker is its marker, as ever: `Themed` is a value the planners ask about..
+    pub(crate) fn held(&self, at: &SheetRef, addr: &CellAddr) -> Option<Held> {
+        let found = self.res.resolve(at, addr)?;
+        if found.holds_unsaved_formula() { self.worked(at, addr, &found) } else { found.value.cell.and_then(|c| c.value.clone()) }
+    }
+
+    /// What a cell that holds a formula and no saved value works out to, as a value a copy of the cell can hold; `None` for any other cell (it is read as saved) and for a
+    /// formula that gives none. `found` is the cell's resolution on `at`.
+    pub(crate) fn worked(&self, at: &SheetRef, addr: &CellAddr, found: &Resolved<'_>) -> Option<Held> {
+        if !found.holds_unsaved_formula() {
+            return None;
+        }
+        match self.val(at, addr) {
+            Val::Missing => None,
+            Val::Num(n) => Held::from_number(n),
+            Val::Colour(c) => Some(Held::from_text(&c.hex())),
+            Val::Text(t) => Some(Held::from_text(&t)),
+        }
+    }
+
+    /// Whether the cell follows the theme: it holds the marker, or a call of the theme's function and no saved value ([`Resolved::reads_theme`]).
+    pub(crate) fn reads_theme(&self, at: &SheetRef, addr: &CellAddr) -> bool {
+        self.res.resolve(at, addr).is_some_and(|found| found.reads_theme())
     }
 
     /// What the cell holds, found by inheritance.
     pub(crate) fn val(&self, at: &SheetRef, addr: &CellAddr) -> Val {
         let Some(found) = self.res.resolve(at, addr) else { return Val::Missing };
-        // A shape with no style link of a cell's family finds nothing for it, and reads the root style's value.
-        if found.value.cell.is_none()
-            && matches!(at, SheetRef::Shape(_))
-            && let Some(root) = self.res.resolve(&SheetRef::Style(0), addr)
-            && root.value.cell.is_some()
-        {
+        // A formula with no value saved anywhere on the way is worked out, as the renderer does (`crates/render/src/read.rs`): the controls show what
+        // the picture draws.
+        if found.holds_unsaved_formula() {
+            return self.unsaved(at, addr, &found);
+        }
+        self.val_found(at, addr, &found)
+    }
+
+    /// What the cell found holds, as the file saved it: the root style's value for a shape that finds none.
+    fn val_found(&self, at: &SheetRef, addr: &CellAddr, found: &Resolved<'_>) -> Val {
+        // A shape with no style link of a cell's family finds nothing for it, and reads the root style's value: the one rule (`Resolver::root_standin`) of the renderer and of the
+        // readers of the edit commands.
+        if let Some(root) = self.res.root_standin(at, addr, found) {
             return self.val_of(at, addr, root.value.cell.and_then(|c| c.value.as_ref()));
         }
         self.val_of(at, addr, found.value.cell.and_then(|c| c.value.as_ref()))
+    }
+
+    /// What a cell holds that has a formula and no saved value: the formula, worked out on the sheet that asked with the cells it reads worked out as well, and the
+    /// answer kept per cell. A result that is no value leaves the cell as it was read before.
+    fn unsaved(&self, at: &SheetRef, addr: &CellAddr, found: &Resolved<'_>) -> Val {
+        let key = (at.clone(), addr.clone());
+        let known = self.themed.borrow().get(&key).cloned();
+        if let Some(known) = known {
+            return known;
+        }
+        let asked = CellAddress::new(at.clone(), addr.clone());
+        let answer = {
+            let mut own = self.own.borrow_mut();
+            self.ev.borrow_mut().evaluate_worked_out_in(&mut own, &asked)
+        };
+        // Steps that ran out on the way give no answer: the cell is read as it was before (the picture does the same, and says so).
+        let out_of_steps = self.own.borrow().stats.budget_exhausted;
+        let val = match answer {
+            _ if out_of_steps => self.val_found(at, addr, found),
+            Some(Calc::Number(q)) if q.stored.is_finite() => Val::Num(q.stored),
+            Some(Calc::Bool(b)) => Val::Num(if b { 1.0 } else { 0.0 }),
+            Some(Calc::Color(c)) => Val::Colour(Rgb(c.r, c.g, c.b)),
+            Some(Calc::Text(t)) => Val::Text(t),
+            Some(Calc::Error(CellError::Na)) => Val::Missing,
+            _ => self.val_found(at, addr, found),
+        };
+        self.themed.borrow_mut().insert(key, val.clone());
+        val
     }
 
     fn val_of(&self, at: &SheetRef, addr: &CellAddr, value: Option<&diacraft_doc::Value>) -> Val {
@@ -530,8 +645,8 @@ fn look_at(r: &Reader<'_, '_>, id: u32, at: &ShapeRef, page: u32, run: &RunProps
     let sheet = SheetRef::Shape(at.clone());
     let direct = CellAddr::direct;
     let number = |name: &str, default: f64| r.num(&sheet, &direct(name), default);
-    let fill_pattern = number("FillPattern", 0.0);
-    let line_pattern = number("LinePattern", 0.0);
+    let fill_pattern = pattern_shown(number("FillPattern", 0.0));
+    let line_pattern = pattern_shown(number("LinePattern", 0.0));
     ShapeLook {
         id,
         fill: (fill_pattern != 0.0).then(|| r.colour(&sheet, &direct("FillForegnd")).unwrap_or(Rgb(255, 255, 255))),
@@ -665,7 +780,8 @@ pub fn look_of_range(doc: &Document, page: u32, ids: &[u32], start: usize, end: 
 /// [`look_of_range`] with the font database the renderer draws in (`face.rs`).
 pub fn look_of_range_in(doc: &Document, page: u32, ids: &[u32], start: usize, end: usize, fonts: &FontDb) -> Result<RangeLook, Problem> {
     let at = single(doc, page, ids)?;
-    let own: &[TextPart] = doc.shape(&at).and_then(|s| s.text.as_ref()).map_or(&[], |t| t.parts.as_slice());
+    // The characters the shape shows: its own text, or its master's when it holds none.
+    let own: &[TextPart] = shown_parts(doc, &at);
     let total = total_chars(own);
     check_range(start, end, total)?;
     let (run_rows, para_rows) = rows_of_range(own, start, end, total);
@@ -703,4 +819,11 @@ pub fn look_of_range_in(doc: &Document, page: u32, ids: &[u32], start: usize, en
 /// A cell's number as a whole number: 0 for one that is negative or not a number.
 fn whole(n: f64) -> u32 {
     if n.is_finite() && (0.0..=f64::from(u32::MAX)).contains(&n) { n.round() as u32 } else { 0 }
+}
+
+/// The number of a pattern cell (`LinePattern`, `FillPattern`) as the controls show it. **A fraction is drawn solid** (the line is solid; the fill paints the foreground),
+/// so it reads 1, and is not rounded to the pattern beside it (2.5 was shown as pattern 3 and 0.4 as none, where the picture is a solid line). Any other
+/// number is the cell's.
+pub(super) fn pattern_shown(n: f64) -> f64 {
+    if n.is_finite() && n.fract() != 0.0 { 1.0 } else { n }
 }

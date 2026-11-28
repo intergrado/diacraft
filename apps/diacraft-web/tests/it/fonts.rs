@@ -15,7 +15,7 @@ fn the_window_the_shell_makes_installs_the_desktops_two_typefaces_and_no_icon_fo
     let definitions = window.ctx.fonts(|fonts| fonts.definitions().clone());
     let names: Vec<&String> = definitions.font_data.keys().collect();
     assert_eq!(names, ["Hack", "Ubuntu-Light"], "the web window installs another set of fonts than the desktop's");
-    assert_eq!(definitions.families.get(&FontFamily::Proportional), Some(&vec!["Ubuntu-Light".to_owned()]));
+    assert_eq!(definitions.families.get(&FontFamily::Proportional), Some(&vec!["Ubuntu-Light".to_owned(), "Hack".to_owned()]));
     assert_eq!(definitions.families.get(&FontFamily::Monospace), Some(&vec!["Hack".to_owned(), "Ubuntu-Light".to_owned()]));
 }
 

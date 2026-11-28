@@ -62,6 +62,15 @@ pub enum DecorationKind {
     DoubleStrikethrough,
 }
 
+/// Where the underline of a Japanese or Korean run goes in vertical text: on the right of the characters, whose
+/// cells are `em` wide and centred on the column, with its inner edge `outward` beyond the cells' right edge (0 for the one line of a single underline, and
+/// for the second line of a double one the gap and the thickness of the first). Set across and used by the turn, which moves the underline there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RightOf {
+    pub em: f64,
+    pub outward: f64,
+}
+
 /// One drawn line: a filled rectangle from `x0` to `x1` whose top edge is at `top` and which is `thickness` tall. A double line is
 /// two of these.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -76,6 +85,8 @@ pub struct Decoration {
     /// A line down a column of vertical text: `x0` and `x1` are then its lower and upper `y`, and `top` is its right edge, so it lies
     /// `thickness` to the left of `top`. [`Decoration::rect`] gives the rectangle either way.
     pub vertical: bool,
+    /// An underline of Japanese or Korean text that vertical text puts on the right of the column (see [`RightOf`]); only set while a layout is turned.
+    pub(crate) right_of: Option<RightOf>,
 }
 
 impl Decoration {
@@ -102,7 +113,8 @@ pub struct Line {
     pub top: f64,
     pub bottom: f64,
     pub height: f64,
-    /// Where the line's text starts, and how wide it is without its trailing spaces.
+    /// The left edge of the line's text, and how wide it is without its trailing spaces: the text runs from `x` to `x + width` whichever way the
+    /// paragraph reads, and a right-to-left one has its start at the right end.
     pub x: f64,
     pub width: f64,
     /// Is the line's paragraph right to left?

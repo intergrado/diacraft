@@ -212,9 +212,10 @@ fn unplaced_ends(
         }
         let Some(at) = paths.get(&c.from_sheet).cloned() else { continue };
         let sheet = SheetRef::Shape(at);
-        // A connector DiaCraft made is glued to a connection point by formulas calc works out, never to the whole of a shape. A connector an `.odg` file holds carries
-        // the same marker (`User.DiaCraftRoute`: the reader lets DiaCraft route it again), and an end of it glued to the whole of a shape holds plain values for the
-        // engine to place: it is placed as any file's is (it stayed where the file had it).
+        // A connector DiaCraft made is glued to a connection point by formulas calc works out, and to the whole of a shape by `_WALKGLUE` formulas, which it cannot (the
+        // end is placed here, as a file's is). A connector an `.odg` file holds carries the same marker (`User.DiaCraftRoute`: the reader lets DiaCraft route it again), and an end
+        // of it glued to the whole of a shape holds plain values for the engine to place: it is placed as any file's is (it stayed
+        // where the file had it).
         if (part == WHOLE_SHAPE || !reader.is_routed(&sheet)) && calc_cannot(doc, reader, &mut ctx, &sheet, which) {
             list.push(Unplaced { which, target: c.to_sheet, part });
         }
@@ -271,8 +272,11 @@ fn odg_target(reader: &Reader<'_>, cache: &mut GluedPoints, id: u32, at: &ShapeR
     let corners = corners(reader, at);
     let points = odg_points(reader, cache, id, at)?;
     let row = |ix: u32| points.iter().find(|p| p.index == ix).map(|p| (p.x, p.y));
-    let standard = match (row(0), row(1), row(2), row(3)) {
-        (Some(a), Some(b), Some(c), Some(d)) => [a, b, c, d],
+    // A custom shape whose rows are its own glue points (`diacraft:glue="own"`) has no standard rows: rows 0 to 3 are its first four points, and the four
+    // standard points LibreOffice puts a whole-shape end on are the middles of its frame's sides (CPDOUBLE.ODG).
+    let own = reader.doc().shape(at).is_some_and(|shape| diacraft_odg::rows_are_listed_glue(shape));
+    let standard = match (own, row(0), row(1), row(2), row(3)) {
+        (false, Some(a), Some(b), Some(c), Some(d)) => [a, b, c, d],
         _ => {
             let mid = |p: P, q: P| ((p.0 + q.0) / 2.0, (p.1 + q.1) / 2.0);
             let [c0, c1, c2, c3] = corners;
@@ -420,6 +424,31 @@ pub(crate) fn place_ends_within(
     steps: &mut u64,
     strict: bool,
 ) -> Result<bool, Problem> {
+    place_ends(doc, page, (reach, inside), located, (steps, strict), None)
+}
+
+/// Puts the ends `which` of connector `id`, which a command has just glued (a new connector, an end moved to a shape), where says (an `.odg` connector's by
+/// `place_ends_within` decides by what the connector carries), as the next change to the shape it is glued to would: a connector made and a connector moved then agree,
+/// and a shape with no connection point is glued to by one rule from the first. The other end of the connector is left where it is (ROTATE-1D-1: a command about the connector
+/// keeps the ends it does not change). → whether a cell was written; the caller settles after, which works out what reads the ends.
+pub(crate) fn place_new_ends(doc: &mut Document, page: u32, id: u32, which: &[Which]) -> Result<bool, Problem> {
+    let mut located = Located::default();
+    let mut steps = Budget::DEFAULT_STEPS;
+    let inside: BTreeSet<u32> = std::iter::once(id).collect();
+    place_ends(doc, page, (&BTreeSet::new(), &inside), &mut located, (&mut steps, false), Some(which))
+}
+
+/// [`place_ends_within`], for the ends `only` names when it is given. `follow` is `reach` and `inside`, and `budget` the steps and `strict`.
+fn place_ends(
+    doc: &mut Document,
+    page: u32,
+    follow: (&BTreeSet<u32>, &BTreeSet<u32>),
+    located: &mut Located,
+    budget: (&mut u64, bool),
+    only: Option<&[Which]>,
+) -> Result<bool, Problem> {
+    let (reach, inside) = follow;
+    let (steps, strict) = budget;
     let writes: Vec<(SheetRef, CellWrite)> = {
         let Some(p) = doc.page(page) else { return Ok(false) };
         let followers: BTreeSet<u32> =
@@ -446,6 +475,9 @@ pub(crate) fn place_ends_within(
             // An `.odg` connector's ends glued to the whole of a shape go where LibreOffice puts them; every other end, and one the rule says nothing of.
             let placed = if reader.is_routed(&sheet) { odg_place(&reader, paths, &mut cache, at, &ends, glue.get(&id)) } else { None };
             for (which, page_spot) in placed.unwrap_or_else(|| place(&reader, paths, &mut cache, at, &ends)) {
+                if only.is_some_and(|only| !only.contains(&which)) {
+                    continue;
+                }
                 // Into the frame the cells are in (a connector in a group has them in the group's).
                 let spot = reader.point_from_page(at, page_spot);
                 for (name, value) in [(which.x_cell(), spot.0), (which.y_cell(), spot.1)] {

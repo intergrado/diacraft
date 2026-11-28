@@ -151,7 +151,7 @@ fn use_default_comes_back_from_each_format_as_the_themes_own_colour() {
 }
 
 #[test]
-fn an_odg_made_from_a_new_drawing_loses_no_formula_of_a_theme_pick() {
+fn an_odg_made_from_a_new_drawing_loses_no_formula_of_a_theme_pick_or_of_a_fixed_colour() {
     let mut s = blank_session();
     let id = run(&mut s, "shape.drop", json!({"master": "rectangle", "page": 1, "x": 3.0, "y": 3.0}))["id"].as_u64().unwrap() as u32;
     run(&mut s, "shape.set_text", json!({"id": id, "text": "Colour"}));
@@ -162,13 +162,17 @@ fn an_odg_made_from_a_new_drawing_loses_no_formula_of_a_theme_pick() {
     let saved = run(&mut s, "file.save_as", json!({ "path": dir.path("x.odg") }));
     let classes: Vec<&str> = saved["checked"]["classes"].as_array().unwrap().iter().map(|c| c["class"].as_str().unwrap()).collect();
     assert!(!classes.contains(&"formulas"), "no formula is lost: {classes:?}");
-    // The same drawing with a fixed colour does lose the formula `RGB(r,g,b)` as before (that is not what this task writes).
+    // The same drawing with a fixed colour loses none either: `RGB(r,g,b)` is carried beside the colour in the file's attribute, as a theme pick's formula is (it was written as the
+    // value alone, and the check named it lost).
     let mut s = blank_session();
     let id = run(&mut s, "shape.drop", json!({"master": "rectangle", "page": 1, "x": 3.0, "y": 3.0}))["id"].as_u64().unwrap() as u32;
     run(&mut s, "shape.format", json!({"ids": [id], "fill": "#336699"}));
     let saved = run(&mut s, "file.save_as", json!({ "path": dir.path("y.odg") }));
     let classes: Vec<&str> = saved["checked"]["classes"].as_array().unwrap().iter().map(|c| c["class"].as_str().unwrap()).collect();
-    assert!(classes.contains(&"formulas"), "the fixed colour's formula is a value in an odg: {classes:?}");
+    assert!(!classes.contains(&"formulas"), "the fixed colour's formula comes back from an odg: {classes:?}");
+    let back = reopened(&dir.path("y.odg"));
+    let first = shape_ids(&back)[0];
+    assert_eq!(formula(&back, first, "FillForegnd").as_deref(), Some("RGB(51,102,153)"), "the formula is the one the colour was picked as");
 }
 
 /// The formula of the first run's `Color` of shape `id`'s text rows, if it holds one.

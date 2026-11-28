@@ -94,7 +94,7 @@ fn the_operations_menu_opens_from_the_folded_shape_design_card_and_union_runs() 
     }
 }
 
-/// A click on an entry that cannot run (Join is not built) runs nothing and closes the menu, as any click inside a menu does, and leaves the card to work in; the
+/// A click on an entry that cannot run (Update Alignment Box is not built) runs nothing and closes the menu, as any click inside a menu does, and leaves the card to work in; the
 /// menu then opens again and Fragment runs from it.
 #[test]
 fn a_quiet_entry_in_the_menu_of_a_card_runs_nothing_and_leaves_the_card() {
@@ -102,9 +102,9 @@ fn a_quiet_entry_in_the_menu_of_a_card_runs_nothing_and_leaves_the_card() {
     let mut w = window_on(&dir, "Developer", 480.0);
     hit(&mut w, FOLD_SHAPE_DESIGN);
     hit(&mut w, "ribbon.Developer.OperationsMenu");
-    assert!(w.state().element("menu.ShapesObjectJoin").is_some_and(|e| !e.enabled), "Join is not built: it is quiet");
+    assert!(w.state().element("menu.ShapesObjectUpdateAlignmentBox").is_some_and(|e| !e.enabled), "Update Alignment Box is not built: it is quiet");
     let revision = w.state().session().revision();
-    hit(&mut w, "menu.ShapesObjectJoin");
+    hit(&mut w, "menu.ShapesObjectUpdateAlignmentBox");
     assert_eq!(w.state().session().revision(), revision, "a quiet row runs nothing");
     assert_eq!(menu_parts(&w), 0, "the click closed the menu");
     assert!(drawn(&w, "ribbon.Developer.OperationsMenu"), "and the card is there to open it again");

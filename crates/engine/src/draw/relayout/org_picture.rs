@@ -159,17 +159,17 @@ pub fn delete_picture(doc: &mut diacraft_doc::Document, page: u32, id: u32) -> R
     if shape.kind == ShapeType::Foreign {
         shape.kind = ShapeType::Shape;
     }
-    let sheet = Arc::make_mut(&mut shape.sheet);
+    let mut counted = shape.counted_sheet();
     for name in CELLS {
-        sheet.cells.remove(name);
+        counted.remove_cell(&diacraft_doc::CellAddr::direct(name));
     }
-    for section in sheet.sections.iter_mut() {
+    for section in counted.sheet.sections.iter_mut() {
         if section.name.as_str() == "User" {
             let section = Arc::make_mut(section);
-            section.rows.retain(|row| row.name.as_deref() != Some(HIDDEN_ROW));
+            section.retain_rows(|row| row.name.as_deref() != Some(HIDDEN_ROW));
         }
     }
-    sheet.sections.retain(|s| !(s.name.as_str() == "User" && s.rows.is_empty() && s.cells.is_empty()));
+    counted.remove_sections(|s| s.name.as_str() == "User" && s.rows.is_empty() && s.cells.is_empty());
     settle(doc, &before, page, &[id], &[])?;
     Ok(true)
 }

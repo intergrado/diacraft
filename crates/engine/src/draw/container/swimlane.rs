@@ -24,8 +24,8 @@ use std::sync::Arc;
 use diacraft_doc::{Cell, CellName, Document, MAX_SHAPES_PER_PAGE, Shape, Value};
 
 use super::lists::{
-    Anchor, Dir, MAX_LIST_MEMBERS, MIN_INCHES, Outline, PHASE_BAND_INCHES, Role, Screen, Structure, Trigger, direction, outline_of, own_role,
-    relayout, role, structure_of,
+    Anchor, Dir, MAX_LIST_MEMBERS, MIN_INCHES, Outline, PHASE_BAND_INCHES, Role, Screen, Structure, Trigger, direction, is_pool, outline_of,
+    own_role, relayout, role, structure_of,
 };
 use super::membership::Graph;
 use super::page::{Page, Rect, Unique};
@@ -33,7 +33,10 @@ use super::settings::{BAND_INCHES, Settings, number_cell, put as put_row};
 use crate::draw::ties::{IN_CONTAINER, IN_LIST, LIST_MEMBERS, MEMBERS, Ties};
 use crate::draw::{Problem, checked, page_mut, page_stats, require_page, require_shape, units_per_inch};
 use crate::stencil::container::Side;
-use crate::stencil::swimlane::{DIRECTION_ROW, LANE_LABEL, PHASE_LABEL, Part, frame_shape, lane_shape, list_shape, phase_shape};
+use crate::stencil::swimlane::{
+    DIRECTION_ROW, LANE_LABEL, PHASE_LABEL, Part, frame_shape, lane_shape, list_shape, phase_shape, pool_frame_shape, pool_lane_shape,
+    pool_list_shape,
+};
 
 /// The most lanes, and the most phases, one command makes or a structure is given (a list is laid out up to [`MAX_LIST_MEMBERS`]).
 pub const MAX_NEW: usize = 256;
@@ -230,9 +233,84 @@ pub fn create(doc: &mut Document, page: u32, req: Create<'_>) -> Result<Created,
     }
     let list = page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?;
     for (at, shape) in shapes.into_iter().enumerate() {
-        list.shapes.insert(at, Arc::new(shape)).map_err(|_| Problem::failed("the page's list of shapes is too long"))?;
+        list.insert_shape(at, Arc::new(shape)).map_err(|_| Problem::failed("the page's list of shapes is too long"))?;
     }
     Ok(Created { frame: frame_id, lane_list: lane_list_id, lanes: lane_ids, phase_list: phase_list_id, phases: phase_ids })
+}
+
+/// A pool to make: a frame with the pool's name in a strip on the left, and one lane.
+#[derive(Clone, Copy, Debug)]
+pub struct PoolCreate<'a> {
+    /// The pool's left edge and top edge on the page, in drawing units (y up).
+    pub left: f64,
+    pub top: f64,
+    /// The pool's width and height, in drawing units: the lane is the rest after the strip.
+    pub width: f64,
+    pub height: f64,
+    /// The drawing units that one inch of the size's own measure is: 1 for the master's size within the range of eight of the page's scale (a master is drawn at 1:1, so a drawing unit is
+    /// its inch), and the page's drawing units to a paper inch for its size on paper beyond it (`draw::drop_scale::built_in_fit`). **The least a lane may be (0.4 inch) is held to the size in
+    /// this unit**: a pool of 2 drawing units at 1:8 is a quarter inch on paper, and 0.4 times the 8 drawing units to a paper inch is more than it has.
+    pub inch: f64,
+    pub name: &'a str,
+    pub lane_label: &'a str,
+    /// The `ID` the session's high-water mark keeps new shapes above.
+    pub above: u32,
+}
+
+/// The label a lane of a pool has until a person types another (the cross-functional flowchart's is `Function`).
+pub const POOL_LANE_LABEL: &str = "Lane";
+
+/// Makes a pool on page `page` (ours: a pool is a frame whose label is separated from its contents by a line and which holds lanes on the swimlane
+/// structure): the frame, with its heading on the left and its name in it, a list of lanes and one lane, all at the back of the page. The frame is the box of its list and a strip of the
+/// heading's thickness on the left; the lane has no line between its label and its contents (DD11).
+pub fn create_pool(doc: &mut Document, page: u32, req: PoolCreate<'_>) -> Result<Created, Problem> {
+    require_page(doc, page)?;
+    super::super::text_edit::check_text(req.name)?;
+    super::super::text_edit::check_text(req.lane_label)?;
+    let k = units_per_inch(doc, page);
+    let (left, top) = (checked("x", req.left)?, checked("y", req.top)?);
+    let (width, height) = (checked("width", req.width)?, checked("height", req.height)?);
+    let strip = BAND_INCHES * k;
+    // A unit that is no length (it is the caller's) is the page's.
+    let inch = if req.inch.is_finite() && req.inch > 0.0 { req.inch } else { k };
+    if width < strip + MIN_INCHES * inch {
+        return Err(least_words("`width`"));
+    }
+    if height < MIN_INCHES * inch {
+        return Err(least_words("`height`"));
+    }
+    let (highest, count) = page_stats(doc, page).ok_or_else(|| Problem::bad(format!("there is no page {page}")))?;
+    if count.saturating_add(3) > MAX_SHAPES_PER_PAGE {
+        return Err(Problem::failed(format!("a page holds at most {MAX_SHAPES_PER_PAGE} shapes")));
+    }
+    let base = highest.max(req.above);
+    let mut ids = [0_u32; 3];
+    for (n, slot) in ids.iter_mut().enumerate() {
+        *slot = base.checked_add(u32::try_from(n + 1).unwrap_or(u32::MAX)).ok_or_else(|| Problem::failed("no shape ids are left on the page"))?;
+    }
+    let [frame_id, list_id, lane_id] = ids;
+    let (l, t) = (left, -top);
+    let lanes_box = Screen { l: l + strip, t, r: l + width, b: t + height };
+    let whole = Screen { l, ..lanes_box };
+    let (band, margin) = (BAND_INCHES * k, LANE_MARGIN_INCHES * k);
+    let mut frame_ties = Ties::default();
+    frame_ties.add(MEMBERS, list_id);
+    let mut frame = pool_frame_shape(&part(frame_id, whole, Side::Left, band, 0.0, req.name));
+    set_ties(&mut frame, &frame_ties);
+    let mut list_ties = Ties::default();
+    list_ties.add(IN_CONTAINER, frame_id);
+    list_ties.add(LIST_MEMBERS, lane_id);
+    let mut list = pool_list_shape(&part(list_id, lanes_box, Side::Top, band, 0.0, ""), Dir::Down.number());
+    set_ties(&mut list, &list_ties);
+    let mut lane_ties = Ties::default();
+    lane_ties.add(IN_LIST, list_id);
+    let mut lane = pool_lane_shape(&part(lane_id, lanes_box, lane_side(Dir::Down), band, margin, req.lane_label));
+    set_ties(&mut lane, &lane_ties);
+    let list_of_shapes = page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?;
+    for (at, shape) in [frame, list, lane].into_iter().enumerate() {
+        list_of_shapes.insert_shape(at, Arc::new(shape)).map_err(|_| Problem::failed("the page's list of shapes is too long"))?;
+    }
+    Ok(Created { frame: frame_id, lane_list: list_id, lanes: vec![lane_id], phase_list: None, phases: Vec::new() })
 }
 
 /// Where a lane or a phase is put next to another.
@@ -323,7 +401,8 @@ fn after_all(p: &Page<'_>, ids: &[u32], floor: u32) -> usize {
 
 fn insert_at(doc: &mut Document, page: u32, at: usize, shape: Shape) -> Result<(), Problem> {
     let list = page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?;
-    list.shapes.insert(at.min(list.shapes.len()), Arc::new(shape)).map_err(|_| Problem::failed("the page's list of shapes is too long"))
+    let at = at.min(list.shapes.len());
+    list.insert_shape(at, Arc::new(shape)).map_err(|_| Problem::failed("the page's list of shapes is too long"))
 }
 
 /// A lane added to a structure (`swimlane.insert`). `target` is a lane (the new one goes before or after it), another part of the structure (it goes at the end), or none (the page's first
@@ -334,6 +413,12 @@ pub fn insert_lane(doc: &mut Document, page: u32, target: Option<u32>, place: Pl
     let (s, index, new, at, list_id) = {
         let p = Page::read(doc, page)?;
         let s = structure_for(&p, target)?;
+        // A lane put into a pool has no line beside its label, and the pool's own label for a lane unless a person gave one.
+        let of_pool = match s.frame {
+            Some(frame) => is_pool(&p, frame)?,
+            None => false,
+        };
+        let label = if of_pool && label == LANE_LABEL { POOL_LANE_LABEL } else { label };
         let dir = direction(&p, s.lanes)?.ok_or_else(|| not_part(s.lanes))?;
         let order = p.list_members_of(s.lanes)?;
         if order.len() >= MAX_NEW {
@@ -365,7 +450,8 @@ pub fn insert_lane(doc: &mut Document, page: u32, target: Option<u32>, place: Pl
             Dir::Down => Screen { l: list_box.l, t: list_box.b, r: list_box.r, b: list_box.b + thick },
             Dir::Across => Screen { l: list_box.r, t: list_box.t, r: list_box.r + thick, b: list_box.b },
         };
-        let shape = lane_shape(&part(new, b, side, BAND_INCHES * p.k, LANE_MARGIN_INCHES * p.k, label));
+        let lane = part(new, b, side, BAND_INCHES * p.k, LANE_MARGIN_INCHES * p.k, label);
+        let shape = if of_pool { pool_lane_shape(&lane) } else { lane_shape(&lane) };
         let at = after_all(&p, &order, s.lanes);
         (s, index, new, (at, shape), s.lanes)
     };
@@ -627,6 +713,12 @@ pub fn set_orientation(doc: &mut Document, page: u32, id: u32, want: Dir) -> Res
         for lane in lanes.iter().chain(&phases) {
             sides.push((*lane, swapped(heading_of(&p, *lane)?)));
         }
+        // A pool's name strip goes with the structure: left and top change places.
+        if let Some(frame) = s.frame
+            && is_pool(&p, frame)?
+        {
+            sides.push((frame, swapped(heading_of(&p, frame)?)));
+        }
         let mut lists: Vec<(usize, u32, Dir)> = Vec::new();
         if let Some(at) = p.at(s.lanes) {
             lists.push((at, s.lanes, want));
@@ -837,6 +929,8 @@ pub struct PartInfo {
 /// A structure, as `swimlane.info` reports it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructureInfo {
+    /// Whether the frame is a pool's.
+    pub pool: bool,
     pub frame: Option<u32>,
     pub lane_list: u32,
     pub phase_list: Option<u32>,
@@ -928,7 +1022,12 @@ pub fn describe(doc: &Document, page: u32) -> Result<Vec<StructureInfo>, Problem
             Some(frame) => p.bounds(frame)?,
             None => p.bounds(s.lanes)?,
         };
+        let pool = match s.frame {
+            Some(frame) => is_pool(&p, frame)?,
+            None => false,
+        };
         out.push(StructureInfo {
+            pool,
             frame: s.frame,
             lane_list: s.lanes,
             phase_list: s.phases,

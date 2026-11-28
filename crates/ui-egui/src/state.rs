@@ -154,6 +154,10 @@ pub struct UiState {
     pub snap_dialog: Option<crate::snap_dialog::SnapDialog>,
     /// The Zoom dialog, while it is open (`zoom_dialog.rs`).
     pub zoom_dialog: Option<crate::zoom_dialog::ZoomDialog>,
+    /// The Offset dialog, while it is open (`operations_dialog.rs`).
+    pub offset_dialog: Option<crate::operations_dialog::OffsetDialog>,
+    /// The Fit Curve dialog, while it is open (`operations_dialog.rs`).
+    pub fit_dialog: Option<crate::operations_dialog::FitCurveDialog>,
     /// The Configure Layout and Spacing Options dialogs, and the page breaks last read (`relayout_ui.rs`).
     pub relayout: crate::relayout_ui::RelayoutState,
     /// The Third-party licences window, while it is open (`licenses.rs`).
@@ -162,6 +166,13 @@ pub struct UiState {
     pub find: crate::find_dialog::FindState,
     /// The engine's answers to whether each shape operation can run on the shapes selected (`operations.rs`).
     pub shape_ops: crate::operations::OpsState,
+    /// What the engine said of the edges of the shapes selected, for the keys and rows that double and halve connection points (`edit/conn_edges.rs`).
+    pub points: crate::edit::PointsView,
+    /// What the last doubling or halving says, put in the status bar once the window command that made it has ended (`DiacraftApp::execute`).
+    pub points_note: Option<String>,
+    /// The least distance between the points a doubling makes, in paper inches (File, Options, Advanced; `window.connectionMinGap`): **a window setting for now**, read and written only through
+    /// `DiacraftApp::connection_min_gap` and `set_connection_min_gap` (a field of the interface preferences once the settings store lands). Not saved, and not in a drawing.
+    pub connection_min_gap: f64,
     /// The Options dialog, while it is open (`options_dialog.rs`).
     pub options_dialog: Option<crate::options_dialog::OptionsDialog>,
     /// The heading of the File > New page on view, and the templates it lists (`new_page.rs`).
@@ -208,7 +219,8 @@ pub struct StencilState {
     pub icons: HashMap<String, Option<egui::TextureHandle>>,
     /// The files the window opened stencils from, by the stencil's id: what a figure is drawn from again, and what is opened again in a drawing
     /// that is read from a file (the session is a new one then).
-    pub files: Vec<(String, PathBuf)>,
+    /// With the scope each was opened in (`diacraft_engine::file_access`): a stencil a request opened is read again under that request's roots, and one the person opened under none.
+    pub files: Vec<(String, PathBuf, diacraft_engine::file_access::ScopeHandle)>,
     /// The sessions the figures of stencil files are drawn in, by the stencil's id (`None`: the file could not be opened again).
     pub scratch: HashMap<String, Option<Scratch>>,
     /// The stencils (by id) whose file was read again for their tiles while a read held the budget and was refused room: **not asked for again until no read holds the budget** (a
@@ -351,10 +363,15 @@ impl Default for UiState {
             sheet: Default::default(),
             snap_dialog: None,
             zoom_dialog: None,
+            offset_dialog: None,
+            fit_dialog: None,
             relayout: crate::relayout_ui::RelayoutState::default(),
             licenses: None,
             find: Default::default(),
             shape_ops: Default::default(),
+            points: Default::default(),
+            points_note: None,
+            connection_min_gap: diacraft_engine::draw::conn_points::DEFAULT_MIN_GAP,
             options_dialog: None,
             new_page: Default::default(),
             splash: None,

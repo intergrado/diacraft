@@ -7,8 +7,9 @@
 //! `local` in the namespace `ns`, whatever its prefix, so a file that binds `svg` to the W3C URI has its `svg:x` found
 //! and its value replaced under the name it has. **A name the writer adds is never written under a prefix the file binds to another URI**
 //! The least prefix bound in scope to ODF's own namespace is used; where there is none, ODF's namespace is declared on the
-//! tag under a prefix of its own, `svg1`, `svg2`, ..., and the file's own bindings are left as they are. **Only attributes the ownership table
-//! owns are written** ([`owns`](crate::write::own::owns)).
+//! tag under a prefix of its own, `svg1`, `svg2`, ..., and the file's own bindings are left as they are. **The declaration is made once for a tag**, however many edits of
+//! it add a name (a connector's ends and then its path are two edits, each with a `TagEdit` of its own): the splicer keeps the declarations the edits made
+//! ([`Splicer::declare`]). **Only attributes the ownership table owns are written** ([`owns`](crate::write::own::owns)).
 
 use diacraft_container::xml_scan::{AttrSpan, TagParts, tag_attributes};
 
@@ -31,6 +32,8 @@ pub(crate) mod fault {
         Unreadable,
         /// Every attribute written is written again after it, under the same name.
         Repeated,
+        /// The declaration of a prefix of the writer's own, made on a tag for a namespace the place does not bind, is written twice.
+        DeclaredTwice,
     }
 
     thread_local! {
@@ -44,6 +47,10 @@ pub(crate) mod fault {
 
     pub(crate) fn repeated() -> bool {
         INJECTED.get() == Fault::Repeated
+    }
+
+    pub(crate) fn declared_twice() -> bool {
+        INJECTED.get() == Fault::DeclaredTwice
     }
 }
 
@@ -265,8 +272,14 @@ impl<'a> TagEdit<'a> {
                 Some(p) => p,
                 None => {
                     let fresh = scopes.fresh_prefix(conventional_prefix, work);
-                    splicer.insert(self.parts.attrs_end, format!(" xmlns:{fresh}=\"{uri}\""));
-                    work.attributes_written = work.attributes_written.saturating_add(1);
+                    // **Once for the tag**: the editor makes one `TagEdit` for each edit of a shape, and the splicer knows what the edits before this one declared on the tag.
+                    if splicer.declare(self.open_at, self.parts.attrs_end, &fresh, uri) {
+                        work.attributes_written = work.attributes_written.saturating_add(1);
+                        #[cfg(test)]
+                        if fault::declared_twice() {
+                            splicer.insert(self.parts.attrs_end, format!(" xmlns:{fresh}=\"{uri}\""));
+                        }
+                    }
                     self.declared.push((uri, fresh.clone()));
                     fresh
                 }
@@ -291,6 +304,7 @@ impl<'a> TagEdit<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::limits::Limits;
 
     /// The scope a tag nested in elements declaring `svg`, `draw` and `other` sees.
     fn scoped() -> (Scopes, u32) {
@@ -373,6 +387,57 @@ mod tests {
             assert!(matches!(tag.add(&mut splicer, &mut scopes, &mut work, ns, local, "1cm"), Err(WriteError::Mismatch(_))), "{local}");
         }
         assert!(tag.add(&mut splicer, &mut scopes, &mut work, Ns::Svg, "y", "1cm").is_ok(), "an attribute it lacks is added");
+    }
+
+    /// What the splice of `bytes` makes after the edits `edits` (each a `TagEdit` of its own on the one start tag, as `Editor::tag` makes one for each edit of a shape): the tag, as text.
+    fn spliced(bytes: &[u8], scope: u32, scopes: &mut Scopes, edits: &[&[(Ns, &str)]]) -> String {
+        let mut work = WriteWork::default();
+        let mut splicer = Splicer::new(bytes);
+        for names in edits {
+            let mut tag = edit(bytes, scope, &mut work);
+            for (ns, local) in *names {
+                tag.add(&mut splicer, scopes, &mut work, *ns, local, "1").unwrap_or_else(|e| panic!("{local}: {e}"));
+            }
+        }
+        String::from_utf8(splicer.apply(&mut work, &Limits::default()).unwrap()).unwrap()
+    }
+
+    /// A name the writer adds in an ODF namespace that the place binds under no prefix is written under a prefix of its own, declared on the tag; **the tag
+    /// is edited by one `TagEdit` for each edit made to it** (a connector's ends, then its path), and each declared the prefix again, so the tag held `xmlns:svg1` twice (not XML).
+    /// The declaration is made once for a tag, whichever of the six namespaces it is for and however many edits add names to the tag.
+    #[test]
+    fn a_prefix_declared_on_a_tag_for_a_namespace_the_place_does_not_bind_is_declared_once_however_many_edits_add_names() {
+        let bytes = br#"<d:e a="1"/>"#;
+        let cases: [(Ns, &str, &str, &str); 5] = [
+            (Ns::Svg, "x", "y", "svg1"),
+            (Ns::Draw, "transform", "z-index", "draw1"),
+            (Ns::Fo, "color", "font-size", "fo1"),
+            (Ns::Style, "display-name", "font-name", "style1"),
+            (Ns::Diacraft, "id", "name", crate::ext::names::PREFIX),
+        ];
+        for (ns, first, second, prefix) in cases {
+            let (mut scopes, scope) = Scopes::with_scope(&[], None, None);
+            let after = spliced(bytes, scope, &mut scopes, &[&[(ns, first)], &[(ns, second)]]);
+            assert_eq!(after.matches(&format!("xmlns:{prefix}=")).count(), 1, "{ns:?}: {after}");
+            for local in [first, second] {
+                assert_eq!(after.matches(&format!(" {prefix}:{local}=\"1\"")).count(), 1, "{ns:?} {local}: {after}");
+            }
+            let tag = after.replace("/>", "></d:e>");
+            assert!(diacraft_container::xml::parse(tag.as_bytes()).is_ok(), "{ns:?}: {after}");
+        }
+        // Three edits, the names of two namespaces among them: one declaration for each prefix, and each name once.
+        let (mut scopes, scope) = Scopes::with_scope(&[], None, None);
+        let edits: [&[(Ns, &str)]; 3] =
+            [&[(Ns::Svg, "x1"), (Ns::Draw, "transform")], &[(Ns::Svg, "d"), (Ns::Svg, "viewBox")], &[(Ns::Draw, "z-index"), (Ns::Svg, "y1")]];
+        let after = spliced(bytes, scope, &mut scopes, &edits);
+        for prefix in ["svg1", "draw1"] {
+            assert_eq!(after.matches(&format!("xmlns:{prefix}=")).count(), 1, "{after}");
+        }
+        for name in ["svg1:x1", "svg1:y1", "svg1:d", "svg1:viewBox", "draw1:transform", "draw1:z-index"] {
+            assert_eq!(after.matches(&format!(" {name}=")).count(), 1, "{name}: {after}");
+        }
+        let tag = after.replace("/>", "></d:e>");
+        assert!(diacraft_container::xml::parse(tag.as_bytes()).is_ok(), "{after}");
     }
 
     #[test]

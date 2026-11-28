@@ -1,6 +1,7 @@
 //! **The oracle: the walk of the whole page that every edit made before a change, kept as it was** (only this note, the visibility of a few items and
 //! the doc comments that say what `index.rs` now does are changed; and gave it the rule of `affected.rs` for a reference that finds no sheet, which
-//! the index keeps the `ID` of, and `changes_between`'s shape-by-shape comparison of a list that repeats an `ID`, which this walk shares). It lists the readers of other sheets by asking every formula of the page for each
+//! the index keeps the `ID` of, and `changes_between`'s shape-by-shape comparison of a list that repeats an `ID`, which this walk shares; and gave it the rule that a
+//! reference which is only the argument of `GETREF` or `GETVAL` is no reader, `facts.links()`, which the index takes too). It lists the readers of other sheets by asking every formula of the page for each
 //! edit, which the index kept from one edit to the next replaced. The tests of `affected/tests.rs` hold the index to this walk: the same cells handed
 //! out, in the same order, over generated pages and edits, and the same document after a commit.
 //!
@@ -25,7 +26,8 @@
 //! * its formula names it: unqualified (`Width`, `Geometry1.X2`: a cell of the cell's own sheet), or qualified (`Sheet.12!PinX`, `ThePage!User.Row`),
 //!   found as the evaluator finds it ([`Evaluator::locate`]), so a name in a formula found on a master is read for the instance
 //!   A row is told by its key; where a section's rows may be keyed by name or by place the key is dropped, and a name
-//!   that reaches any row of that section reads every row of it: more cells are worked out than needed and none fewer;
+//!   that reaches any row of that section reads every row of it: more cells are worked out than needed and none fewer (the references that are the argument of
+//!   `GETREF` or `GETVAL` are no reads, as `affected.rs` says: this walk takes [`crate::facts::Facts::links`] too);
 //! * its formula calls a function that carries a point or an angle from one frame to another (`PAR`, `LOC`, `LOCTOLOC`, `LOCTOPAR`,
 //!   `ANGLETOLOC`, `ANGLETOPAR`), which reads the pose cells (`PinX`, `PinY`, `LocPinX`, `LocPinY`, `Angle`, `FlipX`, `FlipY`) of its own shape and
 //!   its groups, and of every shape its references name and their groups. This is how a connector glued by `PAR(PNT(Sheet.4!Connections.X1, ...))`
@@ -37,7 +39,8 @@
 //! **What is always worked out.** A cell that reads what its text does not name: a reference with a call before it (`LISTSHEETREF()!Width`),
 //! or a function that reads the members of a list, a container or a callout, or a string as a formula ([`crate::facts::Facts::dynamic`]), is
 //! worked out after every edit that changed anything, and so is a cell with a reference that finds no sheet after an edit that took a shape out
-//! (it may have named it). **What is not followed.** What `THEMEVAL`, `TEXTWIDTH` and the like read of the sheet's theme cells and text: the
+//! (it may have named it). **A section written whole** (`Changes::sections`: a route replaces the rows of a connector's `Geometry` section) wakes the readers of any cell of it,
+//! which a reference to a `Geometry` cell is listed under (`some_of`), as `affected.rs` says. **What is not followed.** What `THEMEVAL`, `TEXTWIDTH` and the like read of the sheet's theme cells and text: the
 //! editing commands change none of those, and a caller whose edit does sets [`Changes::whole_page`].
 //!
 //! **What it costs.** The references of a formula are found once for each formula (they are kept under the formula's address, `facts.rs`); the
@@ -82,6 +85,22 @@ const ANY_CELL: &str = "\u{0}any";
 /// change to any cell of the section finds it.
 fn any_of(section: &SectionKey) -> KeyCell {
     (Some(section.clone()), None, CellName::new(ANY_CELL))
+}
+
+/// The name a reader of one cell of a section is also kept under: "some cell of this section is read here". No cell has it (the rule of `affected.rs` for a section written whole).
+const SOME_CELL: &str = "\u{0}some";
+
+/// The place a reader of one cell of a section is also listed under, for a change to the section as a whole (`Changes::sections`).
+fn some_of(section: &SectionKey) -> KeyCell {
+    (Some(section.clone()), None, CellName::new(SOME_CELL))
+}
+
+/// The place a reader of the cell `named` is also listed under, when the cell is one of a `Geometry` section, which a route replaces whole (`affected.rs`).
+fn written_whole(named: &CellAddr) -> Option<KeyCell> {
+    match &named.section {
+        Some(section) if section.name.as_str() == "Geometry" => Some(some_of(section)),
+        _ => None,
+    }
 }
 
 /// A cell directly under a sheet, as a place.
@@ -221,6 +240,10 @@ impl Affected {
             let any = CellAddr { section: Some(section.clone()), row: row.clone(), cell: CellName::new(ANY_CELL) };
             changed.push(key_of(sheet, &any));
         }
+        // A section written whole changed every cell it holds (`Changes::sections`, the rule of `affected.rs`).
+        for (sheet, section) in &changes.sections {
+            changed.push((sheet.clone(), some_of(section)));
+        }
         for sheet in &changes.fresh {
             work.add_fresh(ev, sheet, &mut changed);
         }
@@ -230,7 +253,12 @@ impl Affected {
             let removed: HashSet<u32> = changes.removed.iter().copied().collect();
             dangling.into_iter().filter(|(_, named)| named.is_none_or(|id| removed.contains(&id))).for_each(|(r, _)| work.add(ev, r));
         }
-        if !changes.cells.is_empty() || !changes.rows.is_empty() || !changes.fresh.is_empty() || !changes.removed.is_empty() {
+        if !changes.cells.is_empty()
+            || !changes.rows.is_empty()
+            || !changes.sections.is_empty()
+            || !changes.fresh.is_empty()
+            || !changes.removed.is_empty()
+        {
             dynamic.into_iter().for_each(|r| work.add(ev, r));
         }
         for key in changed {
@@ -354,7 +382,7 @@ fn classify(ev: &mut Evaluator<'_, '_>, graph: &mut Graph, sheet: &SheetRef, add
         frames.extend(if facts.frame_own { Some(sheet.clone()) } else { parent_of(sheet) });
     }
     let reads_path = calls_any(&facts.functions, &PATH_FUNCTIONS);
-    for r in facts.refs.iter().filter(|r| !r.qualifiers.is_empty()) {
+    for r in facts.links().filter(|r| !r.qualifiers.is_empty()) {
         if !ev.steps(1) || !ev.ctx.hold_bytes(2 * KEY_BYTES) {
             return;
         }
@@ -369,6 +397,11 @@ fn classify(ev: &mut Evaluator<'_, '_>, graph: &mut Graph, sheet: &SheetRef, add
                         }
                         graph.cross.entry((target.clone(), place)).or_default().push(reader.clone());
                     }
+                } else if let Some(place) = written_whole(&at) {
+                    if !ev.ctx.hold_bytes(2 * KEY_BYTES) {
+                        return;
+                    }
+                    graph.cross.entry((target.clone(), place)).or_default().push(reader.clone());
                 }
                 if facts.frame {
                     frames.push(target);
@@ -517,7 +550,7 @@ fn build_intra(ev: &mut Evaluator<'_, '_>, sheet: &SheetRef, local_only: bool) -
         }
         let Some(facts) = ev.facts_of(&formula) else { continue };
         let reads_path = calls_any(&facts.functions, &PATH_FUNCTIONS);
-        for r in facts.refs.iter().filter(|r| r.qualifiers.is_empty()) {
+        for r in facts.links().filter(|r| r.qualifiers.is_empty()) {
             if let Some(named) = address_of(&r.path) {
                 if !ev.ctx.hold_bytes(KEY_BYTES) {
                     return map;
@@ -531,6 +564,11 @@ fn build_intra(ev: &mut Evaluator<'_, '_>, sheet: &SheetRef, local_only: bool) -
                         }
                         map.entry(place).or_default().push(addr.clone());
                     }
+                } else if let Some(place) = written_whole(&named) {
+                    if !ev.ctx.hold_bytes(KEY_BYTES) {
+                        return map;
+                    }
+                    map.entry(place).or_default().push(addr.clone());
                 }
             }
         }

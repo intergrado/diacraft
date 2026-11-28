@@ -7,7 +7,8 @@
 //! then brings it to the document: the styles, the sheet, the pages and the masters are added exactly as they are added to a file that was
 //! read.
 //!
-//! **The window.** A new drawing's `windows.xml` holds one drawing `Window` for the first page, with `ShowRulers` and `ShowGrid` on
+//! **The window.** A new drawing's `windows.xml` holds one drawing `Window` for the first page that is not a background page (a file lists its background pages first, and
+//! a window that opened on one would show a frame where the person drew; so `TopPage` of the document settings names it too), with `ShowRulers` and `ShowGrid` on
 //! So that it reopens with the grid
 //! and the rulers showing. A drawing whose window settings nothing set holds no windows part, so it takes the new drawing's, on. A file that was
 //! read keeps its windows part byte for byte but for the flags a save sets in it (`sync_windows` of the splice): this module is only the starting point of
@@ -75,7 +76,11 @@ fn text_node(name: &str, text: &str) -> Node {
     Node::El(element(name, Vec::new(), vec![Node::Text(text.to_owned())]))
 }
 
-/// The drawing `Window` of a new drawing, for its first page; `None` for a drawing with no page, whose `Windows` is then empty.
+/// The drawing `Window` of a new drawing, for its first page that is not a background ([`Document::first_foreground_page`]); `None` for a drawing with no page, whose `Windows` is then empty.
+///
+/// **The page the window opens**, and `TopPage` of the document settings: the first page that is not a background page, and the first page there is for a drawing of backgrounds only. A file lists
+/// its background pages first, so the first page of the model is often one, and a drawing that opened on it would show a frame or a title block where the person
+/// drew; the page the person was on is not something the model holds, so the first page that is not a background is the one a window opens.
 ///
 /// The window opens the page (`ContainerType` `Page`, `Page`) whole (`ViewScale` -1) around the page's middle (`PageWidth` and
 /// `PageHeight` are in drawing units), and shows the rulers and the grid. **The page breaks** show (`ShowPageBreaks` 1, after the grid in the
@@ -83,7 +88,7 @@ fn text_node(name: &str, text: &str) -> Node {
 /// and its VSDX file says it where the format has a place for it); a box that is off writes nothing, which a reader takes as off. The other attributes and
 /// children that R27 lists are left out: no spec gives a value for them, and one written here would stand for a choice nobody made.
 pub(super) fn drawing_window(doc: &Document) -> Option<Node> {
-    let page = doc.pages.iter().next()?;
+    let page = doc.first_foreground_page()?;
     let half = |name: &str| match page.sheet.cells.get(name)?.value.as_ref()?.reading() {
         Reading::Number(n) => Some(n / 2.0),
         _ => None,
@@ -160,11 +165,11 @@ fn rels(name: &str, rows: &[(&str, String, &str)]) -> RelsTree {
     tree
 }
 
-/// The `DocumentSettings` of a new drawing: the attributes are the skeleton's; the children are the model's Snap & Glue words, when it has any (`settings.rs`).
+/// The `DocumentSettings` of a new drawing (`TopPage` is [`Document::first_foreground_page`]'s): the attributes are the skeleton's; the children are the model's Snap & Glue words, when it has any (`settings.rs`).
 pub(super) fn default_settings(doc: &Document) -> El {
-    let first_page = doc.pages.iter().next().map_or(0, |p| p.id);
+    let top_page = doc.first_foreground_page().map_or(0, |p| p.id);
     let settings_attrs = [
-        ("TopPage".to_owned(), first_page.to_string()),
+        ("TopPage".to_owned(), top_page.to_string()),
         ("DefaultTextStyle".to_owned(), "0".to_owned()),
         ("DefaultLineStyle".to_owned(), "0".to_owned()),
         ("DefaultFillStyle".to_owned(), "0".to_owned()),
@@ -180,7 +185,7 @@ pub fn new_windows_part(doc: &Document) -> diacraft_doc::RawElement {
     diacraft_sheetxml::passthrough::raw_element(&windows_root(doc))
 }
 
-/// The `Windows` of a new drawing: one drawing window for its first page.
+/// The `Windows` of a new drawing: one drawing window for its first page that is not a background ([`Document::first_foreground_page`]).
 pub(super) fn windows_root(doc: &Document) -> El {
     element(
         "Windows",

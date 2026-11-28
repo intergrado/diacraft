@@ -20,7 +20,9 @@ use std::sync::Arc;
 
 use diacraft_doc::{Cell, CellName, Digest, FormulaSlot, RawNode, Row, Sheet, Stamp, Text, TextPart, Value};
 
-use super::{MOST_PARAGRAPHS, Props, WORDS_PARAGRAPHS, row_props};
+use diacraft_fonts::script::FontSlot;
+
+use super::{MOST_PARAGRAPHS, Props, WORDS_PARAGRAPHS, row_props, row_props_in, slot_number};
 
 /// The most characters of text the model writer holds beside the model's own (the same bound as a retext's).
 pub(crate) const MOST_TEXT: usize = super::super::text::MOST_EDITED_TEXT;
@@ -285,7 +287,54 @@ pub(crate) fn characters_stamp(para: &ModelPara<'_>, spans: impl Iterator<Item =
     digest.finish()
 }
 
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the languages
+
+/// The script type of the letters of the stretches of one paragraph, asked **in order**: one walk of the paragraph's characters serves all of them (a stretch starts where the one before it
+/// ended or later), so that the cost of the whole is the paragraph's length and not its length for each stretch. `start` and `end` are places in characters. A stretch asked for out of order
+/// walks again from the start of the paragraph, and the caller counts what the cursor walked ([`SlotCursor::walked`]).
+pub(crate) struct SlotCursor<'a> {
+    chars: &'a str,
+    at_char: usize,
+    at_byte: usize,
+    walked: usize,
+}
+
+impl<'a> SlotCursor<'a> {
+    pub(crate) fn new(chars: &'a str) -> SlotCursor<'a> {
+        SlotCursor { chars, at_char: 0, at_byte: 0, walked: 0 }
+    }
+
+    /// How many characters the cursor has walked so far.
+    pub(crate) fn walked(&self) -> usize {
+        self.walked
+    }
+
+    /// The script type most of the letters of the characters `start..end` belong to (a tie goes to the Latin type, then the Asian one).
+    pub(crate) fn slot(&mut self, start: usize, end: usize) -> FontSlot {
+        if start < self.at_char {
+            self.at_char = 0;
+            self.at_byte = 0;
+        }
+        // On to the start of the stretch: the cursor stays there.
+        while self.at_char < start {
+            let Some(c) = self.chars.get(self.at_byte..).and_then(|rest| rest.chars().next()) else { break };
+            self.at_char = self.at_char.saturating_add(1);
+            self.at_byte = self.at_byte.saturating_add(c.len_utf8());
+            self.walked = self.walked.saturating_add(1);
+        }
+        let mut letters = crate::lang::Letters::default();
+        for c in self.chars.get(self.at_byte..).unwrap_or_default().chars().take(end.saturating_sub(start)) {
+            letters.add_char(c);
+            self.walked = self.walked.saturating_add(1);
+        }
+        letters.slot()
+    }
+}
+
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the rows
+
+/// What a row comes to: its [`Props`] and whether it left a cell out, or `None` for a row the sheet does not have or one with no cell.
+type Made = Option<(Arc<Props>, bool)>;
 
 /// The rows of one section of a sheet by `IX`, each as a [`Props`] **that leaves out what a file cannot say** and tells that it did.
 pub(crate) struct ModelRows<'a> {
@@ -293,7 +342,10 @@ pub(crate) struct ModelRows<'a> {
     paragraph: bool,
     palette: &'a dyn Fn(i64) -> Option<String>,
     fonts: &'a dyn Fn(i64) -> Option<String>,
-    done: HashMap<u32, Option<(Arc<Props>, bool)>>,
+    /// What each row comes to for each script type a run can be in (a row with no `LangID` comes to the same for all three).
+    done: HashMap<(u32, u8), Made>,
+    /// The cells of each row that a file can say, made once for a row however many script types it is asked for.
+    kept: HashMap<u32, (Row, bool)>,
     stamps: HashMap<u32, Stamp>,
 }
 
@@ -318,7 +370,7 @@ impl<'a> ModelRows<'a> {
                 }
             }
         }
-        ModelRows { rows, paragraph, palette, fonts, done: HashMap::new(), stamps: HashMap::new() }
+        ModelRows { rows, paragraph, palette, fonts, done: HashMap::new(), kept: HashMap::new(), stamps: HashMap::new() }
     }
 
     /// The stamp of row `ix` as [`diacraft_doc::stamp_text_row`] makes it (a row the sheet lacks stamps as one with no cell), **made once for each row**.
@@ -344,16 +396,31 @@ impl<'a> ModelRows<'a> {
         self.rows.iter().filter(|(_, row)| !row.cells.is_empty()).map(|(ix, _)| *ix)
     }
 
-    /// What row `ix` comes to and whether it left a cell out: `None` for a row the sheet does not have or one with no cell.
+    /// What row `ix` comes to for text of the Latin type (a paragraph's row, or a run's where only its faces are asked) and whether it left a cell out: `None` for a row the sheet does not
+    /// have or one with no cell.
     pub(crate) fn props(&mut self, ix: u32) -> Option<(Arc<Props>, bool)> {
-        if let Some(done) = self.done.get(&ix) {
+        self.props_in(ix, FontSlot::Latin)
+    }
+
+    /// What row `ix` comes to for a run whose letters are mostly of the script type `slot`, and whether it left a cell out: the run's language is written into the triplet of that type.
+    pub(crate) fn props_in(&mut self, ix: u32, slot: FontSlot) -> Option<(Arc<Props>, bool)> {
+        let at = (ix, slot_number(slot));
+        if let Some(done) = self.done.get(&at) {
             return done.clone();
         }
-        let made = self.rows.get(&ix).and_then(|row| {
-            let (kept, lossy) = lenient(row, self.paragraph, self.palette, self.fonts);
-            row_props(&kept, self.paragraph, self.palette).ok().flatten().map(|props| (props, lossy))
-        });
-        self.done.insert(ix, made.clone());
+        let made = match self.rows.get(&ix) {
+            Some(row) => {
+                if !self.kept.contains_key(&ix) {
+                    let made = lenient(row, self.paragraph, self.palette, self.fonts);
+                    self.kept.insert(ix, made);
+                }
+                self.kept.get(&ix).and_then(|(kept, lossy)| {
+                    row_props_in(kept, self.paragraph, self.palette, Some(slot)).ok().flatten().map(|props| (props, *lossy))
+                })
+            }
+            None => None,
+        };
+        self.done.insert(at, made.clone());
         made
     }
 }
@@ -461,6 +528,27 @@ mod tests {
         assert_eq!(model_paragraphs(&t, &mut 0).unwrap_err(), super::super::super::splice::WORDS_XML_CHAR);
         let t = text(vec![TextPart::Chars(Arc::from("a".repeat(MOST_TEXT + 1)))]);
         assert_eq!(model_paragraphs(&t, &mut 0).unwrap_err(), WORDS_TEXT_SIZE);
+    }
+
+    #[test]
+    fn the_cursor_gives_the_script_type_of_each_stretch_in_one_walk() {
+        // a b, three Japanese letters, c d, an Arabic letter: eight characters.
+        let text = "ab\u{65E5}\u{672C}\u{8A9E}cd\u{0639}";
+        let mut cursor = SlotCursor::new(text);
+        assert_eq!(cursor.slot(0, 2), FontSlot::Latin);
+        assert_eq!(cursor.slot(2, 5), FontSlot::Asian);
+        assert_eq!(cursor.slot(5, 8), FontSlot::Latin, "two Latin letters and one Arabic one");
+        assert_eq!(cursor.slot(7, 8), FontSlot::Complex);
+        // In order, each character is walked about once: skipped to a stretch's start and counted in the stretch.
+        assert!(cursor.walked() <= 3 * text.chars().count(), "{}", cursor.walked());
+        // A stretch asked for out of order is the same answer, from a walk from the start.
+        assert_eq!(cursor.slot(2, 5), FontSlot::Asian);
+        assert_eq!(cursor.slot(0, 8), FontSlot::Latin);
+        // A stretch past the end holds no letter, and a wide one is cut at the text's end.
+        assert_eq!(cursor.slot(8, 100), FontSlot::Latin);
+        assert_eq!(cursor.slot(100, 200), FontSlot::Latin);
+        assert_eq!(cursor.slot(4, 3), FontSlot::Latin, "an empty stretch");
+        assert_eq!(SlotCursor::new("").slot(0, 5), FontSlot::Latin);
     }
 
     #[test]

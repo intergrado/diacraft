@@ -7,6 +7,7 @@ mod blobs;
 mod capacity;
 mod cost;
 mod determinism;
+mod door;
 mod hostile;
 mod ledger_cost;
 mod memory;

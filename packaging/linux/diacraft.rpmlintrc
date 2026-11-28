@@ -1,0 +1,14 @@
+# rpmlint's filters for the .rpm of DiaCraft. Run rpmlint on a package made by packaging/linux/make-rpm.sh with them:
+#
+#   rpmlint --rpmlintrc packaging/linux/diacraft.rpmlintrc diacraft-<version>-linux-<cpu>.rpm
+#
+# (rpmlint is no step of the release workflow: its rules change with Fedora, and a package that is no Fedora package is not held to them. docs/releasing.md says what it was run on.)
+
+# The names of file formats and of the command line are no English words: the description says .vsdx, .odg and diacraft-cli.
+addFilter(r"spelling-error .*\b(vsdx|odg|cli)\b")
+
+# The file is named as the downloads of the release are (diacraft-<version>-linux-<cpu>.rpm), which the apps that install DiaCraft read; dnf and rpm read the fields inside.
+addFilter(r"non-coherent-filename")
+
+# The documentation is the manual pages the command line writes, and the website; the package holds the licence files.
+addFilter(r"no-documentation")

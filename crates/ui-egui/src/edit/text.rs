@@ -1,28 +1,43 @@
 //! Text edited in place: an egui text box over the shape, holding the shape's characters, sent with `shape.set_text` when the edit ends.
 //!
 //! Double-click, F2, or typing on a selected shape opens the box with all of the shape's characters selected (so what is typed replaces
-//! them). **On a group whose `IsTextEditTarget` is FALSE the box opens over the member on top of its stack** (`group_text.rs`), and
+//! them). **The characters are the ones the shape shows**: its own, and when it holds no text of its own its master's, so a UML compartment that shows
+//! `+ attribute : Type` opens on those characters, where they can be seen, selected and deleted. Typing edits them as if they were the shape's own; **an edit that changes nothing
+//! sends nothing**, and the shape goes on inheriting; the first change sends a range of those characters, and the engine gives the shape a text of its own made of the master's, with
+//! the change made (`docs/editing-commands.md`, "Text"). **On a group whose `IsTextEditTarget` is FALSE the box opens over the member on top of its stack** (`group_text.rs`), and
 //! the group stays selected. **Escape, Ctrl+Enter, or a click away ends the edit and keeps what was typed** ("Esc or a click away ends
 //! it"); Enter is a line break. Nothing is sent if the text did not change, so an edit that changes nothing is no undo step.
 //!
 //! **The box edits the characters and never the fields** (of the M3 review). A shape's text is kept in parts: the characters, the
 //! markers that start a run, and the fields with the text they show. The box holds the characters of
-//! [`diacraft_engine::draw::text_view`]. Its fields are drawn under them as chips that take no keys and no pointer: shown, not typed into.
+//! [`diacraft_engine::draw::shown_text_view`]. Its fields are drawn under them as chips that take no keys and no pointer: shown, not typed into.
 //! When the edit ends only the characters that changed are sent, as a range (`docs/editing-commands.md`, "Text"): the longest common prefix
 //! and suffix of the old characters and the new are left alone ([`changed_range`]), so a run's formatting and a field survive one changed
 //! letter.
+//!
+//! **A paragraph that reads right to left is edited right to left** (`bidi_text.rs`): text with a paragraph whose `Flags` is 1, or a right-to-left letter, is
+//! laid out by a layouter of ours that gives egui's galley the shape's own direction, alignment and side indents, which the engine reads for the text as it will be
+//! once it is sent (`editor_paragraphs`); all other text is laid out by egui's default layout, as it always was. The caret, the selection, Home and End and an input
+//! method's composition are egui's, whose fork orders and moves right-to-left text by the screen.
 //!
 //! **A text edit that is open is ended before anything else changes the drawing or leaves it**: a page change, Undo, Redo, Save,
 //! New, Open, the File view, an Export and the window's close all call [`DiacraftApp::commit_pending_text`] first, so a label being typed is
 //! never lost without asking.
 
+use std::sync::Arc;
+
 use diacraft_engine::doc::{Document, Owner, TextPart};
-use diacraft_engine::draw::{MAX_TEXT_CHARS, TextField, text_view};
+use diacraft_engine::draw::double_click::{DoubleClick, NO_GROUP_WINDOWS, on_double_click};
+use diacraft_engine::draw::{MAX_TEXT_CHARS, TextField, shown_text_view};
+use diacraft_engine::formatting::editor_paragraphs;
 use diacraft_engine::shown;
 use egui::text::{CCursor, CCursorRange};
-use egui::{Align2, Context, CornerRadius, Frame, Id, Key, Margin, Modifiers, Order, Pos2, Rect, RichText, Sense, Stroke, TextEdit, Ui, vec2};
+use egui::{
+    Align2, Context, CornerRadius, Frame, Galley, Id, Key, Margin, Modifiers, Order, Pos2, Rect, RichText, Sense, Stroke, TextEdit, Ui, vec2,
+};
 use serde_json::json;
 
+use super::bidi_text::{self, EditorLook};
 use super::geom::{self, P};
 use super::gesture::Gesture;
 use super::group_text;
@@ -67,7 +82,7 @@ pub(super) struct TextEditing {
     pub new: Option<NewBox>,
     /// The page the shape is on: the edit is sent there, whatever page is on view by then.
     pub page: u32,
-    /// The characters being edited (the `chars` of `text_view`).
+    /// The characters being edited (the `chars` of `shown_text_view`).
     pub text: String,
     original: String,
     /// The shape's fields, shown under the characters and never edited.
@@ -81,6 +96,23 @@ pub(super) struct TextEditing {
     selection: Option<(usize, usize)>,
     /// What is selected when the box opens: all of its characters when `None`.
     initial: Option<(usize, usize)>,
+    /// The text as the last frame laid it out, where on the screen the layout was drawn, and the room the text edit took. For the tests of what the box shows
+    /// (`edited_text_rows`, `edited_text_caret_rect`, `edited_text_area`).
+    shown: Option<Shown>,
+    /// How the box lays its text out when the text reads right to left or has a letter that does (`bidi_text.rs`); `None` for the box's own layout, which is all that
+    /// left-to-right text has. Read again when the text, or the drawing, has changed since `look_of`.
+    look: Option<EditorLook>,
+    look_of: Option<(u64, String)>,
+}
+
+/// What the text edit of the box gave back in the last frame.
+struct Shown {
+    galley: Arc<Galley>,
+    /// Where the galley's own origin (x and y of 0) is on the screen.
+    at: Pos2,
+    area: Rect,
+    /// The caret as the text edit has it, with the side of a change of direction it sticks to.
+    caret: Option<CCursor>,
 }
 
 impl TextEditing {
@@ -210,6 +242,9 @@ impl DiacraftApp {
             rect: None,
             selection: None,
             initial: None,
+            shown: None,
+            look: None,
+            look_of: None,
         });
     }
 
@@ -252,15 +287,22 @@ impl DiacraftApp {
     /// **A member that is selected on its own, with the pointer on it, is the shape double clicked**, and not the group it is in: its text is edited, whatever
     /// the group's `IsTextEditTarget` says. (A group selected is not a member: the second click of the pair did not go in to the member under it,
     /// `gesture.rs`, and the group sends the text where its cell says, `start_text`.)
+    ///
+    /// **A shape whose `EventDblClick` calls `OPENGROUPWIN()` opens no text box** (`diacraft_engine::draw::double_click`): no group window exists, so
+    /// nothing opens, and on a group the status bar says so.
     pub(super) fn edit_text_at(&mut self, cx: &Cx, over: Option<Pos2>) {
         let Some(at) = over else { return };
         self.ensure_scene(cx.page);
         let (p, reach) = (cx.page_at(at), cx.reach(super::HIT_REACH));
-        let member = self.single().filter(|item| item.parent.is_some() && item.hit(p, reach)).map(|item| item.id);
+        let member = self.single().filter(|item| item.parent.is_some() && item.meets(p, reach)).map(|item| item.id);
         let hit = member.or_else(|| self.ui.edit.scene.as_ref().and_then(|s| s.hit(p, reach)).map(|i| i.id));
         if let Some(id) = hit {
             self.select(&[id]);
-            self.start_text(cx.page, id);
+            match self.session.document().map_or(DoubleClick::EditText, |doc| on_double_click(doc, cx.page, id)) {
+                DoubleClick::EditText => self.start_text(cx.page, id),
+                DoubleClick::GroupWindow => self.set_notice(NO_GROUP_WINDOWS),
+                DoubleClick::Nothing => {}
+            }
         }
     }
 
@@ -285,7 +327,7 @@ impl DiacraftApp {
     fn open_text_box(&mut self, page: u32, id: u32, initial: Option<(usize, usize)>) {
         // A box that is open on another shape ends first: what was typed in it is kept.
         self.commit_pending_text();
-        let Some(view) = self.session.document().and_then(|doc| text_view(doc, page, id)) else { return };
+        let Some(view) = self.session.document().and_then(|doc| shown_text_view(doc, page, id)) else { return };
         self.ui.edit.gesture = None;
         let unread = self.place_not_in_scene(page, id);
         self.ui.edit.text = Some(TextEditing {
@@ -300,6 +342,9 @@ impl DiacraftApp {
             rect: None,
             selection: None,
             initial,
+            shown: None,
+            look: None,
+            look_of: None,
         });
     }
 
@@ -335,7 +380,7 @@ impl DiacraftApp {
 
     /// How many characters the editable text of shape `id` has now.
     pub(crate) fn text_chars(&self, page: u32, id: u32) -> Option<usize> {
-        let view = self.session.document().and_then(|doc| text_view(doc, page, id))?;
+        let view = self.session.document().and_then(|doc| shown_text_view(doc, page, id))?;
         Some(view.chars.chars().count())
     }
 
@@ -354,6 +399,32 @@ impl DiacraftApp {
     /// The characters in the text box, if one is open.
     pub fn edited_text(&self) -> Option<&str> {
         self.ui.edit.text.as_ref().map(|t| t.text.as_str())
+    }
+
+    /// The rows of the text in the open box as the last frame laid them out: each row's rectangle on the screen and the characters of its text, in the order the rows
+    /// stand (top to bottom). Empty when no box is open or none has been drawn.
+    pub fn edited_text_rows(&self) -> Vec<(Rect, String)> {
+        let Some(shown) = self.ui.edit.text.as_ref().and_then(|t| t.shown.as_ref()) else { return Vec::new() };
+        shown.galley.rows.iter().map(|row| (row.rect().translate(shown.at.to_vec2()), row.text().to_owned())).collect()
+    }
+
+    /// Where a caret in front of character `index` of the text in the open box is on the screen, as the last frame laid the text out. `None` when no box is open or none
+    /// has been drawn.
+    pub fn edited_text_caret_rect(&self, index: usize) -> Option<Rect> {
+        let shown = self.ui.edit.text.as_ref()?.shown.as_ref()?;
+        Some(shown.galley.pos_from_cursor(CCursor::new(index)).translate(shown.at.to_vec2()))
+    }
+
+    /// Where the caret of the open box is on the screen, as the last frame drew it: where a change of direction puts one index in two places, the one the caret sticks
+    /// to. `None` when no box is open, none has been drawn, or the box has not the keyboard.
+    pub fn edited_text_caret(&self) -> Option<Rect> {
+        let shown = self.ui.edit.text.as_ref()?.shown.as_ref()?;
+        Some(shown.galley.pos_from_cursor(shown.caret?).translate(shown.at.to_vec2()))
+    }
+
+    /// The room the text edit of the open box took on the screen in the last frame: the width the text is laid out and aligned in.
+    pub fn edited_text_area(&self) -> Option<Rect> {
+        self.ui.edit.text.as_ref()?.shown.as_ref().map(|shown| shown.area)
     }
 
     /// The results of the fields the open text box shows and does not edit, in order.
@@ -377,7 +448,7 @@ impl DiacraftApp {
             self.commit_new_text_box(editing.page, new, &editing.text);
             return;
         }
-        let Some(view) = self.session.document().and_then(|doc| text_view(doc, editing.page, editing.id)) else { return };
+        let Some(view) = self.session.document().and_then(|doc| shown_text_view(doc, editing.page, editing.id)) else { return };
         let Some((start, end, text)) = changed_range(&view.chars, &storable(&editing.text)) else { return };
         let params = json!({"id": editing.id, "text": text, "start": start, "end": end, "page": editing.page});
         self.run_edit("shape.set_text", &params);
@@ -398,7 +469,7 @@ impl DiacraftApp {
             }
         };
         let escape = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
-        let ctrl_enter = ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
+        let ctrl_enter = ctx.input_mut(|i| crate::shortcuts::consume_exact(i, Modifiers::COMMAND, Key::Enter));
         let press_at = ctx.input(|i| i.pointer.latest_pos());
         // A press away from the box ends the edit, **but not one on the ribbon's body or on something floating over the drawing (a menu, a
         // palette, a list)**: a person selects characters and then presses Bold, Font Color or a size, and goes on typing.
@@ -412,10 +483,40 @@ impl DiacraftApp {
         self.draw_text_box(ctx, cx, place);
     }
 
+    /// Works out how the box lays its text out (`bidi_text.rs`), when the text in it or the drawing has changed since it was last worked out: the paragraphs of the
+    /// shape are read as they will be once what was typed is sent (`editor_paragraphs`). A new box has no paragraph to read.
+    fn refresh_look(&mut self) {
+        let revision = self.session.revision();
+        let Some(editing) = self.ui.edit.text.as_ref() else { return };
+        if editing.look_of.as_ref().is_some_and(|(of, text)| *of == revision && *text == editing.text) {
+            return;
+        }
+        let paragraphs = match (&editing.new, self.session.document()) {
+            (None, Some(doc)) => shown_text_view(doc, editing.page, editing.id)
+                .and_then(|view| {
+                    let sent = changed_range(&view.chars, &storable(&editing.text));
+                    editor_paragraphs(doc, editing.page, editing.id, sent.as_ref().map(|(start, end, text)| (*start, *end, text.as_str()))).ok()
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let look = bidi_text::editor_look(&paragraphs, &editing.text);
+        if let Some(editing) = self.ui.edit.text.as_mut() {
+            editing.look = look;
+            editing.look_of = Some((revision, editing.text.clone()));
+        }
+    }
+
     fn draw_text_box(&mut self, ctx: &Context, cx: &Cx, (centre, width): (Pos2, f32)) {
+        self.refresh_look();
         let Some(editing) = self.ui.edit.text.as_mut() else { return };
         let t = Tokens::get(ctx);
         let font = egui::FontId::proportional((cx.view.scale() as f32 / 6.0).clamp(LEAST_FONT, MOST_FONT));
+        let per_inch = cx.view.scale() as f32;
+        let look = editing.look;
+        // A look puts the room of the text in from the box's sides by the paragraph's indents, and the rows where its alignment says (`bidi_text.rs`).
+        let (left, right) = look.map_or((0, 0), |look| bidi_text::indents_in_points(&look, per_inch, width));
+        let align = look.map_or(Align2::CENTER_TOP, |look| Align2([look.halign, egui::Align::TOP]));
         let field = text_field_id(editing.id);
         // The box has the keyboard for as long as it is open (an area's first frame is a sizing pass that cannot take it).
         // (Unless another text field has it: the list of fonts has a box to type a name in, and the box would take the keyboard back.)
@@ -435,26 +536,43 @@ impl DiacraftApp {
             state.store(ctx, field);
             editing.fresh = false;
         }
+        // Home and End go to the first and the last character of the row, whichever side of it each is on (`bidi_text.rs`).
+        if let (Some(_), Some(shown)) = (look, editing.shown.as_ref()) {
+            bidi_text::logical_home_and_end(ctx, field, &shown.galley);
+        }
         let mut shown_rect = None;
         let mut chips = Vec::new();
         egui::Area::new(Id::unique("shape_text_area")).order(Order::Foreground).pivot(Align2::CENTER_CENTER).fixed_pos(centre).show(ctx, |ui| {
-            Frame::new().fill(t.input_fill).stroke(Stroke::new(1.5, t.edit_line)).inner_margin(Margin::symmetric(4, 2)).show(ui, |ui| {
-                let out = TextEdit::multiline(&mut editing.text)
+            let margin = Margin { left: left.saturating_add(4), right: right.saturating_add(4), top: 2, bottom: 2 };
+            Frame::new().fill(t.input_fill).stroke(Stroke::new(1.5, t.edit_line)).inner_margin(margin).show(ui, |ui| {
+                let edit = TextEdit::multiline(&mut editing.text)
                     .id(field)
-                    .font(font)
+                    .font(font.clone())
                     .text_color(t.text)
                     .frame(Frame::NONE)
-                    .desired_width(width - 8.0)
+                    .desired_width(width - 8.0 - f32::from(left) - f32::from(right))
                     .desired_rows(1)
                     .char_limit(MAX_TEXT_CHARS)
-                    .align(Align2::CENTER_TOP)
-                    .show(ui);
+                    .align(align);
+                let out = match look {
+                    Some(look) => {
+                        let mut layouter =
+                            |ui: &Ui, text: &dyn egui::TextBuffer, wrap_width: f32| bidi_text::lay_out(&look, ui, text, wrap_width, &font, t.text);
+                        edit.layouter(&mut layouter).show(ui)
+                    }
+                    None => edit.show(ui),
+                };
                 out.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::MultilineTextInput, true, "Shape text"));
                 // (Kept when the box is not focused for a frame, as it is in the one where a press on the ribbon takes the keyboard.)
                 if let Some(range) = out.cursor_range {
                     let [from, to] = range.sorted_cursors();
                     editing.selection = Some((from.index.0, to.index.0));
                 }
+                // Where the galley's own origin is: the text edit paints it at `galley_pos` less the left of the galley's rectangle, which is not 0 for rows aligned to the
+                // right or the centre.
+                let origin = out.galley_pos - vec2(out.galley.rect.left(), 0.0);
+                let caret = out.cursor_range.map(|range| range.primary);
+                editing.shown = Some(Shown { galley: Arc::clone(&out.galley), at: origin, area: out.response.rect, caret });
                 chips = field_chips(ui, &t, &editing.fields);
             });
             shown_rect = Some(ui.min_rect().expand2(vec2(4.0, 2.0)));

@@ -135,13 +135,7 @@ fn target_page(s: &Session, p: &Value, ids: Option<&[u32]>, cmd: &str) -> Result
         (Some(id), _) if doc.page(id).is_some() => Ok(id),
         (Some(id), _) => Err(bad(cmd, format!("there is no page {id}"))),
         (None, Some(ids)) if !ids.is_empty() => draw::page_holding(doc, None, ids).ok_or_else(|| bad(cmd, "the document has no pages")),
-        (None, _) => doc
-            .pages
-            .iter()
-            .find(|page| !page.background)
-            .or_else(|| doc.pages.iter().next())
-            .map(|page| page.id)
-            .ok_or_else(|| bad(cmd, "the document has no pages")),
+        (None, _) => doc.first_foreground_page().map(|page| page.id).ok_or_else(|| bad(cmd, "the document has no pages")),
     }
 }
 

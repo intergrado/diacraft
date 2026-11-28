@@ -12,9 +12,12 @@ use crate::part::{Master, Page, Style, Theme};
 use crate::raw::{Passthrough, RawAttrs, RawElement};
 use crate::shape::{MAX_SHAPE_DEPTH, ShapeList};
 use crate::shared::SharedVec;
-use crate::sheet::{Row, Section, Sheet};
+use crate::sheet::Sheet;
 use crate::sheet_ref::{Visit, walk};
-use crate::{Cell, CellName, DocError, MAX_COLOR_ENTRIES, MAX_MASTERS, MAX_PAGES, MAX_SHAPES_PER_PAGE, MAX_STYLES, Value, check_page_name};
+use crate::{
+    Cell, CellName, DocError, MAX_COLOR_ENTRIES, MAX_MASTERS, MAX_PAGES, MAX_SHAPES_PER_PAGE, MAX_STYLES, Value, check_given_page_name,
+    check_page_name, page_name_key,
+};
 
 /// One `ColorEntry` of the color table: a color index above 23 and the color it names.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -181,7 +184,9 @@ impl Document {
     }
 
     /// Adds a page after the others and returns its id: one more than the highest id in use. Without a `name` the page is called
-    /// "Page-N" for its id N. The name is checked here, at the write that sets it. Nothing changes when this fails.
+    /// "Page-N" for its id N, or for the next number whose name no page has, in `Name` or in `NameU`, compared without regard to case ([`Document::default_page_name`]). A `name` that is
+    /// given is the page's as it is, however many pages have it: the model takes the names of a file, and the commands hold a name to the rules of [`Document::check_free_page_name`]. The
+    /// name is checked here, at the write that sets it. Nothing changes when this fails.
     ///
     /// The new page's sheet is the shared default (US Letter landscape, one to one), so adding a page copies nothing.
     pub fn add_page(&mut self, name: Option<&str>) -> Result<u32, DocError> {
@@ -192,9 +197,39 @@ impl Document {
             return Err(DocError::TooManyPages);
         }
         let id = self.pages.iter().map(|p| p.id).max().map_or(Some(1), |highest| highest.checked_add(1)).ok_or(DocError::IdsExhausted)?;
-        let name = name.map_or_else(|| format!("Page-{id}"), str::to_owned);
+        let name = name.map_or_else(|| self.default_page_name(id), str::to_owned);
         self.pages.push(Arc::new(new_page(id, &name)));
         Ok(id)
+    }
+
+    /// The name a page added without one is given: `Page-N` for the number N of the id it will have, or for the next number after it whose name no page has (`Name` and `NameU` both
+    /// looked at, without regard to case). A drawing read from an `.odg` numbers its pages from 0, so the second page's id 1 would call it `Page-1` beside the first.
+    pub fn default_page_name(&self, id: u32) -> String {
+        let taken: HashSet<String> =
+            self.pages.iter().flat_map(|p| std::iter::once(&p.name).chain(p.name_u.as_ref())).map(|n| page_name_key(n)).collect();
+        // Among as many numbers as there are names taken, one is free.
+        let first = u64::from(id);
+        (first..=first.saturating_add(taken.len() as u64))
+            .map(|n| format!("Page-{n}"))
+            .find(|name| !taken.contains(&page_name_key(name)))
+            .unwrap_or_else(|| format!("Page-{id}"))
+    }
+
+    /// The page, other than the one with the id `except`, whose name is `name` **compared without regard to case** ([`crate::page_name_key`]): the first of them.
+    pub fn page_named(&self, name: &str, except: Option<u32>) -> Option<&Arc<Page>> {
+        let key = page_name_key(name);
+        self.pages.iter().find(|p| Some(p.id) != except && page_name_key(&p.name) == key)
+    }
+
+    /// Checks a name a command gives to a page: the rules of [`check_given_page_name`] (not empty, at most 31 characters, no control character, not "page" and digits) and that **no
+    /// other page has the name**, compared without regard to case. `except` is the id of the page being renamed, which may be given its own name again, in another case too.
+    /// Nothing is changed. A reader does not ask this of the names of a file.
+    pub fn check_free_page_name(&self, name: &str, except: Option<u32>) -> Result<(), DocError> {
+        check_given_page_name(name)?;
+        if self.page_named(name, except).is_some() {
+            return Err(DocError::PageNameTaken);
+        }
+        Ok(())
     }
 
     /// Gives the page with `id` a new name. The name is checked here, at the write that changes it, and nothing else about the
@@ -206,6 +241,36 @@ impl Document {
         let slot = self.pages.get_mut(at).ok_or(DocError::NoSuchPage(id))?;
         Arc::make_mut(slot).name = Arc::from(name);
         Ok(())
+    }
+
+    /// The page a command works on when it is not told which: **the first page that is not a background page**, and the first page there is when every page is one (`None` for a drawing
+    /// with no page). A file lists its background pages first and a drawing a session makes keeps them so, so the first page of the list is a
+    /// background page in any drawing that has one, where the page a person works on is the first the tabs show: the pages that are not backgrounds come before the backgrounds.
+    pub fn first_foreground_page(&self) -> Option<&Arc<Page>> {
+        self.pages.iter().find(|page| !page.background).or_else(|| self.pages.iter().next())
+    }
+
+    /// The drawing with its pages put in the order a file lists them: **every background page before every foreground page**, each kind in the order it has here (a stable partition),
+    /// as all 70 files of the corpus that hold both kinds list them. `None` when a foreground page comes before no background page, which is to say
+    /// when the pages are in that order already (a drawing made in a session keeps them so). Only the order of the list changes: the pages are the same pages (shared,
+    /// not copied), with their `ID`s, names and `BackPage`s, and nothing else of the drawing is touched.
+    pub fn pages_background_first(&self) -> Option<Document> {
+        let mut seen_foreground = false;
+        let out_of_order = self.pages.iter().any(|page| {
+            if page.background {
+                seen_foreground
+            } else {
+                seen_foreground = true;
+                false
+            }
+        });
+        if !out_of_order {
+            return None;
+        }
+        let (back, front): (Vec<&Arc<Page>>, Vec<&Arc<Page>>) = self.pages.iter().partition(|page| page.background);
+        let mut ordered = self.clone();
+        ordered.pages = back.into_iter().chain(front).cloned().collect();
+        Some(ordered)
     }
 
     /// The background pages of the page `id`, nearest first: its `BackPage`, that page's `BackPage`, and so on. A hostile file may
@@ -387,13 +452,19 @@ fn default_page_sheet() -> &'static Arc<Sheet> {
 /// The root style of a new document, `No Style`: the three flags, the group and glue cells whose roots
 /// reads off real files, and a basic line, fill and text look: a solid white fill, a black solid line one hundredth
 /// of an inch wide, and 12 point black text in the middle of its block with a margin of 4 points. The values are ours to choose and are
-/// not taken from a sample or a template.
+/// not taken from a sample or a template. **`DropOnPageScale` is 1** (the ruling on F40), as the root holds it in every file of the corpus
+/// A shape no drop scaled reads 1, and a formula of a master that names the cell is the master's own size
+/// The root of a drawing read from a file is the file's, and is never given the cell.
+///
+/// **The root states every text cell the program assumes** ([`crate::root_text`]): the whole `Paragraph` row 0 (a paragraph with no `HorzAlign` on its way is
+/// centred here, and a reader that finds none reads it as left), the rest of the text block and the cells of the first run, each with the value the renderer assumes.
 fn root_style() -> Style {
     let mut sheet = Sheet::default();
     for (name, value) in [
         ("EnableLineProps", "1"),
         ("EnableFillProps", "1"),
         ("EnableTextProps", "1"),
+        ("DropOnPageScale", "1"),
         ("SelectMode", "1"),
         ("DisplayMode", "2"),
         ("IsSnapTarget", "1"),
@@ -404,7 +475,6 @@ fn root_style() -> Style {
         ("LinePattern", "1"),
         ("LineColor", "0"),
         ("LineWeight", "0.01"),
-        ("VerticalAlign", "1"),
         ("LeftMargin", "0.05555556"),
         ("RightMargin", "0.05555556"),
         ("TopMargin", "0.05555556"),
@@ -412,13 +482,7 @@ fn root_style() -> Style {
     ] {
         sheet.cells.insert(CellName::new(name), Cell::constant(Value::from_text(value)));
     }
-    // The first run of text: row 0 of `Character`.
-    let mut row = Row { ix: Some(0), ..Row::default() };
-    for (name, value) in [("Size", "0.1666667"), ("Color", "0")] {
-        row.cells.insert(CellName::new(name), Cell::constant(Value::from_text(value)));
-    }
-    let mut character = Section::new("Character", None);
-    character.rows.push(Arc::new(row));
-    sheet.sections.push(Arc::new(character));
-    Style { id: 0, name: Some(Arc::from("No Style")), name_u: Some(Arc::from("No Style")), sheet: Arc::new(sheet), ..Style::default() }
+    let bare = Style { id: 0, name: Some(Arc::from("No Style")), name_u: Some(Arc::from("No Style")), sheet: Arc::new(sheet), ..Style::default() };
+    // The vertical alignment, the rest of the text block, the first run (row 0 of `Character`) and the first paragraph (row 0 of `Paragraph`).
+    crate::root_text::complete(&bare, crate::root_text::Scope::Whole).unwrap_or(bare)
 }

@@ -31,13 +31,18 @@ fn id_names_a_shape(params: &str) -> bool {
     params.split(';').find_map(|e| e.trim().strip_prefix("id:")).is_some_and(|doc| !doc.contains("the id of"))
 }
 
+/// The commands that read, set and clear in one call, with a key that makes a call a write (`cmd/locked.rs`, `READ_UNLESS_GIVEN`): a call with none of their keys only reads, and a read of
+/// a shape on a locked layer answers. A command that is not here and is journaled is refused on a locked layer whatever it is given.
+const READ_OR_WRITE: [(&str, &str); 1] = [("shape.alt_text", "title")];
+
 /// **The registry's walk.** Every registered command that is journaled and names shapes by `ids` or by an `id` that is a shape's is refused, before it runs, when a shape it
 /// names is on a locked layer, in words that name the layer, and changes nothing; a query (not journaled) still answers about it, or refuses for a reason of its own. A command
-/// added later is in the walk without a line here.
+/// added later is in the walk without a line here. The one kind of journaled command that answers is a call that only reads, of a command of `READ_OR_WRITE`: its calls that
+/// write are refused as the others are.
 #[test]
 fn every_command_that_changes_the_drawing_refuses_a_shape_it_names_on_a_locked_layer_and_a_query_does_not() {
     let (mut s, [frozen, _, both]) = locked_page();
-    let (mut edits, mut queries) = (Vec::new(), Vec::new());
+    let (mut edits, mut queries, mut reads) = (Vec::new(), Vec::new(), Vec::new());
     for spec in command_specs() {
         let keys = param_keys(spec.params).unwrap();
         let by_ids = keys.contains(&"ids");
@@ -52,12 +57,20 @@ fn every_command_that_changes_the_drawing_refuses_a_shape_it_names_on_a_locked_l
             }
             if by_id {
                 tries.push((id, json!({"id": id})));
+                if let Some((_, key)) = READ_OR_WRITE.iter().find(|(command, _)| *command == spec.id) {
+                    tries.push((id, json!({"id": id, (*key): "written"})));
+                }
             }
             tries
         }) {
             let before = snapshot(&s);
             let got = s.execute(spec.id, &params);
-            if spec.journal {
+            let only_reads = READ_OR_WRITE.iter().any(|(command, _)| *command == spec.id) && params.as_object().is_some_and(|keys| keys.len() == 1);
+            if only_reads {
+                got.unwrap_or_else(|e| panic!("{} {params}: a call that only reads is refused: {e}", spec.id));
+                assert_eq!(snapshot(&s).document, before.document, "{} {params}: a read changes nothing", spec.id);
+                reads.push(spec.id);
+            } else if spec.journal {
                 let e = got.expect_err(&format!("{} {params}: an edit of a shape on a locked layer ran", spec.id));
                 assert!(is_lock_refusal(&e, shape), "{} {params}: refused for another reason: {e}", spec.id);
                 assert_eq!(snapshot(&s), before, "{} {params}: a refusal changes nothing", spec.id);
@@ -102,6 +115,9 @@ fn every_command_that_changes_the_drawing_refuses_a_shape_it_names_on_a_locked_l
     for id in ["shape.placement", "shape.formatting", "edit.find", "hyperlink.list", "text.block"] {
         assert!(queries.contains(&id), "{id} was not walked as a query: {queries:?}");
     }
+    // Alt text: written, it is an edit; read, it answers (and `master.alt_text` is not here at all: its `id` is a master's).
+    assert!(edits.contains(&"shape.alt_text") && reads.contains(&"shape.alt_text"), "shape.alt_text was walked as both: {edits:?} {reads:?}");
+    assert!(!edits.contains(&"master.alt_text"), "a master's id is no shape's: {edits:?}");
 }
 
 /// A page's and a stencil's `id` is not a shape's: `page.rename` of page 1 runs though shape 1 is on a locked layer.

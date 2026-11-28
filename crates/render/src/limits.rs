@@ -178,6 +178,10 @@ pub const WORK_PER_DASH: u64 = 1;
 /// The work of a line of a hatch (a fill pattern of lines): a stroke across the region, clipped to it.
 pub const WORK_PER_MARK: u64 = 2;
 
+/// The work of painting the shape's fill inside one closed part of a hollow line end, whatever the fill is; a rectangular gradient adds its
+/// [`RECT_GRADIENT_BANDS`] and a hatch its lines ([`WORK_PER_MARK`] each). A mark has at most two closed parts and a line two marks, so a connector costs at most four of these.
+pub const WORK_PER_END_FILL: u64 = 4;
+
 /// The work of an item of a metafile picture drawn (a small item costs a fifth of a glyph; 400,000 of them are [`MAX_METAFILE_ITEMS_PER_FRAME`]).
 pub const WORK_PER_META_ITEM: u64 = 1;
 

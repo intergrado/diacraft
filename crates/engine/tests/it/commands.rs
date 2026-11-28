@@ -154,7 +154,8 @@ fn page_rename_refuses_bad_ids_and_names() {
         (json!({"id": 1, "name": 5}), "`name` must be text"),
         (json!({"id": 1, "name": null}), "missing `name`"),
         (json!({"id": 1, "name": "a\nb"}), "control characters"),
-        (json!({"id": 1, "name": "x".repeat(256)}), "at most 255 characters"),
+        (json!({"id": 1, "name": "x".repeat(32)}), "a page name must be at most 31 characters"),
+        (json!({"id": 1, "name": "x".repeat(256)}), "a page name must be at most 31 characters"),
     ] {
         let e = s.execute("page.rename", &params).unwrap_err();
         assert!(matches!(&e, EngineError::BadParams { cmd, .. } if cmd == "page.rename"), "{params}: {e:?}");

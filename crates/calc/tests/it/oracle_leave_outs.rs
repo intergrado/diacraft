@@ -369,10 +369,16 @@ fn the_same_properties_are_scored_when_the_entry_holds_an_outer_shadow_and_other
     let shape = shadowed("1", &[]).cell("QuickStyleFillColor", "2").cell("QuickStyleFillMatrix", "2").formula("FillForegnd", "THEMEVAL()", "#1b3754");
     let r = scored(shape, 1);
     assert_eq!((r.skipped.theme_no_shadow, r.agreed, r.differed.len()), (0, 1, 0), "{r:?}");
-    // With no theme selected a shadow call is not this branch (the root answers): scored.
-    let shape = schemes(ShapeBuilder::new(1), "0").formula("ShdwForegnd", "THEMEVAL()", "#000000");
-    let r = scored(shape, 1);
+    // With no theme selected a shadow call is not this branch (the root answers, as every file's root holds the cell): scored.
+    let no_theme = || schemes(ShapeBuilder::new(1), "0").formula("ShdwForegnd", "THEMEVAL()", "#000000");
+    let mut doc = DocBuilder::new().root(|r| r.cell("ShdwForegnd", "#000000")).page(1, PageBuilder::new().shape(no_theme())).build();
+    doc.themes.push(ThemeXml::default().part());
+    let r = recalc_all(&doc, &Budget::default());
     assert_eq!((r.skipped.theme_no_shadow, r.agreed, r.differed.len()), (0, 1, 0), "{r:?}");
+    // A root that holds none gives no value (`#N/A`, which a reader takes as a cell found nowhere): scored, and a difference.
+    let r = scored(no_theme(), 1);
+    assert_eq!((r.skipped.theme_no_shadow, r.agreed, r.differed.len()), (0, 0, 1), "{r:?}");
+    assert_eq!(r.differed[0].actual_error.as_deref(), Some("#N/A"), "{r:?}");
 }
 
 // ---- item 10: a cell whose own formula can only fail ------------------------------------------------------------------------------------

@@ -127,7 +127,7 @@ fn row_of(v: &Value) -> Option<Row> {
 }
 
 /// A button with text: the pane's own look, from the tokens.
-fn text_button(ui: &mut Ui, t: &Tokens, label: &str, enabled: bool, name: &str) -> egui::Response {
+pub(crate) fn text_button(ui: &mut Ui, t: &Tokens, label: &str, enabled: bool, name: &str) -> egui::Response {
     let width = widgets::text_width(ui, label, &theme::font(size::LABEL)) + 18.0;
     let (r, resp) = ui.allocate_exact_size(vec2(width, 24.0), if enabled { Sense::click() } else { Sense::hover() });
     widgets::name_button(&resp, enabled, label);
@@ -448,7 +448,7 @@ impl DiacraftApp {
             compose.fresh = false;
         }
         let escaped = self.box_keys(ui, &edit, escape);
-        let post_keys = edit.has_focus() && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
+        let post_keys = edit.has_focus() && ui.input_mut(|i| crate::shortcuts::consume_exact(i, Modifiers::COMMAND, Key::Enter));
         let can_post = !compose.text.trim().is_empty();
         let (mut post, mut cancel) = (post_keys && can_post, escaped);
         ui.horizontal(|ui| {

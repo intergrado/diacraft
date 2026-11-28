@@ -1,0 +1,23 @@
+[package]
+name = "diacraft-help"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Offline help for an app: Help Markdown topics, help catalogs, command search ranking, a topic index, and the tables that map controls to help, all bounded and with no network"
+publish = false
+# The build script reads the help tree of the repository (`help/`, `i18n/help/`) and embeds it; `src/host.rs` names its place.
+build = "build.rs"
+
+[lints]
+workspace = true
+
+# Standalone (layer 0): no workspace crate at all, and no app type in the API, so that the crate can move to craft-libs as `craft-help`.
+# No TOML, no serde and no network on the runtime path.
+[dependencies]
+# Folding for search (`fold.rs`): decomposition, and the combining marks dropped. Pure Rust, in the lock already, builds for wasm32.
+unicode-normalization = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

@@ -10,7 +10,7 @@ use diacraft_doc::{CellAddr, Document, Owner, Resolver, ShapeRef, SheetRef};
 use diacraft_render::{Rendered, Renderer, View};
 use serde_json::{Value, json};
 
-use super::{MasterSpec, all_masters, find_master, stencils};
+use super::{MasterSpec, find_master, stencils};
 use crate::Session;
 use crate::draw::connection_points;
 
@@ -296,11 +296,22 @@ fn every_flowchart_master_drops_with_its_size_its_geometry_and_its_connection_po
 
 #[test]
 fn every_masters_connection_points_are_on_its_drawn_outline() {
-    // The strongest reading of "where a connector would meet it": the pixels of the stroke are at the point. Basic Shapes are held to it too.
-    for spec in all_masters() {
+    // The strongest reading of "where a connector would meet it": the pixels of the stroke are at the point. Basic Shapes are held to it too. The seven stencils of the first batches: the masters of the
+    // second batch are held to the catalogue's own check of their points (`catalogue_tests.rs`), which reads the outline and not the pixels: a dashed outline (a C4 boundary) can leave a gap where a point is,
+    // and so has a dashed stem (a lifeline's). The catalogue's invariants hold those masters to the points lying on the outline they draw.
+    for spec in stencils().iter().filter(|s| s.default_open).flat_map(|s| s.masters()) {
         let (s, id) = dropped(spec);
         let r = render(&s);
         assert!(r.skipped.is_empty(), "{}: {:?}", spec.name, r.skipped);
+        // A master drawn with a dashed or dotted line (BPMN's Group is dash-dot) has gaps in its stroke, and a point may stand in one: the catalogue's check (every point within 0.001 inch of a path)
+        // holds it to its outline, and the pixels are looked at for the solid ones.
+        let doc = s.document().unwrap();
+        let pattern = Resolver::new(doc)
+            .resolve(&sheet_of(doc, id), &CellAddr::direct("LinePattern"))
+            .and_then(|f| f.value.cell.and_then(|c| c.value.as_ref()).and_then(|v| v.number()));
+        if pattern.is_some_and(|n| n > 1.0) {
+            continue;
+        }
         for p in connection_points(s.document().unwrap(), 1, id) {
             assert!(ink_near(&r, (p.x, p.y)) > 0, "{}: connection point {} at ({:.3}, {:.3}) is not on the outline", spec.name, p.index, p.x, p.y);
         }

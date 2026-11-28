@@ -25,7 +25,7 @@ fn made() -> Session {
 }
 
 /// What the structure says of itself, the boxes and the ties of every shape, as one value to compare.
-fn state(s: &mut Session) -> Json {
+pub(crate) fn state(s: &mut Session) -> Json {
     let all: Vec<u32> = doc(s).pages.iter().find(|p| !p.background).unwrap().shapes.iter().map(|sh| sh.id).collect();
     // To six places: an `.odg` writes a length to six.
     let six = |v: f64| (v * 1.0e6).round() / 1.0e6;

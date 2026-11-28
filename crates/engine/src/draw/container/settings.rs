@@ -88,7 +88,7 @@ impl Settings {
         let number = |name: &str| sheet.as_ref().filter(|s| page.reader.is_set(s, &row(name))).map(|s| page.reader.addr_number(s, &row(name)));
         let style = sheet.as_ref().and_then(|s| {
             let found = page.reader.resolver().resolve(s, &row(STYLE_ROW))?;
-            let text = found.value.cell.and_then(|c| c.value.as_ref())?.text().trim().to_owned();
+            let text = page.reader.worked().text_of(s, &row(STYLE_ROW), &found)?.trim().to_owned();
             find_style(&text).map(|style| style.id.to_owned())
         });
         Ok(Settings {
@@ -106,8 +106,7 @@ impl Settings {
 pub(super) fn put(doc: &mut Document, page: u32, at: usize, name: &str, cell: Cell) -> Result<(), Problem> {
     let index = u32::try_from(at).map_err(|_| Problem::failed("a shape's place is out of range"))?;
     let shape = shape_mut(doc, page, &[index]).ok_or_else(|| Problem::failed("a shape went away"))?;
-    let sheet = std::sync::Arc::make_mut(&mut shape.sheet);
-    sheet.set_cell(&row(name), cell).map_err(|e| Problem::failed(e.to_string()))?;
+    shape.counted_sheet().set_cell(&row(name), cell).map_err(|e| Problem::failed(e.to_string()))?;
     Ok(())
 }
 

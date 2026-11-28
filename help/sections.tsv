@@ -1,0 +1,5 @@
+# The sections of the help home: section <TAB> topic id, in the order the home shows them. A section is shown with the topics
+# of its rows, in the order of the rows. The title of a section is a string of the window, so it is translated with the window.
+# A topic that is in no row must say `unlisted: yes` in its header.
+Get started	use-help
+Get help	get-help

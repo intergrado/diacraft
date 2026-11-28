@@ -40,10 +40,11 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_doc::{
-    CellAddr, CellEdit, CellName, Document, EffectiveRow, MAX_SHAPE_DEPTH, MAX_SHAPES_PER_PAGE, Owner, Resolved, Resolver, RowKey, SectionKey, Shape,
-    ShapeList, ShapeRef, SheetRef, Value,
+    CellAddr, CellEdit, CellName, Document, EffectiveRow, FormulaSlot, MAX_SHAPE_DEPTH, MAX_SHAPES_PER_PAGE, Owner, Resolver, RowKey, SectionKey,
+    Shape, ShapeList, ShapeRef, SheetRef, Value,
 };
 
+use super::worked::{Answer, RowView, Worked};
 use super::{Problem, delete_shapes, page_mut, require_page, write_cells};
 use crate::formatting::Rgb;
 
@@ -110,30 +111,29 @@ fn too_many(n: usize) -> Problem {
     Problem::failed(format!("the page has {n} layers, and at most {MAX_LAYERS} are read or made"))
 }
 
-fn cell_of<'r, 'a>(cells: &'r [(CellName, Resolved<'a>)], name: &str) -> Option<&'r Resolved<'a>> {
-    cells.iter().find(|(n, _)| n.as_str() == name).map(|(_, r)| r)
+/// A flag: a cell that holds a number is set when it is not 0, and a missing cell reads `default`. A cell that holds a formula and no saved value is what the
+/// formula works out to: a layer whose `Visible` is the formula `0` is hidden, as the picture has it, and not as a cell that holds nothing (shown).
+fn flag(row: &RowView<'_, '_>, name: &str, default: bool) -> bool {
+    row.number(name).filter(|n| n.is_finite()).map_or(default, |n| n != 0.0)
 }
 
-fn number_of(cells: &[(CellName, Resolved<'_>)], name: &str) -> Option<f64> {
-    cell_of(cells, name)?.value.cell?.value.as_ref()?.number().filter(|n| n.is_finite())
-}
-
-fn text_of(cells: &[(CellName, Resolved<'_>)], name: &str) -> Option<String> {
-    Some(cell_of(cells, name)?.value.cell?.value.as_ref()?.text().to_owned())
-}
-
-/// A flag: a cell that holds a number is set when it is not 0, and a missing cell reads `default`.
-fn flag_of(cells: &[(CellName, Resolved<'_>)], name: &str, default: bool) -> bool {
-    number_of(cells, name).map_or(default, |n| n != 0.0)
-}
-
-/// The colour a `Color` cell gives: `#RRGGBB`, or an index of the document's colour table, and none for 255 (the form is tested first, since `#0000ff` is 255 as a value).
-fn colour_of(doc: &Document, cells: &[(CellName, Resolved<'_>)]) -> Option<(u8, u8, u8)> {
-    let value = cell_of(cells, "Color")?.value.cell?.value.as_ref()?;
-    if value.text().starts_with('#') {
-        return Rgb::parse(value.text()).map(|c| (c.0, c.1, c.2));
+/// The colour a `Color` cell gives: `#RRGGBB`, or an index of the document's colour table, and none for 255 (the form is tested first, since `#0000ff` is 255 as a value). A
+/// cell that holds a formula and no saved value is what the formula works out to: `RGB(255,0,0)` is that colour, and a number is an index.
+fn colour_of(doc: &Document, sheet: &SheetRef, worked: &Worked<'_>, row: &RowView<'_, '_>) -> Option<(u8, u8, u8)> {
+    let found = row.found("Color")?;
+    if found.holds_unsaved_formula() {
+        let addr = CellAddr { section: Some(key()), row: Some(row.key().clone()), cell: CellName::new("Color") };
+        match worked.answer(sheet, &addr) {
+            Some(Answer::Colour(r, g, b)) => return Some((r, g, b)),
+            Some(Answer::Empty) => return None,
+            _ => {}
+        }
     }
-    let n = value.number().filter(|n| n.is_finite())?;
+    let text = row.text("Color")?;
+    if text.starts_with('#') {
+        return Rgb::parse(&text).map(|c| (c.0, c.1, c.2));
+    }
+    let n = row.number("Color").filter(|n| n.is_finite())?;
     if n == 255.0 {
         return None;
     }
@@ -153,6 +153,7 @@ fn row_ix(row: &EffectiveRow<'_>) -> Option<u32> {
 pub fn read_layers(doc: &Document, page: u32) -> Result<Vec<Layer>, Problem> {
     require_page(doc, page)?;
     let res = Resolver::new(doc);
+    let worked = Worked::new(doc);
     let sheet = SheetRef::Page(page);
     let rows = match res.effective_rows_within(&sheet, &key(), MAX_LAYERS) {
         None => return Ok(Vec::new()),
@@ -162,25 +163,26 @@ pub fn read_layers(doc: &Document, page: u32) -> Result<Vec<Layer>, Problem> {
     let mut out = Vec::with_capacity(rows.len());
     for row in &rows {
         let Some(ix) = row_ix(row) else { continue };
-        let cells = &row.cells;
-        let name = text_of(cells, "Name").unwrap_or_default();
-        let status = number_of(cells, "Status").unwrap_or(0.0);
+        let section = key();
+        let look = worked.row(&sheet, &section, row);
+        let name = look.text("Name").unwrap_or_default();
+        let status = look.number("Status").unwrap_or(0.0);
         if (status == 1.0 || status == 2.0) && name.is_empty() {
             continue;
         }
-        let name_univ = text_of(cells, "NameUniv").unwrap_or_default();
+        let name_univ = look.text("NameUniv").unwrap_or_default();
         out.push(Layer {
             ix,
             name,
             name_univ,
-            visible: flag_of(cells, "Visible", true),
-            print: flag_of(cells, "Print", true),
-            active: flag_of(cells, "Active", false),
-            lock: flag_of(cells, "Lock", false),
-            snap: flag_of(cells, "Snap", true),
-            glue: flag_of(cells, "Glue", true),
-            colour: colour_of(doc, cells),
-            transparency: number_of(cells, "ColorTrans").unwrap_or(0.0).clamp(0.0, 1.0),
+            visible: flag(&look, "Visible", true),
+            print: flag(&look, "Print", true),
+            active: flag(&look, "Active", false),
+            lock: flag(&look, "Lock", false),
+            snap: flag(&look, "Snap", true),
+            glue: flag(&look, "Glue", true),
+            colour: colour_of(doc, &sheet, &worked, &look),
+            transparency: look.number("ColorTrans").unwrap_or(0.0).clamp(0.0, 1.0),
             shapes: 0,
         });
     }
@@ -249,6 +251,27 @@ pub fn shape_layers_charged(shape: &Shape, budget: &mut MemberBudget) -> Result<
     }
 }
 
+/// [`shape_layers_charged`] for a shape whose `LayerMember` cell may be a formula and no saved value: that is the list the formula works out to (a text, or a
+/// number for a shape on one layer), as the other cells of the picture are read. `sheet` is the shape's address, which the formula is worked out on, **made only when the cell needs it**.
+/// A formula that gives none of those is no list: the shape is on no layer, which is the saved reading, since the list is the shape's own cell and no style or master gives one
+/// (nothing stands in for it). The text of an answer is read through [`read_members`], bounded and charged like any other.
+pub fn shape_layers_worked(
+    worked: &Worked<'_>,
+    sheet: impl FnOnce() -> SheetRef,
+    shape: &Shape,
+    budget: &mut MemberBudget,
+) -> Result<Vec<u32>, Problem> {
+    let Some(cell) = shape.sheet.cell("LayerMember") else { return Ok(Vec::new()) };
+    if cell.value.is_none() && matches!(cell.formula, FormulaSlot::Local(_)) {
+        return match worked.answer(&sheet(), &CellAddr::direct("LayerMember")) {
+            Some(Answer::Text(text)) => read_members(&text, budget),
+            Some(Answer::Number(n)) => read_members(&n.to_string(), budget),
+            _ => Ok(Vec::new()),
+        };
+    }
+    shape_layers_charged(shape, budget)
+}
+
 /// [`shape_layers_charged`] for one shape on its own: a text over [`MAX_MEMBER_BYTES`] is read as on no layer.
 pub fn shape_layers(shape: &Shape) -> Vec<u32> {
     shape_layers_charged(shape, &mut MemberBudget::default()).unwrap_or_default()
@@ -271,6 +294,7 @@ struct Walk {
 fn walk_members(doc: &Document, page: u32, keep_paths: bool) -> Result<Walk, Problem> {
     let top = &doc.page(page).ok_or_else(|| Problem::bad(format!("there is no page {page}")))?.shapes;
     let mut out = Walk { listed: Vec::new(), cost: MemberBudget::default() };
+    let worked = Worked::new(doc);
     let mut stack: Vec<(&ShapeList, usize)> = vec![(top, 0)];
     let mut path: Vec<u32> = Vec::new();
     let mut count = 0usize;
@@ -289,12 +313,12 @@ fn walk_members(doc: &Document, page: u32, keep_paths: bool) -> Result<Walk, Pro
             return Err(Problem::failed(format!("a page holds at most {MAX_SHAPES_PER_PAGE} shapes")));
         }
         let depth = stack.len();
-        if keep_paths {
-            path.truncate(depth.saturating_sub(1));
-            path.push(u32::try_from(at).unwrap_or(u32::MAX));
-        }
+        // The path is kept as the walk goes (a step for each level, not for each shape): a list that is a formula is worked out on the shape's own address.
+        path.truncate(depth.saturating_sub(1));
+        path.push(u32::try_from(at).unwrap_or(u32::MAX));
         if shape.sheet.cell("LayerMember").is_some() && !shape.del {
-            let list = shape_layers_charged(shape, &mut out.cost)?;
+            let list =
+                shape_layers_worked(&worked, || SheetRef::Shape(ShapeRef { owner: Owner::Page(page), path: path.clone() }), shape, &mut out.cost)?;
             let kept = if keep_paths {
                 kept_steps = kept_steps.saturating_add(path.len());
                 if kept_steps > MAX_PATH_STEPS {
@@ -396,9 +420,11 @@ pub fn first_locked(doc: &Document, page: u32, ids: &[u32]) -> Result<Option<(u3
     let wanted: HashSet<u32> = ids.iter().copied().collect();
     let found = super::scan::scan(doc, page, &wanted)?.found;
     let mut budget = MemberBudget::default();
+    let worked = Worked::new(doc);
     for id in ids {
-        let Some(shape) = found.get(&id).and_then(|at| doc.shape(at)) else { continue };
-        if let Some(layer) = shape_layers_charged(shape, &mut budget)?.iter().find_map(|ix| locked.get(ix)) {
+        let Some(at) = found.get(&id) else { continue };
+        let Some(shape) = doc.shape(at) else { continue };
+        if let Some(layer) = shape_layers_worked(&worked, || SheetRef::Shape(at.clone()), shape, &mut budget)?.iter().find_map(|ix| locked.get(ix)) {
             return Ok(Some((id, (*layer).clone())));
         }
     }
@@ -860,6 +886,7 @@ pub fn assign_layers(doc: &mut Document, page: u32, ids: &[u32], layers: &[u32],
     let mut writes: Vec<(SheetRef, CellAddr, CellEdit)> = Vec::new();
     // Every list the call reads, the members of groups too, is charged to one budget.
     let mut budget = MemberBudget::default();
+    let worked = Worked::new(doc);
     for (_, at) in &outer {
         let paths = if preserve_members { vec![at.path.clone()] } else { subtree_paths(doc, at) };
         if paths.len() > MAX_SHAPES_PER_PAGE {
@@ -867,7 +894,8 @@ pub fn assign_layers(doc: &mut Document, page: u32, ids: &[u32], layers: &[u32],
         }
         for path in paths {
             let Some(shape) = shape_at(doc, page, &path) else { continue };
-            let held: BTreeSet<u32> = shape_layers_charged(shape, &mut budget)?.into_iter().collect();
+            let sheet = || SheetRef::Shape(ShapeRef { owner: Owner::Page(page), path: path.clone() });
+            let held: BTreeSet<u32> = shape_layers_worked(&worked, sheet, shape, &mut budget)?.into_iter().collect();
             let next: BTreeSet<u32> = match mode {
                 Mode::Replace => wanted.clone(),
                 Mode::Add => held.union(&wanted).copied().collect(),
@@ -995,7 +1023,7 @@ pub fn delete_layers(doc: &mut Document, page: u32, which: &[u32], delete_shapes
         let page_part = page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?;
         let sheet = Arc::make_mut(&mut page_part.sheet);
         let section = sheet.section_mut(&key())?;
-        section.rows.retain(|row| row.ix.is_none_or(|ix| !gone.contains(&ix)));
+        section.retain_rows(|row| row.ix.is_none_or(|ix| !gone.contains(&ix)));
         for row in section.rows.iter_mut() {
             if let Some(ix) = row.ix
                 && let Some(moved) = renumber(ix)

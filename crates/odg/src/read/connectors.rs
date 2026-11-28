@@ -473,6 +473,36 @@ impl Place {
         };
         (snap((dx * c + dy * s) * fx), snap((-dx * s + dy * c) * fy))
     }
+
+    /// **The inverse of [`Place::local`] and of how [`placed`] reads LibreOffice's own form** (for the writer of a `draw:glue-point`): a point of the shape's own frame
+    /// (`x` and `y` inches from its bottom left, y up) as the place LibreOffice reads it at, a share of the box on the page of the shape of `size` from the box's centre, `x` right and `y`
+    /// **down** the page (10 cm of `svg:x` and `svg:y` is the whole box). Forward through the mirrors and then the turn (the reader undoes the turn and then the mirrors); the box is
+    /// [`Place::extent`]'s. `None` for a box with no width or height, or a place that is no number.
+    pub(crate) fn page_share(&self, (x, y): (f64, f64), size: (f64, f64)) -> Option<(f64, f64)> {
+        let (s, c) = self.sin_cos();
+        let (fx, fy) = (if self.flip.0 { -1.0 } else { 1.0 }, if self.flip.1 { -1.0 } else { 1.0 });
+        // About the frame's centre, mirrored: the reader's `local` ends with the mirrors, so the page's offset is found from the local one with them undone and the turn put on.
+        let (ax, ay) = ((x - size.0 / 2.0) * fx, (y - size.1 / 2.0) * fy);
+        let (px, py) = (ax * c - ay * s, ax * s + ay * c);
+        let e = self.extent(size);
+        let (bw, bh) = (e.right.plus(e.left.times(-1.0)).at(size), e.top.plus(e.bottom.times(-1.0)).at(size));
+        let (mx, my) = (e.mid_x().at(size), e.mid_y().at(size));
+        let share = ((px - mx) / bw, -(py - my) / bh);
+        (bw > 0.0 && bh > 0.0 && share.0.is_finite() && share.1.is_finite()).then_some(share)
+    }
+
+    /// A direction of the shape's own frame (y up) as the page's: the inverse of [`Place::local_direction`], forward through the mirrors and then the turn. The turn's sine and cosine are
+    /// the reader's, with what is past twelve places left out, so a quarter turn gives an axis exactly.
+    pub(crate) fn page_direction(&self, (dx, dy): (f64, f64)) -> (f64, f64) {
+        let (s, c) = self.sin_cos();
+        let (fx, fy) = (if self.flip.0 { -1.0 } else { 1.0 }, if self.flip.1 { -1.0 } else { 1.0 });
+        let (ax, ay) = (dx * fx, dy * fy);
+        let snap = |v: f64| {
+            let r = (v * 1.0e12).round() / 1.0e12;
+            if r.is_finite() && r != 0.0 { r } else { 0.0 }
+        };
+        (snap(ax * c - ay * s), snap(ax * s + ay * c))
+    }
 }
 
 /// A length on a shape of `w` by `h` (inches) as a sum `Width*a+Height*b+c` (inches): what a glue point's coordinate in the model is, as a formula, so that a resize
@@ -857,4 +887,77 @@ fn aligned(word: &str) -> (Side, Side) {
         Side::Middle
     };
     (x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The turns, mirrors and boxes a shape of the file can have, with the sizes the checks use.
+    fn places() -> Vec<(Place, (f64, f64))> {
+        let mut out = Vec::new();
+        for degrees in [0.0_f64, 30.0, 45.0, 90.0, 135.0, 180.0, 270.0, -60.0, 359.0] {
+            for flip in [(false, false), (true, false), (false, true), (true, true)] {
+                for boxed in [Boxed::Frame, Boxed::Ellipse] {
+                    for size in [(3.0, 2.0), (1.5, 4.0), (2.0, 2.0)] {
+                        out.push((Place { angle: degrees.to_radians(), flip, boxed }, size));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// **The writer's place is read back as the point by the reader's own mapping**: a point of the shape's frame as [`Place::page_share`] puts it, written as LibreOffice's own
+    /// form (10 cm of a length for the whole box) and read by [`placed`], is the same point of the frame, for every turn, mirror and box.
+    #[test]
+    fn a_point_placed_on_the_page_is_read_back_as_the_same_point_of_the_frame() {
+        for (place, size) in places() {
+            for (x, y) in [(0.0, 0.0), (1.0, 0.0), (0.5, 1.0), (0.25, 0.75), (0.9, 0.1), (0.0, 0.5), (1.0, 1.0), (1.4, -0.2)] {
+                let local = (x * size.0, y * size.1);
+                let (sx, sy) = place.page_share(local, size).expect("a box with a size");
+                let (gx, gy) = placed(place, size, (sx * 10_000.0, sy * 10_000.0), None);
+                let (rx, ry) = (gx.at(size), gy.at(size));
+                assert!(
+                    (rx - local.0).abs() < 1e-9 && (ry - local.1).abs() < 1e-9,
+                    "{place:?} {size:?}: ({x}, {y}) came back as ({rx}, {ry}) of {local:?}"
+                );
+            }
+        }
+    }
+
+    /// A way out of the frame as [`Place::page_direction`] puts it is read back by [`Place::local_direction`] as the same way.
+    #[test]
+    fn a_direction_placed_on_the_page_is_read_back_as_the_same_direction_of_the_frame() {
+        for (place, _) in places() {
+            for way in [(0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (0.6, -0.8)] {
+                let page = place.page_direction(way);
+                let back = place.local_direction(page);
+                assert!(
+                    (back.0 - way.0).abs() < 1e-9 && (back.1 - way.1).abs() < 1e-9,
+                    "{place:?}: {way:?} went out as {page:?} and came back as {back:?}"
+                );
+            }
+        }
+    }
+
+    /// A quarter turn gives the way out along an axis of the page exactly, so that the writer can say `left`, `right`, `up` or `down`; any other turn gives none of the four.
+    #[test]
+    fn a_quarter_turn_puts_the_way_out_on_an_axis_exactly() {
+        let at = |degrees: f64, flip: (bool, bool)| Place { angle: degrees.to_radians(), flip, boxed: Boxed::Frame }.page_direction((0.0, 1.0));
+        assert_eq!(at(90.0, (false, false)), (-1.0, 0.0), "up, turned a quarter counterclockwise, is left");
+        assert_eq!(at(180.0, (false, false)), (0.0, -1.0));
+        assert_eq!(at(270.0, (false, false)), (1.0, 0.0));
+        assert_eq!(at(0.0, (false, true)), (0.0, -1.0), "mirrored top to bottom, up is down");
+        let slant = at(30.0, (false, false));
+        assert!(slant.0 != 0.0 && slant.1 != 0.0, "{slant:?}");
+    }
+
+    /// A box with no width or height has no place to say.
+    #[test]
+    fn a_frame_with_no_size_has_no_place() {
+        let place = Place { angle: 0.5, flip: (false, false), boxed: Boxed::Frame };
+        assert_eq!(place.page_share((0.0, 0.0), (0.0, 0.0)), None);
+        assert_eq!(place.page_share((f64::NAN, 0.5), (2.0, 1.0)), None);
+    }
 }

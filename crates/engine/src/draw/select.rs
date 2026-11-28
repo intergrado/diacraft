@@ -226,10 +226,10 @@ fn roles_of(reader: &Reader<'_>, sheet: &SheetRef) -> (bool, bool) {
     (connector, container)
 }
 
-/// The text of a cell, found by inheritance.
+/// The text of a cell, found by inheritance: a cell that holds a formula and no saved value is what the formula works out to, as the picture reads it.
 fn text_of(reader: &Reader<'_>, sheet: &SheetRef, addr: &CellAddr) -> Option<String> {
     let found = reader.resolver().resolve(sheet, addr)?;
-    found.value.cell.and_then(|c| c.value.as_ref()).map(|v| v.text().to_owned())
+    reader.worked().text_of(sheet, addr, &found)
 }
 
 /// The numbers of the layers a query names, which the page must have.

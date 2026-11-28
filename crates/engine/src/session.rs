@@ -124,6 +124,9 @@ pub struct Session {
     /// command's answer says them. Cleared when a command starts.
     refit_left: Vec<crate::draw::Left>,
     refit_unlisted: usize,
+    /// The `SETF` calls the commits of the command that is running dropped past their caps (`setf_note.rs`): the command's answer says how many, and in words.
+    /// Cleared when a command starts.
+    setf_dropped: u64,
     /// The pages read for the snap, one for each page, by revision (`snap/reads.rs`): not part of the document. An edit moves the revision, and the read is then not found.
     reads: PageReads,
     /// What the model of the open document and its history may hold as an edit leaves it ([`MODEL_MOST`]; a test sets another, to see what is done at the figure).
@@ -145,6 +148,9 @@ pub struct Session {
     /// (`calc_index.rs`). Not part of the document or its history: the commits of an edit use it while the edit runs, and what it holds is in the session's hold
     /// on the process's ledger ([`Session::publish_held`]).
     calc_index: crate::calc_index::KeptIndex,
+    /// The routing scene of each page the session has routed on, kept from one edit to the next and put right by pointer (`draw/route_scene.rs`). Not part of the document or its
+    /// history: what the edit's routings use while it runs, counted in the session's hold on the process's ledger ([`Session::publish_held`]), let go with the drawing.
+    route_scenes: crate::draw::route_scene::KeptScenes,
     /// The name and initials new comments are given (`comment.author`): the session's, not the drawing's.
     comment_author: (String, String),
 }
@@ -168,6 +174,7 @@ impl Session {
             stencils: OpenedStencils::new(),
             refit_left: Vec::new(),
             refit_unlisted: 0,
+            setf_dropped: 0,
             reads: PageReads::default(),
             model_most: MODEL_MOST,
             shadow: None,
@@ -176,6 +183,7 @@ impl Session {
             clock: None,
             stamp_work: std::sync::Mutex::new(StampWork::default()),
             calc_index: crate::calc_index::KeptIndex::default(),
+            route_scenes: crate::draw::route_scene::KeptScenes::default(),
             comment_author: ("Author".to_owned(), "A".to_owned()),
         }
     }
@@ -304,8 +312,10 @@ impl Session {
         };
         self.refit_left.clear();
         self.refit_unlisted = 0;
+        self.setf_dropped = 0;
         let mut value = self.run_guarded(spec, &params)?;
         self.say_groups_left(&mut value);
+        self.say_setf_dropped(&mut value);
         if spec.journal {
             self.record(spec.id, params);
         }
@@ -328,6 +338,22 @@ impl Session {
         }
     }
 
+    /// Adds to the answer of the command that ran the `SETF` calls its edits dropped past the caps ("dropped with a note"): `setf_dropped`, how many, and the words
+    /// ([`crate::setf_note::dropped_words`]) at the end of its `notes`. An answer that is not an object, and a command that dropped none, say nothing.
+    fn say_setf_dropped(&mut self, value: &mut Value) {
+        let dropped = std::mem::take(&mut self.setf_dropped);
+        if dropped == 0 {
+            return;
+        }
+        if let Value::Object(map) = value {
+            map.insert("setf_dropped".to_owned(), Value::from(dropped));
+            let entry = map.entry("notes").or_insert_with(|| Value::Array(Vec::new()));
+            if let Value::Array(list) = entry {
+                list.push(Value::String(crate::setf_note::dropped_words(dropped)));
+            }
+        }
+    }
+
     /// The params `spec` is run with ([`cmd::checked_params`]), if it is enabled.
     fn check<'a>(&self, spec: &CommandSpec, params: &'a Value) -> Result<Cow<'a, Value>> {
         let params = cmd::checked_params(spec, params)?;
@@ -342,7 +368,9 @@ impl Session {
     ///
     /// On `Ok` the edited document becomes the document, the revision moves, and the step is recorded:
     /// one step for this edit, or none inside an undo group (a batch), which records one for all its
-    /// edits. On `Err`, or when `f` panics, nothing changes: the edit is made on a copy.
+    /// edits. **An edit that leaves the drawing as it was is no change** (the copy equals the document, whatever `f` said): nothing is
+    /// recorded, the revision does not move and the drawing is not made unsaved, and a batch whose edits net nothing is taken back
+    /// the same way. On `Err`, or when `f` panics, nothing changes: the edit is made on a copy.
     ///
     /// The document is not checked as a whole afterwards. An imported document may hold a page name
     /// that would not pass, and an audit per edit would stop every other edit on it (gaps F2); a name
@@ -376,12 +404,28 @@ impl Session {
         let mut next = Document::clone(&before);
         // The commits the edit makes use the session's index of the readers of the page's cells, until the edit is over.
         let _index_in_use = crate::calc_index::InUse::enter(&self.calc_index);
+        // The routings the edit makes use the session's scene of the page they route on.
+        let _scenes_in_use = crate::draw::route_scene::InUse::enter(&self.route_scenes);
         // The routings the edit makes share one budget of tries, and what they leave is said in the command's answer.
         let routes = crate::draw::EditRoutes::enter();
+        // The `SETF` calls the edit's commits drop past the caps are counted for the command's answer.
+        let setf = crate::setf_note::EditSetf::enter();
         // The reads of containers the edit makes (a move's followers and membership, a fit) share one budget of work (`draw/container/page.rs`).
         let _container_work = crate::draw::container::EditWork::enter();
-        let (value, changed) = f(&mut next)?;
+        let (value, changed) = match f(&mut next) {
+            Ok(done) => done,
+            Err(refused) => {
+                // The edit made on the copy is thrown away, and a scene it was put right with is the drawing's again (`KeptScenes::sync`).
+                self.route_scenes.sync(&before);
+                return Err(refused);
+            }
+        };
+        // **An edit that leaves the drawing as it was is no change, whatever it says**: a move by nothing, an end glued to the place it is at, a format to the value it holds
+        // and the rest said they changed the drawing (they wrote the cells they were asked to write), recorded a step of the history, moved the revision and made the drawing unsaved,
+        // for a drawing that was the same. The copy is compared with the document it was made from ([`same_drawing`]).
+        let changed = changed && !same_drawing(&next, &before);
         if !changed {
+            self.route_scenes.sync(&before);
             return Ok(value);
         }
         let (left, unlisted) = routes.take_left();
@@ -395,6 +439,8 @@ impl Session {
         let room = crate::draw::MAX_LEFT_LISTED.saturating_sub(self.refit_left.len());
         self.refit_unlisted = self.refit_unlisted.saturating_add(refit.unlisted).saturating_add(refit.left.len().saturating_sub(room));
         self.refit_left.extend(refit.left.into_iter().take(room));
+        // The refit works cells out too, so the calls dropped are taken after it.
+        self.setf_dropped = self.setf_dropped.saturating_add(setf.take());
         // What the session holds, with the edit: the count is kept, and the edit adds what it copied. Past the figure the oldest undo steps make room, and an edit that cannot be
         // made to fit is refused with nothing changed ([`held::plan`]).
         let plan = match self.plan_edit(label, figure, &before, &next, read.as_ref()) {
@@ -525,6 +571,18 @@ impl Session {
         self.calc_index.held_bytes()
     }
 
+    /// What the session keeps of the routing scenes of the pages its edits have routed on, as accounted (`draw/route_scene.rs`): `0` until an edit routes. It is in the session's hold on
+    /// the process's ledger, beside [`Session::published_held`] and not in it.
+    pub fn route_scene_held(&self) -> u64 {
+        self.route_scenes.held_bytes()
+    }
+
+    /// How many pages the session keeps a routing scene of, for the tests.
+    #[cfg(test)]
+    pub(crate) fn kept_scenes(&self) -> usize {
+        self.route_scenes.len()
+    }
+
     /// What the session has told the process that it holds: [`Session::model_held`] as it was after the last edit, undo, redo, group, failed command, open or save, `0` with no
     /// document. The tests hold it to the count after every one of them; the process-wide handle of reads the same figure.
     pub fn published_held(&self) -> u64 {
@@ -541,7 +599,9 @@ impl Session {
         let (opened, kept_by_a_save) = self.state.as_ref().map_or((0, 0), |s| (s.opened, s.baseline_extra));
         // The readers of the page's cells that `calc` keeps for the next edit are held by the session as well, beside the model.
         let index = self.calc_index.held_bytes();
-        self.hold.set(self.published.saturating_sub(opened).saturating_sub(kept_by_a_save).saturating_add(index));
+        // So are the routing scenes of the pages the edits have routed on.
+        let scenes = self.route_scenes.held_bytes();
+        self.hold.set(self.published.saturating_sub(opened).saturating_sub(kept_by_a_save).saturating_add(index).saturating_add(scenes));
     }
 
     /// What the rest of the process holds besides this session: the process's total ([`crate::memory::held`]) less this session's hold, its file's and its stencils' (a stencil is part of this session: it was never part of the figure). The edit guard keeps the
@@ -620,7 +680,8 @@ impl Session {
     }
 
     /// **A save across to VSDX left something out of the file, and the drawing becomes what the file reads as with what was left out put back on it** (`across::dropped`): `adopted`
-    /// is that drawing, and `baseline` what the next save compares it with (the drawing as the writer is given it, which is not what the file reads as). It is **no undo step**.
+    /// is that drawing, and `baseline` what the next save compares it with (the drawing as the writer is given it, which is not what the file reads as). It is **no undo step**. It is also
+    /// the drawing of a Save As or a first save whose pages were put in the order a VSDX file lists them (background pages first): the drawing is that one, in that order.
     pub(crate) fn adopt_saved_with(&mut self, adopted: Document, source: OpenFile, baseline: Document) {
         let adopted = Arc::new(adopted);
         if let Some(state) = self.state.as_mut() {
@@ -873,6 +934,9 @@ impl Session {
     fn run_guarded(&mut self, spec: &CommandSpec, params: &Value) -> Result<Value> {
         self.shadow = Some(Snapshot { state: self.state.clone(), revision: self.revision, stencils: self.stencils.clone() });
         self.depth = 1;
+        // The readers the command makes (the commands' own, the snap's, the format planners') take the steps for the cells that hold a formula and no saved value from one budget, the
+        // command's, and not each from a budget of its own (`draw/worked.rs`).
+        let _worked = crate::draw::worked::WorkedBudget::new(crate::draw::worked::WORKED_STEPS).enter();
         let outcome = guard::catch_panic(|| (spec.run)(self, params));
         let snapshot = self.shadow.take();
         // Whether the command ended or unwound, no command is running now. (No undo group is open
@@ -901,6 +965,10 @@ impl Session {
         self.state = snapshot.state;
         self.revision = snapshot.revision;
         self.stencils = snapshot.stencils;
+        // A routing scene the command put right with a document that is gone is the drawing's again.
+        if let Some(state) = &self.state {
+            self.route_scenes.sync(&state.doc);
+        }
         self.publish_held();
     }
 
@@ -927,6 +995,8 @@ impl Session {
         // The history's limit of bytes may have let a step go as it took the other direction's: what that frees is taken from the count.
         let cut = state.history.take_cut();
         Session::credit_history_cut(state, None, &mut self.shadow, cut, false);
+        // The routing scenes are put right with the document gone back to or on to, and the edit after it is not told of what the step did.
+        self.route_scenes.sync(&state.doc);
         self.revision = self.revision.saturating_add(1);
         // The documents the session holds are the same after an undo and a redo, and the count with them: told to the process all the same, at each of them.
         self.publish_held();
@@ -941,6 +1011,8 @@ impl Session {
         let doc = Arc::new(doc);
         // What `calc` kept of the readers of the drawing that is gone is of no use to this one.
         self.calc_index.clear();
+        // Nor did the routing scenes of its pages.
+        self.route_scenes.clear();
         // The drawing is counted whole once, as it is opened: no edit after it counts the drawing.
         let held = Held::of([&*doc]);
         self.state = Some(State {
@@ -1013,6 +1085,7 @@ impl Session {
         }
         let (before, held) = self.state.as_ref().map(|s| (Arc::clone(&s.doc), s.held)).ok_or_else(|| failed(label, "no document open"))?;
         let (revision, depth) = (self.revision, self.depth);
+        let undo_start = self.state.as_ref().map_or(0, |s| s.history.undo_len());
         self.group = Some(Group { edited: false, start: Arc::clone(&before), held });
         let outcome = catch_unwind(AssertUnwindSafe(|| f(self)));
         let group = self.group.take();
@@ -1021,11 +1094,22 @@ impl Session {
             Err(payload) => {
                 // The commands the group ran were cut short, so the depth they raised is still up.
                 self.depth = depth;
-                self.undo_group(before, revision, group.map(|g| g.held));
+                self.undo_group(before, revision, group.map(|g| g.held), false);
                 resume_unwind(payload)
             }
         };
         let read = self.kept_read();
+        // A group whose edits left the drawing as it was (a cell written and written back, a shape moved and moved back) is no change either: it is taken back, with its revision, and
+        // records no step (for the cells of the sheet commands).
+        if result.is_ok() && group.as_ref().is_some_and(|g| g.edited) && self.state.as_ref().is_some_and(|state| same_drawing(&state.doc, &before)) {
+            // The count is the one the group began with, exactly, when no undo step was let go of to make room for its edits (they hold nothing now that the document before is back).
+            let kept = self.state.as_mut().is_some_and(|state| {
+                state.note_read(read.is_some());
+                state.history.undo_len() >= undo_start
+            });
+            self.undo_group(before, revision, group.map(|g| g.held), kept);
+            return result;
+        }
         match (result, self.state.as_mut()) {
             (Ok(value), Some(state)) => {
                 state.note_read(read.is_some());
@@ -1050,21 +1134,24 @@ impl Session {
             }
             (Ok(_), None) => Err(failed(label, "the document was closed while the group ran")),
             (Err(e), _) => {
-                self.undo_group(before, revision, group.map(|g| g.held));
+                self.undo_group(before, revision, group.map(|g| g.held), false);
                 Err(e)
             }
         }
     }
 
     /// Takes back a group's edits. They made no history steps, and undo, redo and a new document are
-    /// refused inside a group, so putting the document and the revision back is all it takes.
-    fn undo_group(&mut self, before: Arc<Document>, revision: u64, held: Option<Held>) {
+    /// refused inside a group, so putting the document and the revision back is all it takes. `exact` says that no undo step was let go of by the group's edits, so that the count
+    /// put back is exact; otherwise it is marked as one that may be more than what is held.
+    fn undo_group(&mut self, before: Arc<Document>, revision: u64, held: Option<Held>, exact: bool) {
         if let Some(state) = self.state.as_mut() {
             state.doc = before;
+            // The routing scenes the group's edits put right are the drawing's again.
+            self.route_scenes.sync(&state.doc);
             // What the group's edits freed and added is put back with the document. An edit of it may have let go of undo steps to make room (the figure), and those are gone, so
             // the count is the one before and may be more than what is held now.
             if let Some(held) = held {
-                state.held = Held { bytes: held.bytes, drifted: true, slack: held.slack };
+                state.held = Held { bytes: held.bytes, drifted: held.drifted || !exact, slack: held.slack };
             }
         }
         self.publish_held();
@@ -1075,6 +1162,14 @@ impl Session {
     pub(crate) fn in_group(&self) -> bool {
         self.group.is_some()
     }
+}
+
+/// Whether two documents are the same drawing: equal in every field of the model, by what they hold and not by which allocation. The lists of an edit's copy that the edit did not write to
+/// are the same allocations as the document's, and `SharedVec` takes a chunk it shares for the same without a look (a page's shapes, the pages, the masters, the styles), so the look is
+/// at what the edit copied: the chunk it wrote to, and the sheets and the small lists of the pages beside it. A number that is not a number (`NaN`) is not equal to itself, so a drawing that
+/// holds one is judged changed by an edit that wrote it again: the step is recorded, as it was before this rule, and nothing is lost.
+fn same_drawing(a: &Document, b: &Document) -> bool {
+    a == b
 }
 
 /// What the model of a drawing and its history may hold as an edit leaves it ([`EDIT_MODEL_BYTES`]): the count of [`held`].

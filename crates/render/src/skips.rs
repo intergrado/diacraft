@@ -38,8 +38,12 @@ pub enum SkipKind {
     TextBudget,
     /// The character budget for text was spent: this many text blocks were left out.
     TextCharBudget,
-    /// A text layout noted something (a face that stands in for another, more text than a layout takes, missing glyphs, ...).
+    /// A text layout noted something (more text than a layout takes, a face whose tables failed, ...). A face the file names that the machine lacks is [`SkipKind::FaceStandIn`].
     TextNote,
+    /// A face the file names is not on this machine, and a stand-in drew its text. The count is of text blocks; the first says which faces
+    /// and what drew each (`Skips::note_face`), so that the list in the window can name them: a file's text is drawn as the machine can, and **which machine** decides whether this
+    /// is said (a drawing made on one with Liberation Sans, opened on one without it).
+    FaceStandIn,
     /// Glyphs with no outline in any face (a box that is blank in some faces): the text may be invisible.
     MissingGlyphs,
     /// A block of text has more glyphs than one block draws: the rest are not drawn.
@@ -81,6 +85,9 @@ pub enum SkipKind {
     CustomPattern,
     /// A dash pattern so fine, or a path so long, that it would make too many dashes: drawn solid.
     DashesTooMany,
+    /// A `LinePattern` or a `FillPattern` that is a number outside the lists: a fraction, or a whole number no row of the table has.
+    /// The cell is kept; a line is drawn solid and a fill paints the foreground. (Not a custom pattern, 254: that has [`SkipKind::CustomPattern`].)
+    PatternOutsideTable,
     /// A line weight wider than the renderer strokes: drawn at the widest.
     StrokeClamped,
     /// A line end drawn by DiaCraft's own rule where no source gives its box or size: a number no source measures, in the box gives it,
@@ -93,7 +100,8 @@ pub enum SkipKind {
     /// `PatternFlags` lack 2), it has no geometry, it is past the caps of `limits::MAX_END_SECTIONS`, `MAX_END_ROWS`, `MAX_END_SHAPES` or `MAX_END_DEPTH`, or its box has no height. A master
     /// that is drawn as the line end it is is not counted.
     CustomLineEnd,
-    /// A compound line (double or triple) is drawn as bands of the weight.
+    /// A compound line (double or triple) whose bands carry a dash pattern or a line end: no source says how they behave, so each band takes the stroke's dashes and the end is drawn
+    /// once at the line's full size. A compound line with neither is drawn as its bands and is nothing to say.
     CompoundApproximate,
     /// A gradient direction drawn by an approximation (rectangular and path gradients).
     GradientApproximate,
@@ -101,6 +109,9 @@ pub enum SkipKind {
     ShadowApproximate,
     /// A value that came from the theme and which the theme could not answer: the root style's value stands.
     ThemeUnanswered,
+    /// A cell with a formula and no saved value that the frame's steps for such cells did not reach: it was read as it would have been read with no formula
+    /// Counted once for each cell asked after the steps ran out; the frame that kept nothing of it draws it from the default.
+    UnsavedUnanswered,
     /// A group nested deeper than the renderer walks: its members are not drawn.
     TooDeep,
     /// A link that leads nowhere (a master or style that is not there): the shape was drawn as if it had no link.
@@ -122,10 +133,25 @@ pub struct Skipped {
     pub first: String,
 }
 
+/// The most faces a [`SkipKind::FaceStandIn`] sample names, and the most characters of one face's name in it: a file can name a face by any number of characters.
+const MAX_FACES_NAMED: usize = 4;
+const MAX_FACE_NAME_CHARS: usize = 64;
+
 /// The collector of a frame.
 #[derive(Debug, Default)]
 pub(crate) struct Skips {
     map: BTreeMap<SkipKind, (usize, String)>,
+    /// The first faces a stand-in drew (the name asked for, the family that drew it), in the order they were met, each once.
+    faces: Vec<(String, String)>,
+    /// More faces than `faces` holds had a stand-in.
+    faces_more: bool,
+}
+
+/// `name` cut to [`MAX_FACE_NAME_CHARS`] characters, with an ellipsis if it was longer.
+fn cut_name(name: &str) -> String {
+    let mut chars = name.chars();
+    let kept: String = chars.by_ref().take(MAX_FACE_NAME_CHARS).filter(|c| !c.is_control()).collect();
+    if chars.next().is_some() { format!("{kept}\u{2026}") } else { kept }
 }
 
 impl Skips {
@@ -145,6 +171,36 @@ impl Skips {
                 self.map.insert(kind, (n, first()));
             }
         }
+    }
+
+    /// Notes that a text block was drawn by `used` in place of the face `requested`, which the machine lacks ([`SkipKind::FaceStandIn`]). The sample names up to four faces, each
+    /// once, with what drew it: `Liberation Sans (drawn in Ubuntu Light); Liberation Serif (drawn in Ubuntu Light)`, and `and more` after them when there were more.
+    pub(crate) fn note_face(&mut self, requested: &str, used: &str) {
+        self.note_n(SkipKind::FaceStandIn, 1, String::new);
+        let pair = (cut_name(requested), cut_name(used));
+        if self.faces.contains(&pair) {
+            return;
+        }
+        if self.faces.len() < MAX_FACES_NAMED {
+            self.faces.push(pair);
+        } else {
+            self.faces_more = true;
+        }
+    }
+
+    /// Notes a text block whose layout met more missing faces than it names ([`SkipKind::FaceStandIn`]): the names are not known, and the sample says there were more.
+    pub(crate) fn note_faces_unnamed(&mut self) {
+        self.note_n(SkipKind::FaceStandIn, 1, String::new);
+        self.faces_more = true;
+    }
+
+    /// The sample of [`SkipKind::FaceStandIn`], from the faces met.
+    fn faces_sample(&self) -> String {
+        let mut named: Vec<String> = self.faces.iter().map(|(asked, used)| format!("{asked} (drawn in {used})")).collect();
+        if self.faces_more {
+            named.push("and more".to_owned());
+        }
+        named.join("; ")
     }
 
     /// Counts `n` of a kind and says whether it is the first of that kind, whose sample the caller then sets with [`Skips::set_first`].
@@ -179,6 +235,17 @@ impl Skips {
                 }
             }
         }
+        for pair in later.faces {
+            if self.faces.contains(&pair) {
+                continue;
+            }
+            if self.faces.len() < MAX_FACES_NAMED {
+                self.faces.push(pair);
+            } else {
+                self.faces_more = true;
+            }
+        }
+        self.faces_more |= later.faces_more;
     }
 
     /// Whether anything of `kind` has been noted.
@@ -187,6 +254,10 @@ impl Skips {
     }
 
     pub(crate) fn into_list(self) -> Vec<Skipped> {
-        self.map.into_iter().map(|(kind, (count, first))| Skipped { kind, count, first }).collect()
+        let faces = self.faces_sample();
+        self.map
+            .into_iter()
+            .map(|(kind, (count, first))| Skipped { kind, count, first: if kind == SkipKind::FaceStandIn { faces.clone() } else { first } })
+            .collect()
     }
 }

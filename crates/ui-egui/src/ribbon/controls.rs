@@ -15,7 +15,7 @@ use crate::app::DiacraftApp;
 use crate::format::Pressed;
 use crate::icons;
 use crate::theme::{self, Tokens, size};
-use crate::widgets::{self, label_colour, paint_button_bg, text_width, tip, two_lines};
+use crate::widgets::{self, label_colour, menu_scroll, paint_button_bg, text_width, tip, two_lines};
 
 /// The height of the ribbon body, in points: the controls and the row of group labels under them.
 pub const BODY_H: f32 = 96.0;
@@ -89,6 +89,18 @@ pub fn ctl_enabled(app: &DiacraftApp, ctl: &Ctl) -> bool {
     if ctl.command == Some("window.shapesheet") {
         return app.sheet_open_verdict(ctl.args).is_ok();
     }
+    // The ShapeSheet's row, section and Editing controls: what the selection allows (`sheet/rows.rs`).
+    if let Some(verdict) = app.sheet_ctl_verdict(ctl.command, ctl.args) {
+        return verdict.is_ok();
+    }
+    // Edit Alt Text works on the shapes selected (its page form needs none: `window.altText {of: page}`).
+    if ctl.command == Some("window.altText") {
+        return app.alt_text_verdict(ctl.args).is_ok();
+    }
+    // The rows that double and halve connection points share one command and differ by what they do and where: each asks for its own (`edit/conn_edges.rs`).
+    if ctl.command == Some("window.connectionPointsDo") {
+        return app.connection_verdict_for(ctl.args).is_ok();
+    }
     ctl.command.is_some_and(|c| app.command_enabled(c).is_ok()) || ctl.items.iter().any(|i| ctl_enabled(app, i))
 }
 
@@ -96,6 +108,15 @@ pub fn ctl_enabled(app: &DiacraftApp, ctl: &Ctl) -> bool {
 fn reason_of(app: &DiacraftApp, ctl: &Ctl) -> Option<String> {
     if ctl.command == Some("window.shapesheet") {
         return app.sheet_open_verdict(ctl.args).err();
+    }
+    if let Some(verdict) = app.sheet_ctl_verdict(ctl.command, ctl.args) {
+        return verdict.err();
+    }
+    if ctl.command == Some("window.altText") {
+        return app.alt_text_verdict(ctl.args).err();
+    }
+    if ctl.command == Some("window.connectionPointsDo") {
+        return app.connection_verdict_for(ctl.args).err();
     }
     ctl.command
         .filter(|c| crate::commands::known(c))
@@ -105,25 +126,41 @@ fn reason_of(app: &DiacraftApp, ctl: &Ctl) -> Option<String> {
 
 /// The tooltip of a control: its caption, and for one that cannot be used the reason when its command gives one ("nothing is selected") and
 /// "not available yet" when it has no command.
-fn ctl_tip(app: &DiacraftApp, ctl: &Ctl, enabled: bool) -> String {
+fn ctl_tip(app: &DiacraftApp, ctx: &egui::Context, ctl: &Ctl, enabled: bool) -> String {
+    // A command whose key is shown (`shortcuts::KEY_SHOWN`) says it in its caption: `Reverse Ends (Ctrl+Alt+R)`.
+    let caption = captioned(ctx, ctl);
     if enabled {
         // Full Screen says how to leave it: the browser keeps Esc held for that, once the keyboard is locked (`page_host.rs`).
         if ctl.command == Some("window.fullScreen") {
-            return format!("{} (hold Esc to leave)", ctl.label);
+            return format!("{caption} (hold Esc to leave)");
         }
-        return ctl.label.to_owned();
+        return caption;
     }
     match reason_of(app, ctl) {
-        Some(reason) => format!("{} ({reason})", ctl.label),
-        None => tip(ctl.label, false),
+        Some(reason) => format!("{caption} ({reason})"),
+        None => tip(&caption, false),
+    }
+}
+
+/// The caption of a control, with its key after it when the command's key is one the window shows (`shortcuts::KEY_SHOWN`).
+fn captioned(ctx: &egui::Context, ctl: &Ctl) -> String {
+    match ctl.command.and_then(|command| crate::shortcuts::hint_for(ctx, command)) {
+        Some(key) => format!("{} ({key})", ctl.label),
+        None => ctl.label.to_owned(),
     }
 }
 
 /// The tooltip of a row of a menu that cannot be used now: the reason its command gives ("nothing is selected", the engine's words for a
 /// shape operation), and for a row with no command to give one, the ribbon's one wording for a control that is not built yet, `widgets::tip`: "Join (not
 /// available yet)", as a button of the ribbon says it. A row that works has none.
-pub(crate) fn menu_row_tip(app: &DiacraftApp, item: &Ctl) -> String {
-    reason_of(app, item).unwrap_or_else(|| tip(item.label, false))
+pub(crate) fn menu_row_tip(app: &DiacraftApp, ctx: &egui::Context, item: &Ctl) -> String {
+    let caption = captioned(ctx, item);
+    match reason_of(app, item) {
+        // The reason says what to do; the key is after it, so that a row that cannot be used yet still tells how it is pressed.
+        Some(reason) if caption != item.label => format!("{reason} ({caption})"),
+        Some(reason) => reason,
+        None => tip(&caption, false),
+    }
 }
 
 fn big_width(ui: &Ui, ctl: &Ctl) -> f32 {
@@ -287,7 +324,7 @@ fn draw_label_row(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, group: &Group, are
         ui.painter().line_segment([b, b + vec2(-3.0, 0.0)], ink);
         ui.painter().line_segment([b, b + vec2(0.0, -3.0)], ink);
         app.note(format!("ribbon.{}.{}", cx.tab, launcher.id), r, enabled);
-        if resp.clone().on_hover_text(ctl_tip(app, launcher, enabled)).clicked() && enabled {
+        if resp.clone().on_hover_text(ctl_tip(app, ui.ctx(), launcher, enabled)).clicked() && enabled {
             press(app, ui, launcher);
         }
     }
@@ -338,63 +375,69 @@ fn menu_popup(app: &mut DiacraftApp, ui: &Ui, cx: Cx, resp: &egui::Response, ctl
         egui::PopupCloseBehavior::CloseOnClick
     };
     let shown = egui::Popup::menu(resp).close_behavior(behaviour).show(|ui| {
-        ui.set_width(menu_width(ui, control.items, control.palette.is_some()).max(if control.body == Body::PageSizes {
+        let width = menu_width(ui, control.items, control.palette.is_some()).max(if control.body == Body::PageSizes {
             pickers::SIZES_WIDTH
         } else {
             design::body_width(control.body)
-        }));
-        if let Some(palette) = control.palette {
-            super::palette::colour_menu(app, ui, cx, &control, palette);
-            if !control.items.is_empty() {
-                ui.add_space(2.0);
-                ui.separator();
-            }
-        }
-        if control.body == Body::PageSizes {
-            pickers::size_gallery(app, ui, cx);
-            if !control.items.is_empty() {
-                ui.add_space(2.0);
-                ui.separator();
-            }
-        }
-        if control.body == Body::ContainerStyles {
-            crate::container_ui::style_menu(app, ui, cx, &control);
-        }
-        if control.body == Body::Masters {
-            super::change_shape::gallery_menu(app, ui, cx);
-        }
-        if matches!(control.body, Body::Themes | Body::Variants) {
-            design::gallery_menu(app, ui, cx, &control);
-            if !control.items.is_empty() {
-                ui.add_space(2.0);
-                ui.separator();
-            }
-        }
-        if control.body == Body::Callouts {
-            super::callouts::gallery_menu(app, ui, cx);
-        }
-        if control.body == Body::SheetSections {
-            crate::sheet::cards::sections_menu(app, ui, &cx.t);
-        }
-        if control.body == Body::Layouts {
-            crate::relayout_ui::gallery_menu(app, ui, cx);
-        }
-        if control.body == Body::QuickStyles {
-            super::quick_styles::gallery_menu(app, ui, cx);
-            if !control.items.is_empty() {
-                ui.add_space(2.0);
-                ui.separator();
-            }
-        }
-        for item in control.items {
-            menu_row(app, ui, cx, item);
-        }
+        });
+        // A menu taller than the window scrolls inside it, and the arrow keys bring the row they come to into view.
+        menu_scroll::tall_menu(ui, &cx.t, width, |ui| menu_body(app, ui, cx, &control));
     });
     // The theme a right click picked in the Themes menu is forgotten when the menu closes.
     if shown.is_none() && control.body == Body::Themes {
         app.ui.design.picked = None;
     }
     let _ = ui;
+}
+
+/// What a control's menu holds, top to bottom: the palette of a colour menu, the gallery its body names, and its items.
+fn menu_body(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, control: &Ctl) {
+    if let Some(palette) = control.palette {
+        super::palette::colour_menu(app, ui, cx, control, palette);
+        if !control.items.is_empty() {
+            ui.add_space(2.0);
+            ui.separator();
+        }
+    }
+    if control.body == Body::PageSizes {
+        pickers::size_gallery(app, ui, cx);
+        if !control.items.is_empty() {
+            ui.add_space(2.0);
+            ui.separator();
+        }
+    }
+    if control.body == Body::ContainerStyles {
+        crate::container_ui::style_menu(app, ui, cx, control);
+    }
+    if control.body == Body::Masters {
+        super::change_shape::gallery_menu(app, ui, cx);
+    }
+    if matches!(control.body, Body::Themes | Body::Variants) {
+        design::gallery_menu(app, ui, cx, control);
+        if !control.items.is_empty() {
+            ui.add_space(2.0);
+            ui.separator();
+        }
+    }
+    if control.body == Body::Callouts {
+        super::callouts::gallery_menu(app, ui, cx);
+    }
+    if control.body == Body::SheetSections {
+        crate::sheet::cards::sections_menu(app, ui, &cx.t);
+    }
+    if control.body == Body::Layouts {
+        crate::relayout_ui::gallery_menu(app, ui, cx);
+    }
+    if control.body == Body::QuickStyles {
+        super::quick_styles::gallery_menu(app, ui, cx);
+        if !control.items.is_empty() {
+            ui.add_space(2.0);
+            ui.separator();
+        }
+    }
+    for item in control.items {
+        menu_row(app, ui, cx, item);
+    }
 }
 
 /// The room a submenu's list leaves for its frame and a little air at the window's top and bottom edges, in points.
@@ -422,16 +465,79 @@ pub(crate) fn menu_width(ui: &Ui, items: &[Ctl], palette: bool) -> f32 {
         .iter()
         .map(|item| {
             let left = if item.sample == Sample::Icon { 30.0 } else { 8.0 + pickers::SAMPLE_W + 10.0 };
-            left + text_width(ui, item.label, &font) + 28.0
+            // A row whose command shows its key has room for it after the caption.
+            let key =
+                item.command.and_then(|command| crate::shortcuts::hint_for(ui.ctx(), command)).map_or(0.0, |key| 24.0 + text_width(ui, &key, &font));
+            left + text_width(ui, item.label, &font) + key + 28.0
         })
         .fold(0.0_f32, f32::max);
     rows.max(if palette { super::palette::WIDTH } else { 0.0 }).max(MENU_MIN_W)
+}
+
+/// The side of its row a menu inside a menu opens on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Side {
+    Right,
+    Left,
+}
+
+/// The least a list is made to be wide where neither side of its parent menu has room for the whole of it, in points: the width it is cut to
+/// before it is allowed to come over the parent.
+const SUBMENU_MIN_WIDTH: f32 = 150.0;
+
+/// Which side of its row a menu inside a menu opens on, and how wide it is there. `room_right` and `room_left` are the points between the
+/// parent menu's edge and the window's on each side, and `need` is the width the list wants, its frame and scroll bar in. **The right side if the whole list
+/// fits there, else the left if it does, else the side with more room, with the list cut to that room** (never to less than [`SUBMENU_MIN_WIDTH`], and never
+/// wider than it wants): the list is then always beside its parent, and where the window is too narrow for both it is as narrow as can be read, and the part of the
+/// parent it comes over is the least there is. egui's popup chooses by whether the whole popup fits the window, so a list taller than the window (the 23 dashes,
+/// the 46 line ends) fits nowhere and it kept its first choice, the right, pushed back over the parent by the window's edge.
+pub(crate) fn submenu_placement(room_right: f32, room_left: f32, need: f32) -> (Side, f32) {
+    let room = |r: f32| if r.is_finite() { r.max(0.0) } else { 0.0 };
+    let (right, left) = (room(room_right), room(room_left));
+    let need = room(need);
+    if right >= need {
+        (Side::Right, need)
+    } else if left >= need {
+        (Side::Left, need)
+    } else if left > right {
+        (Side::Left, left.max(SUBMENU_MIN_WIDTH).min(need))
+    } else {
+        (Side::Right, right.max(SUBMENU_MIN_WIDTH).min(need))
+    }
+}
+
+/// The side the menu `item` opens on beside its row `row`, and the width of its popup there (see [`submenu_placement`]).
+fn submenu_side(ui: &Ui, row: &egui::Response, wide: f32) -> (Side, f32) {
+    let frame = egui::Frame::menu(ui.style());
+    let margin = frame.total_margin().sum().x;
+    // The popup's near edge is the parent's frame plus the visual gap between the two (`egui::containers::menu::SubMenu::show`).
+    let gap = margin * 0.5 + egui::containers::menu::MenuConfig::new().submenu_gap;
+    let window = ui.ctx().content_rect();
+    let need = wide + egui::style::ScrollStyle::solid().allocated_width() + margin;
+    submenu_placement(window.right() - (row.rect.right() + gap), (row.rect.left() - gap) - window.left(), need)
+}
+
+/// `label` cut to `room` points with an ellipsis, or whole when it fits.
+fn elided(ui: &Ui, label: &str, font: &FontId, room: f32) -> String {
+    if text_width(ui, label, font) <= room {
+        return label.to_owned();
+    }
+    let mut kept: Vec<char> = label.chars().collect();
+    while !kept.is_empty() {
+        kept.pop();
+        let shown: String = kept.iter().collect::<String>().trim_end().to_owned() + "\u{2026}";
+        if text_width(ui, &shown, font) <= room {
+            return shown;
+        }
+    }
+    "\u{2026}".to_owned()
 }
 
 pub(crate) fn menu_row(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, item: &Ctl) {
     let enabled = ctl_enabled(app, item);
     let checked = item.kind == Kind::Check && app.check_state(item);
     let current = pickers::is_current(app, item);
+    let key = item.command.and_then(|command| crate::shortcuts::hint_for(ui.ctx(), command));
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), if enabled { Sense::click() } else { Sense::hover() });
     if item.kind == Kind::Check {
         widgets::name_check(&resp, enabled, checked, item.label);
@@ -465,26 +571,44 @@ pub(crate) fn menu_row(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, item: &Ctl) {
     } else {
         icons::paint(painter, Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), Vec2::splat(16.0)), item.icon, &cx.t, enabled);
     }
-    painter.text(pos2(text_x, rect.center().y), Align2::LEFT_CENTER, item.label, label_font(), label_colour(&cx.t, enabled));
     let opens_menu = !item.items.is_empty() || item.body == Body::VariantColours;
+    // A row in a list cut to the room beside its parent (`submenu_placement`) shows as much of its label as fits, and an ellipsis for the rest.
+    let label = elided(ui, item.label, &label_font(), rect.right() - text_x - if opens_menu { 22.0 } else { 6.0 });
+    let painter = ui.painter();
+    painter.text(pos2(text_x, rect.center().y), Align2::LEFT_CENTER, &label, label_font(), label_colour(&cx.t, enabled));
     if opens_menu {
         icons::chevron(painter, pos2(rect.right() - 10.0, rect.center().y), 2.5, label_colour(&cx.t, enabled));
     }
+    // The key of a command that shows it, at the right edge of the row (`shortcuts::KEY_SHOWN`).
+    if let Some(key) = &key {
+        let edge = rect.right() - if opens_menu { 26.0 } else { 10.0 };
+        painter.text(pos2(edge, rect.center().y), Align2::RIGHT_CENTER, key, label_font(), if enabled { cx.t.text_dim } else { cx.t.text_disabled });
+    }
     app.note(format!("menu.{}", item.id), rect, enabled);
     if !enabled {
-        resp.clone().on_hover_text(menu_row_tip(app, item));
+        resp.clone().on_hover_text(menu_row_tip(app, ui.ctx(), item));
+    } else if key.is_some() {
+        resp.clone().on_hover_text(captioned(ui.ctx(), item));
     }
     if opens_menu {
         // A menu inside a menu opens beside its row. It is as tall as the window lets it be, and in a window too short for it, it scrolls with a bar that
         // is always drawn: egui's own bar shows only under the pointer, so a person saw no sign of the rows below.
         if enabled {
+            // The list opens on the side of its parent that has room for it, never over the parent (`submenu_placement`). egui opens a submenu to the right of its row (to the
+            // left in a right-to-left interface) and falls back by whether the whole popup fits the window: the interface's direction is turned for this one popup to say which
+            // side is wanted, and put back, and the arrow keys then open and close it by the side it is on.
+            let wanted = menu_width(ui, item.items, false).max(if item.body == Body::VariantColours { 220.0 } else { 0.0 });
+            let (side, popup_w) = submenu_side(ui, &resp, wanted);
+            let (scroll, margin) = (egui::style::ScrollStyle::solid().allocated_width(), egui::Frame::menu(ui.style()).total_margin().sum().x);
+            let native = ui.style().right_to_left;
+            ui.style_mut().right_to_left = side == Side::Left;
             egui::containers::menu::SubMenu::new().show(ui, &resp, |ui| {
                 ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
                 // egui paints the bar's handle in the fill of an idle widget, which the theme makes the list's own white: the handle takes the input border's
                 // grey, so that it shows. (The rows paint themselves from the tokens and use no egui widget.)
                 ui.visuals_mut().widgets.inactive.bg_fill = cx.t.input_border;
-                // (Room for the scroll bar a long list has.)
-                let wide = menu_width(ui, item.items, false).max(if item.body == Body::VariantColours { 220.0 } else { 0.0 });
+                // (Room for the scroll bar a long list has.) A list cut to the room beside its parent keeps the rows' labels inside it (`menu_row` elides them).
+                let wide = wanted.min((popup_w - scroll - margin).max(0.0));
                 ui.set_width(wide + ui.spacing().scroll.allocated_width());
                 // As tall as its rows, up to `height`. Not cut to the room under the row the menu opened from (what the popup's last size leaves it): a
                 // list taller than that is moved up to fit the window, as any menu is.
@@ -497,8 +621,11 @@ pub(crate) fn menu_row(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, item: &Ctl) {
                     for sub in item.items {
                         menu_row(app, ui, cx, sub);
                     }
+                    // The arrow keys bring the row the focus comes to into view.
+                    menu_scroll::follow_focus(ui);
                 });
             });
+            ui.style_mut().right_to_left = native;
         }
     } else if resp.clicked() && enabled {
         app.run_ribbon_command(ui.ctx(), item);
@@ -543,8 +670,8 @@ fn draw_big_split(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, ctl: &Ctl, rect: R
     ui.painter().text(pos2(rect.center().x, split_y), Align2::CENTER_TOP, ctl.label, font.clone(), colour);
     let tw = text_width(ui, ctl.label, &font);
     icons::chevron(ui.painter(), pos2(rect.center().x + tw / 2.0 + 7.0, split_y + 7.0), 2.5, colour);
-    main_resp.clone().on_hover_text(ctl_tip(app, ctl, main_on));
-    menu_resp.clone().on_hover_text(if menu_on { format!("{} options", ctl.label) } else { ctl_tip(app, ctl, false) });
+    main_resp.clone().on_hover_text(ctl_tip(app, ui.ctx(), ctl, main_on));
+    menu_resp.clone().on_hover_text(if menu_on { format!("{} options", ctl.label) } else { ctl_tip(app, ui.ctx(), ctl, false) });
     let any = main_on || menu_on;
     app.note(format!("ribbon.{}.{}", cx.tab, ctl.id), rect, any);
     app.note(format!("ribbon.{}.{}.main", cx.tab, ctl.id), main, main_on);
@@ -585,7 +712,7 @@ fn draw_big(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, ctl: &Ctl, rect: Rect) {
         let tw = text_width(ui, last, &font);
         icons::chevron(ui.painter(), pos2(rect.center().x + tw / 2.0 + 7.0, last_y + 7.0), 2.5, colour);
     }
-    resp.clone().on_hover_text(ctl_tip(app, ctl, enabled));
+    resp.clone().on_hover_text(ctl_tip(app, ui.ctx(), ctl, enabled));
     app.note(format!("ribbon.{}.{}", cx.tab, ctl.id), rect, enabled);
     if matches!(ctl.kind, Kind::Menu | Kind::Split) {
         menu_popup(app, ui, cx, &resp, ctl);
@@ -658,12 +785,12 @@ fn draw_small(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, ctl: &Ctl, rect: Rect,
             icons::chevron(painter, pos2(rect.right() - 7.0, rect.center().y), 2.0, colour);
         }
     }
-    resp.clone().on_hover_text(ctl_tip(app, ctl, enabled));
+    resp.clone().on_hover_text(ctl_tip(app, ui.ctx(), ctl, enabled));
     app.note(format!("ribbon.{}.{}", cx.tab, ctl.id), rect, enabled || menu_on);
     if let Some(menu_resp) = menu_resp {
         app.note(format!("ribbon.{}.{}.main", cx.tab, ctl.id), main, enabled);
         app.note(format!("ribbon.{}.{}.menu", cx.tab, ctl.id), strip, menu_on);
-        menu_resp.clone().on_hover_text(if menu_on { format!("{} options", ctl.label) } else { ctl_tip(app, ctl, false) });
+        menu_resp.clone().on_hover_text(if menu_on { format!("{} options", ctl.label) } else { ctl_tip(app, ui.ctx(), ctl, false) });
         if resp.clicked() && enabled {
             press(app, ui, ctl);
         }
@@ -713,7 +840,7 @@ fn draw_row_item(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, ctl: &Ctl, rect: Re
         "FontSize" => pickers::size_menu(app, ui, cx, &control),
         _ => {}
     });
-    resp.on_hover_text(ctl_tip(app, ctl, enabled));
+    resp.on_hover_text(ctl_tip(app, ui.ctx(), ctl, enabled));
 }
 
 fn draw_gallery(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, ctl: &Ctl, rect: Rect, compact: bool) {
@@ -743,7 +870,7 @@ fn draw_gallery(app: &mut DiacraftApp, ui: &mut Ui, cx: Cx, ctl: &Ctl, rect: Rec
     let arrow = Rect::from_min_max(pos2(strip.right() - 16.0, strip.top()), strip.max);
     ui.painter().line_segment([arrow.left_top(), arrow.left_bottom()], Stroke::new(1.0, cx.t.input_border));
     icons::chevron(ui.painter(), arrow.center(), 2.5, label_colour(&cx.t, enabled));
-    resp.clone().on_hover_text(ctl_tip(app, ctl, enabled));
+    resp.clone().on_hover_text(ctl_tip(app, ui.ctx(), ctl, enabled));
     app.note(format!("ribbon.{}.{}", cx.tab, ctl.id), rect, enabled);
     app.note(format!("ribbon.{}.{}.more", cx.tab, ctl.id), arrow, enabled);
     menu_popup(app, ui, cx, &resp, ctl);
@@ -918,10 +1045,13 @@ impl DiacraftApp {
             all.push(super::spec::CANVAS_SHOW_SHEET);
         }
         all.extend_from_slice(rows);
-        ui.set_width(menu_width(ui, &all, false));
-        for item in &all {
-            menu_row(self, ui, cx, item);
-        }
+        // A menu taller than the window scrolls inside it.
+        let width = menu_width(ui, &all, false);
+        menu_scroll::tall_menu(ui, &cx.t, width, |ui| {
+            for item in &all {
+                menu_row(self, ui, cx, item);
+            }
+        });
     }
 
     /// How far the control is pressed: the tool in use, or the style or alignment the selection has (`format.rs`).
@@ -1042,6 +1172,25 @@ mod tests {
         assert_eq!(submenu_height(100.0), SUBMENU_MIN_HEIGHT);
         for odd in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 0.0] {
             assert_eq!(submenu_height(odd), SUBMENU_MIN_HEIGHT, "{odd}");
+        }
+    }
+
+    /// The right if the whole list fits there, else the left if it does, else the side with more room, cut to that room and never to less than the least.
+    #[test]
+    fn a_list_opens_on_the_side_with_room_for_it_and_is_cut_only_where_neither_has() {
+        assert_eq!(submenu_placement(400.0, 100.0, 300.0), (Side::Right, 300.0), "room on the right: the right, whole");
+        assert_eq!(submenu_placement(300.0, 900.0, 300.0), (Side::Right, 300.0), "just enough on the right");
+        assert_eq!(submenu_placement(120.0, 400.0, 300.0), (Side::Left, 300.0), "the right is too narrow, the left is not");
+        assert_eq!(submenu_placement(120.0, 260.0, 300.0), (Side::Left, 260.0), "neither: the side with more room, cut to it");
+        assert_eq!(submenu_placement(260.0, 120.0, 300.0), (Side::Right, 260.0), "neither: the right has more");
+        assert_eq!(submenu_placement(200.0, 200.0, 300.0), (Side::Right, 200.0), "a tie goes to the right");
+        assert_eq!(submenu_placement(40.0, 60.0, 300.0), (Side::Left, SUBMENU_MIN_WIDTH), "no room to speak of: the least a list is cut to");
+        assert_eq!(submenu_placement(40.0, 60.0, 100.0), (Side::Left, 100.0), "never wider than it wants");
+        for odd in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -50.0] {
+            let (_, width) = submenu_placement(odd, odd, 300.0);
+            assert!(width.is_finite() && (0.0..=300.0).contains(&width), "{odd}: {width}");
+            let (_, width) = submenu_placement(100.0, 100.0, odd);
+            assert!(width.is_finite() && width >= 0.0, "{odd}: {width}");
         }
     }
 }

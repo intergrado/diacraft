@@ -11,9 +11,11 @@
 //! **Project rules** (ours; the specs leave them open, and the check list lists them):
 //!
 //! * A new field is the row whose `IX` is one more than the highest of the shape's `Field` rows and its `fld`s, from 0. A shape holds at most [`MAX_FIELDS`] fields.
-//! * A field is made with the format its kind has by default, which the Data Format list can change: a date or a time `{<211>}` (the date and the time, `M/d/yyyy h:mm am/pm`),
-//!   a length `esc(7)` (two places and the unit), an angle `esc(12)` (degrees), a shape data field the format its row has (`Prop.<row>.Format`), and any other none (a text as it is, a number in
-//!   plain digits). The format is the text of `FIELDPICTURE`'s answer, so a field made in the dialog and one made by a program say the same.
+//! * A field is made with the format its kind has by default, which the Data Format list can change, and **never with none**: an empty picture gives empty text
+//!   So a text field with an empty `Format` shows nothing. A text is `@` (`FIELDPICTURE(37)`, the text as it is), a number, a duration or a currency
+//!   `esc(0)` (`FIELDPICTURE(0)`, the plain number), a date or a time `{<211>}` (the date and the time, `M/d/yyyy h:mm am/pm`), a length `esc(7)` (two places and the unit) and an angle
+//!   `esc(12)` (degrees). A shape data field has the format its row has when that is a picture, and its kind's otherwise (a row of a list holds its items there, no picture). The format
+//!   is the text of `FIELDPICTURE`'s answer, so a field made in the dialog and one made by a program say the same. A format that is given blank is not given.
 //! * The Object Info `Type` field is `TYPEDESC()`: the specs do not say which of `TYPE` and `TYPEDESC` the field uses, and the text is what a person reads.
 //! * The clock is the session's (`Session::now`), **in UTC**: the build reads no time zone. A drawing that has no creation or last edit date yet (a new one) shows the time it
 //!   is made at, and a print date it has not got shows nothing. `FILENAME()` and `DIRECTORY()` are the session's file, empty for a drawing never saved.
@@ -21,7 +23,8 @@
 //!   copied or moved: the text shown is worked out again from the row. A field that reads the clock or the file's name is worked out again by `text.update_fields`, which is also the way to
 //!   bring every field up to date after a file is opened (a file's own text is kept as it was saved until then). **A field on a background page that reads the page** (`PAGENUMBER`,
 //!   `PAGENAME`: an OpenDocument master page's page number among them) shows the page that uses the background, so no refresh works it out to the background page's own
-//!   answer: it keeps the text it has.
+//!   answer: it keeps the text it has. **A save that gives a page the name a VSDX file keeps** works out only the fields that show a page's name
+//!   ([`refresh_page_name_fields`]): the rename is the writer's, so the text a file holds in the other fields is kept.
 //!
 //! **Hostile input.** A call counts at most [`MAX_FIELDS_PER_CALL`] fields ([`MAX_AUTO_FIELDS`] for an edit's own refresh) before it works any out, skips a shape of more than [`MAX_FIELDS`] and says how many it skipped, works within
 //! one evaluation budget for all of them, and walks at most [`MAX_WALK`] shapes; the work follows the number of fields (see [`refresh`]).
@@ -36,7 +39,8 @@ use diacraft_doc::{
     Value, WriteOrigin,
 };
 
-use super::{Problem, require_page, require_shape, shape_mut, write_cells};
+use super::worked::Worked as CellReader;
+use super::{Problem, require_page, require_shape, shape_mut, shown_parts, write_cells};
 
 /// The most fields one shape holds.
 pub const MAX_FIELDS: usize = 1_024;
@@ -124,6 +128,21 @@ const fn choice(id: &'static str, label: &'static str, formula: &'static str, ki
 /// The date and time format: `FIELDPICTURE(211)`.
 const DATE_FORMAT: &str = "{<211>}";
 
+/// The text format: `FIELDPICTURE(37)`, the text as it is.
+const TEXT_FORMAT: &str = "@";
+
+/// The number format: `FIELDPICTURE(0)`, the plain number (`0.####`).
+const NUMBER_FORMAT: &str = "esc(0)";
+
+/// The picture a field of `kind` is made with when nothing says another: never an empty one.
+pub fn default_format(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Text => TEXT_FORMAT,
+        Kind::Number | Kind::Duration | Kind::Currency => NUMBER_FORMAT,
+        Kind::Date => DATE_FORMAT,
+    }
+}
+
 /// A category of the dialog.
 #[derive(Clone, Copy, Debug)]
 pub struct Category {
@@ -141,17 +160,17 @@ const DATE_TIME: &[Choice] = &[
 ];
 
 const DOCUMENT: &[Choice] = &[
-    choice("creator", "Creator", "CREATOR()", Kind::Text, ""),
-    choice("description", "Description", "DESCRIPTION()", Kind::Text, ""),
-    choice("directory", "Directory", "DIRECTORY()", Kind::Text, ""),
-    choice("filename", "Filename", "FILENAME()", Kind::Text, ""),
-    choice("keywords", "Keywords", "KEYWORDS()", Kind::Text, ""),
-    choice("subject", "Subject", "SUBJECT()", Kind::Text, ""),
-    choice("title", "Title", "TITLE()", Kind::Text, ""),
-    choice("manager", "Manager", "MANAGER()", Kind::Text, ""),
-    choice("company", "Company", "COMPANY()", Kind::Text, ""),
-    choice("category", "Category", "CATEGORY()", Kind::Text, ""),
-    choice("hyperlink_base", "Hyperlink Base", "HYPERLINKBASE()", Kind::Text, ""),
+    choice("creator", "Creator", "CREATOR()", Kind::Text, TEXT_FORMAT),
+    choice("description", "Description", "DESCRIPTION()", Kind::Text, TEXT_FORMAT),
+    choice("directory", "Directory", "DIRECTORY()", Kind::Text, TEXT_FORMAT),
+    choice("filename", "Filename", "FILENAME()", Kind::Text, TEXT_FORMAT),
+    choice("keywords", "Keywords", "KEYWORDS()", Kind::Text, TEXT_FORMAT),
+    choice("subject", "Subject", "SUBJECT()", Kind::Text, TEXT_FORMAT),
+    choice("title", "Title", "TITLE()", Kind::Text, TEXT_FORMAT),
+    choice("manager", "Manager", "MANAGER()", Kind::Text, TEXT_FORMAT),
+    choice("company", "Company", "COMPANY()", Kind::Text, TEXT_FORMAT),
+    choice("category", "Category", "CATEGORY()", Kind::Text, TEXT_FORMAT),
+    choice("hyperlink_base", "Hyperlink Base", "HYPERLINKBASE()", Kind::Text, TEXT_FORMAT),
 ];
 
 const GEOMETRY: &[Choice] = &[
@@ -161,20 +180,20 @@ const GEOMETRY: &[Choice] = &[
 ];
 
 const OBJECT: &[Choice] = &[
-    choice("data1", "Data 1", "DATA1()", Kind::Text, ""),
-    choice("data2", "Data 2", "DATA2()", Kind::Text, ""),
-    choice("data3", "Data 3", "DATA3()", Kind::Text, ""),
-    choice("id", "ID", "ID()", Kind::Number, ""),
-    choice("master", "Master", "MASTERNAME()", Kind::Text, ""),
-    choice("name", "Name", "NAME()", Kind::Text, ""),
-    choice("type", "Type", "TYPEDESC()", Kind::Text, ""),
+    choice("data1", "Data 1", "DATA1()", Kind::Text, TEXT_FORMAT),
+    choice("data2", "Data 2", "DATA2()", Kind::Text, TEXT_FORMAT),
+    choice("data3", "Data 3", "DATA3()", Kind::Text, TEXT_FORMAT),
+    choice("id", "ID", "ID()", Kind::Number, NUMBER_FORMAT),
+    choice("master", "Master", "MASTERNAME()", Kind::Text, TEXT_FORMAT),
+    choice("name", "Name", "NAME()", Kind::Text, TEXT_FORMAT),
+    choice("type", "Type", "TYPEDESC()", Kind::Text, TEXT_FORMAT),
 ];
 
 const PAGE: &[Choice] = &[
-    choice("background", "Background", "BKGPAGENAME()", Kind::Text, ""),
-    choice("name", "Name", "PAGENAME()", Kind::Text, ""),
-    choice("page_count", "Number of Pages", "PAGECOUNT()", Kind::Number, ""),
-    choice("page_number", "Page Number", "PAGENUMBER()", Kind::Number, ""),
+    choice("background", "Background", "BKGPAGENAME()", Kind::Text, TEXT_FORMAT),
+    choice("name", "Name", "PAGENAME()", Kind::Text, TEXT_FORMAT),
+    choice("page_count", "Number of Pages", "PAGECOUNT()", Kind::Number, NUMBER_FORMAT),
+    choice("page_number", "Page Number", "PAGENUMBER()", Kind::Number, NUMBER_FORMAT),
 ];
 
 /// The categories, in the order the dialog lists them.
@@ -310,11 +329,14 @@ fn row_names(doc: &Document, at: &ShapeRef, section: &str) -> Result<Vec<RowFact
         Some(Ok(rows)) => rows,
     };
     let mut out = Vec::new();
-    for row in &rows {
-        let RowKey::Name(name) = &row.key else { continue };
-        let kind = row.cells.iter().find(|(n, _)| n.as_str() == "Type").and_then(|(_, r)| r.value.cell?.value.as_ref()?.number());
-        let format = row.cells.iter().find(|(n, _)| n.as_str() == "Format").and_then(|(_, r)| Some(r.value.cell?.value.as_ref()?.text().to_owned()));
-        out.push((name.to_string(), kind, format.unwrap_or_default()));
+    // The cells that hold a formula and no saved value are what the formula works out to, as the picture reads them.
+    let cells = CellReader::new(doc);
+    let sheet = SheetRef::Shape(at.clone());
+    let key = SectionKey::new(section, None);
+    for effective in &rows {
+        let RowKey::Name(name) = &effective.key else { continue };
+        let row = cells.row(&sheet, &key, effective);
+        out.push((name.to_string(), row.number("Type"), row.text("Format").unwrap_or_default()));
     }
     Ok(out)
 }
@@ -343,16 +365,17 @@ pub fn choices_of(doc: &Document, page: u32, id: Option<u32>, category: &Categor
     Ok(row_names(doc, &at, section)?
         .into_iter()
         .filter(|(name, _, _)| writable(name))
-        .map(|(name, kind, _)| {
-            let kind = if section == "Property" { prop_kind(kind) } else { Kind::Text };
+        .map(|(name, kind, format)| {
+            let (kind, format) =
+                if section == "Property" { (prop_kind(kind), row_picture(kind, &format)) } else { (Kind::Text, TEXT_FORMAT.to_owned()) };
             let formula = format!("{prefix}.{name}");
-            (name.clone(), name, formula, kind, String::new())
+            (name.clone(), name, formula, kind, format)
         })
         .collect())
 }
 
 /// The kind a shape data row's `Type` says (0 string, 2 number, 5 date, 6 duration, 7 currency; the lists are strings).
-fn prop_kind(cell: Option<f64>) -> Kind {
+pub(crate) fn prop_kind(cell: Option<f64>) -> Kind {
     match cell.map(|n| n.round() as i64) {
         Some(2) => Kind::Number,
         Some(5) => Kind::Date,
@@ -360,6 +383,18 @@ fn prop_kind(cell: Option<f64>) -> Kind {
         Some(7) => Kind::Currency,
         _ => Kind::Text,
     }
+}
+
+/// The picture a field that shows a shape data row is made with: the row's own `Format` when it holds a picture, and its kind's default when it holds none (a string's usually
+/// does not) or holds the items of a list (`Type` 1 and 4), which are no picture.
+fn row_picture(type_cell: Option<f64>, format: &str) -> String {
+    let listed = matches!(type_cell.map(|n| n.round() as i64), Some(1 | 4));
+    if listed || format.trim().is_empty() { default_format(prop_kind(type_cell)).to_owned() } else { format.to_owned() }
+}
+
+/// The format a caller gave: none when it gave none or a blank one, which is no picture (an empty picture gives empty text).
+fn given(format: Option<&str>) -> Option<&str> {
+    format.filter(|f| !f.trim().is_empty())
 }
 
 /// Checks what a field is asked to be and says what it is made of.
@@ -390,7 +425,7 @@ pub fn plan(
             field: String::new(),
             formula: formula.to_owned(),
             kind: None,
-            format: format.unwrap_or("").to_owned(),
+            format: given(format).unwrap_or("").to_owned(),
         });
     }
     if formula.is_some() {
@@ -414,14 +449,15 @@ pub fn plan(
             return Err(Problem::bad(format!("the row {} has a name no formula can write", crate::error::shown(name))));
         }
         let prefix = if section == "Property" { "Prop" } else { "User" };
-        // A shape data field has the format its row has, written as it is now.
-        let default_format = if section == "Property" { row_format.clone() } else { String::new() };
+        // A shape data field has the format its row has, written as it is now, and its kind's when the row has none; a user cell's kind is what it gives, which the insertion
+        // knows (`insert_field`).
+        let default_format = if section == "Property" { row_picture(*kind, row_format) } else { String::new() };
         return Ok(Planned {
             category: cat.id,
             field: name.clone(),
             formula: format!("{prefix}.{name}"),
             kind: (section == "Property").then(|| prop_kind(*kind)),
-            format: format.map_or(default_format, str::to_owned),
+            format: given(format).map_or(default_format, str::to_owned),
         });
     }
     let choice = cat.choices.iter().find(|c| c.id == field).ok_or_else(|| {
@@ -433,7 +469,7 @@ pub fn plan(
         field: choice.id.to_owned(),
         formula: choice.formula.to_owned(),
         kind: Some(choice.kind),
-        format: format.unwrap_or(choice.format).to_owned(),
+        format: given(format).unwrap_or(choice.format).to_owned(),
     })
 }
 
@@ -455,27 +491,46 @@ struct Worked {
 
 /// The text of the row's `Format` cell: the value it holds (`V`), which is the picture whether the cell is a constant or a formula's result. A picture that looks like a number (`0.00`) is
 /// text here, which a value read through the evaluator would not be.
-fn format_of(res: &Resolver<'_>, at: &ShapeRef, ix: u32) -> String {
-    res.resolve(&SheetRef::Shape(at.clone()), &row_addr(ix, "Format"))
-        .and_then(|r| Some(r.value.cell?.value.as_ref()?.text().to_owned()))
-        .unwrap_or_default()
+///
+/// A `Format` cell that holds a formula and no saved value is what the formula works out to, as the picture reads it.
+fn format_of(res: &Resolver<'_>, cells: &CellReader<'_>, at: &ShapeRef, ix: u32) -> String {
+    let (sheet, addr) = (SheetRef::Shape(at.clone()), row_addr(ix, "Format"));
+    res.resolve(&sheet, &addr).and_then(|found| cells.text_of(&sheet, &addr, &found)).unwrap_or_default()
+}
+
+/// The formula of the row's `Value` (its own or its master's), in upper case, for a row that has one.
+fn value_formula(res: &Resolver<'_>, at: &ShapeRef, ix: u32) -> Option<String> {
+    res.resolve(&SheetRef::Shape(at.clone()), &row_addr(ix, "Value")).and_then(|r| {
+        // The cell that holds the formula: for a cell with a formula and no saved value there is no cell that holds a value, and it is the formula's own.
+        let holder = if r.holds_unsaved_formula() { r.formula.cell? } else { r.value.cell? };
+        Some(holder.formula.text()?.to_ascii_uppercase())
+    })
 }
 
 /// Whether the row's `Value` (its own or its master's) reads the page that shows the field: `PAGENUMBER` or `PAGENAME`. On a background page such a field shows the
 /// page that uses the background, which the background page's own answer is not.
 fn reads_the_page(res: &Resolver<'_>, at: &ShapeRef, ix: u32) -> bool {
-    res.resolve(&SheetRef::Shape(at.clone()), &row_addr(ix, "Value"))
-        .and_then(|r| {
-            let formula = r.value.cell?.formula.text()?;
-            let upper = formula.to_ascii_uppercase();
-            Some(upper.contains("PAGENUMBER") || upper.contains("PAGENAME"))
-        })
-        .unwrap_or(false)
+    value_formula(res, at, ix).is_some_and(|formula| formula.contains("PAGENUMBER") || formula.contains("PAGENAME"))
 }
 
-fn work_row(ev: &mut Evaluator<'_, '_>, res: &Resolver<'_>, at: &ShapeRef, ix: u32, language: Option<&str>) -> Worked {
+/// Whether the row's `Value` (its own or its master's) reads the name of a page: `PAGENAME` or `BKGPAGENAME`.
+fn reads_a_page_name(res: &Resolver<'_>, at: &ShapeRef, ix: u32) -> bool {
+    value_formula(res, at, ix).is_some_and(|formula| formula.contains("PAGENAME"))
+}
+
+/// Whether a refresh leaves the text of the field `ix` as it is, for what the field reads and where it is:
+///
+/// * **A refresh for the name of a page** (`names_only`: a save that gave a page another name) leaves the text of every field that does not show a page's name as it is: what a file holds is kept until
+///   `text.update_fields`.
+/// * **A field on a background page** (`on_background`: a master page of an OpenDocument drawing) that reads the page shows the number or the name of the page that uses the background, so its text is left as
+///   the file saved it: the background page's own answer (0 for a number) is not what it shows.
+fn keeps_its_text(res: &Resolver<'_>, at: &ShapeRef, ix: u32, names_only: bool, on_background: bool) -> bool {
+    (names_only && !reads_a_page_name(res, at, ix)) || (on_background && reads_the_page(res, at, ix))
+}
+
+fn work_row(ev: &mut Evaluator<'_, '_>, res: &Resolver<'_>, cells: &CellReader<'_>, at: &ShapeRef, ix: u32, language: Option<&str>) -> Worked {
     let value = ev.evaluate(&CellAddress::new(SheetRef::Shape(at.clone()), row_addr(ix, "Value")));
-    let format = format_of(res, at, ix);
+    let format = format_of(res, cells, at, ix);
     let shown = field_text(&value, &format, language);
     Worked { value, format, shown }
 }
@@ -498,10 +553,11 @@ fn has_inherited_row(res: &Resolver<'_>, at: &ShapeRef, known: &mut Option<HashS
 
 /// The next `IX` for a field of the shape: one more than the highest of its rows and its `fld`s, and how many fields it has.
 fn next_ix(doc: &Document, at: &ShapeRef) -> Result<(u32, usize), Problem> {
-    let shape = doc.shape(at).ok_or_else(|| Problem::failed("the shape went away"))?;
+    doc.shape(at).ok_or_else(|| Problem::failed("the shape went away"))?;
     let mut highest: Option<u32> = None;
     let mut count = 0usize;
-    for part in shape.text.iter().flat_map(|t| t.parts.iter()) {
+    // The fields the shape shows: its own text's, or its master's when it holds none.
+    for part in shown_parts(doc, at) {
         if let TextPart::Fld { ix, .. } = part {
             highest = highest.max(Some(*ix));
             count += 1;
@@ -613,13 +669,15 @@ fn with_part(parts: &[TextPart], at: usize, part: TextPart) -> Result<Vec<TextPa
 /// worked out.
 pub fn insert_field(doc: &mut Document, page: u32, id: u32, at_char: Option<usize>, plan: &Planned, env: &Env) -> Result<Inserted, Problem> {
     let at = require_shape(doc, page, id)?;
+    let was = doc.clone();
     let (ix, count) = next_ix(doc, &at)?;
     if count >= MAX_FIELDS {
         return Err(Problem::failed(format!("a shape holds at most {MAX_FIELDS} fields")));
     }
+    // The place counts the characters the shape shows: its own text, or its master's when it holds none, which the field is put into as the shape's own.
     let (old_parts, ext) = {
         let shape = doc.shape(&at).ok_or_else(|| Problem::failed("the shape went away"))?;
-        (shape.text.as_ref().map(|t| t.parts.clone()).unwrap_or_default(), shape.text.as_ref().map(|t| t.ext.clone()).unwrap_or_default())
+        (shown_parts(doc, &at).to_vec(), shape.text.as_ref().map(|t| t.ext.clone()).unwrap_or_default())
     };
     let total: usize = old_parts.iter().map(|p| if let TextPart::Chars(s) = p { s.chars().count() } else { 0 }).fold(0, usize::saturating_add);
     let at_char = at_char.unwrap_or(total);
@@ -627,7 +685,8 @@ pub fn insert_field(doc: &mut Document, page: u32, id: u32, at_char: Option<usiz
     with_part(&old_parts, at_char, TextPart::Fld { ix, text: Arc::from("") })?;
     let sheet = SheetRef::Shape(at.clone());
     let type_now = plan.kind.map_or(0, Kind::type_cell);
-    let format_cell = Cell::constant(Value::from_text(&plan.format));
+    // The format is a string, and a string says `STR`.
+    let format_cell = Cell::constant(Value::from_text(&plan.format)).with_unit("STR");
     write_cells(
         doc,
         vec![
@@ -642,9 +701,10 @@ pub fn insert_field(doc: &mut Document, page: u32, id: u32, at_char: Option<usiz
         let evaldoc = env.document(doc);
         let mut ctx = EvalCtx::new(env.options(), Budget::with_steps(MAX_STEPS));
         let res = Resolver::new(&evaldoc);
+        let cells = CellReader::new(&evaldoc);
         let mut ev = Evaluator::new(&evaldoc, &mut ctx);
         let language = evaldoc.props.language.clone();
-        (work_row(&mut ev, &res, &at, ix, language.as_deref()), language)
+        (work_row(&mut ev, &res, &cells, &at, ix, language.as_deref()), language)
     };
     let mut results: Vec<(SheetRef, CellAddr, CellEdit)> = Vec::new();
     let mut format = worked.format.clone();
@@ -667,15 +727,16 @@ pub fn insert_field(doc: &mut Document, page: u32, id: u32, at_char: Option<usiz
     if let Some(edit) = cache_edit(&worked.value) {
         results.push((sheet.clone(), row_addr(ix, "Value"), edit));
     }
-    // A custom formula's type is what it gave, and a date of one has the date's format.
+    // A custom formula's type is what it gave, and a field that has no format (a custom formula's, a user cell's, a row of shape data that holds none) has its kind's, never an empty one
+    // An empty picture gives empty text.
     let mut writes = Vec::new();
     if plan.kind.is_none() {
         writes.push((sheet.clone(), row_addr(ix, "Type"), CellEdit::Value(Value::from_text(&kind.type_cell().to_string()))));
-        if kind == Kind::Date && format.is_empty() {
-            format = DATE_FORMAT.to_owned();
-            writes.push((sheet.clone(), row_addr(ix, "Format"), CellEdit::Value(Value::from_text(&format))));
-            shown = field_text(&worked.value, &format, language.as_deref());
-        }
+    }
+    if format.trim().is_empty() {
+        format = default_format(kind).to_owned();
+        writes.push((sheet.clone(), row_addr(ix, "Format"), CellEdit::Value(Value::from_text(&format))));
+        shown = field_text(&worked.value, &format, language.as_deref());
     }
     write_cells(doc, writes)?;
     write_results(doc, results)?;
@@ -684,6 +745,8 @@ pub fn insert_field(doc: &mut Document, page: u32, id: u32, at_char: Option<usiz
     let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
     shape.text = Some(Arc::new(Text { parts, ext }));
     super::settle::settle_text(doc, page, &at)?;
+    // What the field shows may widen or lengthen a shape that is sized to its text: the connectors glued to it follow.
+    super::settle::route_recalculated(doc, &was, page)?;
     Ok(Inserted { ix, at: at_char, formula: plan.formula.clone(), format, shown, kind })
 }
 
@@ -698,12 +761,21 @@ pub fn sample(doc: &Document, page: u32, id: u32, plan: &Planned, env: &Env) -> 
 pub enum Scope<'a> {
     /// Every page.
     All,
+    /// Every page, and of the fields only those that show the name of a page (`PAGENAME()`, `BKGPAGENAME()`): what a save that gave a page another name works out.
+    PageNames,
     /// One page.
     Page(u32),
     /// These shapes of a page.
     Shapes(u32, &'a [u32]),
     /// These shapes of a page, where they are.
     Refs(u32, &'a [ShapeRef]),
+}
+
+impl Scope<'_> {
+    /// Whether the refresh is for the fields that show the name of a page only ([`Scope::PageNames`]).
+    fn shows_names_only(&self) -> bool {
+        matches!(self, Scope::PageNames)
+    }
 }
 
 /// What a refresh did.
@@ -715,6 +787,8 @@ pub struct Refreshed {
     pub examined: usize,
     /// The fields of shapes that hold more than [`MAX_FIELDS`]: left as they were, and counted.
     pub skipped: usize,
+    /// The steps of the evaluator the fields took.
+    pub steps: u64,
 }
 
 /// A shape's fields, as a walk finds them.
@@ -825,11 +899,18 @@ fn walk_page(doc: &Document, page: u32, visited: &mut usize, max: usize, tally: 
 /// shape's rows and the texts its fields show are indexed once for the shape, each distinct field is worked out once, and the apply is by the same index: the work follows the number of fields.
 /// `strict` also refuses a document with more shapes than [`MAX_WALK`], and an evaluation past [`MAX_STEPS`]; without it the work stops where it ends and what was done stands.
 pub fn refresh(doc: &mut Document, scope: Scope<'_>, env: &Env, strict: bool) -> Result<Refreshed, Problem> {
+    refresh_within(doc, scope, env, strict, None)
+}
+
+/// [`refresh`] within `left` steps of the evaluator when given (at most [`MAX_STEPS`] of them), which it takes what the fields took off: a caller that refreshes the fields of many pages in
+/// one edit shares one budget among them.
+fn refresh_within(doc: &mut Document, scope: Scope<'_>, env: &Env, strict: bool, left: Option<&mut u64>) -> Result<Refreshed, Problem> {
     let max_walk = if strict { MAX_WALK } else { MAX_AUTO_WALK };
     let mut tally = Tally::new(if strict { MAX_FIELDS_PER_CALL } else { MAX_AUTO_FIELDS });
     let mut visited = 0usize;
+    let names_only = scope.shows_names_only();
     match scope {
-        Scope::All => {
+        Scope::All | Scope::PageNames => {
             for p in doc.pages.iter() {
                 if walk_page(doc, p.id, &mut visited, max_walk, &mut tally).is_err() {
                     if strict {
@@ -882,11 +963,12 @@ pub fn refresh(doc: &mut Document, scope: Scope<'_>, env: &Env, strict: bool) ->
     let mut changes: Vec<TextChanges> = Vec::new();
     let mut results: Vec<(SheetRef, CellAddr, CellEdit)> = Vec::new();
     let mut examined = 0usize;
-    {
+    let used = {
         let evaldoc = env.document(doc);
-        let mut ctx = EvalCtx::new(env.options(), Budget::with_steps(MAX_STEPS));
+        let mut ctx = EvalCtx::new(env.options(), Budget::with_steps(left.as_deref().map_or(MAX_STEPS, |left| MAX_STEPS.min(*left))));
         let language = evaldoc.props.language.clone();
         let res = Resolver::new(&evaldoc);
+        let cells = CellReader::new(&evaldoc);
         let mut ev = Evaluator::new(&evaldoc, &mut ctx);
         'shapes: for f in &found {
             let Some(shape) = doc.shape(&f.at) else { continue };
@@ -916,9 +998,7 @@ pub fn refresh(doc: &mut Document, scope: Scope<'_>, env: &Env, strict: bool) ->
                     continue;
                 }
                 let value_cell = own.and_then(|r| r.cells.get("Value"));
-                // A field on a background page (a master page of an OpenDocument drawing) that reads the page shows the number or the name of the page that uses the
-                // background, so its text is left as the file saved it: the background page's own answer (0 for a number) is not what it shows.
-                if backgrounds.contains(&f.page) && reads_the_page(&res, &f.at, *ix) {
+                if keeps_its_text(&res, &f.at, *ix, names_only, backgrounds.contains(&f.page)) {
                     continue;
                 }
                 // A row that reads the file's name is left alone by a refresh that does not know it.
@@ -931,7 +1011,7 @@ pub fn refresh(doc: &mut Document, scope: Scope<'_>, env: &Env, strict: bool) ->
                     continue;
                 }
                 examined += 1;
-                let worked = work_row(&mut ev, &res, &f.at, *ix, language.as_deref());
+                let worked = work_row(&mut ev, &res, &cells, &f.at, *ix, language.as_deref());
                 if let Some(text) = &worked.shown
                     && shown_now.get(ix).copied() != Some(text.as_str())
                 {
@@ -947,6 +1027,10 @@ pub fn refresh(doc: &mut Document, scope: Scope<'_>, env: &Env, strict: bool) ->
                     if strict {
                         return Err(Problem::failed("the fields take more work than one call does: name a shape or a page"));
                     }
+                    // A budget the call shares with the pages it reached is spent: the call is refused as a routing that passes it is.
+                    if left.is_some() {
+                        return Err(Problem::failed("the page is too large to recalculate"));
+                    }
                     break 'shapes;
                 }
             }
@@ -954,6 +1038,11 @@ pub fn refresh(doc: &mut Document, scope: Scope<'_>, env: &Env, strict: bool) ->
                 changes.push((f.page, f.at.clone(), new_texts));
             }
         }
+        ev.stats().steps
+    };
+    let mut left = left;
+    if let Some(left) = left.as_deref_mut() {
+        *left = left.saturating_sub(used);
     }
     let mut updated = 0usize;
     for (page, at, texts) in &changes {
@@ -974,9 +1063,16 @@ pub fn refresh(doc: &mut Document, scope: Scope<'_>, env: &Env, strict: bool) ->
     }
     write_results(doc, results)?;
     for (page, at, _) in &changes {
-        super::settle::settle_text(doc, *page, at)?;
+        match left.as_deref_mut() {
+            // The commit that works out what reads the text, and the routing of the pages it reaches, take their steps off the budget the call shares.
+            Some(left) => {
+                let took = super::settle::settle_text_within(doc, *page, at, *left)?;
+                *left = left.saturating_sub(took);
+            }
+            None => super::settle::settle_text(doc, *page, at)?,
+        }
     }
-    Ok(Refreshed { updated, examined, skipped })
+    Ok(Refreshed { updated, examined, skipped, steps: used })
 }
 
 fn ev_exhausted(ev: &Evaluator<'_, '_>) -> bool {
@@ -1006,10 +1102,61 @@ pub fn refresh_changed(doc: &mut Document, page: u32, cells: &[(SheetRef, CellAd
     let _ = refresh(doc, Scope::Refs(page, &refs), &Env::none(), false);
 }
 
+/// [`refresh_changed`] for a page **a commit reached** (a cell of its shapes was worked out because it reads one of another page, so the text of a field that shows it is stale): the
+/// shapes of it whose cells the commit changed, `cells`, are refreshed as those of the edited page are, within what the edit has left for all the pages it reached: `take` says how many of the shapes
+/// asked for it may be refreshed (at most [`MAX_AUTO_SHAPES`] in all, whatever the pages and the commits one inside another), and `steps` is the evaluator's. Past either the fields are left as
+/// they are, for `text.update_fields`.
+pub(super) fn refresh_reached(
+    doc: &mut Document,
+    page: u32,
+    cells: &[(SheetRef, CellAddr)],
+    take: fn(usize) -> usize,
+    steps: &mut u64,
+) -> Result<(), Problem> {
+    let mut refs: Vec<ShapeRef> = Vec::new();
+    let mut seen: HashSet<&ShapeRef> = HashSet::new();
+    for (sheet, _) in cells {
+        if refs.len() >= MAX_AUTO_SHAPES {
+            break;
+        }
+        let SheetRef::Shape(at) = sheet else { continue };
+        if at.owner != Owner::Page(page) || !seen.insert(at) {
+            continue;
+        }
+        if doc.shape(at).is_some_and(|s| has_fields(s)) {
+            refs.push(at.clone());
+        }
+    }
+    if refs.is_empty() {
+        return Ok(());
+    }
+    // **A budget that is spent refuses the call, in words, as the routing does** (what is left to refresh is not left as it is, with the call said to have worked).
+    if *steps == 0 {
+        return Err(Problem::failed("the page is too large to recalculate"));
+    }
+    refs.truncate(take(refs.len()));
+    if refs.is_empty() {
+        return Ok(());
+    }
+    // As for the edited page, a refresh that cannot be made for another reason leaves the text as it was, and the row, which is right, is what a save writes; a budget that runs out is refused.
+    match refresh_within(doc, Scope::Refs(page, &refs), &Env::none(), false, Some(steps)) {
+        Err(problem) if !problem.bad_params && problem.message.contains("too large to recalculate") => Err(problem),
+        _ => Ok(()),
+    }
+}
+
 /// The edit's own refresh for every page (a page was added, renamed, taken away, copied or moved), with the clock and the file `env` gives: a failure leaves the texts as they were.
 pub fn refresh_all_after_edit(doc: &mut Document, env: &Env) {
     // As above: a refresh that cannot be made leaves the texts as they were.
     let _ = refresh(doc, Scope::All, env, false);
+}
+
+/// The refresh of a save that gave a page another name: **the fields that show the name of a page** are worked out again, as `page.rename` works them out, and
+/// **no other field is**. The rename is the writer's and no person edited the drawing, so the text a file holds in a field of the page number, the page count, the date or the file's name stays
+/// as the file saved it until `text.update_fields`, as it does when no page is renamed. A failure leaves the texts as they were.
+pub fn refresh_page_name_fields(doc: &mut Document, env: &Env) {
+    // As above: a refresh that cannot be made leaves the texts as they were.
+    let _ = refresh(doc, Scope::PageNames, env, false);
 }
 
 /// How many `fld`s the pages' shapes hold in all, walking at most [`MAX_WALK`] shapes: `None` past it.

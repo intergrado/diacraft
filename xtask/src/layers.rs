@@ -46,6 +46,11 @@ pub const TABLE: &[(&str, Class)] = &[
     ("metafile", Class::Standalone),
     ("dxf", Class::Standalone),
     ("data", Class::Standalone),
+    // The person's settings: `config.toml` through craft-settings and the files beside it, bounded and named. Below the engine so that its hostile-input parts have a fuzz
+    // target of their own, and the engine, the window and the command line reach it through one crate.
+    ("prefs", Class::Standalone),
+    // The help layer: the format of the in-app help, its parser, catalogs, ranking and tables, with no DiaCraft type, so that it can move to craft-libs as `craft-help`.
+    ("help", Class::Standalone),
     // L1: the document model and the font database
     ("doc", Class::Layer(1)),
     ("fonts", Class::Layer(1)),

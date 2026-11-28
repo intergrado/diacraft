@@ -16,10 +16,15 @@
 //! cells written), not the page. Nothing here moves a shape, so no connector is routed again.
 //!
 //! **Groups** (ours): a group is formatted through its members. Every shape without members inside the shapes named, to any
-//! depth, is formatted, and the cells of the group itself are left alone: a group draws nothing of its own. **A group one of whose members to be formatted is
+//! depth, is formatted, and the cells of the group itself are left alone: a group draws nothing of its own. **A member that draws no line or no fill keeps it so**
+//! (ours): a colour, a pattern, a gradient or a Quick Style put on a group does not make solid the pattern of a member reached through it that reads 0 (the box of a
+//! name, the frame of a text), where the same put on the member by its `ID` does. **A member filled with its own line colour** (the formula `LineColor`: the dark markers
+//! of the notation stencils) **is left by the fill settings** (ours), and follows the line colour the group is given. Both are [`targets_reached`]'s `through_group`.
+//! **A group one of whose members to be formatted is
 //! on a locked layer is refused in words** (a shape on a locked layer is not edited, and the specifications say nothing of a group whose
 //! member is on one), each member judged by its own list.
 
+mod editor;
 mod effects;
 mod face;
 mod look;
@@ -29,18 +34,21 @@ mod shape_cells;
 #[cfg(test)]
 mod tests;
 mod text;
+#[cfg(test)]
+mod unsaved_tests;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_calc::{Budget, Changes};
 use diacraft_doc::{
-    Cell, CellAddr, CellEdit, CellName, Document, FormulaSlot, Lookup, MAX_SHAPE_DEPTH, Resolver, RowKey, SectionKey, ShapeRef, SheetRef, Value,
+    Cell, CellAddr, CellEdit, CellName, Document, FormulaSlot, Lookup, MAX_SHAPE_DEPTH, RowKey, SectionKey, ShapeRef, SheetRef, Value,
 };
 
 use crate::calc_index::commit_changed;
 use crate::draw::{Problem, require_shape, shape_mut, write_cells};
 
+pub use editor::{EditorParagraph, MAX_EDITOR_PARAGRAPHS, editor_paragraphs};
 pub use effects::{
     GradientFormat, GradientKind, GradientLook, GradientTarget, MAX_GRADIENT_STOPS, SHADOW_MAX_POINTS, SHADOW_PRESETS, SHADOW_SIZE_RANGE,
     ShadowFormat, ShadowLook, StopFormat, StopLook, format_gradient, format_shadow, shadow_preset,
@@ -273,10 +281,14 @@ impl Edits {
         self.writes.len().saturating_add(self.rows.len()).saturating_add(self.gone.len())
     }
 
-    /// Makes the writes (all or nothing, a `GUARD` cell an error) and works out what they changed and what reads it.
+    /// Makes the writes (all or nothing, a `GUARD` cell an error) and works out what they changed and what reads it, **and routes again the connectors glued to the shapes that
+    /// the recalculation moved or resized** (the size of the characters, a face, a margin, the line a type wraps at, each changes the height or the width a block of
+    /// text is sized to, and with it the shape's connection points).
     pub(crate) fn apply(self, doc: &mut Document, page: u32) -> Result<(), Problem> {
+        let was = doc.clone();
         let changed = self.write(doc, page)?;
-        recalculate(doc, page, changed)
+        recalculate(doc, page, changed)?;
+        crate::draw::route_recalculated(doc, &was, page)
     }
 
     /// [`Edits::apply`] without the recalculation: for a copy of the document that a preview reads the cells of, where a cell that holds the theme's marker is
@@ -348,14 +360,14 @@ fn replace_row(doc: &mut Document, page: u32, set: RowSet) -> Result<(), Problem
         }));
     }
     let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
-    let sheet = Arc::make_mut(&mut shape.sheet);
+    let mut counted = shape.counted_sheet();
     let key = SectionKey::new(set.section, None);
     if set.state == RowState::Revived {
         // The section brought back too, if the shape had it deleted: a row of a deleted section would still read as gone.
-        sheet.section_mut(&key)?.del = false;
+        counted.section_mut(&key)?.del = false;
     }
-    let row = sheet.row_mut(&key, &RowKey::Ix(set.ix))?;
-    row.cells = set.cells;
+    let row = counted.row_mut(&key, &RowKey::Ix(set.ix))?;
+    row.replace_cells(set.cells);
     row.del = set.state == RowState::Deleted;
     Ok(())
 }
@@ -388,8 +400,8 @@ fn remove_rows(doc: &mut Document, page: u32, sheet: &SheetRef, section: &'stati
     #[cfg(test)]
     counts::SECTION_PASSES.with(|c| c.set(c.get() + 1));
     let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
-    let section_mut = Arc::make_mut(&mut shape.sheet).section_mut(&key)?;
-    section_mut.rows.retain(|row| !goes(row));
+    let mut counted = shape.counted_sheet();
+    counted.section_mut(&key)?.retain_rows(|row| !goes(row));
     Ok(())
 }
 
@@ -415,6 +427,15 @@ fn recalculate(doc: &mut Document, page: u32, cells: Vec<(SheetRef, CellAddr)>) 
 /// one inside a group that is named too, are looked at again, so the count is of what is looked at and not of what is kept.
 pub const MAX_VISITED: usize = 4 * MAX_TARGETS;
 
+/// A shape a command formats, and how the command came to it.
+#[derive(Clone, Debug)]
+pub(crate) struct Target {
+    pub(crate) at: ShapeRef,
+    /// Whether the shape was **reached through a group**: the person named a group it is in, and not the shape itself. A shape that is named is a member of no group as far
+    /// as the command goes, whether or not a group named holds it too.
+    pub(crate) through_group: bool,
+}
+
 /// The shapes a command formats for the shapes `ids` on a page: each without members, found inside the shapes named to any depth, once
 /// In the order the shapes are named. A shape that is not on the page is refused. **The shapes named are found in one walk of the page** that stops at the last of
 /// them (`draw::find_named`), where a search for each by `Document::find_shape` walked the page from the top for each: 4,096 names on a page of 30,000 shapes were 58 million visits
@@ -422,9 +443,14 @@ pub const MAX_VISITED: usize = 4 * MAX_TARGETS;
 /// a shape named and also inside a named group is looked at twice, and every shape looked at is charged to one budget, [`MAX_VISITED`], for
 /// the whole call, so that a list of names cannot make the walk cost the names times the size of what they hold.
 pub(crate) fn targets(doc: &Document, page: u32, ids: &[u32]) -> Result<Vec<ShapeRef>, Problem> {
+    Ok(targets_reached(doc, page, ids)?.into_iter().map(|target| target.at).collect())
+}
+
+/// [`targets`], each with whether it was reached through a group.
+pub(crate) fn targets_reached(doc: &Document, page: u32, ids: &[u32]) -> Result<Vec<Target>, Problem> {
     let mut named: HashSet<u32> = HashSet::with_capacity(ids.len());
     let mut seen: HashSet<Vec<u32>> = HashSet::new();
-    let mut out: Vec<ShapeRef> = Vec::new();
+    let mut out: Vec<Target> = Vec::new();
     let mut visited = 0_usize;
     // A member of a group named that is on a locked layer is not formatted through the group: each judged by its own list.
     let mut locks = crate::draw::layers::Locks::default();
@@ -451,7 +477,9 @@ pub(crate) fn targets(doc: &Document, page: u32, ids: &[u32]) -> Result<Vec<Shap
                     if out.len() >= MAX_TARGETS {
                         return Err(Problem::failed(format!("the shapes named hold more than {MAX_TARGETS} shapes to format")));
                     }
-                    out.push(at);
+                    // Reached through a group when it is below the shape named and is not named itself (a shape named is found by the walk of the page above).
+                    let through_group = at.path.len() > depth && !places.contains_key(&shape.id);
+                    out.push(Target { at, through_group });
                 }
                 continue;
             }
@@ -485,15 +513,29 @@ pub(crate) fn leaf_below(doc: &Document, mut at: ShapeRef) -> ShapeRef {
     at
 }
 
-/// The number a cell resolves to by inheritance: its saved value, if that reads as a number. `None` for a cell found nowhere, a theme marker, or
-/// text.
-pub(crate) fn resolved_number(res: &Resolver<'_>, sheet: &SheetRef, addr: &CellAddr) -> Option<f64> {
-    res.resolve(sheet, addr)?.value.cell?.value.as_ref()?.number()
+/// The number a cell resolves to by inheritance: its saved value, if that reads as a number, and for a cell that holds a formula and no saved value what the formula works
+/// out to. `None` for a cell found nowhere, a theme marker, or text.
+pub(crate) fn resolved_number(reader: &look::Reader<'_, '_>, sheet: &SheetRef, addr: &CellAddr) -> Option<f64> {
+    reader.held(sheet, addr)?.number()
 }
 
-/// Whether a cell resolves to a value at all (not found nowhere).
-pub(crate) fn has_value(res: &Resolver<'_>, sheet: &SheetRef, addr: &CellAddr) -> bool {
-    res.resolve(sheet, addr).is_some_and(|found| found.value.cell.is_some_and(|c| c.value.is_some()))
+/// Our rule: whether a shape **reached through a group** draws nothing of a family, its `pattern` cell (`LinePattern`, `FillPattern`) reading 0. A command that is put on a group
+/// leaves such a member as it is for the pattern: a colour, a pattern or a gradient put on a figure does not turn on a line or a fill that a member of it was made without (the box of a name, the
+/// frame of a text), where the same colour put on the member itself does.
+pub(crate) fn keeps_none(reader: &look::Reader<'_, '_>, sheet: &SheetRef, through_group: bool, pattern: &str) -> bool {
+    through_group && resolved_number(reader, sheet, &CellAddr::direct(pattern)) == Some(0.0)
+}
+
+/// Our rule: whether a shape reached through a group **is filled with its own line colour**: its `FillForegnd` is the formula `LineColor`, as the dark markers of the
+/// notation stencils are (a throwing event's marker, a send task's envelope: as dark as their outline). The fill commands leave such a member's fill to its line, which the line commands reach.
+pub(crate) fn fill_is_line(reader: &look::Reader<'_, '_>, sheet: &SheetRef, through_group: bool) -> bool {
+    through_group
+        && reader
+            .res
+            .resolve(sheet, &CellAddr::direct("FillForegnd"))
+            .and_then(|found| found.formula.cell)
+            .and_then(|cell| cell.formula.text())
+            .is_some_and(|formula| formula.trim().eq_ignore_ascii_case("LineColor"))
 }
 
 /// Counts of what the commands do, for the unit tests of this module (a count is a bound that does not depend on the speed of the machine).

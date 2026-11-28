@@ -36,8 +36,25 @@ fn package_error(e: diacraft_container::ContainerError) -> WriteError {
     WriteError::Package(e)
 }
 
+/// Looks at each XML part the save changes or adds for a start tag that names an attribute twice, or declares a prefix twice (the parts are as the save made them, and none is
+/// put into the package that the reader would refuse). Every writer of a package passes here (the edited save, the first save's thumbnail, the change of the kind), whatever it edited.
+fn check_names(changes: &Changes, limits: &Limits, work: &mut WriteWork) -> Result<(), WriteError> {
+    let is_xml = |name: &str| name.rsplit_once('.').is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("xml"));
+    // In the order of the names, so that the part a refusal names is the same on every run.
+    let mut replaced: Vec<(&String, &Vec<u8>)> = changes.replace.iter().filter(|(name, _)| is_xml(name)).collect();
+    replaced.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, bytes) in replaced {
+        super::unique::check_part(name, bytes, limits, work)?;
+    }
+    for (name, bytes, _) in changes.add.iter().filter(|(name, _, _)| is_xml(name)) {
+        super::unique::check_part(name, bytes, limits, work)?;
+    }
+    Ok(())
+}
+
 /// The package with `changes` made, entries in the order they lie in the file.
 pub(crate) fn assemble(opened: &Opened<'_>, changes: &Changes, limits: &Limits, work: &mut WriteWork) -> Result<Vec<u8>, WriteError> {
+    check_names(changes, limits, work)?;
     let archive = &opened.archive;
     let mut order: Vec<usize> = (0..archive.entries().len()).collect();
     order.sort_by_key(|&i| archive.entries().get(i).map_or(usize::MAX, |e| e.local_offset));
@@ -88,4 +105,49 @@ pub(crate) fn assemble(opened: &Opened<'_>, changes: &Changes, limits: &Limits, 
 /// The package with every entry copied as it is, in the order they lie in the file: what an unedited save is.
 pub(crate) fn copy_all(opened: &Opened<'_>, limits: &Limits, work: &mut WriteWork) -> Result<Vec<u8>, WriteError> {
     assemble(opened, &Changes::default(), limits, work)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TWICE: &str = r#"<a x="1" x="2"/>"#;
+
+    fn why(r: Result<(), WriteError>) -> String {
+        match r {
+            Err(WriteError::SelfCheck(words)) => words,
+            other => panic!("expected a refusal of the check, got {other:?}"),
+        }
+    }
+
+    /// Each XML part the save changes or adds is looked through, in the order of the names, and a part that is no XML by its name is not read as markup.
+    #[test]
+    fn the_xml_parts_a_save_changes_or_adds_are_looked_through_and_the_others_are_not() {
+        let (limits, mut work) = (Limits::default(), WriteWork::default());
+        let none = Changes::default();
+        assert!(check_names(&none, &limits, &mut work).is_ok());
+        // A replaced part of any case of `.xml`, and an added one, with a tag that names an attribute twice, is refused, and the words say which part.
+        for name in ["content.xml", "META-INF/manifest.xml", "DiaCraft/document.xml", "styles.XML"] {
+            let mut changes = Changes::default();
+            changes.replace.insert(name.to_owned(), TWICE.as_bytes().to_vec());
+            assert!(why(check_names(&changes, &limits, &mut WriteWork::default())).contains(name), "replaced {name}");
+            let mut changes = Changes::default();
+            changes.add.push((name.to_owned(), TWICE.as_bytes().to_vec(), Method::Deflated));
+            assert!(why(check_names(&changes, &limits, &mut WriteWork::default())).contains(name), "added {name}");
+        }
+        // The names are looked at in order, so the part a refusal names does not depend on the map: `a.xml` before `b.xml`.
+        let mut changes = Changes::default();
+        for name in ["b.xml", "c.xml", "a.xml"] {
+            changes.replace.insert(name.to_owned(), TWICE.as_bytes().to_vec());
+        }
+        assert!(why(check_names(&changes, &limits, &mut WriteWork::default())).contains("a.xml"));
+        // What is no XML by its name is not read as markup: a picture, a thumbnail, a part with no extension, a stored media type.
+        let mut changes = Changes::default();
+        for name in ["Thumbnails/thumbnail.png", "Pictures/image1.png", "mimetype", "README", "x.xml.bak"] {
+            changes.replace.insert(name.to_owned(), TWICE.as_bytes().to_vec());
+            changes.add.push((name.to_owned(), TWICE.as_bytes().to_vec(), Method::Stored));
+        }
+        assert!(check_names(&changes, &limits, &mut work).is_ok());
+        assert_eq!(work.checked_name_bytes, 0, "none of them was looked at");
+    }
 }

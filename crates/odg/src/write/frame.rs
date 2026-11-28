@@ -26,6 +26,13 @@ use crate::limits::Limits;
 use crate::read::names::Ns;
 use crate::read::units::{LenUnit, length};
 
+/// The words of the refusal of an outline that is not of the kind of element the file holds a segment as.
+pub(crate) const WORDS_POLY_KIND: &str = "a one-dimensional shape the file holds as a polyline or a path whose outline now needs the other (a curve where the file has a polyline, none where it has a path): a save does not change the element";
+
+/// The words of the refusal of a line the model glued to a shape: ODF's `draw:line` has no attribute to name a shape in.
+pub(crate) const WORDS_GLUED_LINE: &str =
+    "a line glued to a shape (only a connector of an .odg can be: a draw:line has no attribute to say what it is glued to)";
+
 /// What the edits of one part are made with: the part's bytes and splicer, its namespaces, the work and the limits, and the page being edited.
 pub(crate) struct Editor<'a, 'w> {
     pub bytes: &'a [u8],
@@ -83,6 +90,8 @@ pub(crate) struct Editor<'a, 'w> {
     pub kept: super::shapes::KeptMarkup,
     /// The document being saved: its colour table and its font table, which the rows of a shape's text are read through.
     pub doc: &'w diacraft_doc::Document,
+    /// The document's resolver, for the alt text a new shape takes from its master: its maps are built once for the save.
+    pub resolver: diacraft_doc::Resolver<'w>,
     /// The names of the common styles of the package (the other part's): a paragraph or run of the model path that names one names it by reference, and no automatic style is made under it.
     pub commons: std::collections::HashSet<String>,
     /// The text of the shape being written, made by the model writer before its element and taken by the function that writes it ([`Editor::rich_text`]).
@@ -282,6 +291,30 @@ impl<'a> Editor<'a, '_> {
         Ok(())
     }
 
+    /// Writes the outline of a segment the file holds as a polyline or a path from `placed`: the box on the page as `svg:x`, `svg:y`, `svg:width` and `svg:height` (each in
+    /// the unit its attribute has, the page's where it has none), the view box, and the data (`draw:points` of a polyline, `svg:d` of a path). The element is not changed: a polyline whose outline
+    /// has a curve now, or a path whose outline has none, is refused in words.
+    pub(crate) fn set_poly(&mut self, shape: &ScanShape, placed: &super::poly::Placed) -> Result<(), WriteError> {
+        if (shape.kind == Kind::Path) != placed.path {
+            return Err(WriteError::Unsupported(WORDS_POLY_KIND));
+        }
+        let mut tag = self.tag(shape)?;
+        let unit = ["x", "y", "width", "height"].iter().find_map(|l| self.held(&tag, Ns::Svg, l)).map_or(self.unit, |h| h.unit);
+        for (local, hundredths) in [("x", placed.left), ("y", placed.top), ("width", placed.width), ("height", placed.height)] {
+            self.put(&mut tag, local, super::poly::inches(hundredths), unit, false)?;
+        }
+        let (data_ns, data_local) = if placed.path { (Ns::Svg, "d") } else { (Ns::Draw, "points") };
+        for (ns, local, text) in [(Ns::Svg, "viewBox", placed.view_box.as_str()), (data_ns, data_local, placed.data.as_str())] {
+            self.charge()?;
+            self.work.charge_copy(text.len(), self.limits)?;
+            match tag.find(&mut self.scopes, ns, local, self.work) {
+                Some(at) => tag.set(&mut self.splicer, at, text)?,
+                None => tag.add(&mut self.splicer, &mut self.scopes, self.work, ns, local, text)?,
+            }
+        }
+        Ok(())
+    }
+
     /// Writes `draw:z-index` as `value`: in its place when the element has one, added when it has not.
     pub(crate) fn set_z(&mut self, shape: &ScanShape, value: i64) -> Result<(), WriteError> {
         let mut tag = self.tag(shape)?;
@@ -377,6 +410,41 @@ impl<'a> Editor<'a, '_> {
                 Ok(other.is_some())
             }
         }
+    }
+
+    /// Writes the glue of one end of a connector of the file (the rows for `draw:start-shape`, `draw:end-shape` and the glue points): the name of the shape the end is
+    /// glued to, and the glue point it names, which a glue to the whole of a shape has none of. Each attribute is **replaced in its place** when the tag has it (and is left alone when it
+    /// says already what is to be written), **added after the tag's last attribute** when it has not, and taken out when it is not to be written (an end glued to the whole of a shape
+    /// loses the point it named). `name` is the name the reader finds the shape by (`xml:id`, else `draw:id`).
+    ///
+    /// **Only a `draw:connector` has these attributes** (ODF 1.4, 10.3.10): a line the model glued, which the writer cannot say with one, is refused in words and nothing is written.
+    pub(crate) fn write_glue_end(&mut self, shape: &ScanShape, start: bool, name: &str, point: Option<u32>) -> Result<(), WriteError> {
+        if shape.kind != Kind::Connector {
+            return Err(WriteError::Unsupported(WORDS_GLUED_LINE));
+        }
+        let mut tag = self.tag(shape)?;
+        let (shape_attr, point_attr) = if start { ("start-shape", "start-glue-point") } else { ("end-shape", "end-glue-point") };
+        let point_text = point.map(|p| p.to_string());
+        for (local, value) in [(shape_attr, Some(name)), (point_attr, point_text.as_deref())] {
+            match (tag.find(&mut self.scopes, Ns::Draw, local, self.work), value) {
+                (Some(at), Some(text)) => {
+                    if tag.text(at) != text {
+                        self.charge()?;
+                        tag.set(&mut self.splicer, at, text)?;
+                    }
+                }
+                (Some(at), None) => {
+                    self.charge()?;
+                    tag.remove(&mut self.splicer, at)?;
+                }
+                (None, Some(text)) => {
+                    self.charge()?;
+                    tag.add(&mut self.splicer, &mut self.scopes, self.work, Ns::Draw, local, text)?;
+                }
+                (None, None) => {}
+            }
+        }
+        Ok(())
     }
 
     /// Takes the glue of one end of a connector out (R9 delete): `draw:start-shape` or `draw:end-shape`, and its glue point.

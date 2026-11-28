@@ -21,6 +21,11 @@
 //! **A new drawing is written the same way**, from [`skeleton`]: the package of a drawing with no page, which the save then brings to the
 //! document, so adding the first page of a new drawing and the tenth page of a file read are one code path.
 //!
+//! **Background pages come first in the pages index**: the writers that make the index from the model, a drawing never saved and a model written
+//! from the model alone, list every background page before every foreground page, as all 70 files of the corpus that hold both kinds do, with each page's `ID`, name, `BackPage` and content
+//! unchanged and the pages of each kind in the order the model has ([`diacraft_doc::Document::pages_background_first`]). **A save into a file keeps the order the file has**, whatever it is: the
+//! splice changes only what an edit changed, and a page the model moved to another place is written to that place.
+//!
 //! **A model that holds anything of a VSDX package is written from the model alone** (`held.rs` is its plan and `model.rs` its trees and package): a document that was read from a package
 //! ([`diacraft_doc::Document::vsdx`]), one that holds a part of its own, or one with unknown elements of its document, has no file to splice into when it comes from a `.diacraft` file, and its parts, rows, names and
 //! slots are the model's. `write_with(doc, None, options)` writes all of it, and [`WriteOptions::content_unchanged`] says whether the bookkeeping of the file is kept or written as an edited save writes it. A save into a
@@ -69,6 +74,7 @@ mod par;
 mod parts;
 mod patch;
 mod props;
+mod root;
 mod settings;
 mod skeleton;
 pub use skeleton::new_windows_part;
@@ -326,13 +332,57 @@ pub fn write_with_threads(
 ) -> Result<Written, WriteError> {
     match original {
         Some(o) => run(doc, o.bytes, o.baseline, options, false, threads),
-        // A model that holds anything of a VSDX package is written from the model alone (`held.rs`); a drawing made new is the skeleton, patched.
-        None if held::wanted(doc) => held::write(doc, options),
-        None => {
-            let skeleton = skeleton::build(doc, options)?;
-            run(doc, &skeleton, None, options, true, threads)
-        }
+        None => write_new(doc, options, threads),
     }
+}
+
+/// A drawing with no file to splice into: a drawing never saved, and a model written from the model alone. **The pages index is made from the model, with the background pages first** (in each of the 70 files of the corpus that hold both kinds, every background page comes before every foreground one):
+/// a page keeps its `ID`, its name, its
+/// `BackPage` and what it holds, and the pages of each kind keep the order the model has. The drawing handed back is what the file reads as, in that order. A file that is saved into
+/// keeps the order it has (the splice changes only what an edit changed), so this is for the writers that make the index.
+fn write_new(doc: &Document, options: &WriteOptions, threads: usize) -> R<Written> {
+    // **A language cell is written as the files hold one** (`plain_languages.rs`): the tag alone, where the drawing holds a string formula for it. A model has no file to compare
+    // with, so every cell is looked at; the engine asks for the same drawing before it writes one from the model, and the check after the save finds the file as it was written.
+    let plain = crate::plain_languages::plain_languages(doc, None);
+    let doc = plain.as_ref().unwrap_or(doc);
+    // **The text of a `User` or `Field` row says `STR`** (`string_units.rs`): the `Value` of every such row that holds a text is given the unit, whatever made it (a `.diacraft` file of an
+    // earlier build holds the text of a container's `User` rows with none), **in a drawing whose units are DiaCraft's to state**: one that came from no VSDX package or from one that names DiaCraft. The
+    // cells of the package of another program are written as they were read. The engine asks for the same drawing before it writes one from the model.
+    let strung = crate::string_units::string_units(doc);
+    let doc = strung.as_ref().map_or(doc, |fitted| &fitted.doc);
+    let ordered = doc.pages_background_first();
+    // With the pages put in order the file is not what the drawing was read as, so the bookkeeping of an unedited visit (the thumbnail, the program's name) is not kept.
+    let edited_options;
+    let (doc, options) = match &ordered {
+        Some(in_order) => {
+            edited_options = WriteOptions { content_unchanged: false, ..options.clone() };
+            (in_order, &edited_options)
+        }
+        None => (doc, options),
+    };
+    // **The root style states what the program assumes**: a model that came from no VSDX file is written with the cells of its style 0 that a reader would take as another value
+    // than the assumed one, and the model handed back keeps the root the caller had (see [`root::stated`]).
+    let stated = root::stated(doc);
+    let to_write = stated.as_ref().map_or(doc, |s| &s.doc);
+    // A model that holds anything of a VSDX package is written from the model alone (`held.rs`); a drawing made new is the skeleton, patched.
+    let mut written = if held::wanted(to_write) {
+        held::write(to_write, options)?
+    } else {
+        // **The page names are the ones the program that opens the file keeps** (`page_names.rs`), before the skeleton is made: its list of page names in the properties is made from
+        // the drawing it is given. `run` finds nothing more to rename in what it is handed.
+        let kept = crate::page_names::keep_page_names(to_write, None);
+        let to_make = kept.as_ref().map_or(to_write, |k| &k.doc);
+        let skeleton = skeleton::build(to_make, options)?;
+        let mut made = run(to_make, &skeleton, None, options, true, threads)?;
+        if let Some(words) = kept.as_ref().filter(|k| !k.renamed.is_empty()).map(crate::page_names::KeptNames::words) {
+            made.warnings.insert(0, words);
+        }
+        made
+    };
+    if let Some(stated) = &stated {
+        stated.give_back(&mut written.document);
+    }
+    Ok(written)
 }
 
 fn run(doc: &Document, bytes: &[u8], baseline: Option<&Document>, options: &WriteOptions, new_file: bool, threads: usize) -> R<Written> {
@@ -358,8 +408,22 @@ fn run(doc: &Document, bytes: &[u8], baseline: Option<&Document>, options: &Writ
         }
     };
     // (A drawing that was never saved and holds unknown elements of its document is the model writer's, `held::wanted`; the skeleton holds only the Snap & Glue words.)
+    // **The page names are the ones the program that opens the file keeps** (`page_names.rs`): a page the file holds under its names is left as it is, and a page that is new or
+    // renamed has the names that program would give, said in the save's warnings.
+    let kept = crate::page_names::keep_page_names(doc, Some(base));
+    let doc = kept.as_ref().map_or(doc, |k| &k.doc);
+    // **A language cell is written as the files hold one** (`plain_languages.rs`): a cell the file holds as it is stands, and one the edit wrote is the tag alone.
+    let plain = crate::plain_languages::plain_languages(doc, Some(base));
+    let doc = plain.as_ref().map_or(doc, |p| p);
+    // **The text of a `User` or `Field` row of a file DiaCraft wrote says `STR`** (`string_units.rs`): the cells an earlier build wrote with no unit (the cached text of a field row, which a save keeps
+    // as the file had it) are given it, and a file another program wrote is kept as that program wrote it. A drawing never saved was given the unit by `write_new`.
+    let strung = (!new_file && props::names_diacraft(&pkg)).then(|| crate::string_units::string_units_in_file(doc)).flatten();
+    let doc = strung.as_ref().map_or(doc, |fitted| &fitted.doc);
     // The themes of a drawing that was never saved are added to the skeleton like any other (`themes.rs`).
     let mut plan = Plan::new(pkg, base, doc, options, new_file)?;
+    if let Some(words) = kept.as_ref().filter(|k| !k.renamed.is_empty()).map(crate::page_names::KeptNames::words) {
+        plan.warnings.push(words);
+    }
     plan.threads = threads;
     plan.layout()?;
     plan.variant()?;
@@ -371,6 +435,8 @@ fn run(doc: &Document, bytes: &[u8], baseline: Option<&Document>, options: &Writ
     plan.pages()?;
     plan.diacraft()?;
     plan.properties()?;
+    // After every step that may have edited the file, so that it knows whether the save writes the file again (`diacraft.rs`).
+    plan.drop_old_declaration()?;
     plan.finish(&limits)
 }
 
@@ -1241,7 +1307,9 @@ impl<'a> Plan<'a> {
         let b: Vec<&Page> = base.pages.iter().map(|p| &**p).collect();
         let n: Vec<&Page> = doc.pages.iter().map(|p| &**p).collect();
         let (matched, used) = patch::match_items(&b, &n, &|p: &Page| Some(p.id));
-        let mut index_changed = b.len() != n.len();
+        // **A page that went to another place among the pages the file has is a change of the index** (R52 when a Save As puts the background pages first): the rows of the pages
+        // that stay are in the order of the model, and an index whose rows are all the same rows in another order is not the file's.
+        let mut index_changed = b.len() != n.len() || pages_moved(&matched);
         // Pages whose part is rewritten, with the masters their shapes used before and use now.
         let mut touched: Vec<(String, Vec<u32>, Vec<u32>, Background)> = Vec::new();
         // The parts to patch are found first and patched together (on threads when there are some): a refusal found on the way is held until the patches before it are made, since the first error of
@@ -1977,6 +2045,19 @@ fn masters_used(list: &ShapeList) -> BTreeSet<u32> {
     out
 }
 
+/// Whether the pages that stay are in another order than the file has them: `matched[j]` is the place in the baseline of the `j`th page of the model, when it had one. True when a page that
+/// stays comes after one that stood after it in the file (`matched` is not rising); a page that is new or gone says nothing of the order of the others.
+fn pages_moved(matched: &[Option<usize>]) -> bool {
+    let mut reached = 0usize;
+    for place in matched.iter().flatten() {
+        if *place < reached {
+            return true;
+        }
+        reached = *place;
+    }
+    false
+}
+
 /// Whether two pages are the same row of the pages index: everything but their shapes and the writer's `r:id`.
 fn page_row_same(a: &Page, b: &Page) -> bool {
     std::ptr::eq(a, b) || (page_attrs(a) == page_attrs(b) && a.sheet == b.sheet && a.passthrough == b.passthrough)
@@ -1988,6 +2069,23 @@ fn master_row_same(a: &Master, b: &Master) -> bool {
 
 #[allow(dead_code)]
 const _: &str = NS_TYPES;
+
+#[cfg(test)]
+mod page_order_words {
+    use super::pages_moved;
+
+    #[test]
+    fn pages_are_moved_when_the_places_they_had_do_not_rise() {
+        assert!(!pages_moved(&[]));
+        assert!(!pages_moved(&[Some(0), Some(1), Some(2)]), "the order the file has");
+        assert!(pages_moved(&[Some(1), Some(0)]), "two pages that changed places");
+        assert!(pages_moved(&[Some(0), Some(2), Some(1)]), "one of three taken back");
+        // A page that is new (`None`) or taken out (a place no page of the model has) says nothing of the order of the others.
+        assert!(!pages_moved(&[None, Some(0), None, Some(2), Some(3)]));
+        assert!(pages_moved(&[None, Some(3), None, Some(2)]));
+        assert!(!pages_moved(&[None, None]));
+    }
+}
 
 #[cfg(test)]
 mod read_back_words {

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use diacraft_doc::{DocError, Document, MAX_NAME_CHARS, MAX_PAGES, Page, TextProblem, check_text};
+use diacraft_doc::{DocError, Document, MAX_NAME_CHARS, MAX_PAGE_NAME_CHARS, MAX_PAGES, Page, TextProblem, check_given_page_name, check_text};
 
 #[test]
 fn a_blank_document_has_one_named_page_and_is_valid() {
@@ -292,4 +292,48 @@ fn the_root_style_of_a_blank_document_holds_a_basic_line_fill_and_text_look() {
         (r.formula.source, r.value.cell.and_then(|c| c.value.as_ref()).map(Value::text)),
         (Source::Style { id: 0, family: Some(diacraft_doc::Family::Line) }, Some("0.02"))
     );
+}
+
+/// A name a command gives a page has at most 31 characters (the Page Properties tab, rule E2 of the page setup dialog); the model still holds the names of a file, up to 255.
+#[test]
+fn a_name_a_command_gives_a_page_has_at_most_31_characters_and_the_model_still_holds_a_longer_one_a_file_has() {
+    assert_eq!(MAX_PAGE_NAME_CHARS, 31);
+    // Counted in characters, not bytes: 31 of two bytes and 31 of four.
+    assert_eq!(check_given_page_name(&"é".repeat(31)), Ok(()));
+    assert_eq!(check_given_page_name(&"\u{1f600}".repeat(31)), Ok(()));
+    assert_eq!(check_given_page_name(&"x".repeat(32)), Err(DocError::PageNameTooLong));
+    assert_eq!(check_given_page_name(&"x".repeat(100_000)), Err(DocError::PageNameTooLong));
+    // The rules of any name still hold.
+    assert_eq!(check_given_page_name(""), Err(DocError::EmptyName));
+    assert_eq!(check_given_page_name("  "), Err(DocError::EmptyName));
+    assert_eq!(check_given_page_name("a\nb"), Err(DocError::ControlCharacter));
+    assert!(DocError::PageNameTooLong.to_string().contains("at most 31 characters"), "{}", DocError::PageNameTooLong);
+    // The document takes the 40 characters a file gave a page, as an add and a rename of it, and the audit passes it.
+    let mut doc = Document::new_blank();
+    let forty = "n".repeat(40);
+    doc.rename_page(1, &forty).unwrap();
+    let second = doc.add_page(Some(&forty)).unwrap();
+    assert_eq!(doc.page(second).map(|p| &*p.name), Some(forty.as_str()));
+    assert_eq!(doc.validate(), Ok(()));
+}
+
+/// The page a command works on when it is not told which: the first page that is not a background (the tabs put the background pages after the others, and a file lists them first), and
+/// the first page there is when every page is one.
+#[test]
+fn the_first_foreground_page_is_the_first_that_is_not_a_background_else_the_first() {
+    let page = |id: u32, background: bool| {
+        let mut page = Page::new(id, &format!("P{id}"));
+        page.background = background;
+        Arc::new(page)
+    };
+    let mut doc = Document::new_blank();
+    assert_eq!(doc.first_foreground_page().map(|p| p.id), Some(1), "a blank drawing's one page");
+    doc.pages = vec![page(7, true), page(8, true), page(3, false), page(4, false)].into_iter().collect();
+    assert_eq!(doc.first_foreground_page().map(|p| p.id), Some(3), "backgrounds first, as a file lists them");
+    doc.pages = vec![page(3, false), page(7, true), page(4, false)].into_iter().collect();
+    assert_eq!(doc.first_foreground_page().map(|p| p.id), Some(3), "a background between the pages");
+    doc.pages = vec![page(7, true), page(8, true)].into_iter().collect();
+    assert_eq!(doc.first_foreground_page().map(|p| p.id), Some(7), "every page a background: the first there is");
+    doc.pages = Default::default();
+    assert!(doc.first_foreground_page().is_none(), "no pages, no page");
 }

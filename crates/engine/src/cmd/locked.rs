@@ -5,11 +5,14 @@
 //! The rule is the registry's, not each command's: it is asked of every command before it runs ([`refuse`], from `Session::check`), so a command added later cannot skip it.
 //!
 //! * **Which commands.** Every command that is journaled (a query, which only reads, still answers): the shapes it names are the `ids` it is given and its `id`, except for the
-//!   commands of [`ID_NAMES_NO_SHAPE`], whose `id` is a page's or a stencil's, the `container` of a `container.*` command (it is changed: its members and its box) and the `lane` or `phase` of a `swimlane.*` command. A connector's ends (`from`, `to`, `target`) are not edits of the shapes they are glued to: the
+//!   commands of [`ID_NAMES_NO_SHAPE`], whose `id` is a page's, a master's or a stencil's, the `container` of a `container.*` command (it is changed: its members and its box) and the `lane` or `phase` of a `swimlane.*` command. A connector's ends (`from`, `to`, `target`) are not edits of the shapes they are glued to: the
 //!   layers' Glue box governs them (`draw::layers::glue_refusal`).
+//! * **A call that only reads is no edit**. A command that reads and writes in one call is journaled, as a command that can write is, so the journal flag cannot tell its reads
+//!   from its writes: [`READ_UNLESS_GIVEN`] lists those commands with the keys that make a call a write, and a call that gives none of them answers about a shape on a locked layer. Every other
+//!   command that reads is a query of its own (`shape.behavior`, `sheet.get`) and is not journaled.
 //! * **A `sheet.*` call**: its `id` is a shape of a page unless it names a `master` (a master's shape, which no page's layer locks), and a `sheet.set_cells` call names a
 //!   shape in each of its writes that names one (a write that names any sheet key names its sheet whole, else it takes the call's): one on a locked layer refuses the whole call.
-//! * **Which page.** The page the command names, else the first page that holds every shape named, else the first page: the page the commands themselves work on (`page_for`).
+//! * **Which page.** The page the command names, else the first page that holds every shape named (the pages that are not backgrounds first), else the first page that is not a background: the page the commands themselves work on (`page_for`).
 //! * **Which shapes.** Each shape by its own `LayerMember`, as the window's pointer reads it ([`crate::draw::layers::first_locked`]).
 //! * **What it costs.** A drawing none of whose pages has a locked layer costs the read of each page's table and no walk of any page.
 
@@ -22,8 +25,20 @@ use crate::Session;
 use crate::draw::{self, layers};
 use crate::error::{Result, bad};
 
-/// The commands whose `id` names no shape: a page's (`page.*`) or a stencil's (`stencil.*`). Their `ids`, if they had any, would be shapes.
-pub(crate) const ID_NAMES_NO_SHAPE: &[&str] = &["page.rename", "page.duplicate", "page.delete", "page.move", "stencil.open", "stencil.close"];
+/// The commands whose `id` names no shape: a page's (`page.*`), a master's (`master.alt_text`) or a stencil's (`stencil.*`). Their `ids`, if they had any, would be shapes.
+pub(crate) const ID_NAMES_NO_SHAPE: &[&str] =
+    &["page.rename", "page.duplicate", "page.delete", "page.move", "master.alt_text", "stencil.open", "stencil.close"];
+
+/// The commands that read, set and clear in one call, each with the keys that make a call a write: a call that gives none of them only reads, and a read changes nothing, so it is no
+/// edit of the shape it names (the alt text of a shape on a locked layer can be read: the window reads it, and so must a program). A key is given when the call has it and it is
+/// neither `null` nor `false` (`clear: false` clears nothing; a text that is `false` is no text, which the command refuses in its own words).
+pub(crate) const READ_UNLESS_GIVEN: &[(&str, &[&str])] = &[("shape.alt_text", &["title", "description", "clear"])];
+
+/// Whether `spec` run with `p` is a call of a command of [`READ_UNLESS_GIVEN`] that gives nothing to write.
+fn only_reads(spec: &CommandSpec, p: &Value) -> bool {
+    let gives = |key: &&str| !matches!(p.get(*key), None | Some(Value::Null) | Some(Value::Bool(false)));
+    READ_UNLESS_GIVEN.iter().any(|(id, keys)| *id == spec.id && !keys.iter().any(gives))
+}
 
 /// The shapes `p` names by `ID`, for the command `spec`: the whole numbers of its `ids`, at most `MAX_IDS` of them, and its `id`. What is not a whole number
 /// is left for the command to refuse.
@@ -104,9 +119,9 @@ fn refuse_group(s: &Session, spec: &CommandSpec, named: Option<u32>, ids: &[u32]
 }
 
 /// Refuses `spec` run with `p` when it changes the drawing and names a shape that is on a locked layer: a bad-parameters error whose words name the shape
-/// and the layer. Anything else passes: a query, a command that names no shape, no document, a page that is not there.
+/// and the layer. Anything else passes: a query, a call that only reads ([`READ_UNLESS_GIVEN`]), a command that names no shape, no document, a page that is not there.
 pub(crate) fn refuse(s: &Session, spec: &CommandSpec, p: &Value) -> Result<()> {
-    if !spec.journal {
+    if !spec.journal || only_reads(spec, p) {
         return Ok(());
     }
     let ids = named_shapes(spec, p);
@@ -162,5 +177,48 @@ mod tests {
         let mut listed = ID_NAMES_NO_SHAPE.to_vec();
         listed.sort_unstable();
         assert_eq!(no_shape, listed);
+    }
+
+    /// The commands that read and write in one call are those whose doc says so: each of [`READ_UNLESS_GIVEN`] is a registered, journaled command that lists its keys and says "the
+    /// call only reads"; and a journaled command that says it and names shapes by `ids`, or by an `id` that is a shape's, is in the list, so that a command added later with a read
+    /// mode fails here, in a test, and not on a drawing with a locked layer.
+    #[test]
+    fn the_commands_that_read_and_write_in_one_are_those_whose_doc_says_the_call_only_reads() {
+        let specs = super::super::command_specs();
+        for (id, keys) in READ_UNLESS_GIVEN {
+            let spec = specs.iter().find(|spec| spec.id == *id).unwrap_or_else(|| panic!("{id} is not a registered command"));
+            assert!(spec.journal, "{id}: a command that is no query");
+            let listed = super::super::param_keys(spec.params).unwrap();
+            for key in *keys {
+                assert!(listed.contains(key), "{id}: its params doc has no `{key}`");
+            }
+            assert!(spec.params.contains("the call only reads"), "{id}: its params doc does not say the call only reads");
+        }
+        for spec in specs.iter().filter(|spec| spec.journal && spec.params.contains("the call only reads")) {
+            let listed = super::super::param_keys(spec.params).unwrap();
+            let names_shapes = listed.contains(&"ids") || (listed.contains(&"id") && !ID_NAMES_NO_SHAPE.contains(&spec.id));
+            assert!(
+                !names_shapes || READ_UNLESS_GIVEN.iter().any(|(id, _)| *id == spec.id),
+                "{}: it reads and writes in one call and names shapes, so it belongs in READ_UNLESS_GIVEN",
+                spec.id
+            );
+        }
+    }
+
+    /// A call gives nothing to write when each key is left out, `null` or `false`, and writes when one is any other value: a text (the empty one too) and `clear: true`.
+    #[test]
+    fn a_call_only_reads_when_it_gives_nothing_to_write() {
+        let specs = super::super::command_specs();
+        let alt = specs.iter().find(|spec| spec.id == "shape.alt_text").unwrap();
+        let reads = |p: Value| only_reads(alt, &p);
+        assert!(reads(serde_json::json!({"id": 1})));
+        assert!(reads(serde_json::json!({"id": 1, "clear": false, "title": null, "description": null})));
+        assert!(!reads(serde_json::json!({"id": 1, "title": "x"})));
+        assert!(!reads(serde_json::json!({"id": 1, "description": ""})), "the empty text clears");
+        assert!(!reads(serde_json::json!({"id": 1, "clear": true})));
+        assert!(!reads(serde_json::json!({"id": 1, "title": 5})), "a value that is no text is a write, which the command refuses in its own words");
+        // A command that is not in the list is never a read.
+        let delete = specs.iter().find(|spec| spec.id == "shape.delete").unwrap();
+        assert!(!only_reads(delete, &serde_json::json!({"ids": [1]})));
     }
 }

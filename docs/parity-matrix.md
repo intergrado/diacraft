@@ -5,8 +5,8 @@ makes the page (`site/feature-comparison.html`) from it; [the website's notes](w
 with the reference app, LibreOffice Draw and draw.io in 155 rows grouped by area, and lists the features that only DiaCraft
 has. Each cell is Full, Partial, Not yet or unknown (the page shows unknown as "?").
 
-**The cells come from public documentation, not from running the apps.** The reference app was not inspected, nothing was
-launched or measured, and our output has not been opened in it by the project. LibreOffice was also run as a black box, to
+**The cells come from public documentation.** The reference app was never taken apart, and the files DiaCraft writes are
+being tested by opening them in it, in LibreOffice Draw and in draw.io. LibreOffice was also run as a black box, to
 read the list of its file filters, its Gallery themes and the handles of its preset shapes. Every LibreOffice and draw.io cell
 names its sources and the date they were read; the reference app's cells rest on the checklist. **Corrections are welcome:**
 open an issue at <https://github.com/intergrado/diacraft/issues> with the row id, the cell and a public source.
@@ -116,5 +116,6 @@ channel (each of the others can be driven by another program). Doubled connectio
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-26 | minor | The seven manual rows read again for 0.2.4 (no value moved), and the Linux row's note names the four downloads (an AppImage, a `.deb`, an `.rpm` and a `.tar.gz`) |
 | 2026-11-26 | minor | `cargo xtask site --write` makes the page from the data; DiaCraft's counts follow the checklist (79 Partial and 62 Not yet, one row having moved since the research); the wording of two features only DiaCraft has says what the docs say (the format's public specification and kept details; no connection once loaded, with the two files the editor asks for), and a note of the offline item names the vendor's plan comparison |
 | 2026-11-26 | major | Created, with the data file of 155 rows, the rules of each column, the sources and their dates, the DiaCraft-only items and the notices the page carries |

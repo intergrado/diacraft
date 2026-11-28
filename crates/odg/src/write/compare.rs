@@ -69,6 +69,8 @@ pub(crate) struct ShapeDiff {
     pub text: Option<super::text::TextEdit>,
     /// The outline, when it was edited: the sheet it is written from, and the modifiers a handle changed.
     pub geo: Option<own::GeoEdit>,
+    /// The title and the description, when one changed: the elements `svg:title` and `svg:desc` to write.
+    pub alt: Option<super::alt::AltEdit>,
     /// What DiaCraft's extension carries of the shape and what this change does to it: present for every changed shape, since a change of the pose,
     /// the text or the names is also a change of the tier 2 that holds the old one.
     pub tier2: Option<own::Tier2Edit>,
@@ -78,12 +80,72 @@ pub(crate) struct ShapeDiff {
     /// The `draw:layer` to write on the shape of the file: the layer the save declares that the model put the shape on. `None` keeps the
     /// layer the file named, its list riding in DiaCraft's data.
     pub layer: Option<String>,
+    /// The shape's own sheet in the model, and the map of the groups around it to the page: a segment the file holds as a polyline or a path is written from them.
+    pub sheet: std::sync::Arc<diacraft_doc::Sheet>,
+    pub outer: Affine,
+    /// The connection points the model now has, when they are other than the file's: the glue points the save writes into the shape's element so that another program has a point to
+    /// attach a connector to (CPDOUBLE.ODG).
+    pub glue_rows: Option<PointsEdit>,
+}
+
+/// What the model did to the connection points of a shape of the file (CPDOUBLE.ODG): the rows as glue points, as the model has them now, and as the file has them.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PointsEdit {
+    pub now: Vec<super::geometry::GluePoint>,
+    pub was: Vec<super::geometry::GluePoint>,
+    /// The shape's size, turn and mirrors in the model, with the box of a plain frame: where its glue point elements are written, in the page's axes for a shape that is turned or mirrored,
+    /// as LibreOffice places them ([`super::geometry::GlueFrame`]). The box is the one of a custom shape or a rectangle; the writer of the elements judges the shape's own.
+    /// `None` for a shape whose width or height is no length above 0: no element is written for it.
+    pub frame: Option<super::geometry::GlueFrame>,
+    /// **The shape is turned or flipped other than the file has it**: a `draw:glue-point` element of the file is in the page's axes, so it is the row it made only in the turn and
+    /// the flips the shape was read with, and a turn made since leaves it where it was, to be read back as another place than the row's. No element is then kept: each row past the geometry's
+    /// own points is written its own, for the shape's frame as it is.
+    pub moved: bool,
+}
+
+/// The glue points to write for a shape of the file whose connection rows the model changed: `None` for a shape whose rows are the file's (the same number of rows, each with the same
+/// `X`, `Y`, `DirX` and `DirY`), or whose rows cannot be written as glue points ([`super::geometry::glue_points_of`]). The rows are compared as cells, not as shares of the frame: a resize
+/// changes the shares of rows that are lengths and is no change of the rows.
+fn points_edit(file: &diacraft_doc::Shape, model: &diacraft_doc::Shape, steps: &mut u64) -> Option<PointsEdit> {
+    let rows = |shape: &diacraft_doc::Shape| shape.sheet.sections.iter().find(|s| s.name.as_str() == "Connection").map(|s| s.rows.clone());
+    let (was_rows, now_rows) = (rows(file), rows(model));
+    let (was_rows, now_rows) = (was_rows.unwrap_or_default(), now_rows?);
+    *steps = steps.saturating_add(was_rows.len().max(now_rows.len()) as u64);
+    let number = |row: &diacraft_doc::Row, name: &str| row.cells.get(name).and_then(|c| c.value.as_ref()?.number());
+    let same = was_rows.len() == now_rows.len()
+        && was_rows.iter().zip(&now_rows).all(|(a, b)| {
+            a.ix == b.ix
+                && ["X", "Y", "DirX", "DirY"].iter().all(|name| match (number(a, name), number(b, name)) {
+                    (Some(p), Some(q)) => (p - q).abs() <= 1e-12 * (1.0 + p.abs().max(q.abs())),
+                    (None, None) => true,
+                    _ => false,
+                })
+        });
+    let frame = super::geometry::GlueFrame::of(&model.sheet, crate::read::Boxed::Frame);
+    // A turn or a flip the session made since the file was read: the elements the file holds are in the old page axes (the cells the reader gave the shape are the file's).
+    let was_frame = super::geometry::GlueFrame::of(&file.sheet, crate::read::Boxed::Frame);
+    let moved = match (&frame, &was_frame) {
+        (Some(now), Some(was)) => {
+            let turned = now.place.angle - was.place.angle;
+            now.place.flip != was.place.flip || turned.sin().abs() > 1e-9 || turned.cos() < 0.0
+        }
+        _ => false,
+    };
+    // A shape with no element of the file's has none to write again for a turn.
+    let held = was_rows.iter().any(|r| r.ext.get().and_then(|e| e.odf.held.as_ref()).is_some_and(|h| h.group == diacraft_doc::HeldGroup::Glue));
+    if same && !(moved && held) {
+        return None;
+    }
+    let now = super::geometry::glue_points_of(&model.sheet)?;
+    let was = super::geometry::glue_points_of(&file.sheet).unwrap_or_default();
+    Some(PointsEdit { now, was, frame, moved: moved && held })
 }
 
 /// The glue points of a turned shape of the file that connectors are glued to: LibreOffice places a `draw:glue-point` in the page's axes, from the box the shape
 /// takes up on the page (`read::connectors::Place`), and the standard points of a polygon, a polyline or a path on the box of its outline, so a turn the file does not
-/// say moves them elsewhere than the model's rows, which turn with the shape. The save refuses such a turn in words (`plan::apply_shape`), as the writer has no inverse of
-/// that placement yet.
+/// say moves them elsewhere than the model's rows, which turn with the shape. The save refuses such a turn in words (`plan::apply_shape`). The writer has the inverse of that placement now
+/// ([`super::geometry::GlueFrame`]) and writes the elements of the rows it adds at the shape's turn; but a turn made in the session leaves the elements the file held where
+/// the file had them, in the page's axes of the turn it had, so the refusal stays.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TurnedGlue {
     /// A connector is glued to a row a `draw:glue-point` of the file made (a row with a held glue point).
@@ -94,6 +156,28 @@ pub(crate) struct TurnedGlue {
 
 /// The words of the refusal of such a turn.
 pub(crate) const WORDS_TURNED_GLUE: &str = "a turn of a shape of the file whose connectors are glued to a glue point that LibreOffice places on the box the shape takes up on the page (a glue point the file gives as a draw:glue-point, or a standard one of a polygon, a polyline or a path): it would put the point elsewhere once the shape is turned";
+
+/// What an end of a connector is glued to: the shape's `ID` in the model as it is, and the part of it, **as `ToPart` says it** (3 for the whole shape, 100 and the row for a connection
+/// point).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GlueTo {
+    pub target: u32,
+    pub part: u32,
+    /// The element the shape is: the ordinal of its element in the file, or, for a shape the model made, its `ID`.
+    pub at: Joined,
+}
+
+/// One end of a connector of the file that the model glues otherwise than the file does: glued to another shape or point, glued anew, or taken off its shape. The
+/// glue of a connector the model made is not one: it is written with the connector ([`PageDiff::new_connects`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GlueEdit {
+    /// The ordinal of the connector's element.
+    pub ord: u32,
+    /// The begin of the connector (`true`) or its end.
+    pub start: bool,
+    /// What the end is glued to now: `None` for a free end.
+    pub to: Option<GlueTo>,
+}
 
 /// A level whose shapes are in another order than they were: the parent's ordinal (0 for the page) and the shapes' ordinals, those the model
 /// still has, in the order the baseline had them and in the order the model has.
@@ -127,8 +211,8 @@ pub(crate) struct PageDiff {
     /// The ordinals of the baseline's modelled shapes that the model no longer has, in order.
     pub deleted: Vec<u32>,
     pub levels: Vec<Level>,
-    /// The connectors (by ordinal) whose end lost its glue, and which end: true for the start.
-    pub unglue: Vec<(u32, bool)>,
+    /// The ends of connectors of the file whose glue the model changed, sorted by connector and end: an end taken off its shape, glued to another one or glued anew.
+    pub glue: Vec<GlueEdit>,
     /// Each shape of the model as it is, by `ID` and the ordinal of its element.
     pub survivors: Vec<(u32, u32)>,
     /// The shapes the model has put on the page that the file lacks, in the model's order, each with the shape it follows.
@@ -174,6 +258,9 @@ pub(crate) struct NewShape {
     pub parent: Option<usize>,
     /// The map from the shape's own frame to the page's: the identity for a shape of the top level, and the groups' around it for a member of a new group.
     pub outer: Affine,
+    /// Where the shape is in the model: its page and its place among the shapes of the page and the members of the groups around it (the alt text it takes from its master
+    /// is read from there).
+    pub at: diacraft_doc::ShapeRef,
 }
 
 /// The shapes of the model's page the file lacks, in order, each after the one before it in the model; a new group is followed by its members, deepest last, in
@@ -182,12 +269,13 @@ pub(crate) struct NewShape {
 fn news_of(doc: &Page, held: &PageShapes) -> Result<Vec<NewShape>, WriteError> {
     let mut out: Vec<NewShape> = Vec::new();
     let mut previous = Anchor::First;
-    for s in doc.shapes.iter() {
+    for (index, s) in doc.shapes.iter().enumerate() {
         match held.ordinal(s.id) {
             Some(o) => previous = Anchor::Ord(o),
             None => {
                 let top = out.len();
-                push_new(&mut out, s, previous, held)?;
+                let at = diacraft_doc::ShapeRef::top(diacraft_doc::Owner::Page(doc.id), u32::try_from(index).unwrap_or(u32::MAX));
+                push_new(&mut out, s, previous, held, at)?;
                 previous = Anchor::New(top);
             }
         }
@@ -195,13 +283,22 @@ fn news_of(doc: &Page, held: &PageShapes) -> Result<Vec<NewShape>, WriteError> {
     Ok(out)
 }
 
+/// A shape still to put: the shape, the new group it is a member of, the map of the groups around it, what it follows and where it is in the model.
+type ToPut<'a> = (&'a std::sync::Arc<Shape>, Option<usize>, Affine, Anchor, diacraft_doc::ShapeRef);
+
 /// Puts a new top-level shape in `out`, and for a group its members after it, each with the map of the groups around it: a stack of the members still to put, so no
 /// input makes the walk recurse.
-fn push_new(out: &mut Vec<NewShape>, shape: &std::sync::Arc<Shape>, after: Anchor, held: &PageShapes) -> Result<(), WriteError> {
+fn push_new(
+    out: &mut Vec<NewShape>,
+    shape: &std::sync::Arc<Shape>,
+    after: Anchor,
+    held: &PageShapes,
+    top: diacraft_doc::ShapeRef,
+) -> Result<(), WriteError> {
     let starved = |held: usize| WriteError::Limit { what: "memory for the new shapes of a page", max: held as u64 };
     // The shapes to put, the last first: each with the group it is a member of, the map of the groups around it, and what it follows.
-    let mut stack: Vec<(&std::sync::Arc<Shape>, Option<usize>, Affine, Anchor)> = vec![(shape, None, Affine::IDENTITY, after)];
-    while let Some((s, parent, outer, after)) = stack.pop() {
+    let mut stack: Vec<ToPut<'_>> = vec![(shape, None, Affine::IDENTITY, after, top)];
+    while let Some((s, parent, outer, after, here)) = stack.pop() {
         if parent.is_some() && held.ordinal(s.id).is_some() {
             return Err(WriteError::Unsupported(
                 "a shape of the file put into a new group (moving an element of the file into another is not written)",
@@ -209,7 +306,7 @@ fn push_new(out: &mut Vec<NewShape>, shape: &std::sync::Arc<Shape>, after: Ancho
         }
         let at = out.len();
         out.try_reserve(1).map_err(|_| starved(at))?;
-        out.push(NewShape { shape: std::sync::Arc::clone(s), after, parent, outer });
+        out.push(NewShape { shape: std::sync::Arc::clone(s), after, parent, outer, at: here.clone() });
         if s.children.is_empty() {
             continue;
         }
@@ -218,7 +315,11 @@ fn push_new(out: &mut Vec<NewShape>, shape: &std::sync::Arc<Shape>, after: Ancho
             .map(|m| own::compose(&outer, &m))
             .ok_or(WriteError::Unsupported("a new group whose frame is not numbers"))?;
         stack.try_reserve(s.children.len()).map_err(|_| starved(at))?;
-        stack.extend(s.children.iter().rev().map(|m| (m, Some(at), own, Anchor::First)));
+        stack.extend(s.children.iter().enumerate().rev().map(|(i, m)| {
+            let mut path = here.path.clone();
+            path.push(u32::try_from(i).unwrap_or(u32::MAX));
+            (m, Some(at), own, Anchor::First, diacraft_doc::ShapeRef { owner: here.owner, path })
+        }));
     }
     Ok(())
 }
@@ -235,7 +336,7 @@ impl PageDiff {
         !self.shapes.is_empty()
             || !self.deleted.is_empty()
             || !self.levels.is_empty()
-            || !self.unglue.is_empty()
+            || !self.glue.is_empty()
             || self.size.is_some()
             || !self.new.is_empty()
             || !self.layer_flags.is_empty()
@@ -358,8 +459,9 @@ struct Pair<'a> {
     in_file: bool,
     /// The baseline shape was read as a copy of another (its style carries an `ID` an earlier shape carries): it holds none of the data its style carries.
     copy: bool,
-    /// The model lost a glue of this shape (a connector's end was unglued): the formulas of its end cells changed with it, and the connections say so.
-    glue_off: bool,
+    /// What the model did to the glue of this connector's two ends, the begin first: `None` for an end whose glue is as the file has it, `Some(None)` for one taken off its shape and
+    /// `Some(Some(to))` for one glued to `to` now. The formulas of the end cells of such an end changed with it, and the connections say so.
+    glue: [Option<Option<GlueTo>>; 2],
     /// The tier-2 items of the baseline shape that tier 3 found stale when the file was read (`PageShapes::stale`).
     stale: &'a [crate::ext::fingerprint::Key],
     /// The native outputs of the baseline shape's markup that its tier-2 items rest on, as the file had them (`PageShapes::natives`).
@@ -373,9 +475,9 @@ fn classify(pair: &Pair<'_>, work: &mut WriteWork) -> Result<Option<ShapeDiff>, 
     let one_d = b.sheet.cell("BeginX").is_some();
     let connector = b.sheet.cell("ShapeRouteStyle").is_some();
     let palette = |index: i64| pair.fills.palette(index);
-    let (style, text, geo, delta) = match own::shape_change(b, d, connector, &palette, &mut work.cells_compared, &mut work.memory_room) {
-        own::ShapeChange::Same => (None, None, None, None),
-        own::ShapeChange::Edit { style, text, geo, delta } => (style, text, geo, delta),
+    let (style, text, geo, delta, alt) = match own::shape_change(b, d, connector, &palette, &mut work.cells_compared, &mut work.memory_room) {
+        own::ShapeChange::Same => (None, None, None, None, None),
+        own::ShapeChange::Edit { style, text, geo, delta, alt } => (style, text, geo, delta, alt),
         own::ShapeChange::Refuse(words) => return Err(WriteError::Unsupported(words)),
         own::ShapeChange::Memory => {
             return Err(WriteError::Limit {
@@ -391,11 +493,27 @@ fn classify(pair: &Pair<'_>, work: &mut WriteWork) -> Result<Option<ShapeDiff>, 
         own::decide_line_end(&mut edit, &d.sheet, |cell| pair.fills.line_number(&d.sheet, cell, &mut work.cells_compared));
         edit
     });
-    // The formula of a connector's end cell is the glue's: it changes when the glue goes, and then the connection says so. A formula set on an end with the glue as
+    // The formula of a connector's end cell is the glue's: it changes when the glue does, and then the connection says so. A formula set on an end with the glue as
     // it was is not written (the file would rebuild the end from its glue), so it is refused in words and not dropped.
-    if connector && !pair.glue_off && !own::pose_extras_same(&b.sheet, &d.sheet, &own::END_CELLS) {
-        return Err(WriteError::Unsupported(WORDS_END_FORMULA));
+    // **An end is judged by its own glue**: the other end of a connector whose one end was glued anew keeps the rule.
+    if connector {
+        let held: Vec<&&'static str> =
+            END_PAIRS.iter().zip(&pair.glue).filter(|(_, glue)| glue.is_none()).flat_map(|(cells, _)| cells.iter()).collect();
+        if !own::pose_extras_same(&b.sheet, &d.sheet, held) {
+            return Err(WriteError::Unsupported(WORDS_END_FORMULA));
+        }
     }
+    // **What the file's glue rebuilds is not carried**: the cells of an end that is glued to a point by the formula the reader gives it, or glued to no point (or to none)
+    // and a plain place, are what the reader makes of the glue and the end's place written in the file. A copy in DiaCraft's extension would name a shape by the `ID` it has in the
+    // session, which the file may number otherwise, so it is left out of what an edit carries and out of what the style carried before.
+    let rebuilt: Vec<&'static str> = if connector { rebuilt_end_cells(&d.sheet, &pair.glue) } else { Vec::new() };
+    let delta = delta.and_then(|mut carried| {
+        for name in &rebuilt {
+            carried.cells.remove(*name);
+            carried.removed_cells.retain(|n| n != name);
+        }
+        (!carried.is_empty()).then_some(carried)
+    });
     let group = d.kind == ShapeType::Group;
     // A group's own text (R45 writes it as one more member of the group: not written yet) is refused in words, and never dropped (review).
     if group && (text.is_some() || super::groups::holds_text(d)) {
@@ -455,7 +573,22 @@ fn classify(pair: &Pair<'_>, work: &mut WriteWork) -> Result<Option<ShapeDiff>, 
         }
         route
     };
-    if matches!(frame, FrameChange::None) && route.is_none() && style.is_none() && text.is_none() && geo.is_none() && delta.is_none() {
+    // A segment of the fixed geometry's route style (16) that lost an end's glue is a change even when no cell of it did (the shape it was glued to was deleted: the end keeps the place it had):
+    // the file may hold it as a polyline, whose glue DiaCraft's data carries, and that edit takes it out (`Tier2Edit::unglued`). For any other it is an edit that writes nothing.
+    let fixed_unglued = pair.glue.iter().any(|end| matches!(end, Some(None)))
+        && b.sheet.cell("ShapeRouteStyle").and_then(|c| c.value.as_ref()?.number()) == Some(16.0);
+    // The connection points the model changed, as glue points of the file (CPDOUBLE.ODG).
+    let glue_rows = if one_d || group { None } else { points_edit(b, d, &mut work.cells_compared) };
+    if matches!(frame, FrameChange::None)
+        && route.is_none()
+        && style.is_none()
+        && text.is_none()
+        && geo.is_none()
+        && delta.is_none()
+        && alt.is_none()
+        && glue_rows.is_none()
+        && !fixed_unglued
+    {
         return Ok(None);
     }
     // Only a shape that carries tier 2 in the file, or whose edit adds some, has the extension looked at: the edit of any other costs what it did.
@@ -470,6 +603,8 @@ fn classify(pair: &Pair<'_>, work: &mut WriteWork) -> Result<Option<ShapeDiff>, 
         stale: pair.stale.to_vec(),
         outline: own::OutlineWrite::of(geo.as_ref()),
         natives: pair.natives.clone(),
+        unglued: [false; 2],
+        rebuilt,
     });
     Ok(Some(ShapeDiff {
         ord: pair.doc.ord,
@@ -483,10 +618,41 @@ fn classify(pair: &Pair<'_>, work: &mut WriteWork) -> Result<Option<ShapeDiff>, 
         style,
         text,
         geo,
+        alt,
         tier2,
         turned_glue: None,
         layer: None,
+        sheet: std::sync::Arc::clone(&d.sheet),
+        outer: pair.doc.outer,
+        glue_rows,
     }))
+}
+
+/// The cells of a connector's two ends, the begin's first: the cells the glue of an end feeds (`own::END_CELLS`, by end).
+const END_PAIRS: [[&str; 2]; 2] = [["BeginX", "BeginY"], ["EndX", "EndY"]];
+
+/// The cells of the ends of a connector whose glue the model changed (`glue`: the begin's, then the end's) that the file's glue rebuilds, so that nothing of them is carried: for an end
+/// glued to a connection point, a cell holding the formula the reader gives an end glued there ([`crate::read::glue_formula`]); for an end glued to the whole of a shape or to nothing,
+/// a plain value; in either case with no error, no attribute of its own and no content beside the value. A cell that is otherwise (a formula of the person's own) is carried as before.
+fn rebuilt_end_cells(sheet: &diacraft_doc::Sheet, glue: &[Option<Option<GlueTo>>; 2]) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for (cells, now) in END_PAIRS.iter().zip(glue) {
+        let Some(now) = now else { continue };
+        for name in cells {
+            let Some(cell) = sheet.cell(name) else { continue };
+            let plain = cell.error.is_none() && cell.raw.is_empty() && cell.extra.is_none();
+            let formula_ok = match now {
+                Some(GlueTo { target, part, .. }) if *part >= 100 => {
+                    cell.formula.text() == Some(crate::read::glue_formula(*target, *part - 100).as_str())
+                }
+                _ => matches!(cell.formula, diacraft_doc::FormulaSlot::Absent),
+            };
+            if plain && formula_ok {
+                out.push(*name);
+            }
+        }
+    }
+    out
 }
 
 /// The words of the refusal of a text on a group of the file.
@@ -1002,7 +1168,7 @@ fn compare_page(
         shapes: Vec::new(),
         deleted: Vec::new(),
         levels: Vec::new(),
-        unglue: Vec::new(),
+        glue: Vec::new(),
         survivors: Vec::new(),
         new: Vec::new(),
         new_connects: Vec::new(),
@@ -1025,17 +1191,22 @@ fn compare_page(
         page.layers = super::layers::PageLayers::of(markup.as_deref(), &doc.sheet, added, work)?;
     }
     let new_ids: HashSet<u32> = page.new.iter().map(|n| n.shape.id).collect();
-    (page.unglue, page.new_connects) = unglued(doc, base, &nodes, indexes, &page.deleted, &new_ids)?;
+    (page.glue, page.new_connects) = glue_edits(doc, base, indexes, &page.deleted, &new_ids, work)?;
     // The shapes new connectors are glued to that have one flip: one look at each shape of the page, when a new connector is glued to any.
-    if !page.new_connects.is_empty() {
-        let targets: HashSet<u32> = page.new_connects.iter().map(|c| c.to_sheet).collect();
+    if !page.new_connects.is_empty() || page.glue.iter().any(|g| g.to.is_some()) {
+        let glued_to = page.glue.iter().filter_map(|g| g.to.map(|to| to.target));
+        let targets: HashSet<u32> = page.new_connects.iter().map(|c| c.to_sheet).chain(glued_to).collect();
         let one_flip = |sheet: &diacraft_doc::Sheet| own::flips_of(sheet).is_some_and(|(x, y)| x != y);
         work.order_steps = work.order_steps.saturating_add((nodes.doc.len() + page.new.len()) as u64);
         let of_file = nodes.doc.iter().map(|n| (n.id, &*n.shape.sheet));
         let of_new = page.new.iter().map(|n| (n.shape.id, &*n.shape.sheet));
         page.one_flip = of_file.chain(of_new).filter(|(id, sheet)| targets.contains(id) && one_flip(sheet)).map(|(id, _)| id).collect();
     }
-    let glue_off: HashSet<u32> = page.unglue.iter().map(|(ord, _)| *ord).collect();
+    // What the model did to each end of the connectors whose glue it changed, by the connector's ordinal.
+    let mut glue_of: HashMap<u32, [Option<Option<GlueTo>>; 2]> = HashMap::new();
+    for edit in &page.glue {
+        glue_of.entry(edit.ord).or_default()[usize::from(!edit.start)] = Some(edit.to);
+    }
     // The shapes read as copies, by `ID`, indexed once (each is one look, charged as the page's other lookups are).
     work.order_steps = work.order_steps.saturating_add(tier2_in_file.copies().len() as u64);
     let copies: HashSet<u32> = tier2_in_file.copies().iter().copied().collect();
@@ -1069,12 +1240,20 @@ fn compare_page(
             dh,
             in_file,
             copy,
-            glue_off: glue_off.contains(&d.ord),
+            glue: glue_of.get(&d.ord).copied().unwrap_or_default(),
             stale: tier2_in_file.stale(b.id),
             natives: tier2_in_file.natives(b.id),
             held: indexes.0,
         };
         if let Some(mut change) = classify(&pair, work)? {
+            // The ends of this shape that lost their glue: a segment the file holds as a polyline carries its glue in DiaCraft's data, which the edit of its tier 2 takes them out of.
+            if let Some(edit) = change.tier2.as_mut() {
+                for lost in page.glue.iter().filter(|e| e.to.is_none()) {
+                    if lost.ord == d.ord {
+                        edit.unglued[usize::from(!lost.start)] = true;
+                    }
+                }
+            }
             if matches!(change.frame, FrameChange::Reshape { .. }) && !change.group {
                 change.turned_glue = turned_glue(doc, &pair, &mut glued_rows, work);
             }
@@ -1243,66 +1422,135 @@ fn levels(nodes: &Nodes<'_>) -> Vec<Level> {
     out
 }
 
-/// What the comparison of a page's connections gives: the connectors whose end lost its glue (and which end), and the new shapes' own connections.
-type Unglued = (Vec<(u32, bool)>, Vec<Connect>);
+/// What the comparison of a page's connections gives: the ends of connectors of the file whose glue the model changed, and the new shapes' own connections.
+type GlueChanges = (Vec<GlueEdit>, Vec<Connect>);
 
-/// The connections the model lost: each row the baseline has and the model does not, with the model's ends in the baseline's `ID`s. A
-/// connection the model gained or changed is not written by this task.
-fn unglued(
+/// A shape a connection joins to: the ordinal of its element in the file, or, for a shape the model made, its `ID`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Joined {
+    Ord(u32),
+    New(u32),
+}
+
+/// A connection told by the elements it joins and not by their `ID`s (an `ID` the file and the model number alike and a save may renumber): the connector's ordinal, the cell and part it
+/// is from, the shape it joins to, and the cell and part it is to.
+type Join = (u32, Option<std::sync::Arc<str>>, Option<u32>, Joined, Option<std::sync::Arc<str>>, Option<u32>);
+
+/// The end of a connector a connection is from: `Some(true)` for the begin (`BeginX`, `BeginY`), `Some(false)` for the end, `None` for any other cell.
+pub(crate) fn end_named(from_cell: Option<&str>) -> Option<bool> {
+    match from_cell {
+        Some("BeginX" | "BeginY") => Some(true),
+        Some("EndX" | "EndY") => Some(false),
+        _ => None,
+    }
+}
+
+/// What a connection is glued to, as `ToPart` says it: 3 for the whole shape, 100 and the row for a connection point. Any other part is no glue the file can say.
+fn glue_part(to_part: Option<u32>) -> Option<u32> {
+    to_part.filter(|part| *part == 3 || *part >= 100)
+}
+
+/// The ends of connectors of the file that the model glues otherwise than the file does, and the connections of the new connectors.
+///
+/// The model's connections that come from a connector the model made are that connector's own, written with it. The others are compared with the file's, **by the elements they join**
+/// (the index maps a shape of the model to its element, and the file read again maps the baseline's shapes to theirs), end by end: an end whose connections are the file's is as it was;
+/// one that has none now was taken off its shape (a shape the model deleted among them: its connector ends free); one that has one now, other than the file's, is glued to a new
+/// place. **Two places for one end** (two rows for the begin that name different shapes or parts) is no glue the file can say and is refused in words.
+///
+/// The work is a pass over the model's connections and the file's, each end a look in an index made once, and **counted** in the page's steps.
+fn glue_edits(
     doc: &Page,
     base: &Page,
-    nodes: &Nodes<'_>,
     indexes: (&PageShapes, &PageShapes),
     deleted: &[u32],
     new_ids: &HashSet<u32>,
-) -> Result<Unglued, WriteError> {
-    // The connections that name a new shape are the new shapes' own; the others are compared with the file's. **A connection from a shape the file holds
-    // to a new shape is neither**: the glue of a new connector is written with the connector, and a glue made anew on a connector of the file is not
-    // written yet, so a save that let it pass would be made and the file would lack a glue the model has (the review: an undo that
-    // put back a shape a save had deleted, with the glue of a connector the file holds).
-    if doc.connects.iter().any(|c| !new_ids.contains(&c.from_sheet) && new_ids.contains(&c.to_sheet)) {
-        return Err(WriteError::Unsupported(
-            "a connector of the file glued to a new shape (a glue made anew on a connector of the file is written by a later version)",
-        ));
-    }
-    let touches_new = |c: &Connect| new_ids.contains(&c.from_sheet) || new_ids.contains(&c.to_sheet);
-    let new_connects: Vec<Connect> = doc.connects.iter().filter(|c| touches_new(c)).cloned().collect();
-    let mine: Vec<&Connect> = doc.connects.iter().filter(|c| !touches_new(c)).collect();
+    work: &mut WriteWork,
+) -> Result<GlueChanges, WriteError> {
+    let starved = |held: usize| WriteError::Limit { what: "memory for the connections of a page", max: held as u64 };
+    work.charge_steps(doc.connects.len())?;
+    let new_connects: Vec<Connect> = doc.connects.iter().filter(|c| new_ids.contains(&c.from_sheet)).cloned().collect();
+    let mine: Vec<&Connect> = doc.connects.iter().filter(|c| !new_ids.contains(&c.from_sheet)).collect();
     if mine.len() == base.connects.len() && mine.iter().zip(base.connects.iter()).all(|(a, b)| *a == b) {
         return Ok((Vec::new(), new_connects));
     }
+    work.charge_steps(mine.len().saturating_add(base.connects.len()).saturating_mul(2))?;
     let (held, fresh) = indexes;
-    let fresh_id: HashMap<u32, u32> = fresh.ordinal_map().iter().map(|(id, ord)| (*ord, *id)).collect();
-    // A row of the model, in the `ID`s of the baseline.
-    let to_base = |id: u32| held.ordinal(id).and_then(|ord| fresh_id.get(&ord).copied());
-    let key = |c: &Connect| (c.from_sheet, c.from_cell.clone(), c.from_part, c.to_sheet, c.to_cell.clone(), c.to_part);
-    let mut now = HashSet::new();
-    for c in mine.iter().copied() {
-        let (Some(from), Some(to)) = (to_base(c.from_sheet), to_base(c.to_sheet)) else {
-            return Err(WriteError::Unsupported("a connection to a shape the file does not hold"));
+    // The model's connections, with the `ID` of the shape each joins to.
+    let mut now: Vec<(Join, u32)> = Vec::new();
+    now.try_reserve_exact(mine.len()).map_err(|_| starved(mine.len()))?;
+    for c in &mine {
+        let Some(from) = held.ordinal(c.from_sheet) else {
+            return Err(WriteError::Unsupported("a connection from a shape the file does not hold"));
         };
-        now.insert(key(&Connect { from_sheet: from, to_sheet: to, ..c.clone() }));
+        let to = match held.ordinal(c.to_sheet) {
+            Some(ord) => Joined::Ord(ord),
+            None if new_ids.contains(&c.to_sheet) => Joined::New(c.to_sheet),
+            None => return Err(WriteError::Unsupported("a connection to a shape the file does not hold")),
+        };
+        now.push(((from, c.from_cell.clone(), c.from_part, to, c.to_cell.clone(), c.to_part), c.to_sheet));
     }
-    let before: HashSet<_> = base.connects.iter().map(&key).collect();
-    if now.iter().any(|k| !before.contains(k)) {
-        return Err(WriteError::Unsupported("a connector glued or glued anew (a connection is written by a later task)"));
+    // The file's: the connections whose two shapes the reader models (every one the reader made).
+    let mut before: HashSet<Join> = HashSet::new();
+    before.try_reserve(base.connects.len()).map_err(|_| starved(base.connects.len()))?;
+    for c in base.connects.iter() {
+        if let (Some(from), Some(to)) = (fresh.ordinal(c.from_sheet), fresh.ordinal(c.to_sheet)) {
+            before.insert((from, c.from_cell.clone(), c.from_part, Joined::Ord(to), c.to_cell.clone(), c.to_part));
+        }
     }
+    let kept: HashSet<&Join> = now.iter().map(|(join, _)| join).collect();
     let dead: HashSet<u32> = deleted.iter().copied().collect();
-    let by_id: HashMap<u32, u32> = nodes.base.iter().map(|n| (n.id, n.ord)).collect();
-    let mut out = Vec::new();
-    for c in base.connects.iter().filter(|c| !now.contains(&key(c))) {
-        let Some(&ord) = by_id.get(&c.from_sheet) else { continue };
-        if dead.contains(&ord) {
+    // The ends a connection was lost from or gained on, by the connector's ordinal and the end (the begin first): a connector the model deleted has nothing to write.
+    let mut touched: std::collections::BTreeSet<(u32, bool)> = std::collections::BTreeSet::new();
+    let unknown = || WriteError::Unsupported("a connection of a kind the writer does not know");
+    for join in before.iter().filter(|join| !kept.contains(join)) {
+        if !dead.contains(&join.0) {
+            touched.insert((join.0, end_named(join.1.as_deref()).ok_or_else(unknown)?));
+        }
+    }
+    for (join, _) in now.iter().filter(|(join, _)| !before.contains(join)) {
+        touched.insert((join.0, end_named(join.1.as_deref()).ok_or_else(unknown)?));
+    }
+    // What each end is glued to, in the file and in the model, by the connector's ordinal and the end. An end the file glues to two places is the reader's to have read once.
+    let mut glued_now: HashMap<(u32, bool), (Joined, u32, u32)> = HashMap::new();
+    glued_now.try_reserve(touched.len()).map_err(|_| starved(touched.len()))?;
+    for (join, id) in &now {
+        let Some(start) = end_named(join.1.as_deref()) else { continue };
+        if !touched.contains(&(join.0, start)) {
             continue;
         }
-        match c.from_cell.as_deref() {
-            Some("BeginX" | "BeginY") => out.push((ord, true)),
-            Some("EndX" | "EndY") => out.push((ord, false)),
-            _ => return Err(WriteError::Unsupported("a connection of a kind the writer does not know")),
+        let part = glue_part(join.5).ok_or_else(unknown)?;
+        let here = (join.3, part, *id);
+        if glued_now.insert((join.0, start), here).is_some_and(|earlier| (earlier.0, earlier.1) != (here.0, here.1)) {
+            return Err(WriteError::Unsupported("a connector end glued to two places (the file says one shape and one point for an end)"));
         }
     }
-    out.sort_unstable();
-    out.dedup();
+    let mut glued_before: HashMap<(u32, bool), (Joined, u32)> = HashMap::new();
+    glued_before.try_reserve(touched.len()).map_err(|_| starved(touched.len()))?;
+    for join in &before {
+        let Some(start) = end_named(join.1.as_deref()) else { continue };
+        if touched.contains(&(join.0, start))
+            && let Some(part) = glue_part(join.5)
+        {
+            glued_before.entry((join.0, start)).or_insert((join.3, part));
+        }
+    }
+    let mut out = Vec::new();
+    out.try_reserve_exact(touched.len()).map_err(|_| starved(touched.len()))?;
+    for (ord, start) in touched {
+        match glued_now.get(&(ord, start)) {
+            None => out.push(GlueEdit { ord, start, to: None }),
+            Some(&(joined, part, target)) => {
+                if glued_before.get(&(ord, start)) == Some(&(joined, part)) {
+                    // The same shape and part: only a spelling of the connection changed.
+                    continue;
+                }
+                // (A shape the model made is named, and its points numbered, as for a new connector's end: the writer has made it by then.)
+                out.push(GlueEdit { ord, start, to: Some(GlueTo { target, part, at: joined }) });
+            }
+        }
+    }
+    // A connector's begin before its end, as a new connector's ends are named.
+    out.sort_unstable_by_key(|e| (e.ord, !e.start));
     Ok((out, new_connects))
 }
 

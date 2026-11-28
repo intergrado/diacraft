@@ -391,11 +391,31 @@ fn memory_words(held: u64, max: u64) -> String {
 /// What the engine holds beside the drawing that a refusal for memory names: less is not worth a sentence.
 const MUCH_HELD: u64 = 16 * 1024 * 1024;
 
+/// The most characters of a page's name a refusal repeats: the name is a file's, and as long as the file made it.
+const MOST_PAGE_NAME: usize = 40;
+
+/// The words of the refusal of a group with no name that has data of DiaCraft's or a link to a master: **which group needs a name, and what a person can do**, and nothing
+/// to take back. The file finds a group's data by the group's name (`diacraft_odg`'s `WriteError::Group` says why in its own words, which the command line and the library keep), so a group
+/// with no name that has data cannot be saved into the file as it is. The cause is the group's, not the last change: a second save, a save after another shape was moved and an undo of that
+/// move all leave it as it was, so the way out of every other refusal, "Undo the change (edit.undo) to save", sent a person to take back what they had not done. The words say what the
+/// group is, and three ways out that hold whatever was done last: name it, put its data on a shape beside it, or Save As a `.diacraft` file, which holds it. The first words of the message
+/// are what the window shows (it cuts a refusal at 300 characters), so the group comes first and the whole is 296 characters for a page called `Page-1`. A flat file has no such words: its writer raises `WriteError::FlatGroup` for a group's data (
+/// the arm of [`refusal`] below), never `Group`.
+fn group_refused_words(page: &str, page_nth: u32, nth: u32) -> String {
+    let place = if page_nth > 1 { format!(" (the page numbered {page_nth} of that name)") } else { String::new() };
+    format!(
+        "the drawing could not be saved: the group with no name numbered {nth} on the page \"{}\"{place} has data of its own or a link to a master, which an .odg keeps only under the group's \
+         name. Name it, put its data on a shape beside it, or use Save As for a .diacraft file, which holds it. Nothing was written.",
+        crate::shown(page, MOST_PAGE_NAME)
+    )
+}
+
 /// The error of a save the writer refused, in the writer's words. A refusal for want of memory says what the engine holds beside the drawing, against the limit
-/// a save has (the writer's own figure is what is left of it, which says nothing).
+/// a save has (the writer's own figure is what is left of it, which says nothing). A group with no name that holds data has words of its own ([`group_refused_words`]).
 fn refusal(cmd: &str, e: &WriteError, beside: u64, max: u64, flat: bool) -> EngineError {
     match e {
         WriteError::Limit { what, .. } if what.contains("bytes of memory a save holds") => failed(cmd, memory_words(beside, max)),
+        WriteError::Group { page, page_nth, nth, .. } => failed(cmd, group_refused_words(page, *page_nth, *nth)),
         WriteError::MediaType(_) => {
             let mut words = crate::shown(
                 &format!("the drawing could not be saved: {}.", e.to_string().trim_end_matches('.')),
@@ -404,6 +424,9 @@ fn refusal(cmd: &str, e: &WriteError, beside: u64, max: u64, flat: bool) -> Engi
             words.push_str(KIND_WAY_OUT);
             failed(cmd, words)
         }
+        // A group of a flat drawing that holds data of its own: a flat file has no place for it. The group first (the window shows the first 300 characters of a message), what to do
+        // with the data, and nothing to take back: the cause is the group's data, which a later change does not undo, so the way out of the other refusals of a flat file ("Undo the change") is not said.
+        WriteError::FlatGroup { .. } => failed(cmd, crate::shown(&format!("the drawing could not be saved: {e}. Nothing was written."), MOST_SHOWN)),
         other => failed(cmd, refused_words(&other.to_string(), flat)),
     }
 }
@@ -432,7 +455,7 @@ fn thumbnail_with(doc: &Document, limits: Limits, clock: Clock) -> Result<Vec<u8
 
 /// The frame of [`thumbnail_with`], and the work it was charged (`Renderer::work_done`).
 pub(super) fn render_thumbnail(doc: &Document, limits: Limits, clock: Clock) -> Result<(diacraft_render::Rendered, u64), String> {
-    let page = doc.pages.iter().find(|p| !p.background).or_else(|| doc.pages.iter().next()).ok_or("the drawing has no page")?;
+    let page = doc.first_foreground_page().ok_or("the drawing has no page")?;
     let (w, h) = page_paper_size(doc, page.id).ok_or("the page has no size")?;
     // A little under the bound, so that rounding the page's size up never passes it.
     let ppi = (THUMBNAIL_PIXELS - 1.0) / w.max(h);
@@ -644,6 +667,27 @@ mod tests {
             assert!(said.ends_with(WAY_OUT) && said.contains("edit.undo") && said.chars().count() <= MOST_SHOWN + 1, "{said}");
         }
         assert!(with.chars().count() <= MOST_SHOWN + 1 && little.chars().count() <= MOST_SHOWN + 1);
+    }
+
+    /// A group with no name that holds data is refused in words of its own: the group first (the window shows the first 300 characters), the ways out that hold
+    /// whatever was done last, and nothing to undo. A page that shares its name is named by its number among them, and a page's name too long
+    /// for a message, or holding control characters, is cut and escaped.
+    #[test]
+    fn a_group_with_no_name_that_holds_data_is_refused_by_the_group_and_says_no_undo() {
+        let group = |page: &str, page_nth: u32, nth: u32| WriteError::Group { page: page.to_owned(), page_nth, nth, why: "the writer's own cause" };
+        let said = |e: &WriteError| refusal("file.save", e, 0, 2900 * 1024 * 1024, false).to_string();
+        let package = said(&group("Page-1", 1, 2));
+        assert!(package.contains("the group with no name numbered 2 on the page \"Page-1\" has data of its own or a link to a master"), "{package}");
+        assert!(package.contains("an .odg keeps only under the group's name. Name it, put its data on a shape beside it"), "{package}");
+        assert!(package.ends_with("or use Save As for a .diacraft file, which holds it. Nothing was written."), "{package}");
+        assert!(!package.contains("Undo") && !package.contains("edit.undo") && !package.contains("flat file"), "{package}");
+        assert!(!package.contains("the writer's own cause"), "the writer's own words are the library's and the command line's: {package}");
+        assert!(package.chars().count() <= 300 + "`file.save` failed: ".len(), "{} characters: {package}", package.chars().count());
+        let third = said(&group("Page-1", 3, 1));
+        assert!(third.contains("on the page \"Page-1\" (the page numbered 3 of that name) has data"), "{third}");
+        let hostile = said(&group(&format!("{}\u{1b}[2J", "x".repeat(5_000)), 1, 1));
+        assert!(hostile.chars().count() <= MOST_SHOWN && !hostile.chars().any(|c| c == '\u{1b}'), "{} characters", hostile.chars().count());
+        assert!(hostile.ends_with("Nothing was written.") && hostile.contains("\u{2026}"), "the name is cut and the way out is whole: {hostile}");
     }
 
     /// A save the file cannot make as another kind of document is not one a change of the drawing caused, so it does not say to undo

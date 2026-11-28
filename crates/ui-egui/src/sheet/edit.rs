@@ -71,6 +71,10 @@ pub struct EditState {
     pub typing: bool,
     /// Edited in the bar (a press there) and not in the cell.
     pub in_bar: bool,
+    /// Edited in the Edit Formula card (Ctrl+E, the Editing group's Edit Formula): the card draws the text, and the cell and the bar show it.
+    pub in_card: bool,
+    /// What the text was when the card opened over an edit that was already open: Cancel gives it back. `None` when the card began the edit (Cancel then gives the edit up).
+    pub card_from: Option<String>,
     /// What the cell holds, from `sheet.cell` (`text`, `length`, ...): a text cell takes typed text as a string.
     pub kind: String,
     pub fault: Option<Fault>,
@@ -94,6 +98,8 @@ impl EditState {
             text,
             typing,
             in_bar: false,
+            in_card: false,
+            card_from: None,
             kind,
             fault: None,
             refusal: None,
@@ -127,6 +133,7 @@ impl EditState {
             "text": self.text,
             "typing": self.typing,
             "inBar": self.in_bar,
+            "inCard": self.in_card,
             "kind": self.kind,
             "fault": self.fault.as_ref().map(|f| json!({"start": f.start, "end": f.end, "words": f.words})),
             "refusal": self.refusal,

@@ -914,9 +914,10 @@ pub(crate) struct TextStyles {
     /// The automatic styles the model writer made under the name the file gave them, by family and name, with what each was made from: the cells and the held values it says, and the
     /// faces its text properties name as they were written.
     pub(crate) held_made: HashMap<(Fam, String), (String, String)>,
-    /// The paragraph styles made for a held style asked for again with another content, by family, the name the file gave the style and the content, with the name each was given: one for each
-    /// content, whatever the number of paragraphs that ask for it.
-    pub(crate) held_variants: HashMap<(Fam, String, String), String>,
+    /// The styles made for a held style asked for again with another content (and a run's), by family, the name the file gave the style and the content, with the name each was given: one for each
+    /// content, whatever the number of paragraphs that ask for it. **`None` is a content that says nothing** (no cell, no held value and nothing in the file's style that no cell reads), which is no
+    /// style: it is looked at once as well.
+    pub(crate) held_variants: HashMap<(Fam, String, String), Option<String>>,
     /// The names of held styles that said nothing and were made no style, by family and name, with the content each was asked for: a style asked for again, for each of a million spans, is one look.
     pub(crate) held_none: HashMap<(Fam, String), String>,
     /// The list styles the part holds, by their content without their names: a list style the model writer would make that the part has already is that style.

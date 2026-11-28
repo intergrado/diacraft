@@ -13,6 +13,8 @@ workspace = true
 [dependencies]
 diacraft-doc = { workspace = true }
 diacraft-engine = { workspace = true }
+# The hostile-file sweeps (`door`): the drawing a reader made is written as a `.diacraft` file before it goes through the engine's open (`door/pipeline.rs`).
+diacraft-native = { workspace = true }
 diacraft-vsdx = { workspace = true }
 serde_json = { workspace = true }
 # The archives of `package.rs`: the same two crates `opc` reads them with (pure Rust, builds for wasm32).
@@ -20,3 +22,7 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 crc32fast = "1.5"
 # The strategies of `model.rs`: whole models for the property tests of the codecs.
 proptest = { workspace = true }
+
+[dev-dependencies]
+# The tests of `door/zipfile.rs` check the archives it writes against the container's reader.
+diacraft-container = { workspace = true }

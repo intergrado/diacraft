@@ -13,8 +13,9 @@ use std::sync::Arc;
 use diacraft_doc::{Cell, CellName, Row, Section, Sheet, Text, TextPart, Value};
 
 use super::container::{HEADING_ROW, LOCK_ROW, MARGIN_ROW, RESIZE_ROW, Side};
+use super::group_master::{Factor, drop_factor};
 use super::look::Flag;
-use super::{length, plain, put};
+use super::{length, length_formula, number_text, plain, put};
 
 /// The extras of a master: `More::NONE` for a plain one.
 pub(crate) struct More {
@@ -32,6 +33,9 @@ impl More {
 
     /// A master that holds `ObjType` 1 and nothing else ([`Dress::PLACEABLE`]): a shape people join.
     pub(crate) const PLACEABLE: More = More { dress: Some(&Dress::PLACEABLE), hidden: false, brings: &[] };
+
+    /// A master that holds `ObjType` 4 and nothing else ([`Dress::NEITHER`]): a part of a structure, which no route goes round and no layout places (the Swimlane and the Separator).
+    pub(crate) const NEITHER: More = More { dress: Some(&Dress::NEITHER), hidden: false, brings: &[] };
 }
 
 /// One `Character` row: the size in points, the style bits (1 bold, 2 italic, 4 underline) and a colour formula (the style's when `None`).
@@ -81,6 +85,29 @@ pub(crate) struct FieldDef {
     pub prompt: &'static str,
 }
 
+/// What a cell that a dress sets in a row holds.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CellSet {
+    /// A constant number.
+    Number(f64),
+    /// A formula, which has no value in the table: the master's build settles it (a class's name is italic when its `Abstract` is true).
+    Formula(&'static str),
+}
+
+/// One cell of one row of a section of the master's shape that the dress sets, beside the rows the other fields make: a paragraph's alignment (`Paragraph`, row 0, `HorzAlign`), or a formula in a
+/// character format (`Character`, row 0, `Style`). The section and the row are made when the dress has none of them yet, and a row the dress already made (a `Character` row of `chars`) keeps its
+/// other cells. A dress holds at most [`MAX_ROW_CELLS`] of them.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RowCell {
+    pub section: &'static str,
+    pub ix: u32,
+    pub cell: &'static str,
+    pub set: CellSet,
+}
+
+/// The most row cells a dress sets: a table is data a person wrote, and the build never reads past it.
+pub(crate) const MAX_ROW_CELLS: usize = 16;
+
 /// What a part of a structure is: a drop of it goes into the structure and is no shape of its outline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PartKind {
@@ -116,6 +143,8 @@ pub(crate) struct Dress {
     pub text: TextSpec,
     /// The `Character` rows, in order.
     pub chars: &'static [CharRow],
+    /// Cells of rows the dress sets besides: a paragraph's alignment, a formula in a character format ([`RowCell`]).
+    pub rows: &'static [RowCell],
     /// The Shape Data rows, in order.
     pub data: &'static [FieldDef],
     /// `User` rows of ours: a name and the text it holds.
@@ -126,9 +155,11 @@ pub(crate) struct Dress {
     pub select_mode: Option<u8>,
     /// `IsTextEditTarget`.
     pub text_edit_target: Option<bool>,
-    /// `ObjType`: 1 for a shape people join, which a route goes round from the start. `None` writes no cell, so a drop reads none and becomes placeable when a connector is
-    /// glued to it.
+    /// `ObjType`: 1 for a shape people join, which a route goes round from the start, and 4 for a part of a structure (a swimlane, a separator), which
+    /// is neither placeable nor routable. `None` writes no cell, so a drop reads none and becomes placeable when a connector is glued to it.
     pub obj_type: Option<u8>,
+    /// A `Rounding` of 0 of the shape's own: a figure whose parts stand against one another (the package's tab on its body) is not rounded part by part by a theme with rounded corners.
+    pub no_rounding: bool,
     pub role: Role,
 }
 
@@ -141,23 +172,34 @@ impl Dress {
         line_pattern: None,
         text: TextSpec::None,
         chars: &[],
+        rows: &[],
         data: &[],
         user: &[],
         locks: &[],
         select_mode: None,
         text_edit_target: None,
         obj_type: None,
+        no_rounding: false,
         role: Role::Shape,
     };
 
     /// The dress of a shape people join: `ObjType` 1 and nothing else. The masters of Basic Shapes, the Basic Flowchart and the Gane-Sarson shapes wear it (`More::PLACEABLE`).
     pub(crate) const PLACEABLE: Dress = Dress { obj_type: Some(1), ..Dress::NONE };
+
+    /// The dress of a part of a structure: `ObjType` 4 and nothing else, as the reference's swimlane and separator masters hold (item 2). The Swimlane and the Separator of the
+    /// Cross-Functional Flowchart stencil wear it (`More::NEITHER`).
+    pub(crate) const NEITHER: Dress = Dress { obj_type: Some(4), ..Dress::NONE };
 }
 
+/// The picture of a field that shows a text: the text as it is (`FIELDPICTURE(37)`). An empty picture shows nothing.
+pub(crate) const TEXT_FORMAT: &str = "@";
+
+/// A cell that holds a number as text (`0`, `0001`): no unit.
 fn text_cell(text: &str) -> Cell {
     Cell::constant(Value::from_text(text))
 }
 
+/// A cell that holds a string (the label, the prompt, the format, a user cell's text): `STR`.
 fn string_cell(text: &str) -> Cell {
     text_cell(text).with_unit("STR")
 }
@@ -185,11 +227,11 @@ fn property_row(index: usize, field: &FieldDef) -> Arc<Row> {
         field.row,
         vec![
             ("Value", value),
-            ("Label", text_cell(field.label)),
-            ("Prompt", text_cell(field.prompt)),
+            ("Label", string_cell(field.label)),
+            ("Prompt", string_cell(field.prompt)),
             ("Type", text_cell(code)),
-            ("Format", text_cell(format)),
-            ("SortKey", text_cell(&format!("{:04}", index + 1))),
+            ("Format", string_cell(format)),
+            ("SortKey", string_cell(&format!("{:04}", index + 1))),
             ("Invisible", text_cell("0")),
             ("Verify", text_cell("0")),
             ("Calendar", text_cell("0")),
@@ -203,7 +245,7 @@ fn field_section(fields: &[FieldText]) -> Section {
     for (ix, field) in fields.iter().enumerate() {
         let mut row = Row { ix: Some(u32::try_from(ix).unwrap_or(0)), ..Row::default() };
         row.cells.insert(CellName::new("Value"), Cell::with_formula(field.formula, Some(Value::from_text(field.shown))).with_unit("STR"));
-        row.cells.insert(CellName::new("Format"), text_cell(""));
+        row.cells.insert(CellName::new("Format"), string_cell(TEXT_FORMAT));
         row.cells.insert(CellName::new("Type"), text_cell("0"));
         section.rows.push(Arc::new(row));
     }
@@ -223,7 +265,8 @@ pub(crate) fn own_text(fields: &[FieldText]) -> Text {
     Text { parts, ..Text::default() }
 }
 
-/// The `Character` section of the dress: a size is in inches, 1/72 to the point.
+/// The `Character` section of the dress: a size is in inches, 1/72 to the point. A row past the first is whole (`super::text_row`): a reader of the file takes none of its
+/// cells from the styles, which hold row 0 alone.
 fn character_section(rows: &[CharRow]) -> Section {
     let mut section = Section::new("Character", None);
     for (ix, row) in rows.iter().enumerate() {
@@ -231,20 +274,23 @@ fn character_section(rows: &[CharRow]) -> Section {
         if let Some(color) = row.color {
             cells.push(("Color", Cell::with_formula(color, None)));
         }
-        section.rows.push(super::row(u32::try_from(ix).unwrap_or(0), None, cells));
+        section.rows.push(super::text_row("Character", u32::try_from(ix).unwrap_or(0), cells));
     }
     section
 }
 
-/// The `User` section of the dress: the rows it names, and what its role says.
-fn user_section(dress: &Dress) -> Option<Section> {
+/// The `User` section of the dress: the rows it names, and what its role says. **A container's margin follows the page's drop scale**: the row holds
+/// `<margin>*<factor>`, the factor being the shape's own `DropOnPageScale` (`of`) or 1 where it reads none, so that a package dropped beyond the range of eight keeps the room it leaves
+/// round what it holds, on paper.
+fn user_section(dress: &Dress, of: Factor) -> Option<Section> {
     let mut section = Section::new("User", None);
     if let Role::Container { heading, margin_in } = dress.role {
         // The rows, but not the style row: a container with a master and no style row keeps its master's outline.
-        let kind = Cell::with_formula("\"Container\"", Some(Value::from_text("Container")));
+        let kind = Cell::with_formula("\"Container\"", Some(Value::from_text("Container"))).with_unit("STR");
         section.rows.push(named_row("msvStructureType", vec![("Value", kind)]));
         section.rows.push(named_row(HEADING_ROW, vec![("Value", plain(f64::from(heading.number())))]));
-        section.rows.push(named_row(MARGIN_ROW, vec![("Value", length(margin_in))]));
+        let margin = length_formula(&format!("{}*{}", number_text(margin_in), drop_factor(of)), margin_in);
+        section.rows.push(named_row(MARGIN_ROW, vec![("Value", margin)]));
         section.rows.push(named_row(RESIZE_ROW, vec![("Value", plain(1.0))]));
         section.rows.push(named_row(LOCK_ROW, vec![("Value", plain(0.0))]));
     }
@@ -255,8 +301,8 @@ fn user_section(dress: &Dress) -> Option<Section> {
 }
 
 /// What the dress adds to the shape the generic builder made: the look, the locks and the group properties as cells, the Shape Data, the fields, the character formats and the `User` rows as sections.
-/// → the master's text.
-pub(super) fn decorate(dress: &Dress, sheet: &mut Sheet) -> Option<Text> {
+/// → the master's text. `of` says where a length it holds reads the factor of the page's drop scale: the shape's own or its group's.
+pub(super) fn decorate(dress: &Dress, sheet: &mut Sheet, of: Factor) -> Option<Text> {
     let cells = &mut sheet.cells;
     if let Some(fill) = dress.fill {
         put(cells, "FillForegnd", Cell::with_formula(fill, None));
@@ -282,6 +328,9 @@ pub(super) fn decorate(dress: &Dress, sheet: &mut Sheet) -> Option<Text> {
     if let Some(kind) = dress.obj_type {
         put(cells, "ObjType", plain(f64::from(kind)));
     }
+    if dress.no_rounding {
+        put(cells, "Rounding", length(0.0));
+    }
     if !dress.data.is_empty() {
         let mut section = Section::new("Property", None);
         section.rows.extend(dress.data.iter().enumerate().map(|(i, f)| property_row(i, f)));
@@ -298,10 +347,37 @@ pub(super) fn decorate(dress: &Dress, sheet: &mut Sheet) -> Option<Text> {
     if !dress.chars.is_empty() {
         sheet.sections.push(Arc::new(character_section(dress.chars)));
     }
-    if let Some(user) = user_section(dress) {
+    for set in dress.rows.iter().take(MAX_ROW_CELLS) {
+        put_row_cell(sheet, set);
+    }
+    if let Some(user) = user_section(dress, of) {
         sheet.sections.push(Arc::new(user));
     }
     text
+}
+
+/// Sets one cell of one row of a section of the sheet: the section and the row are made when there is none, and a row that is there keeps its other cells. A section that is not `Geometry` has
+/// no `IX` of its own, so the one with the name and no `IX` is the one. Rows stay in the order of their `IX`.
+fn put_row_cell(sheet: &mut Sheet, set: &RowCell) {
+    let cell = match set.set {
+        CellSet::Number(n) => plain(n),
+        CellSet::Formula(formula) => Cell::with_formula(formula, None),
+    };
+    let at = match sheet.sections.iter().position(|s| s.name.as_str() == set.section && s.ix.is_none()) {
+        Some(at) => at,
+        None => {
+            sheet.sections.push(Arc::new(Section::new(set.section, None)));
+            sheet.sections.len().saturating_sub(1)
+        }
+    };
+    let Some(section) = sheet.sections.get_mut(at).map(Arc::make_mut) else { return };
+    if !section.rows.iter().any(|r| r.ix == Some(set.ix)) {
+        section.rows.push(Arc::new(Row { ix: Some(set.ix), ..Row::default() }));
+        section.rows.sort_by_key(|r| r.ix);
+    }
+    if let Some(row) = section.rows.iter_mut().find(|r| r.ix == Some(set.ix)) {
+        Arc::make_mut(row).cells.insert(CellName::new(set.cell), cell);
+    }
 }
 
 /// The text a shape dropped from a master keeps of its own: for a master that holds fields, the text that shows them (the shown form of a field lives in the text that holds it), and for one that

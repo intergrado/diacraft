@@ -4,8 +4,8 @@
 //! be opened is the same error in words, with the kind of trouble and never the path. **The page is drawn as the window draws it**, through
 //! `diacraft_render`'s walk, so what the export leaves out or draws by a stand-in is the window's own list, printed.
 //!
-//! **Where it writes.** Exactly where `--out` says: this command line has no granted folders yet (the automation roots of gaps A2 come with
-//! the engine's `file.export` and the MCP tools, which write for a client that was not the one who typed the path). The file is written whole
+//! **Where it writes.** Exactly where `--out` says: this command line has no granted folders (the automation roots of gaps A2 are `mcp`'s and the
+//! control channel's: they keep the engine's `file.export` and the MCP tools, which write for a client that was not the one who typed the path, to the folders a person grants). The file is written whole
 //! or not at all (`craft_atomic`: a temporary file beside it, then a rename), so a failure leaves any file that was there as it was, and
 //! `--out` is never the drawing itself.
 //!
@@ -62,9 +62,15 @@ pub fn make(args: &ExportArgs) -> Result<(Value, Option<&'static str>), Failure>
         (doc, report.variant.map(|variant| variant.extension()))
     };
     let count = doc.pages.len();
-    let page = args.page.checked_sub(1).and_then(|at| doc.pages.get(at)).ok_or_else(|| {
+    // A page that is not asked for is the first one that is not a background: a file lists its background pages first, and the picture of a drawing is not the picture of its frame. `--page N`
+    // is the page's place in the drawing as the file lists it, so `--page 1` is the background page such a file lists first.
+    let page = match args.page {
+        None => doc.first_foreground_page(),
+        Some(place) => place.checked_sub(1).and_then(|at| doc.pages.get(at)),
+    }
+    .ok_or_else(|| {
         let pages = if count == 1 { "1 page".to_owned() } else { format!("{count} pages") };
-        Failure::Message(format!("the drawing has {pages}: there is no page {}", args.page))
+        Failure::Message(format!("the drawing has {pages}: there is no page {}", args.page.unwrap_or(1)))
     })?;
     refuse_the_drawing_itself(&args.file, &args.out)?;
 

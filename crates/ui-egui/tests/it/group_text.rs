@@ -7,13 +7,16 @@
 //! The drop order is the document order: the first rectangle dropped is the first member and the last is the one on top of the stack, so the
 //! rectangle that holds "Name", dropped last, is the member the group's text goes to.
 
-use diacraft_engine::doc::Owner;
+use diacraft_engine::Session;
+use diacraft_engine::doc::{Cell, CellAddr, CellEdit, Owner, SheetRef, Value as Held, WriteOrigin};
 use diacraft_engine::draw::text_view;
+use diacraft_ui_egui::DiacraftApp;
+use diacraft_ui_egui::render_worker::bundled_drawer;
 use egui::{Key, Modifiers};
 use serde_json::{Value, json};
 
 use crate::editing::{at, click_at, edit_window, key, type_text};
-use crate::support::{Rest, Window};
+use crate::support::{Rest, Window, fast_window};
 
 /// A group of three boxes one over the other, and the `ID`s of its members in document order.
 struct Class {
@@ -307,4 +310,87 @@ fn a_group_in_a_group_is_followed_by_the_cell_of_each() {
     pause(&mut w);
     key(&mut w, Key::F2, Modifiers::NONE);
     assert_eq!(w.state().edited_text_shape(), Some(inner), "an inner group that takes the text itself ends the walk");
+}
+
+// ---- OPENGROUPWIN: a double click that would open a group's window --------------------------------------------------------------------------
+
+/// A drop of a rectangle with `text`, at `y` inches up, straight on a session.
+fn drop_box(s: &mut Session, page: u32, text: &str, y: f64) -> u32 {
+    let made = s.execute("shape.drop", &json!({"master": "rectangle", "page": page, "x": 4.0, "y": y})).unwrap();
+    let id = id_of(&made);
+    s.execute("shape.set_text", &json!({"id": id, "text": text, "page": page})).unwrap();
+    id
+}
+
+/// A window on a class of three boxes grouped (or, with `grouped` false, on one box), the shape that is double clicked holding `formula` in its `EventDblClick`. The cell is
+/// written to the document directly: `sheet.set_cell` cannot add it while the catalogue holds no batch for the events. Returns the window and the shape.
+fn event_window(formula: &str, grouped: bool) -> (Window, u32) {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    let page = s.document().unwrap().pages.get(0).unwrap().id;
+    let ids = if grouped {
+        vec![drop_box(&mut s, page, "Operations", 5.0), drop_box(&mut s, page, "Attributes", 6.0), drop_box(&mut s, page, "Name", 7.0)]
+    } else {
+        vec![drop_box(&mut s, page, "Plain", 5.0)]
+    };
+    let shape = if grouped { id_of(&s.execute("shape.group", &json!({"ids": ids, "page": page})).unwrap()) } else { ids[0] };
+    s.edit("event", |d| {
+        let at = d.find_shape(Owner::Page(page), shape).unwrap();
+        let cell = Cell::with_formula(formula, Some(Held::from_text("0")));
+        d.write_cell(&SheetRef::Shape(at), &CellAddr::direct("EventDblClick"), CellEdit::Cell(cell), WriteOrigin::Automation).unwrap();
+        Ok(())
+    })
+    .unwrap();
+    let mut w = fast_window(DiacraftApp::new(s, None).with_inline_pictures(bundled_drawer()), [1280.0, 900.0]);
+    w.rest();
+    command(&mut w, "view.zoom", json!({"percent": 100}));
+    (w, shape)
+}
+
+/// A project rule: no group window exists: given a group whose `EventDblClick` holds `OPENGROUPWIN()`, double clicked, nothing is
+/// opened and nothing is changed, and the status bar says why. The text box that a double click opens on any other group does not open.
+#[test]
+fn a_double_click_on_a_group_that_opens_its_window_does_nothing_and_the_status_bar_says_so() {
+    for formula in ["OPENGROUPWIN()", "_OPENGROUPWIN()", "openGroupWin()", "IF(1,OPENGROUPWIN(),OPENTEXTWIN())"] {
+        let (mut w, group) = event_window(formula, true);
+        let before = w.state().session().revision();
+        assert!(w.state().notice().is_none(), "{formula}: no notice yet");
+        click_at(&mut w, 4.0, 5.0);
+        click_at(&mut w, 4.0, 5.0);
+        assert!(!editing(&w), "{formula}: no text box is opened");
+        assert_eq!(w.state().selection(), [group], "{formula}: the group is the selection the first click made");
+        assert_eq!(w.state().session().revision(), before, "{formula}: nothing was changed");
+        let notice = w.state().notice().unwrap_or_else(|| panic!("{formula}: the status bar says nothing"));
+        assert!(notice.contains("group window"), "{formula}: {notice}");
+        assert!(notice.contains("no group windows"), "{formula}: it says there are none: {notice}");
+        assert_eq!(chars(&w, group), "", "{formula}");
+        assert_eq!(w.state().ui_panics(), 0);
+    }
+}
+
+/// A group whose double click calls anything else, and one with no such cell, edits text as before: only the call that opens a group window is stopped.
+#[test]
+fn a_double_click_on_a_group_whose_event_is_another_call_edits_text_as_before() {
+    for formula in ["OPENTEXTWIN()", "DEFAULTEVENT()", "0"] {
+        let (mut w, group) = event_window(formula, true);
+        click_at(&mut w, 4.0, 5.0);
+        click_at(&mut w, 4.0, 5.0);
+        assert!(editing(&w), "{formula}");
+        assert_eq!(w.state().edited_text_shape(), Some(group), "{formula}");
+        assert!(w.state().notice().is_none(), "{formula}: {:?}", w.state().notice());
+    }
+}
+
+/// Given a rectangle with the same formula, double clicked, expect nothing and no message. Naive: an error for a shape that is no group.
+#[test]
+fn a_double_click_on_a_shape_that_is_no_group_with_that_formula_does_nothing_and_says_nothing() {
+    let (mut w, shape) = event_window("OPENGROUPWIN()", false);
+    let before = w.state().session().revision();
+    click_at(&mut w, 4.0, 5.0);
+    click_at(&mut w, 4.0, 5.0);
+    assert!(!editing(&w), "the call does nothing, and it stands in for the default");
+    assert_eq!(w.state().selection(), [shape]);
+    assert!(w.state().notice().is_none(), "no message: {:?}", w.state().notice());
+    assert_eq!(w.state().session().revision(), before);
+    assert_eq!(w.state().ui_panics(), 0);
 }

@@ -14,8 +14,9 @@
 //!   turns its outline a quarter clockwise about it. An East Asian character stands upright: it is centred across the column
 //!   and in its cell down it, and the run it is in is not turned. A bullet is drawn like the letters;
 //! * the lines through and under text are turned with the rest, so an underline lies down the baseline side of the column, which is its
-//!   left (the Text dialog's page says the line goes to the right for Japanese and Korean vertical text, which we do not follow,
-//!   ours).
+//!   left (ours), **except in a run of Japanese or Korean, whose underline lies on the right of the characters**, as the Text
+//!   dialog's page says (design call, which replaced for those two languages): see
+//!   [`turn_decoration`].
 //!
 //! **Cost.** One pass over the glyphs after the layout across, and one more over the source characters, each once: a glyph is copied once, however the
 //! way up changes along the line (`work::glyph_copies` counts it).
@@ -52,7 +53,7 @@ pub(crate) fn lay_out_down(runs: &[Run], block: &BlockFormat, width: Option<f64>
         height: width,
         ..block.clone()
     };
-    let laid = lay_out_across(runs, &across, block.height, db);
+    let laid = lay_out_across(runs, &across, block.height, db, true);
     // How tall the block is: its height, or where its longest column ends when it has none.
     let height = match block.height.filter(|h| h.is_finite()) {
         Some(h) => h.clamp(-MAX_LENGTH, MAX_LENGTH),
@@ -95,12 +96,21 @@ fn turn_line(line: Line, source: &[char], height: f64) -> Line {
         turned.glyphs = b.glyphs.iter().map(|g| placed(g, g.y, height - g.x)).collect();
         turned
     });
-    let decorations = line
-        .decorations
-        .iter()
-        .map(|d| Decoration { vertical: true, x0: height - d.x1, x1: height - d.x0, top: d.top, thickness: d.thickness, ..*d })
-        .collect();
+    let decorations = line.decorations.iter().map(|d| turn_decoration(d, centre, height)).collect();
     Line { vertical: true, runs, bullet, decorations, ..line }
+}
+
+/// A line through or under the text, turned: it keeps its place along the column (`x0` and `x1` are lengths down the block) and lies across it where it
+/// did across, which is the left for an underline. **An underline of a Japanese or Korean run lies on the right of the characters** (
+/// for those two languages): its inner edge is at the right edge of the characters' cells, which are centred on the column's centre line
+/// and as wide as the run's size, and its thickness is the one it had.
+fn turn_decoration(d: &Decoration, centre: f64, height: f64) -> Decoration {
+    let top = match d.right_of {
+        // `top` is the right edge of a turned line, which lies `thickness` to its left.
+        Some(right) => centre + right.em / 2.0 + right.outward + d.thickness,
+        None => d.top,
+    };
+    Decoration { vertical: true, x0: height - d.x1, x1: height - d.x0, top, right_of: None, ..*d }
 }
 
 /// A run's glyphs, in runs of the same way up: the letters on their sides together and the upright letters together.

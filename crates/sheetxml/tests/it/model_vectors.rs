@@ -1187,8 +1187,14 @@ fn groups_at_the_depth_cap_holding_a_kept_tree_at_its_cap() {
 #[test]
 fn content_stamp_of_the_blank_drawing_is_pinned() {
     // Recorded at the vocabulary freeze. May change it only in one commit with the reason.
-    let stamp = content_stamp(&Document::new_blank(), &mut Budget::for_open(&Limits::default())).unwrap();
-    assert_eq!(stamp.text(), "00ebc460d282d097");
+    // **Moved it** (`00ebc460d282d097` before): the root style of a new drawing holds `DropOnPageScale` 1, one cell. The stamp of the blank drawing as it was, with
+    // that cell out of its root, is the freeze's, which the format's Vector 1 states (`docs/diacraft-format.md`, "The content stamp of Vector 1's model"): the algorithm is as it was.
+    // **Moved it again** (`2a5bda518f5b4efb` before): the root style of a new drawing states the text cells the renderer assumes (a `Paragraph` row, the rest of the text block and
+    // the cells of the first run). With those out of its root too the stamp is the one gave it, which pins that the algorithm is as it was.
+    let stamp = |doc: &Document| content_stamp(doc, &mut Budget::for_open(&Limits::default())).unwrap().text();
+    assert_eq!(stamp(&diacraft_testkit::fixtures::without_root_factor(Document::new_blank())), "00ebc460d282d097");
+    assert_eq!(stamp(&diacraft_testkit::fixtures::without_root_text_cells(Document::new_blank())), "2a5bda518f5b4efb");
+    assert_eq!(stamp(&Document::new_blank()), "c43fd9d9d0153d90");
 }
 
 fn stamp(d: &Document) -> String {

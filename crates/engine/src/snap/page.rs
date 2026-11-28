@@ -227,11 +227,12 @@ fn guide_line(reader: &Reader<'_>, at: &ShapeRef, k: f64) -> Option<Line> {
                 if row.row_type.as_deref() != Some("InfiniteLine") {
                     continue;
                 }
+                // A cell that holds a formula and no saved value is what the formula works out to.
                 let cell = |name: &str| {
-                    row.cells
-                        .iter()
-                        .find(|(n, _)| n.as_str() == name)
-                        .and_then(|(_, f)| f.value.cell.and_then(|c| c.value.as_ref()).and_then(|v| v.number()))
+                    row.cells.iter().find(|(n, _)| n.as_str() == name).and_then(|(n, f)| {
+                        let addr = diacraft_doc::CellAddr { section: Some(key.clone()), row: Some(row.key.clone()), cell: n.clone() };
+                        reader.worked().number_of(&sheet, &addr, f)
+                    })
                 };
                 if let (Some(x), Some(y), Some(a), Some(b)) = (cell("X"), cell("Y"), cell("A"), cell("B")) {
                     local = Some(((x, y), (a - x, b - y)));

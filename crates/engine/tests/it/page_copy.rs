@@ -118,12 +118,12 @@ fn the_copy_takes_the_next_name_that_is_free_and_sits_after_its_source() {
     let c = run(&mut s, "page.duplicate", json!({"id": a}));
     assert_eq!(c["name"], "Overview-2-2");
     assert!(a != b && b != id_of(&c));
-    // A name as long as a name can be is cut short to leave room for the number.
-    let long = "n".repeat(255);
+    // A name as long as a name can be is cut short to leave room for the number (31 characters).
+    let long = "n".repeat(31);
     run(&mut s, "page.rename", json!({"id": 1, "name": long}));
     let d = run(&mut s, "page.duplicate", json!({"id": 1}));
     let name = d["name"].as_str().unwrap();
-    assert_eq!(name.chars().count(), 255);
+    assert_eq!(name.chars().count(), 31);
     assert!(name.ends_with("-2"), "{name}");
     check_session(&s).unwrap();
 }

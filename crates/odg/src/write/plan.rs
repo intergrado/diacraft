@@ -64,11 +64,28 @@ pub(crate) fn apply_page(ed: &mut Editor<'_, '_>, scan: &ScanPage, diff: &PageDi
     ed.height = diff.height;
     ed.unit = diff.unit;
     let gone = closure(scan, &diff.deleted)?;
+    // **First**, before any shape is written (a segment whose end was glued anew has a geometry the outline may not be written from, and that is the lesser cause): an end of a segment the file holds as a polyline or a path cannot be glued anew: the element has no glue to write (its glue is DiaCraft's data, which an edit takes the end out of).
+    for edit in diff.glue.iter().filter(|e| e.to.is_some()) {
+        if matches!(element(scan, edit.ord)?.kind, Kind::Polyline | Kind::Path) {
+            return Err(WriteError::Unsupported(WORDS_POLY_GLUE));
+        }
+    }
     for change in &diff.shapes {
         apply_shape(ed, scan, diff, change, &gone)?;
     }
-    for &(ord, start) in &diff.unglue {
+    // An end taken off its shape loses its attributes; an end glued to a shape is written with the new shapes' glue (`Editor::new_shapes`), which names the shapes and numbers their points.
+    for edit in diff.glue.iter().filter(|e| e.to.is_none()) {
+        let (ord, start) = (edit.ord, edit.start);
         let shape = element(scan, ord)?;
+        // A segment the file holds as a polyline has no glue in its element: DiaCraft's data carries it, and the edit of that took the end out (`Tier2Edit::unglued`). An end that no edit of
+        // the shape's data took out would leave the glue in the file, and is refused in words.
+        if matches!(shape.kind, Kind::Polyline | Kind::Path) {
+            let taken = diff.shapes.iter().any(|c| c.ord == ord && c.tier2.as_ref().is_some_and(|t| t.unglued[usize::from(!start)]));
+            if !taken {
+                return Err(WriteError::Unsupported(WORDS_POLY_GLUE));
+            }
+            continue;
+        }
         ed.unglue(shape, start)?;
     }
     // A group of the file whose frame is not the box of its members is written as its members, and said.
@@ -93,9 +110,10 @@ pub(crate) fn apply_page(ed: &mut Editor<'_, '_>, scan: &ScanPage, diff: &PageDi
     let block = match (&diff.comments, diff.held_at) {
         (Some(edit), Some(_)) => {
             let made = super::comments::prepare(ed, scan, scan.scope, diff, edit, false)?;
-            // What the annotations need declared is declared once, on the page's start tag, before its end (`>` or `/>`).
+            // What the annotations need declared is declared once, on the page's start tag, before its end (`>` or `/>`): **once for each prefix**, since an edit of the
+            // page's own tag (its master page renamed) may have declared one of them.
             if !made.declare.is_empty() {
-                ed.splicer.insert(scan.open.1.saturating_sub(if scan.empty { 2 } else { 1 }), made.declare.clone());
+                ed.splicer.declare_text(scan.open.0, scan.open.1.saturating_sub(if scan.empty { 2 } else { 1 }), &made.declare);
             }
             made.text
         }
@@ -179,6 +197,10 @@ fn place_new(
     orders: &Orders,
 ) -> Result<Vec<super::shapes::NewWrote>, WriteError> {
     if diff.new.is_empty() {
+        // No new shape: what is left is the glue of connectors of the file, which names the shapes it is glued to and writes the glue points.
+        if diff.glue.iter().any(|g| g.to.is_some()) {
+            ed.new_shapes(scan, diff, held, &[])?;
+        }
         return Ok(Vec::new());
     }
     let modelled: HashSet<u32> = held.ordinal_map().values().copied().collect();
@@ -497,8 +519,14 @@ fn apply_shape(ed: &mut Editor<'_, '_>, scan: &ScanPage, diff: &PageDiff, change
     if gone.get(change.ord as usize).copied().unwrap_or(false) {
         return Err(WriteError::Mismatch("a shape of the model is inside an element the model deleted"));
     }
-    let kind_agrees =
-        shape.kind.one_d() == change.one_d && (shape.kind == Kind::Connector) == change.connector && (shape.kind == Kind::Group) == change.group;
+    // **A segment the file holds as a polyline or a path** (a one-dimensional shape of a geometry of its own is written as the outline it draws, and its frame rides in DiaCraft's
+    // data over the box of the outline) is a segment of the model and a 2-D element of the file.
+    let poly1d = change.one_d && matches!(shape.kind, Kind::Polyline | Kind::Path);
+    let kind_agrees = if poly1d {
+        !change.group
+    } else {
+        shape.kind.one_d() == change.one_d && (shape.kind == Kind::Connector) == change.connector && (shape.kind == Kind::Group) == change.group
+    };
     if !kind_agrees {
         return Err(WriteError::Mismatch("the part holds another kind of element than the model's shape"));
     }
@@ -508,7 +536,10 @@ fn apply_shape(ed: &mut Editor<'_, '_>, scan: &ScanPage, diff: &PageDiff, change
     if let Some(glue) = change.turned_glue {
         let outline = matches!(shape.kind, Kind::Polygon | Kind::Polyline | Kind::Path);
         let boxed = outline || matches!(shape.kind, Kind::Custom | Kind::Rect | Kind::Ellipse | Kind::Circle | Kind::Frame);
-        if (glue.elements && boxed) || (glue.standard && outline) {
+        // **The elements of a custom shape, a rectangle, an ellipse or a circle are written again for the turn it has now** ([`super::glue`]), so the points are not elsewhere.
+        let rewritten = matches!(shape.kind, Kind::Custom | Kind::Rect | Kind::Ellipse | Kind::Circle)
+            && change.glue_rows.as_ref().is_some_and(|g| g.moved && g.frame.is_some());
+        if (glue.elements && boxed && !rewritten) || (glue.standard && outline) {
             return Err(WriteError::Unsupported(super::compare::WORDS_TURNED_GLUE));
         }
     }
@@ -516,16 +547,40 @@ fn apply_shape(ed: &mut Editor<'_, '_>, scan: &ScanPage, diff: &PageDiff, change
     if let Some(name) = &change.layer {
         ed.set_layer(shape, name)?;
     }
-    match &change.frame {
-        FrameChange::None => {}
-        FrameChange::Translate { dx, dy } => ed.translate(shape, *dx, -*dy)?,
-        FrameChange::Reshape { pose, angle } => ed.reshape(shape, pose, *angle, who)?,
-        FrameChange::Ends(ends) => ed.set_ends(shape, *ends)?,
+    // The outline of a segment the file holds as a polyline is written from the model when its ends or its geometry changed: the box, the view box and the data. The tier 2 that carries the
+    // segment's frame is made again from the model with it, and the fingerprint of the outline written is stamped.
+    let mut written_outline: Option<crate::ext::fingerprint::Fp> = None;
+    if poly1d {
+        if !matches!(change.frame, FrameChange::None) || change.geo.is_some() {
+            written_outline = Some(write_segment(ed, shape, change, diff.height)?);
+        }
+    } else {
+        match &change.frame {
+            FrameChange::None => {}
+            FrameChange::Translate { dx, dy } => ed.translate(shape, *dx, -*dy)?,
+            FrameChange::Reshape { pose, angle } => ed.reshape(shape, pose, *angle, who)?,
+            FrameChange::Ends(ends) => ed.set_ends(shape, *ends)?,
+        }
     }
     // A custom shape that holds text after a retext has `draw:auto-grow-height="false"` in its style (the retext row).
     let grow = shape.kind == Kind::Custom && change.text.as_ref().is_some_and(super::text::TextEdit::holds_text);
     // The style, the frame's `draw:auto-grow-height`, and what DiaCraft's extension carries of the shape (a group's own style carries none).
     let tier2 = change.tier2.as_ref().filter(|_| !change.group);
+    let segment_edit = tier2.zip(written_outline).map(|(t, fp)| segment_edit(t, fp));
+    // A segment whose outline was not written (its ends did not move: an end lost its glue and kept its place) still carries its end cells.
+    let whole;
+    let tier2 = if poly1d {
+        match (segment_edit.as_ref(), tier2) {
+            (Some(edit), _) => Some(edit),
+            (None, Some(edit)) if !edit.rebuilt.is_empty() => {
+                whole = whole_frame(edit);
+                Some(&whole)
+            }
+            (None, other) => other,
+        }
+    } else {
+        tier2
+    };
     if (change.style.is_some() || grow || tier2.is_some())
         && let Some(carried) = ed.restyle(shape, change.style.as_ref().unwrap_or(&StyleEdit::default()), grow, tier2)?
     {
@@ -540,11 +595,22 @@ fn apply_shape(ed: &mut Editor<'_, '_>, scan: &ScanPage, diff: &PageDiff, change
             ed.zero.push((change.ord, done.expect));
         }
     }
-    if let Some(geo) = &change.geo {
+    if let Some(geo) = change.geo.as_ref().filter(|_| !poly1d) {
         let wrote = ed.outline(shape, geo)?;
         if !wrote.is_empty() {
             ed.kid_edits.push((change.ord, wrote));
         }
+    }
+    // The connection points the model changed, as glue points of the file (CPDOUBLE.ODG).
+    if let Some(glue) = &change.glue_rows {
+        let wrote = ed.glue_edit(scan, shape, change.ord, glue)?;
+        if !wrote.is_empty() {
+            ed.kid_edits.push((change.ord, wrote));
+        }
+    }
+    // The title and the description: the elements `svg:title` and `svg:desc`.
+    if let Some(alt) = &change.alt {
+        ed.alt_text(shape, alt)?;
     }
     // **The route is written from the cells when the connector was routed anew; otherwise the file's own path is kept, and a change of the page's height shifts it**
     // The height edit keeps `PinY`, so every end of the page moves down it by what the page grew, and the path, which is a fixed distance
@@ -553,7 +619,9 @@ fn apply_shape(ed: &mut Editor<'_, '_>, scan: &ScanPage, diff: &PageDiff, change
     // it that only change the page's height (`classify` gives such a connector no route, so it reaches the shift below with none). A path the writer
     // cannot place is another matter: it is not shifted, so the save that cannot shift it says so each time.
     let mut said = false;
-    let written = match &change.route {
+    // (A segment the file holds as a polyline has no route: it is not a connector, whatever cells the model holds.)
+    let route = change.route.as_ref().filter(|_| !poly1d);
+    let written = match route {
         Some(Route::Path(segs)) => match route::text(segs, diff.height) {
             Some((path, view_box)) => {
                 ed.set_route(shape, &path, &view_box, who)?;
@@ -573,11 +641,71 @@ fn apply_shape(ed: &mut Editor<'_, '_>, scan: &ScanPage, diff: &PageDiff, change
         None => false,
     };
     let grew = diff.grew_by();
-    if change.connector && !written && grew != 0.0 && !ed.shift_route(shape, grew * route::HUNDREDTHS_PER_INCH)? && !said {
+    if change.connector && !poly1d && !written && grew != 0.0 && !ed.shift_route(shape, grew * route::HUNDREDTHS_PER_INCH)? && !said {
         // The file's path cannot be placed: it stays as it is, and the save says the route was not written.
         ed.notes.push(SaveNote::RouteNotWritten { page: diff.page_at, shape: change.id });
     }
     Ok(())
+}
+
+/// The words of the refusal of an end glued or unglued on a segment the file holds as a polyline or a path.
+const WORDS_POLY_GLUE: &str =
+    "an end glued or unglued on a one-dimensional shape the file holds as a polyline or a path (the element has no glue to write)";
+
+/// The words of the refusal of a segment of a group of the file, held as a polyline, whose ends or outline changed.
+const WORDS_POLY_GROUP: &str = "a change of the ends or the geometry of a one-dimensional shape the file holds as a polyline or a path inside a group (the outline is written in the page's coordinates, and a member of a group is measured from the group)";
+
+/// The words of the refusal of a segment held as a polyline whose geometry cannot be written as one now.
+const WORDS_POLY_OUTLINE: &str = "a one-dimensional shape the file holds as a polyline or a path whose geometry is now more than one section of lines and curves with a box of some size (the outline is written from the geometry)";
+
+/// Writes the outline of the segment of the model `change` is of into its element, a polyline or a path of the file ([`Editor::set_poly`]), and gives the fingerprint of the outline written (the
+/// one the reader will make of the element's `draw:points` or `svg:d` and view box).
+fn write_segment(ed: &mut Editor<'_, '_>, shape: &ScanShape, change: &ShapeDiff, height: f64) -> Result<crate::ext::fingerprint::Fp, WriteError> {
+    use crate::ext::fingerprint::{Outline, OutlineKind, outline_fp};
+    if shape.parent != 0 {
+        return Err(WriteError::Unsupported(WORDS_POLY_GROUP));
+    }
+    let mut steps: u64 = 0;
+    let route = super::poly::segs_of(&change.sheet, &change.outer, &mut steps);
+    ed.work.charge_steps(usize::try_from(steps).unwrap_or(usize::MAX))?;
+    let placed = route.and_then(|route| super::poly::placed(&route, height)).ok_or(WriteError::Unsupported(WORDS_POLY_OUTLINE))?;
+    ed.set_poly(shape, &placed)?;
+    let mut outline = Outline::new(if placed.path { OutlineKind::Path } else { OutlineKind::Points });
+    outline.path = Some(&placed.data);
+    outline.view_box = Some(&placed.view_box);
+    Ok(outline_fp(&outline))
+}
+
+/// The tier-2 edit of a segment the file holds as a polyline, **with the end cells the glue would rebuild carried all the same**: the file's glue rebuilds the end cells of a connector element
+/// But a polyline has no glue to rebuild them from, and its whole frame, the ends among it, is carried over its box. An end taken off its shape, or glued anew, must
+/// keep its cells in what is carried (and what the data carried of them before must not be let go), or the frame read back is not the one written, and the polyline is read as the markup says.
+fn whole_frame(t: &super::own::Tier2Edit) -> super::own::Tier2Edit {
+    let mut out = t.clone();
+    for name in std::mem::take(&mut out.rebuilt) {
+        if let Some(cell) = t.model.sheet.cells.get(name) {
+            out.delta.cells.insert(diacraft_doc::CellName::new(name), cell.clone());
+        }
+    }
+    out
+}
+
+/// The tier-2 edit of a segment the file holds as a polyline whose outline was written from the model: **its frame and its geometry are carried over the box of the outline**, so the edit carries
+/// every frame cell the model holds and the `Geometry` sections as they are (the pose cells of a line are the markup's, and an edit leaves them out of what it carries), and the outline's
+/// fingerprint is the one of what was written.
+fn segment_edit(t: &super::own::Tier2Edit, whole: crate::ext::fingerprint::Fp) -> super::own::Tier2Edit {
+    let mut out = whole_frame(t);
+    let sheet = &t.model.sheet;
+    for name in super::own::POSE_CELLS {
+        if let Some(cell) = sheet.cells.get(name) {
+            out.delta.cells.insert(diacraft_doc::CellName::new(name), cell.clone());
+        }
+    }
+    for section in sheet.sections.iter().filter(|s| s.name.as_str() == "Geometry") {
+        out.delta.sections.retain(|s| s.ix != section.ix || s.name != section.name);
+        out.delta.sections.push(std::sync::Arc::clone(section));
+    }
+    out.outline = super::own::OutlineWrite::Whole(whole);
+    out
 }
 
 /// The numbered children of the page (index 0) and of each shape element, by ordinal, the elements gone left out, in document order.
@@ -1054,9 +1182,13 @@ mod tests {
             style: None,
             text: None,
             geo: None,
+            alt: None,
             tier2: None,
             turned_glue: None,
             layer: None,
+            sheet: std::sync::Arc::default(),
+            outer: crate::read::Affine::IDENTITY,
+            glue_rows: None,
         }
     }
 
@@ -1074,7 +1206,7 @@ mod tests {
             shapes,
             deleted: Vec::new(),
             levels: Vec::new(),
-            unglue: Vec::new(),
+            glue: Vec::new(),
             survivors: Vec::new(),
             new: Vec::new(),
             new_connects: Vec::new(),

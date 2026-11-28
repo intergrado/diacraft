@@ -2,7 +2,7 @@
 
 > **Last reviewed:** 2026-11-22
 
-The target is the reference app's desktop edition. The reference app was not inspected, nothing was launched or measured, and our output has not been opened in it by the project. This is the backlog: one row for each row of the feature inventories in `/` (`inventory-*.md`), with the inventory's area, feature name and priority, scored by what the code does on the date above. Feature rows are scored D (done), P (partial) or M (missing), and weighted P0, P1 or P2. The summary comes from `cargo xtask parity`: D counts 1, P counts a half, M counts 0, and a P0 weighs 3, a P1 2 and a P2 1.
+The target is the reference app's desktop edition. The reference app was never taken apart: what it does comes from public documentation and public sample files, and the files DiaCraft writes are being tested by opening them in it, in LibreOffice Draw and in draw.io. This is the backlog: one row for each row of the feature inventories in `/` (`inventory-*.md`), with the inventory's area, feature name and priority, scored by what the code does on the date above. Feature rows are scored D (done), P (partial) or M (missing), and weighted P0, P1 or P2. The summary comes from `cargo xtask parity`: D counts 1, P counts a half, M counts 0, and a P0 weighs 3, a P1 2 and a P2 1.
 
 **How a row is scored.**
 
@@ -14,7 +14,7 @@ The target is the reference app's desktop edition. The reference app was not ins
 * Scores err low. A row is D only for what is there and works, not for a menu item that exists.
 * **Out of scope by policy** ([roadmap](roadmap.md#out-of-scope-by-policy)): running VBA, the Visual Basic editor, recording VBA macros and COM add-ins stay M and are not planned; a file's VBA project is kept and never run.
 
-**Numbers.** The counts and percentages below are **measured** (`cargo xtask parity` over the table). Each D, P or M is **estimated**: a reading of the command registry, the window's source and tests, and the docs on 2026-11-21, not a run against the reference app and not a test of each row. Evidence for the rows scored D or P is in [`parity-evidence.md`](parity-evidence.md).
+**Numbers.** The counts and percentages below are **measured** (`cargo xtask parity` over the table). Each D, P or M is **estimated**: a reading of the command registry, the window's source and tests, and the docs on 2026-11-21, and not a test of each row. Evidence for the rows scored D or P is in [`parity-evidence.md`](parity-evidence.md).
 
 The approved application icon is in the OS window decoration, with no duplicate in the app's top bar; the File Home cover remains. The **Backstage / Start screen** row stays M: artwork does not implement start-screen behaviour or recent drawings. No inventory score changes.
 
@@ -25,31 +25,31 @@ The accepted stencil presentation is a compact chooser, fixed square icon cards 
 **Scheduled next** (owner, 2026-11-25), after the 0.3 items, in the order the owner listed them ([roadmap](roadmap.md#current-focus)). All four are designed and under way (the roadmap's Current focus says what each has built), and each row keeps its score until the work that closes it lands:
 
 1. Connectors that route around shapes, and are routed again when a shape moves: under Connectors: Routing, Automatic reroute on moving shapes (P0, P, the one open P0 item) and Route around placeable shapes (P1, M).
-2. The ShapeSheet window, with a command that sets any cell: the rows under ShapeSheet: Opening a sheet, Reading a sheet and Editing formulas (built the window's reading and its editing, and they scored the rows they cover; Insert Function, Insert Cell Name, Edit Formula, AutoComplete and reference by click stay M; built the commands that write rows and sections, and the window's Sections and Rows groups are still to build).
+2. The ShapeSheet window, with a command that sets any cell: the rows under ShapeSheet: Opening a sheet, Reading a sheet and Editing formulas (built the window's reading, its editing and its rows and sections, and they scored the rows they cover; Insert Function, Insert Cell Name, AutoComplete and reference by click stay M; built the commands that write rows and sections).
 3. Opening draw.io files and their compressed form: no row of the inventories names it, and the Common diagram formats row of [`file-format-parity.md`](file-format-parity.md) tracks it.
-4. DiaCraft's own UML, BPMN, C4, network and database stencils, drawn by the project with no copied art: they give shapes to the rows under Diagram kinds: UML, Networks and cloud and Database diagrams and to the BPMN rows under Diagram kinds: Flowcharts (all M but the Gane-Sarson row, which is P), and a stencil alone makes none of those rows done; no row names C4.
+4. DiaCraft's own UML, BPMN, C4, network and database stencils, drawn by the project with no copied art: they give shapes to the rows under Diagram kinds: UML, Networks and cloud and Database diagrams and to the BPMN rows under Diagram kinds: Flowcharts. Nineteen of those rows are partial since the network, UML, BPMN and database stencils were built (UMLCLASS, UMLSEQ, BPMN and ERD: the two network templates, nine UML rows, four BPMN rows and four database rows), beside the Gane-Sarson row, which was P before; a stencil alone makes none of those rows done, and no row names C4.
 
 <!-- SUMMARY -->
-**Weighted breadth parity: 36%** over 977 features.
+**Weighted breadth parity: 38%** over 977 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 56 | 55 | 1 | 0 | 99% |
-| P1 | 296 | 109 | 61 | 126 | 47% |
-| P2 | 625 | 33 | 37 | 555 | 8% |
+| P1 | 296 | 113 | 72 | 111 | 50% |
+| P2 | 625 | 44 | 41 | 540 | 10% |
 
 | Area | Parity |
 |---|---|
 | Document | 63% |
-| Shapes | 62% |
-| Connectors | 57% |
-| ShapeSheet | 45% |
+| Shapes | 64% |
+| Connectors | 59% |
+| ShapeSheet | 53% |
 | Styling | 66% |
-| Diagram kinds | 11% |
+| Diagram kinds | 15% |
 | Data | 14% |
 | Process | 0% |
 | Automation | 11% |
-| Review | 24% |
+| Review | 32% |
 | Backstage | 23% |
 | Cloud | 0% |
 
@@ -214,7 +214,7 @@ Open P0 items: Automatic reroute on moving shapes.
 | Shapes | Edit a master's icon | P2 | M |
 | Shapes | Document stencil | P1 | M |
 | Shapes | Master Explorer | P2 | M |
-| Shapes | Drop shape resizes to the drawing scale | P1 | M |
+| Shapes | Drop shape resizes to the drawing scale | P1 | D |
 | Shapes | Share a stencil file | P2 | M |
 
 ### Shapes: Selecting shapes
@@ -302,10 +302,10 @@ Open P0 items: Automatic reroute on moving shapes.
 | Shapes | Fragment | P1 | D |
 | Shapes | Intersect | P1 | D |
 | Shapes | Subtract | P1 | D |
-| Shapes | Join | P2 | M |
-| Shapes | Trim | P2 | M |
-| Shapes | Offset | P2 | M |
-| Shapes | Fit Curve | P2 | M |
+| Shapes | Join | P2 | D |
+| Shapes | Trim | P2 | D |
+| Shapes | Offset | P2 | D |
+| Shapes | Fit Curve | P2 | D |
 | Shapes | Update Alignment Box | P2 | M |
 | Shapes | Corner rounding | P1 | P |
 | Shapes | Measure tool shapes | P2 | M |
@@ -439,7 +439,7 @@ Open P0 items: Automatic reroute on moving shapes.
 | Connectors | Route around placeable shapes | P1 | M |
 | Connectors | Reset Connector | P1 | D |
 | Connectors | Edit a connector path by hand | P0 | D |
-| Connectors | Reverse Ends | P1 | M |
+| Connectors | Reverse Ends | P1 | D |
 | Connectors | Connector splits when a shape drops on it | P1 | M |
 | Connectors | Healing a connector when a shape is deleted | P1 | M |
 | Connectors | Move shapes away on drop | P2 | M |
@@ -508,7 +508,7 @@ Open P0 items: Automatic reroute on moving shapes.
 | ShapeSheet | Reference a cell by clicking it | P2 | M |
 | ShapeSheet | Copy a formula between cells | P2 | D |
 | ShapeSheet | Formula AutoComplete | P2 | M |
-| ShapeSheet | Edit a long formula in a larger editor | P2 | M |
+| ShapeSheet | Edit a long formula in a larger editor | P2 | D |
 | ShapeSheet | Insert a function from a list | P2 | M |
 | ShapeSheet | Insert a cell name from a list | P2 | M |
 
@@ -516,13 +516,13 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| ShapeSheet | Insert a section | P2 | P |
-| ShapeSheet | Delete a section | P2 | P |
-| ShapeSheet | Insert a row | P2 | P |
-| ShapeSheet | Delete a row | P2 | P |
+| ShapeSheet | Insert a section | P2 | D |
+| ShapeSheet | Delete a section | P2 | D |
+| ShapeSheet | Insert a row | P2 | D |
+| ShapeSheet | Delete a row | P2 | D |
 | ShapeSheet | Change a row's type | P2 | M |
 | ShapeSheet | Expand a row | P2 | M |
-| ShapeSheet | Row commands for shape data, hyperlinks and actions | P2 | M |
+| ShapeSheet | Row commands for shape data, hyperlinks and actions | P2 | D |
 
 ### ShapeSheet: Tracing formulas
 
@@ -657,10 +657,10 @@ Open P0 items: Automatic reroute on moving shapes.
 | Diagram kinds | Swimlane label text and direction | P1 | D |
 | Diagram kinds | Phase separators | P1 | D |
 | Diagram kinds | Work Flow Diagram template | P2 | M |
-| Diagram kinds | BPMN Diagram template | P1 | M |
-| Diagram kinds | BPMN shape variants by right-click | P1 | M |
-| Diagram kinds | BPMN connector types | P1 | M |
-| Diagram kinds | BPMN refuses non-standard styling | P2 | M |
+| Diagram kinds | BPMN Diagram template | P1 | P |
+| Diagram kinds | BPMN shape variants by right-click | P1 | P |
+| Diagram kinds | BPMN connector types | P1 | P |
+| Diagram kinds | BPMN refuses non-standard styling | P2 | P |
 | Diagram kinds | BPMN workflow starter templates | P2 | M |
 | Diagram kinds | SDL Diagram template | P2 | M |
 | Diagram kinds | IDEF0 Diagram template | P2 | M |
@@ -917,18 +917,18 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| Diagram kinds | UML Class template | P1 | M |
-| Diagram kinds | UML class members and fields | P1 | M |
-| Diagram kinds | UML Sequence template | P1 | M |
-| Diagram kinds | Sequence lifelines | P1 | M |
-| Diagram kinds | Sequence messages | P1 | M |
-| Diagram kinds | Sequence fragments | P2 | M |
-| Diagram kinds | Sequence activation and destruction | P2 | M |
-| Diagram kinds | UML Use Case template | P1 | M |
+| Diagram kinds | UML Class template | P1 | P |
+| Diagram kinds | UML class members and fields | P1 | P |
+| Diagram kinds | UML Sequence template | P1 | P |
+| Diagram kinds | Sequence lifelines | P1 | P |
+| Diagram kinds | Sequence messages | P1 | P |
+| Diagram kinds | Sequence fragments | P2 | P |
+| Diagram kinds | Sequence activation and destruction | P2 | P |
+| Diagram kinds | UML Use Case template | P1 | P |
 | Diagram kinds | UML Activity template | P1 | M |
 | Diagram kinds | UML Component template | P2 | M |
 | Diagram kinds | UML component holds other components | P2 | M |
-| Diagram kinds | UML stereotype label on a shape | P2 | M |
+| Diagram kinds | UML stereotype label on a shape | P2 | P |
 | Diagram kinds | UML connector type and multiplicity | P2 | M |
 | Diagram kinds | UML Deployment template | P2 | M |
 | Diagram kinds | UML State Machine template | P2 | M |
@@ -939,11 +939,11 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| Diagram kinds | Crow's Foot Database Notation template | P1 | M |
-| Diagram kinds | Set relationship end symbols | P1 | M |
-| Diagram kinds | Entity height follows its attributes | P2 | M |
+| Diagram kinds | Crow's Foot Database Notation template | P1 | P |
+| Diagram kinds | Set relationship end symbols | P1 | P |
+| Diagram kinds | Entity height follows its attributes | P2 | P |
 | Diagram kinds | Show attribute types on an entity | P2 | M |
-| Diagram kinds | Chen's Database Notation template | P2 | M |
+| Diagram kinds | Chen's Database Notation template | P2 | P |
 | Diagram kinds | IDEF1X Database Notation template | P2 | M |
 | Diagram kinds | Database Model Diagram template | P2 | M |
 | Diagram kinds | Table definition and columns | P2 | M |
@@ -1278,10 +1278,10 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Area | Feature | Priority | Status |
 |---|---|---|---|
-| Review | Accessibility Checker | P1 | M |
-| Review | Alt text on shapes and pictures | P1 | M |
-| Review | Alt text on masters | P2 | M |
-| Review | Alt text on pages | P2 | M |
+| Review | Accessibility Checker | P1 | D |
+| Review | Alt text on shapes and pictures | P1 | D |
+| Review | Alt text on masters | P2 | P |
+| Review | Alt text on pages | P2 | D |
 | Review | Diagram Navigation pane | P1 | M |
 | Review | Screen reader reads shapes in order | P1 | M |
 | Review | Move between pages with a reader | P2 | M |
@@ -1301,7 +1301,7 @@ Open P0 items: Automatic reroute on moving shapes.
 | Review | Research pane | P2 | M |
 | Review | Insights pane | P2 | M |
 | Review | Translate text | P2 | M |
-| Review | Language of shape text | P2 | M |
+| Review | Language of shape text | P2 | P |
 | Review | Language preferences | P2 | M |
 | Review | Regional text options | P2 | M |
 | Review | Horizontal in vertical text | P2 | M |
@@ -1493,9 +1493,24 @@ Open P0 items: Automatic reroute on moving shapes.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-27 | minor | Language of shape text moves from M to P (each run's `LangID` and the drawing's `DocLangID` read, kept and written in VSDX, `.diacraft` and `.odg`, and used to shape and measure text; the language setting that marks selected text and the proofing are missing; the summary is recomputed) |
+| 2026-11-26 | minor | Offset and Fit Curve move from M to D (`shape.offset` and `shape.fit_curve`, the Operations menu's Offset row and the Draw tab's Fit Curve row; the summary is recomputed) |
+| 2026-11-26 | minor | Join and Trim move from M to D (`shape.join` and `shape.trim`, and the Operations menu's rows on the Developer and Draw tabs; the summary is recomputed) |
+| 2026-11-26 | minor | Reverse Ends moves from M to D (`connector.reverse_ends`; a row of the connector's right-click menu, of Rotate Shapes and of the Connector button's menu, and Ctrl+Alt+R; one undo step, the glue kept, the path walked the other way, the arrow at the other end); Connectors is 59% (it was 57%) and the headline stays 37% weighted |
+| 2026-11-26 | minor | Accessibility Checker, Alt text on shapes and pictures and Alt text on pages move from P to D (the Accessibility pane, the Format Shape pane's Alt Text tab with the shape menu's Edit Alt Text row, and Page Setup's Alt Text tab send the commands); Alt text on masters stays P (no window edits a master's shape); the summary is made again by `cargo xtask parity` |
+| 2026-11-26 | minor | The fourth scheduled feature says nineteen Diagram kinds rows are partial since the network, UML, BPMN and database stencils were built (it said all were M but the Gane-Sarson row) |
+| 2026-11-26 | minor | Insert a section, Delete a section, Insert a row and Delete a row move from P to D (the window's Sections and Rows groups and its right-click menu send `sheet.add_section`, `sheet.delete_section`, `sheet.add_row` and `sheet.delete_row`), and Edit a long formula in a larger editor (the Edit Formula card, Ctrl+E) and Row commands for shape data, hyperlinks and actions (the Editing group's Shape Data, Link and Shape Action) move from M to D; Sections, rows and cells in a sheet window and Move around a sheet with the keyboard stay P, since the window still puts a section's column titles on a line of their own and Enter and Tab are project rules; the summary is recomputed |
+| 2026-11-26 | minor | Round 2: the summary is made again on the merged tree (`cargo xtask parity`: 37% weighted, P1 50%) once are in |
+| 2026-11-26 | minor | The summary is made again on the merged tree (`cargo xtask parity`: 37% weighted, P1 49%, P2 9%, Diagram kinds 15%) once the five stencils of the second batch and are in |
+| 2026-11-26 | minor | BPMN Diagram template, BPMN shape variants by right-click, BPMN connector types and BPMN refuses non-standard styling move from M to P (the BPMN Shapes stencil and its template ship; variants are Shape Data, the flows' patterns are guarded), and the summary is recomputed by `cargo xtask parity` |
+| 2026-11-26 | minor | Accessibility Checker, Alt text on shapes and pictures, Alt text on masters and Alt text on pages move from M to P (the engine reads, sets and checks them: `shape.alt_text`, `page.alt_text`, `master.alt_text` and `review.check_accessibility`; the window does not wire them yet), and the weighted breadth stays 36% (P1 47%, P2 8%) |
+| 2026-11-26 | minor | Drop shape resizes to the drawing scale moves from M to D (`shape.drop`, a drop from a stencil file, AutoConnect and the window's drops follow the range of eight of the page's drawing scale); P1 done 109 to 110 and missing 126 to 125, Shapes 62% to 63%, the weighted total stays 36% (P0 99%, P1 47%, P2 8%; measured: `cargo xtask parity`) |
 | 2026-11-26 | minor | Scheduled next says the four features are designed and under way (it said none was designed or started) |
+| 2026-11-26 | minor | Crow's Foot Database Notation template, Set relationship end symbols, Entity height follows its attributes and Chen's Database Notation template move from M to P (the two stencils and their templates are built; the ends are set by Shape Data and not by a menu, an entity's height follows its text and not rows dropped on it, and the reference app's Attribute, Primary Key Attribute and Primary Key Separator shapes are the compartments' lines) |
+| 2026-11-26 | minor | UML Sequence template, Sequence lifelines, Sequence messages, Sequence fragments and Sequence activation and destruction move from M to P (the UML Sequence stencil and the template are built; the foot handle, the right-click switch of a message's route, an operand added by dropping on a fragment, lost and found messages and the starter diagrams are not) |
 | 2026-11-26 | minor | Sections, rows and cells in a sheet window and Move around a sheet with the keyboard are P, not the D that gave them (the coordinator's ruling: the reference puts a section's column titles on its header line and the window uses a separate line; Enter and Tab are project rules, R44 being unknown); the summary is recomputed by `cargo xtask parity` |
 | 2026-11-26 | minor | Sections, rows and cells in a sheet window, Type a new formula and Empty formula returns to inheriting move to D, and Edit in the cell or the formula bar, Copy a formula between cells, Move around a sheet with the keyboard and Drawing and sheet update together move from M to D (the window edits a cell through `sheet.set_cell`, moves by the keys of the spec and lays a display group out as pairs); the summary is recomputed by `cargo xtask parity` |
+| 2026-11-26 | minor | UML Class template, UML class members and fields, UML Use Case template and UML stereotype label on a shape move from M to P (the UML Class and UML Use Case stencils and their two templates are built; members as the rows of a list, the reception compartment, multiplicity at a line's ends, a plain Dependency line in the use case stencil and the Show Stereotype menu are not), and the summary is recomputed by `cargo xtask parity` |
 | 2026-11-26 | minor | Default connector type for a page and Line jump size move from P to D, Routing style per page and connector and Page spacing for routing from M to P (the Layout and Routing tab sets them; the router does not read the spacing yet), and the summary is recomputed: P1 46%, P2 8%, Connectors 57% |
 | 2026-11-26 | minor | Basic Network Diagram template and Detailed Network Diagram template move from M to P (the network and computers stencils and the template are built; the backbone's connectors, the legend and equipment data from a source are not) |
 | 2026-11-26 | minor | The window reads a sheet, so seven ShapeSheet rows move from M to D (Open the sheet of a shape, page or document, Sheet stays on the object it opened with, Show formulas or values, Local and inherited cell colours, Error values in cells, Show or hide sections, Collapse or expand a section) and two to P (Sheets of other objects, Sections, rows and cells in a sheet window); the summary is the tool's |

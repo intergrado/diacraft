@@ -327,6 +327,10 @@ pub(crate) fn map_of(angle: f64, flip: (bool, bool)) -> impl Fn(f64, f64) -> (f6
 pub(crate) fn stale_pose(t: &Tier2, native: &Sheet) -> Vec<&'static str> {
     let mut out: Vec<&'static str> = Vec::new();
     let one_d = native.cells.contains_key("BeginX");
+    // A segment written as the outline it draws carries its whole frame over the box of a polyline, which the size cells would be compared with: it is judged as a whole ([`segment_stale`]).
+    if !one_d && carries_segment(t) {
+        return out;
+    }
     for name in if one_d { END_CELLS.as_slice() } else { SIZE_CELLS.as_slice() } {
         let name = *name;
         if let (Some(carried), Some(now)) = (number(t.cells.get(name)), number(native.cells.get(name)))
@@ -336,6 +340,100 @@ pub(crate) fn stale_pose(t: &Tier2, native: &Sheet) -> Vec<&'static str> {
         }
     }
     out
+}
+
+/// Whether a tier 2 carries the frame of a segment: the four cells of its ends. On the element of a line or a connector the reader makes them itself; on any other element, and in what this
+/// build writes only a polyline or a path of a one-dimensional shape, it is a segment written as the outline it draws (`write::poly`, [`super::native::Frame::Segment`]).
+pub(crate) fn carries_segment(t: &Tier2) -> bool {
+    END_CELLS.iter().all(|name| t.cells.contains_key(*name))
+}
+
+/// What a carried segment draws, on the page (inches, y up): the end of each of its rows, and the box of its outline (its centre and its size, the control points of a curve in the box).
+struct SegmentDraws {
+    ends: Vec<(f64, f64)>,
+    centre: (f64, f64),
+    size: (f64, f64),
+}
+
+/// What the cells of a carried segment and the one `Geometry` section it carries draw, by the map the writer placed the polyline by (`write::poly::segs_of`). `None` for a carried frame or
+/// geometry that draws nothing the writer says: no section or more than one, a cell that holds no number, a row the writer does not say.
+fn segment_draws(t: &Tier2) -> Option<SegmentDraws> {
+    let mut sheet = Sheet::default();
+    for name in crate::write::own::POSE_CELLS {
+        if let Some(cell) = t.cells.get(name) {
+            sheet.cells.insert(diacraft_doc::CellName::new(name), cell.clone());
+        }
+    }
+    let mut found = t.sections.iter().filter(|s| s.name.as_str() == OUTLINE_SECTION);
+    let section = found.next()?;
+    if found.next().is_some() {
+        return None;
+    }
+    sheet.sections.push(Arc::clone(section));
+    let route = crate::write::poly::segs_of(&sheet, &crate::read::Affine::IDENTITY, &mut 0)?;
+    let [x0, y0, x1, y1] = crate::write::poly::extent(&route)?;
+    let ends = crate::write::poly::ends_of(&route);
+    Some(SegmentDraws { ends, centre: ((x0 + x1) / 2.0, (y0 + y1) / 2.0), size: (x1 - x0, y1 - y0) })
+}
+
+/// The end of each row of the outline the markup's polyline has, on the page (inches, y up): the rows the reader made of its points, which are shares of its box, taken through the box. `None`
+/// for a markup that has not one section of numbers, or no box.
+fn markup_ends(native: &Sheet) -> Option<Vec<(f64, f64)>> {
+    let n = |name: &str| number(native.cells.get(name));
+    let (w, h) = (n("Width")?, n("Height")?);
+    let (left, bottom) = (n("PinX")? - n("LocPinX")?, n("PinY")? - n("LocPinY")?);
+    let mut found = native.sections.iter().filter(|s| s.name.as_str() == OUTLINE_SECTION);
+    let section = found.next()?;
+    if found.next().is_some() {
+        return None;
+    }
+    section.rows.iter().map(|row| Some((left + number(row.cells.get("X"))? * w, bottom + number(row.cells.get("Y"))? * h))).collect()
+}
+
+/// Whether the polyline of a carried segment is not the one the writer wrote: **the markup says the frame of an outline by its box and its points**, and the box and the points of the outline
+/// the carried cells draw are worked out again (the same way a line's frame is) and compared with the box and the points the markup has now, to the grid of the file. A polyline another
+/// program moved, resized, turned or edited is not the segment's; one it only saved is (it writes the points on its own grid and a view box one unit wider: the points differ by a unit of
+/// 0.01 mm, which the tolerance of the file's grid is). A carried frame that draws nothing is stale as well: it is no frame to rely on.
+fn segment_stale(t: &Tier2, native: &Sheet) -> bool {
+    if markup_turned(native) {
+        return true;
+    }
+    let Some(draws) = segment_draws(t) else { return true };
+    let n = |name: &str| number(native.cells.get(name));
+    let (Some(nw), Some(nh), Some(px), Some(py), Some(lx), Some(ly)) = (n("Width"), n("Height"), n("PinX"), n("PinY"), n("LocPinX"), n("LocPinY"))
+    else {
+        return true;
+    };
+    let close = |a: f64, b: f64| (a - b).abs() <= FRAME_TOLERANCE;
+    if !(close(nw, draws.size.0) && close(nh, draws.size.1) && close(px - lx + nw / 2.0, draws.centre.0) && close(py - ly + nh / 2.0, draws.centre.1))
+    {
+        return true;
+    }
+    match markup_ends(native) {
+        Some(markup) => markup.len() != draws.ends.len() || markup.iter().zip(&draws.ends).any(|(a, b)| !(close(a.0, b.0) && close(a.1, b.1))),
+        None => true,
+    }
+}
+
+/// The keys of every item a segment's polyline stands for: the frame cells (the carried ones and those said gone), the `Geometry` sections, which go stale together, since the geometry is in
+/// the frame's own axes, and the link to the master whose line it is.
+fn segment_keys(t: &Tier2) -> Vec<Key> {
+    let mut keys: Vec<Key> = crate::write::own::POSE_CELLS.iter().map(|name| Key::Cell((*name).to_owned())).collect();
+    if t.master.is_some() || t.master_shape.is_some() {
+        keys.push(Key::Master);
+    }
+    let carried = t.sections.iter().filter(|s| s.name.as_str() == OUTLINE_SECTION).map(|s| s.ix);
+    let gone = t.gone.iter().filter_map(|g| match g {
+        Gone::Section(k) if k.name.as_str() == OUTLINE_SECTION => Some(k.ix),
+        _ => None,
+    });
+    let mut seen: HashSet<Option<u32>> = HashSet::new();
+    for ix in carried.chain(gone) {
+        if seen.insert(ix) {
+            keys.push(Key::Section(SectionKey::new(OUTLINE_SECTION, ix)));
+        }
+    }
+    keys
 }
 
 /// What a pin's place is worth in the markup's frame: the formula `Width*k` (or `Height*k`, or the plain size) worked out with the markup's size, since the value the
@@ -361,7 +459,8 @@ pub(crate) fn place_value(cell: &Cell, size: Option<f64>, size_name: &str) -> Op
 /// taken out first, then the pin is derived. A turned or flipped shape is derived by [`derive_turned`]; a line, a cell the model lacks, and a shape that carries neither
 /// the pin nor its place are not touched. The (at most two) cells it inserts are covered by the charge of `judge_tier2` for the cells a style carries.
 pub(crate) fn derive_pins(t: &mut Tier2, native: &Sheet) {
-    if native.cells.contains_key("BeginX") {
+    // A line is its ends, and a segment written as an outline carries its whole frame: its pin is the model's, whatever the box of the polyline says.
+    if native.cells.contains_key("BeginX") || carries_segment(t) {
         return;
     }
     if carried_turn_disagrees(t, native) {
@@ -487,6 +586,21 @@ pub(crate) fn judge(t: &mut Tier2, natives: &Natives, sheet: &Sheet) -> Verdict 
         verdict.stale.retain(|k| *k != Key::Format);
     }
     verdict.stale.extend(stale_pose(t, sheet).into_iter().map(|name| Key::Cell(name.to_owned())));
+    // **A segment written as an outline is judged by what it draws, and is stale as a whole**: the box and the points of the polyline are compared with those the carried cells
+    // draw ([`segment_stale`]), and no fingerprint of the outline's text judges it (another program that only saves the file writes the points and the view box in its own form). Its geometry is
+    // in the frame's own axes, so a polyline that is not the segment's takes the frame, the geometry, the link to the master and the glue out together, and the polyline the markup says stands.
+    if !sheet.cells.contains_key("BeginX") && carries_segment(t) {
+        if segment_stale(t, sheet) {
+            for key in segment_keys(t) {
+                if !verdict.stale.contains(&key) {
+                    verdict.stale.push(key);
+                }
+            }
+            t.connects.clear();
+        } else {
+            verdict.stale.retain(|k| !matches!(k, Key::Master | Key::Vsdx) && !matches!(k, Key::Section(s) if s.name.as_str() == OUTLINE_SECTION));
+        }
+    }
     if verdict.stale.is_empty() {
         derive_pins(t, sheet);
         return verdict;
@@ -654,6 +768,8 @@ pub(crate) enum OutlineNow {
     Path(Fp),
     /// The save writes the outline in a way whose output is not known here (the modifiers, a path, a polygon's points).
     Unknown,
+    /// The save writes the whole outline of a polyline or a path from the model, and this is its fingerprint (a segment the file holds as a polyline).
+    Whole(Fp),
 }
 
 /// Makes the fingerprints a tier 2 carries follow an edit of the shape, and **stamps the ones it lacks**: `t` is what the style will carry after the edit, `was` what
@@ -695,6 +811,7 @@ pub(crate) fn restamp(t: &mut Tier2, was: &Tier2, natives: Option<&Natives>, out
                         .and_then(|n| n.name.map(|name| vsdx_fp(name, n.outline.map(|o| o.whole))))
                         .map(Fp::text)
                         .or(if unchanged { kept } else { None }),
+                    OutlineNow::Whole(whole) => natives.and_then(|n| n.name).map(|name| vsdx_fp(name, Some(whole)).text()),
                     _ => None,
                 },
                 Key::Foreign => natives.and_then(|n| n.foreign).map(Fp::text).or(if unchanged { kept } else { None }),
@@ -707,6 +824,7 @@ pub(crate) fn restamp(t: &mut Tier2, was: &Tier2, natives: Option<&Natives>, out
                             .filter(|o| o.kind == OutlineKind::Custom)
                             .map(|o| join_outline(OutlineKind::Custom, path, o.modifiers, o.rest).text()),
                         OutlineNow::Unknown => None,
+                        OutlineNow::Whole(whole) => Some(whole.text()),
                     }
                 }
                 Key::Cell(name) if unchanged => natives.and_then(|n| n.cells.get(name)).map(|fp| fp.text()).or(kept),
@@ -1619,5 +1737,150 @@ mod tests {
         let mut t = carried(&[("PinX", 3.0), ("LocPinX", 1.0)]);
         derive_pins(&mut t, &native);
         assert_eq!(number(t.cells.get("PinX")), Some(3.0), "a constant place of 1 and the edge at 2");
+    }
+
+    /// The carried frame of a segment 1.5 inch long from (3.25, 3) to (4.75, 3), whose geometry in its own frame is a vee 0.1 deep (the box of its outline: 3.25 to 4.75 by 3.0 to 3.1).
+    fn segment() -> Tier2 {
+        let mut t = carried(&[
+            ("BeginX", 3.25),
+            ("BeginY", 3.0),
+            ("EndX", 4.75),
+            ("EndY", 3.0),
+            ("PinX", 4.0),
+            ("PinY", 3.0),
+            ("LocPinX", 0.75),
+            ("LocPinY", 0.0),
+            ("Width", 1.5),
+            ("Height", 0.0),
+        ]);
+        let mut section = Section::new("Geometry", Some(0));
+        section.cells.insert(CellName::new("NoFill"), cell(1.0));
+        for (i, (kind, x, y)) in [("MoveTo", 0.0, 0.0), ("LineTo", 0.75, 0.1), ("LineTo", 1.5, 0.0)].into_iter().enumerate() {
+            let mut row = diacraft_doc::Row { row_type: Some(Arc::from(kind)), ix: u32::try_from(i + 1).ok(), ..diacraft_doc::Row::default() };
+            row.cells.insert(CellName::new("X"), cell(x));
+            row.cells.insert(CellName::new("Y"), cell(y));
+            section.rows.push(Arc::new(row));
+        }
+        t.sections.push(Arc::new(section));
+        t.master = Some(7);
+        t.connects = vec![super::super::payload::Glue {
+            begin: true,
+            to_sheet: 2,
+            to_part: Some(100),
+            from_part: Some(9),
+            to_cell: "Connections.X1".to_owned(),
+        }];
+        t
+    }
+
+    /// What the reader makes of a polyline of the segment above, moved right by `by`: a 2-D shape of its box, and the rows of its points (shares of the box) in its one section.
+    fn polyline_box(by: f64) -> Sheet {
+        let mut sheet = sheet_of(&[("PinX", 4.0 + by), ("PinY", 3.05), ("LocPinX", 0.75), ("LocPinY", 0.05), ("Width", 1.5), ("Height", 0.1)]);
+        let mut section = Section::new("Geometry", Some(0));
+        for (i, (kind, x, y)) in [("RelMoveTo", 0.0, 0.0), ("RelLineTo", 0.5, 1.0), ("RelLineTo", 1.0, 0.0)].into_iter().enumerate() {
+            let mut row = diacraft_doc::Row { row_type: Some(Arc::from(kind)), ix: u32::try_from(i + 1).ok(), ..diacraft_doc::Row::default() };
+            row.cells.insert(CellName::new("X"), cell(x));
+            row.cells.insert(CellName::new("Y"), cell(y));
+            section.rows.push(Arc::new(row));
+        }
+        sheet.sections.push(Arc::new(section));
+        sheet
+    }
+
+    /// A carried segment is judged by the box and the points of the outline it draws: a polyline that is where the writer put it is the segment, and one another program moved, resized, turned,
+    /// flipped or edited in its points is not.
+    #[test]
+    fn a_carried_segment_stands_while_its_polyline_is_where_it_was_and_goes_whole_when_it_is_not() {
+        // As it was: nothing is stale, and the frame, the geometry, the link and the glue all stand.
+        let mut t = segment();
+        let verdict = judge(&mut t, &Natives::default(), &polyline_box(0.0));
+        assert!(verdict.stale.is_empty(), "{:?}", verdict.stale);
+        assert!(t.cells.contains_key("BeginX") && t.sections.len() == 1 && t.master == Some(7) && t.connects.len() == 1);
+        // To the grid of the file: a hundredth of a millimetre either way is the same polyline.
+        let mut t = segment();
+        assert!(judge(&mut t, &Natives::default(), &polyline_box(0.0003)).stale.is_empty());
+        // Moved, resized, turned, flipped, a point moved, a point more: the frame, the geometry, the link to the master and the glue go together, and the polyline the markup says stands.
+        let mut resized = polyline_box(0.0);
+        resized.cells.insert(CellName::new("Width"), cell(2.5));
+        let mut turned = polyline_box(0.0);
+        turned.cells.insert(CellName::new("Angle"), cell(0.5));
+        let mut flipped = polyline_box(0.0);
+        flipped.cells.insert(CellName::new("FlipY"), cell(1.0));
+        let edited = |change: &dyn Fn(&mut Vec<Arc<diacraft_doc::Row>>)| {
+            let mut sheet = polyline_box(0.0);
+            let mut section = (*sheet.sections[0]).clone();
+            change(&mut section.rows);
+            sheet.sections = vec![Arc::new(section)];
+            sheet
+        };
+        let shifted = edited(&|rows| {
+            let mut row = (*rows[1]).clone();
+            row.cells.insert(CellName::new("X"), cell(0.3));
+            rows[1] = Arc::new(row);
+        });
+        let extra = edited(&|rows| rows.push(Arc::clone(&rows[2])));
+        for (what, native) in [
+            ("moved", polyline_box(1.0)),
+            ("resized", resized),
+            ("turned", turned),
+            ("flipped", flipped),
+            ("a point moved", shifted),
+            ("a point more", extra),
+        ] {
+            let mut t = segment();
+            let verdict = judge(&mut t, &Natives::default(), &native);
+            assert!(
+                verdict.stale.contains(&Key::Cell("BeginX".to_owned())) && verdict.stale.contains(&outline_key(Some(0))),
+                "{what}: {:?}",
+                verdict.stale
+            );
+            assert!(verdict.stale.contains(&Key::Master), "{what}: the link to the master goes");
+            assert!(!t.cells.contains_key("BeginX") && !t.cells.contains_key("Width") && !t.cells.contains_key("PinX"), "{what}: the frame is out");
+            assert!(t.sections.is_empty() && t.master.is_none() && t.connects.is_empty(), "{what}: the geometry, the link and the glue are out");
+        }
+    }
+
+    /// The fingerprint of the outline's text does not judge a segment: another program that saves the file writes the points and the view box in its own form (a view box one unit wider, each
+    /// point a unit off), and the polyline it writes is the segment still; one that no longer draws what the carried cells draw is not, whatever the fingerprint says. A carried frame with no
+    /// geometry to draw, or one that draws nothing, is stale: it is no frame to rely on.
+    #[test]
+    fn a_segment_is_judged_by_what_it_draws_and_not_by_the_text_of_its_points() {
+        let mut t = segment();
+        with(&mut t, &outline_key(Some(0)), fp(1));
+        with(&mut t, &Key::Master, fp(1));
+        let natives = Natives { outline: Some(whole(2)), ..Natives::default() };
+        let verdict = judge(&mut t, &natives, &polyline_box(0.0));
+        assert!(verdict.stale.is_empty(), "the text of the points is another, and the polyline is the same: {:?}", verdict.stale);
+        assert!(t.cells.contains_key("BeginX") && t.master == Some(7) && t.connects.len() == 1);
+        // No geometry carried, or a number the cells lack: nothing is drawn, so stale.
+        let mut bare = segment();
+        bare.sections.clear();
+        assert!(!judge(&mut bare, &Natives::default(), &polyline_box(0.0)).stale.is_empty(), "no geometry");
+        let mut unnumbered = segment();
+        unnumbered.cells.insert(CellName::new("PinX"), Cell::new());
+        assert!(!judge(&mut unnumbered, &Natives::default(), &polyline_box(0.0)).stale.is_empty(), "a pin that holds no number");
+        // A markup with no geometry of its own to compare with is no polyline of this segment.
+        let mut no_rows = polyline_box(0.0);
+        no_rows.sections.clear();
+        assert!(!judge(&mut segment(), &Natives::default(), &no_rows).stale.is_empty(), "the markup's points are not there");
+        // A frame so large that its outline has no box (the points are not numbers) is stale, and never a panic.
+        let mut huge = segment();
+        huge.cells.insert(CellName::new("PinX"), cell(1.0e308));
+        huge.cells.insert(CellName::new("LocPinX"), cell(-1.0e308));
+        assert!(!judge(&mut huge, &Natives::default(), &polyline_box(0.0)).stale.is_empty(), "a frame past what a box holds");
+        // A segment whose element is a line (the markup has its ends) is judged by the ends, as it was: the polyline's rule is no part of it.
+        let mut line = segment();
+        let native = sheet_of(&[("BeginX", 3.25), ("BeginY", 3.0), ("EndX", 4.75), ("EndY", 3.0), ("PinX", 4.0), ("PinY", 3.0)]);
+        assert!(judge(&mut line, &Natives::default(), &native).stale.is_empty(), "the ends are the markup's");
+    }
+
+    /// A carried segment's pin is the model's: it is not worked out from the edge of the polyline's box and the place the segment carries.
+    #[test]
+    fn the_pin_of_a_carried_segment_is_never_derived_from_the_box() {
+        let mut t = segment();
+        t.cells.insert(CellName::new("PinY"), cell(3.0));
+        derive_pins(&mut t, &polyline_box(0.0));
+        assert_eq!(number(t.cells.get("PinY")), Some(3.0), "the box's centre is 3.05, and the segment's pin is on its line");
+        assert!(stale_pose(&segment(), &polyline_box(0.0)).is_empty(), "the size cells of the segment are not the box's");
     }
 }

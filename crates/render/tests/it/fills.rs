@@ -151,3 +151,31 @@ fn a_transparent_fill_lets_what_is_behind_show_through() {
     let p = pic.at(2.0, 2.0);
     assert!(p[0] > 100 && p[2] > 100, "half red over blue: {p:?}");
 }
+
+#[test]
+fn a_fill_pattern_outside_the_table_paints_the_foreground_and_says_so() {
+    // A fraction, or a number the lists have no row for, paints solid foreground (for any number but 0), with the cell kept and a warning. A fraction was rounded to the
+    // number beside it: 2.5 drew as the hatch 3, 0.4 as 0 (no fill at all) and 40.6 as the gradient 41.
+    for text in ["2.5", "0.4", "24.5", "40.6", "41", "100", "-1"] {
+        let sb = rect(1, 1.0, 1.0, 2.0, 2.0)
+            .cell("LinePattern", "0")
+            .cell("FillPattern", text)
+            .cell("FillForegnd", "#FF0000")
+            .cell("FillBkgnd", "#0000FF");
+        let pic = draw(&one_page(vec![sb]));
+        for (x, y) in [(1.2, 1.2), (2.0, 2.0), (2.8, 1.5), (1.5, 2.8)] {
+            assert!(pic.is_red(x, y), "{text}: solid foreground at ({x}, {y}), got {:?}", pic.at(x, y));
+        }
+        assert!(pic.r.skipped.iter().any(|s| s.kind == diacraft_render::SkipKind::PatternOutsideTable), "{text}: said so, got {:?}", pic.r.skipped);
+    }
+    // The table's own numbers say nothing of it: 1 is solid, 6 a hatch, 40 a gradient, 254 the custom pattern; 0 paints nothing.
+    for text in ["0", "1", "6", "40"] {
+        let sb = rect(1, 1.0, 1.0, 2.0, 2.0)
+            .cell("LinePattern", "0")
+            .cell("FillPattern", text)
+            .cell("FillForegnd", "#FF0000")
+            .cell("FillBkgnd", "#0000FF");
+        let pic = draw(&one_page(vec![sb]));
+        assert!(pic.r.skipped.iter().all(|s| s.kind != diacraft_render::SkipKind::PatternOutsideTable), "{text}: {:?}", pic.r.skipped);
+    }
+}

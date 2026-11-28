@@ -544,11 +544,13 @@ pub(super) fn siblings(doc: &Document, page: u32, parent: &[u32]) -> Option<Vec<
     }
 }
 
+/// Puts a rebuilt list of shapes in place of the page's, or of a group's members: the one place the drawing order, group and ungroup put a list back. **The unknown nodes among the
+/// shapes (a comment, a foreign element) go with the shapes they followed** (`Page::edit_shapes`, `Shape::edit_members`).
 pub(super) fn put_siblings(doc: &mut Document, page: u32, parent: &[u32], list: ShapeList) -> Result<(), Problem> {
     if parent.is_empty() {
-        page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes = list;
+        page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.edit_shapes(|shapes| *shapes = list);
     } else {
-        shape_mut(doc, page, parent).ok_or_else(|| Problem::failed("the group went away"))?.children = list;
+        shape_mut(doc, page, parent).ok_or_else(|| Problem::failed("the group went away"))?.edit_members(|members| *members = list);
     }
     Ok(())
 }

@@ -359,8 +359,10 @@ fn last_look(s: &mut Session) -> serde_json::Value {
 }
 
 fn last_links(doc: &Document) -> Links {
-    let shape = doc.pages.get(0).unwrap().shapes.iter().next_back().unwrap();
-    (shape.sheet.links.line, shape.sheet.links.fill, shape.sheet.links.text)
+    let page = doc.pages.get(0).unwrap();
+    let shape = page.shapes.iter().next_back().unwrap();
+    // Its own links, or those of the master's shape it stands for (a theme links the masters' shapes, and an instance keeps no link of its own).
+    crate::theme_master_links::follows(doc, page.id, shape.id)
 }
 
 /// What a person does after a theme: `act` puts a new shape last on page 0 of `bytes`' drawing. Two sessions do it, one that saves and one that never does. The shape is saved,

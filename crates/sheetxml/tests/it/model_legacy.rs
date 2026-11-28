@@ -124,6 +124,7 @@ fn a_stamp_is_the_same_whichever_namespace_the_data_declares_and_is_the_one_a_bu
     earlier.diacraft = Some(std::sync::Arc::new(changed));
     assert_eq!(stamp_of(&current), stamp_of(&earlier), "the namespace the data declares is no content");
     assert_ne!(stamp_of(&current), stamp_of(&Document::new_blank()), "and the settings are");
-    // The blank drawing's stamp is the one pinned before the namespace moved (`model_vectors`).
-    assert_eq!(stamp_of(&Document::new_blank()), "00ebc460d282d097");
+    // The blank drawing's stamp is the one pinned before the namespace moved (`model_vectors`): the blank drawing as it was, put a cell in the root of a new
+    // one (`model_vectors` pins that stamp too).
+    assert_eq!(stamp_of(&diacraft_testkit::fixtures::without_root_factor(Document::new_blank())), "00ebc460d282d097");
 }

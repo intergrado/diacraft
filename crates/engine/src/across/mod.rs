@@ -8,6 +8,8 @@
 //!   They are **options, never requirements** (`drop_macros`, `drop_objects`: the design's Owner 9): a macro project of either language goes into a VSDX file only of a macro-enabled type
 //!   (Call 17), and a save to a macro-free type without `drop_macros` is refused in words that name the macro-enabled types as the other way out.
 //! * [`onto`]: the model a model writer is given for a drawing of the other format: the objects left out when asked, and the cells a VSDX writer needs to draw a picture an `.odg` held.
+//! * [`fields`]: **the field rows of a VSDX file**: the `Type`, the `Format` and the unit a field row of an `.odg`, of an older build or of a program of another kind lacks, for the copy a VSDX writer is given.
+//! * [`text_rows`]: **the text rows of a VSDX file**: the cells a `Character` or `Paragraph` row past the first of an `.odg` or of an older build lacks, for the copy a VSDX writer is given.
 //! * [`natively`]: **the objects a VSDX file holds once, as embeddings**: a save into the file is given the drawing, and the baseline, without the parts the embeddings were written from.
 //! * [`classes`]: **what the file carries**, in plain words: the classes of data a VSDX file has no place for ("line ends", "gradients", ...), found by one counted walk of the model.
 //! * [`note`]: **the save note** (the design's 5.6): the structured `carried` field of the save result, never a warning (ODF decision 8), and its words, exactly.
@@ -21,10 +23,12 @@
 
 pub(crate) mod classes;
 pub(crate) mod dropped;
+pub(crate) mod fields;
 pub(crate) mod hold;
 pub(crate) mod natively;
 pub mod note;
 pub(crate) mod onto;
+pub(crate) mod text_rows;
 
 pub use note::{Carried, Target, words};
 
@@ -115,16 +119,27 @@ pub(crate) fn adopts(written: &diacraft_vsdx::Written, given: &onto::Given) -> b
 ///
 /// * A drawing read from an **`.odg`**: always: every frame of it is written as something a VSDX file says in another way.
 /// * A drawing of a **`.diacraft`** file, or **with no working file at all** (a new one, or one made from a template), **when the writer was given pictures an `.odg` held, in the box a
-///   picture has** ([`onto::Given::boxed`]): the file reads back with the cells of that box and the drawing does not hold them, so a Save into the file was refused "a change to the picture of a
-///   shape". A drawing that holds no such picture is written as the drawing holds it, and its file is what the drawing is: **a blank new drawing, whatever type it is saved as, is never made another
-///   model** (it holds nothing of an `.odg`, so `boxed` is 0). This is the narrowest condition that closes the case: it asks for nothing but the pictures themselves. A drawing made from an `.otg`
-///   template holds the frames of an `.odg`, and has no working file.
+///   picture has** ([`onto::Given::boxed`]) **or ends glued to the whole of a shape that it gave the glue formulas** ([`onto::Given::dressed`]), **or connectors of DiaCraft's that it gave `ObjType` and `GlueType`** ([`onto::Given::routable`]), **or field rows that it gave what they lacked** ([`onto::Given::fielded`]), **or text rows that it made whole** ([`onto::Given::texts`]): the file reads back with the cells of that
+///   box, of those formulas, of those two cells or of those rows, and the drawing does not hold them, so a Save into the file was refused "a change to the picture of a shape" (and would have written the plain places over the formulas);
+///   **or shapes read from an `.odg` that it gave no link that is their master's** ([`onto::Given::unlinked`]), which a Save into the file would give the links back,
+///   **or sheets whose `User` or `Field` text it gave the unit `STR`** ([`onto::Given::stringed`]): the file reads back with the units and the drawing does not hold them.
+///   A drawing that holds no such picture and no such end is written as the drawing holds it, and its file is what the drawing is: **a blank new drawing, whatever type it is saved as, is never made
+///   another model** (it holds nothing of an `.odg`, so `boxed` and `dressed` are 0). This is the narrowest condition that closes the case: it asks for nothing but the pictures and the ends
+///   themselves. A drawing made from an `.otg` template holds the frames of an `.odg`, and has no working file.
 /// * A drawing of a **VSDX** file is never made another model: its file is its own, spliced into.
 pub(crate) fn adopts_by_working_file(working: Option<crate::file::FileFormat>, given: &onto::Given) -> bool {
     use crate::file::FileFormat;
     match working {
         Some(FileFormat::Odg) => true,
-        Some(FileFormat::Diacraft) | None => given.boxed > 0,
+        Some(FileFormat::Diacraft) | None => {
+            given.boxed > 0
+                || given.dressed > 0
+                || given.routable > 0
+                || given.fielded > 0
+                || given.texts > 0
+                || given.unlinked > 0
+                || given.stringed > 0
+        }
         Some(FileFormat::Vsdx) => false,
     }
 }
@@ -167,7 +182,7 @@ mod tests {
     use crate::file::FileFormat;
 
     fn given(boxed: u64) -> onto::Given {
-        onto::Given { doc: None, left: hold::Left::default(), boxed }
+        onto::Given { doc: None, left: hold::Left::default(), boxed, dressed: 0, routable: 0, fielded: 0, texts: 0, unlinked: 0, stringed: 0 }
     }
 
     /// **A drawing with no pictures of an `.odg` is never made another model by a save** (a new drawing is saved as it is), and a `.diacraft` drawing, or one with no working
@@ -180,6 +195,71 @@ mod tests {
             assert_eq!(adopts_by_working_file(Some(FileFormat::Diacraft), &given), boxed > 0, "a .diacraft drawing, {boxed} pictures");
             assert_eq!(adopts_by_working_file(None, &given), boxed > 0, "a drawing with no file (new, or made from a template), {boxed} pictures");
             assert!(!adopts_by_working_file(Some(FileFormat::Vsdx), &given), "a VSDX drawing's file is its own, {boxed} pictures");
+        }
+    }
+
+    /// A `.diacraft` drawing, or one with no working file, whose field rows were given the `Type`, the `Format` or the unit they lacked becomes the model its file reads as (the file holds
+    /// the cells and the drawing does not: a Save into the file would take them out of the file again); a VSDX drawing's file stays its own.
+    #[test]
+    fn a_drawing_whose_field_rows_were_given_what_they_lacked_becomes_the_model_its_vsdx_file_reads_as() {
+        for fielded in [0, 1, u64::MAX] {
+            let given = onto::Given { fielded, ..given(0) };
+            assert!(adopts_by_working_file(Some(FileFormat::Odg), &given));
+            assert_eq!(adopts_by_working_file(Some(FileFormat::Diacraft), &given), fielded > 0, "a .diacraft drawing, {fielded} shapes");
+            assert_eq!(adopts_by_working_file(None, &given), fielded > 0, "a drawing with no file, {fielded} shapes");
+            assert!(!adopts_by_working_file(Some(FileFormat::Vsdx), &given), "a VSDX drawing's file is its own, {fielded} shapes");
+        }
+    }
+
+    /// A `.diacraft` drawing, or one with no working file, whose `User` and `Field` text was given the unit `STR` becomes the model its file reads as (the file holds the units and the
+    /// drawing does not: a Save into a file whose program is not DiaCraft would take them out of the file again); a VSDX drawing's file stays its own.
+    #[test]
+    fn a_drawing_whose_user_and_field_text_was_given_the_unit_becomes_the_model_its_vsdx_file_reads_as() {
+        for stringed in [0, 1, u64::MAX] {
+            let given = onto::Given { stringed, ..given(0) };
+            assert!(adopts_by_working_file(Some(FileFormat::Odg), &given));
+            assert_eq!(adopts_by_working_file(Some(FileFormat::Diacraft), &given), stringed > 0, "a .diacraft drawing, {stringed} sheets");
+            assert_eq!(adopts_by_working_file(None, &given), stringed > 0, "a drawing with no file, {stringed} sheets");
+            assert!(!adopts_by_working_file(Some(FileFormat::Vsdx), &given), "a VSDX drawing's file is its own, {stringed} sheets");
+        }
+    }
+
+    /// A `.diacraft` drawing, or one with no working file, whose ends glued to the whole of a shape were given the glue formulas becomes the model its file reads as (the file holds the
+    /// formulas and the drawing does not: a Save into the file would write the plain places over them); a VSDX drawing's file stays its own.
+    #[test]
+    fn a_drawing_whose_whole_shape_ends_were_given_glue_formulas_becomes_the_model_its_vsdx_file_reads_as() {
+        for dressed in [0, 1, u64::MAX] {
+            let given = onto::Given { dressed, ..given(0) };
+            assert!(adopts_by_working_file(Some(FileFormat::Odg), &given));
+            assert_eq!(adopts_by_working_file(Some(FileFormat::Diacraft), &given), dressed > 0, "a .diacraft drawing, {dressed} shapes");
+            assert_eq!(adopts_by_working_file(None, &given), dressed > 0, "a drawing with no file, {dressed} shapes");
+            assert!(!adopts_by_working_file(Some(FileFormat::Vsdx), &given), "a VSDX drawing's file is its own, {dressed} shapes");
+        }
+    }
+
+    /// A `.diacraft` drawing, or one with no working file, whose connectors of DiaCraft's were given `ObjType` and `GlueType` becomes the model its file reads as (the file holds the
+    /// cells and the drawing does not: a Save into the file would take them out of the file again); a VSDX drawing's file stays its own.
+    #[test]
+    fn a_drawing_whose_connectors_were_given_the_cells_that_make_them_routable_becomes_the_model_its_vsdx_file_reads_as() {
+        for routable in [0, 1, u64::MAX] {
+            let given = onto::Given { routable, ..given(0) };
+            assert!(adopts_by_working_file(Some(FileFormat::Odg), &given));
+            assert_eq!(adopts_by_working_file(Some(FileFormat::Diacraft), &given), routable > 0, "a .diacraft drawing, {routable} connectors");
+            assert_eq!(adopts_by_working_file(None, &given), routable > 0, "a drawing with no file, {routable} connectors");
+            assert!(!adopts_by_working_file(Some(FileFormat::Vsdx), &given), "a VSDX drawing's file is its own, {routable} connectors");
+        }
+    }
+
+    /// A `.diacraft` drawing, or one with no working file, whose shapes read from an `.odg` were given no style link that is their master's becomes the model its file reads as (a Save
+    /// into the file would give the links back); a VSDX drawing's file stays its own.
+    #[test]
+    fn a_drawing_whose_odg_instances_were_given_no_link_of_their_masters_becomes_the_model_its_vsdx_file_reads_as() {
+        for unlinked in [0, 1, u64::MAX] {
+            let given = onto::Given { unlinked, ..given(0) };
+            assert!(adopts_by_working_file(Some(FileFormat::Odg), &given));
+            assert_eq!(adopts_by_working_file(Some(FileFormat::Diacraft), &given), unlinked > 0, "a .diacraft drawing, {unlinked} shapes");
+            assert_eq!(adopts_by_working_file(None, &given), unlinked > 0, "a drawing with no file, {unlinked} shapes");
+            assert!(!adopts_by_working_file(Some(FileFormat::Vsdx), &given), "a VSDX drawing's file is its own, {unlinked} shapes");
         }
     }
 }

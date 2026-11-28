@@ -14,7 +14,7 @@ pub const JOURNAL_LIMIT: usize = 10_000;
 /// trimming (a move of the entries that stay) is done once in a while instead of on every command.
 pub const JOURNAL_SLACK: usize = 1_000;
 
-/// The most memory the entries are allowed, by estimate: a legal batch of 256 `page.rename` calls with
+/// The most memory the entries are allowed, by estimate: a legal batch of 256 `comment.author` calls with
 /// 255-character names is about 275 KB of params, so the entry count alone would allow about 3 GB. The estimate counts the
 /// leaves of the maps under the objects. In a release build the resident memory of the entries was 0.94 to 0.99 of it for
 /// batches with long names, batches with one-letter names, batches of steps with no params and single commands (measured

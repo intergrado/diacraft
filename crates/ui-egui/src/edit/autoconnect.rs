@@ -19,7 +19,8 @@
 //! * **The keys.** None is published ("Shortcut: none published"). **Alt with an arrow key is a click on that arrow for the one shape selected**, and **Alt+Shift with an arrow
 //!   key opens that arrow's flyout with the keyboard**: the arrow keys move between the masters, Enter drops the one that has the keyboard, Escape closes it.
 //! * **A drag let go over bare page makes nothing**, and a drag from an arrow ignores the Glue switch (it is a command of its own, not a connector end dropped).
-//! * **Which shapes have arrows**: a shape (not a group, not a connector) with a connection point, with the Pointer Tool on and nothing being dragged.
+//! * **Which shapes have arrows**: a shape (not a group, not a connector) whose layers allow glue, with the Pointer Tool on and nothing being dragged. A shape with no connection point
+//!   has them too: the engine glues a connector to the whole of such a shape, so a click on one of its arrows is no longer refused.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -234,9 +235,7 @@ struct Offer {
 struct Hover {
     id: u32,
     since: Duration,
-    /// Whether the shape has a connection point to glue a connector to, once the rest is over and it has been looked at (a shape with none has no arrows).
-    connectable: Option<bool>,
-    /// The arrows are showing: the rest is over and the shape can be joined.
+    /// The arrows are showing: the rest is over.
     shown: bool,
 }
 
@@ -385,7 +384,7 @@ impl DiacraftApp {
         arrows_of(screen_box(item, cx), gap)
     }
 
-    /// The shape the pointer is on, for arrows: a shape (not a group or a connector) that has a connection point, under `at`; the shape that already has the arrows
+    /// The shape the pointer is on, for arrows: a shape (not a group or a connector) whose layers allow glue, under `at`; the shape that already has the arrows
     /// stays while the pointer is on its arrows or its flyout.
     fn auto_target(&self, cx: &Cx, at: Pos2, over_page: bool) -> Option<u32> {
         let scene = self.ui.edit.scene.as_ref().filter(|s| s.page == cx.page)?;
@@ -462,7 +461,7 @@ impl DiacraftApp {
         match (target, auto.hover.as_mut()) {
             (Some(id), Some(h)) if h.id == id => {}
             (Some(id), _) => {
-                auto.hover = Some(Hover { id, since: now, connectable: None, shown: false });
+                auto.hover = Some(Hover { id, since: now, shown: false });
                 // The pointer's flyout goes with the shape it was on; the keyboard's belongs to the selection and stays.
                 if !auto.flyout.as_ref().is_some_and(|f| f.keyboard) {
                     auto.flyout = None;
@@ -475,19 +474,9 @@ impl DiacraftApp {
                 }
             }
         }
-        // The connection points are looked at once the rest is over, and not for every shape the pointer crosses.
-        let look = auto.hover.filter(|h| now >= h.since + ARROWS_DELAY && h.connectable.is_none()).map(|h| h.id);
-        let connectable = look.map(|id| match (self.ui.edit.scene.as_ref(), self.session.document()) {
-            (Some(scene), Some(doc)) => !scene.points(doc, id).is_empty(),
-            _ => false,
-        });
-        let auto = &mut self.ui.edit.auto;
         if let Some(h) = auto.hover.as_mut() {
-            if h.connectable.is_none() {
-                h.connectable = connectable;
-            }
             let due = now >= h.since + ARROWS_DELAY;
-            h.shown = due && h.connectable == Some(true);
+            h.shown = due;
             if !due {
                 ctx.request_repaint_after(h.since + ARROWS_DELAY - now);
             }

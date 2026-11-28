@@ -109,6 +109,24 @@ set_version_from_name() { # set_version_from_name NAME
     esac
 }
 
+# The version a Linux package says of itself, the same in a .deb and in an .rpm (both sort a `~` before the release it leads to): the tag's, 0.2.0, and 0.2.0~rc1 for v0.2.0-rc1.
+# A name that is no tag (a rehearsal's dev-<commit>, a test build's label) gives the workspace's version with the label after a `~`, so that it sorts before the release it leads
+# to. Letters, digits, and . + ~ only (a Debian version also allows : and -, an RPM version allows _ and ^, which a name never needs).
+package_version() { # package_version NAME
+    local v=${1#v}
+    case $v in
+    [0-9]*.[0-9]*.[0-9]*)
+        # A tag: the first hyphen starts a pre-release (0.2.0-rc1 is 0.2.0~rc1), a later one is a dot.
+        v=$(printf '%s' "$v" | sed -e 's/-/~/' -e 's/-/./g')
+        ;;
+    *)
+        v=$(workspace_version)
+        v="${v%%-*}~$1"
+        ;;
+    esac
+    printf '%s' "$v" | tr -c 'A-Za-z0-9.+~' '.'
+}
+
 # The CPU a Linux or Windows program was built for, read from its own header, and not guessed from the machine that runs the script: x86_64 or arm64. The name of a
 # download says what is in it, so a program of the other kind (or a file that is no program) stops the script.
 hex_bytes() { # hex_bytes FILE OFFSET COUNT: COUNT bytes of FILE from OFFSET, as hex digits with no spaces
@@ -163,7 +181,7 @@ programs_arch() { # programs_arch linux|windows DIR
 
 # What a Linux download says of the CPU it is for, from the architecture (x86_64 or arm64): `cpu` (Intel or AMD, or ARM), `glibc` (the oldest C library the programs run
 # on) and `distros` (distributions that have one that new). The release workflow builds both CPUs on the oldest Ubuntu image GitHub offers for each (22.04, and
-# 22.04-arm), so that they run on any Linux with glibc 2.35 (release.yml, `linux`; the owner, 2026-11-24: ARM64 matches x64). The .deb's dependency on the C library and
+# 22.04-arm), so that they run on any Linux with glibc 2.35 (release.yml, `linux`; the owner, 2026-11-24: ARM64 matches x64). The .deb's dependency on the C library, the .rpm's (rpm reads the version of every symbol from the programs) and
 # the README say it.
 linux_cpu_words() { # linux_cpu_words ARCH
     case $1 in

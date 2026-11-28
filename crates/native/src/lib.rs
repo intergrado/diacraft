@@ -26,7 +26,7 @@
 //! the size its record states, and is never parsed, opened as a package or run. What does not fit is refused in words that name what is large, and memory that runs out is
 //! an error and not an abort.
 //!
-//! The VSDX application was not inspected: the format is DiaCraft's own and is written from its public specification.
+//! The format is DiaCraft's own and is written from its public specification.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 

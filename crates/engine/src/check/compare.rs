@@ -16,10 +16,10 @@ use std::sync::Arc;
 
 use diacraft_doc::{
     Cell, CellAddr, DefFamily, Definition, Document, ForeignData, Format, MAX_SHAPE_DEPTH, Master, Owner, Page, PartRole, Resolver, Row, RowKey,
-    Section, Shape, ShapeList, ShapeRef, ShapeType, Sheet, SheetRef, Style, Text, TextPart,
+    Section, Shape, ShapeList, ShapeRef, ShapeType, Sheet, SheetRef, Style, Text, TextPart, ValueKind,
 };
 
-use super::cells::{self, Same, class_of, is_default, is_drawn_default, kind_of, own_formula, same_formula, same_value};
+use super::cells::{self, Same, class_of, is_default, is_drawn_default, kind_of, own_formula, same_formula};
 use super::class::{ALL, Class};
 use super::kept;
 use super::meter::{Meter, Stop};
@@ -129,6 +129,54 @@ impl Tally {
     }
 }
 
+/// The cells that name a font face, by the section they sit in: what [`Compare::faces_named`] reads.
+const FACE_CELLS: [(&str, &[&str]); 2] = [("Character", &["Font", "AsianFont", "ComplexScriptFont"]), ("Paragraph", &["BulletFont"])];
+
+/// What [`Compare::faces_named`] looks for and has found.
+struct Named<'d> {
+    doc: &'d Document,
+    /// The faces looked for, in lower case.
+    wanted: std::collections::HashSet<String>,
+    /// Those a cell names.
+    named: std::collections::HashSet<String>,
+    /// The table of the faces by `ID`, made at the first cell that names a face by a number, and paid for then.
+    table: Option<cells::FaceTable<'d>>,
+}
+
+impl<'d> Named<'d> {
+    /// Reads the cells `face_cells` of `row`, a row that is not deleted. → `false` when the table by `ID` it had to make was past the budget, and nothing was read past it.
+    fn row(&mut self, row: &Row, face_cells: &[&str], meter: &Meter) -> bool {
+        for cell in face_cells {
+            let Some(value) = row.cells.get(*cell).and_then(|c| c.value.as_ref()) else { continue };
+            let text = value.text();
+            if matches!(value.reading(), diacraft_doc::Reading::Themed) || is_default(diacraft_doc::ValueKind::Font, text) {
+                continue;
+            }
+            let by_number = if cells::face_number(text).is_some() {
+                if self.table.is_none() {
+                    if !meter.charge(self.doc.fonts.len()) {
+                        return false;
+                    }
+                    self.table = Some(cells::FaceTable::of(self.doc));
+                }
+                self.table.as_ref().and_then(|table| table.face_of(text))
+            } else {
+                None
+            };
+            let face = by_number.unwrap_or_else(|| text.trim().to_ascii_lowercase());
+            if self.wanted.contains(&face) {
+                self.named.insert(face);
+            }
+        }
+        true
+    }
+
+    /// Whether every face looked for is named.
+    fn all(&self) -> bool {
+        self.named.len() >= self.wanted.len()
+    }
+}
+
 /// The plain `text:span`s of a paragraph that hold values of their style no cell says, by where they begin.
 fn plain_runs_that_hold_values(runs: &[diacraft_doc::OdfRun]) -> Vec<&diacraft_doc::OdfRun> {
     let mut held: Vec<&diacraft_doc::OdfRun> = runs.iter().filter(|r| r.element.is_none() && r.from < r.to && !r.style.held.is_empty()).collect();
@@ -228,6 +276,9 @@ pub(crate) struct Compare<'d> {
     before: &'d Document,
     after: &'d Document,
     resolvers: (OnceCell<Resolver<'d>>, OnceCell<Resolver<'d>>),
+    /// The faces of each drawing by `ID`, and its colours by `IX`: made when the first cell that names one by a number is compared, **charged a step for each before they are made** ([`Compare::same`]).
+    faces: (OnceCell<cells::FaceTable<'d>>, OnceCell<cells::FaceTable<'d>>),
+    colours: (OnceCell<cells::ColourTable<'d>>, OnceCell<cells::ColourTable<'d>>),
     pub(crate) tally: Tally,
     /// The caller chose to leave the macro project out of the file: it is no loss.
     macros_left_out: bool,
@@ -382,6 +433,8 @@ impl<'d> Compare<'d> {
             before,
             after,
             resolvers: (OnceCell::new(), OnceCell::new()),
+            faces: (OnceCell::new(), OnceCell::new()),
+            colours: (OnceCell::new(), OnceCell::new()),
             tally: Tally::default(),
             macros_left_out,
             meter: Meter::new(max),
@@ -510,6 +563,37 @@ impl<'d> Compare<'d> {
         self.meter.steps()
     }
 
+    /// Makes the table in `slot` once, **charged `entries` steps before it is made**: the comparison ends with [`Stop`] when they are past its budget, and no table is made then.
+    fn made_once<T>(&self, slot: &OnceCell<T>, entries: usize, make: impl FnOnce() -> T) -> Result<(), Stop> {
+        if slot.get().is_none() {
+            self.meter.charge(entries);
+            self.meter.check()?;
+            slot.get_or_init(make);
+        }
+        Ok(())
+    }
+
+    /// Whether the value text `wanted` of the drawing and `found` of the file read back are one value, for a cell of `kind` ([`cells::same_value`]). **A face or a colour a text names by a number is looked up in a
+    /// table made once for the drawing and once for the file** ([`cells::needs`] says which the pair reads), charged a step for each face or colour before it is made and a probe a cell (the security
+    /// scan's finding: a walk of the whole table for each cell, charged nothing but the cell's own step, was cells times faces). Two texts that are the same, or both a default, read none.
+    fn same(&self, kind: ValueKind, wanted: &str, found: &str) -> Result<Same, Stop> {
+        let needs = cells::needs(kind, wanted, found);
+        if needs.faces.0 {
+            self.made_once(&self.faces.0, self.before.fonts.len(), || cells::FaceTable::of(self.before))?;
+        }
+        if needs.faces.1 {
+            self.made_once(&self.faces.1, self.after.fonts.len(), || cells::FaceTable::of(self.after))?;
+        }
+        if needs.colours.0 {
+            self.made_once(&self.colours.0, self.before.colors.len(), || cells::ColourTable::of(self.before))?;
+        }
+        if needs.colours.1 {
+            self.made_once(&self.colours.1, self.after.colors.len(), || cells::ColourTable::of(self.after))?;
+        }
+        let tables = cells::Tables { faces: (self.faces.0.get(), self.faces.1.get()), colours: (self.colours.0.get(), self.colours.1.get()) };
+        Ok(cells::same_value(tables, kind, wanted, found))
+    }
+
     fn resolver_before(&self) -> &Resolver<'d> {
         self.resolvers.0.get_or_init(|| Resolver::new(self.before))
     }
@@ -540,13 +624,13 @@ impl<'d> Compare<'d> {
         if let Some(wanted) = before.value.as_ref() {
             let local = after.and_then(|c| c.value.as_ref());
             let verdict = match local {
-                Some(found) => same_value(self.before, self.after, kind, wanted.text(), found.text()),
+                Some(found) => self.same(kind, wanted.text(), found.text())?,
                 None => {
                     // The file holds no value of its own here: what the sheets above it give is the value.
                     self.step(RESOLVE_STEPS)?;
                     let given = effective(self.resolver_after(), &place.sheets.1, &place.addr());
                     match given.value {
-                        Some(found) => same_value(self.before, self.after, kind, wanted.text(), found),
+                        Some(found) => self.same(kind, wanted.text(), found)?,
                         None if is_default(kind, wanted.text()) => Same::InAnotherForm,
                         // What the shape is drawn with when nothing gives the cell (a line end's size), or, for a cell the file does not hold at all, what its default formula gives
                         // when the drawing's cell holds that formula (the text block's cells): the file gives the shape what the drawing did.
@@ -673,7 +757,7 @@ impl<'d> Compare<'d> {
         self.step(RESOLVE_STEPS)?;
         let given = effective(self.resolver_before(), &place.sheets.0, &place.addr());
         let verdict = match given.value {
-            Some(wanted) => same_value(self.before, self.after, kind, wanted, found.text()),
+            Some(wanted) => self.same(kind, wanted, found.text())?,
             // **The drawing held nothing for the cell**, not even from a style sheet or its master: it was drawn with what nothing gives a cell of its kind (the number 0, black, nothing), and a file that
             // writes that is the same; **one that writes anything else draws the shape otherwise, and is a difference** (the comparison goes both ways; a reader that added a
             // gradient's angle reading the file back was told as a value of the file's own, and nothing was named).
@@ -1729,15 +1813,26 @@ impl<'d> Compare<'d> {
     }
 
     /// The font faces, the themes and the properties.
+    ///
+    /// **A face is missing when the file read back has no face of its name** (in any case). **A face that is its name and nothing more** (no attribute of a VSDX file's `FaceName`, no markup of
+    /// an `.odg` declaration, nothing of DiaCraft's own) **is looked for only where a cell of the drawing names it** ([`Compare::faces_named`]): such a row says nothing a cell does
+    /// not, and the one a VSDX writer puts in the table of a new drawing (MS-VSDX asks for a row, and nothing names it) is in no `.odg`, which declares the faces its texts use, so a file without
+    /// it lost nothing. A face a cell names, and one that holds more than its name, is a missing font when the file lacks it.
     fn document_data(&mut self) -> Result<(), Stop> {
         let (before, after) = (self.before, self.after);
         self.step(before.fonts.len().saturating_add(after.fonts.len()).saturating_add(before.themes.len()))?;
         let faces: std::collections::HashSet<String> = after.fonts.iter().map(|f| f.name_u.to_ascii_lowercase()).collect();
-        for face in before.fonts.iter() {
-            if !faces.contains(&face.name_u.to_ascii_lowercase()) {
-                let name = &face.name_u;
-                self.count(Class::Fonts, 1, || format!("the face {:?}", cut(name)));
+        let missing: Vec<(&diacraft_doc::FaceName, String)> =
+            before.fonts.iter().map(|f| (f, f.name_u.to_ascii_lowercase())).filter(|(_, key)| !faces.contains(key)).collect();
+        let bare = |face: &diacraft_doc::FaceName| face.raw.is_empty() && face.ext.is_empty();
+        let unnamed: std::collections::HashSet<String> = missing.iter().filter(|(face, _)| bare(face)).map(|(_, key)| key.clone()).collect();
+        let named = if unnamed.is_empty() { unnamed } else { self.faces_named(before, unnamed)? };
+        for (face, key) in missing {
+            if bare(face) && !named.contains(&key) {
+                continue;
             }
+            let name = &face.name_u;
+            self.count(Class::Fonts, 1, || format!("the face {:?}", cut(name)));
         }
         // The themes by their bytes, each hashed once and charged as such.
         let theme_bytes: usize = before.themes.iter().chain(after.themes.iter()).map(|t| t.bytes.len()).fold(0, usize::saturating_add);
@@ -1789,6 +1884,51 @@ impl<'d> Compare<'d> {
             self.count(Class::KeptData, 1, || "the elements of the document no field reads".to_owned());
         }
         Ok(())
+    }
+
+    /// **Which of the faces `wanted` (names in lower case) a cell of `doc` names**: a cell of [`FACE_CELLS`] of a style sheet, or of a shape of a page or a master (members of
+    /// groups too, by a stack and not by recursion), by the face's name in any case or by a number (a face's `ID`, else its place in the table, as a cell is compared: [`cells::FaceTable::face_of`]). The
+    /// theme marker, an empty value and `0` name no face, and a deleted row names none. A step for each shape, each sheet's sections and each row of a section that names faces, charged before
+    /// it is read; **a cell that names a face by a number finds it in a table of the faces by `ID`**, made once and paid for a step a face (the security scan's finding on this task: a walk of the
+    /// table for each cell was rows times faces, unpaid). The style sheets are read first, then the shapes, and **the reading stops once every face looked for is named**.
+    fn faces_named(&mut self, doc: &'d Document, wanted: std::collections::HashSet<String>) -> Result<std::collections::HashSet<String>, Stop> {
+        let mut found = Named { doc, wanted, named: std::collections::HashSet::new(), table: None };
+        for style in doc.styles.iter() {
+            if self.read_faces(&style.sheet, &mut found)? {
+                return Ok(found.named);
+            }
+        }
+        let mut lists: Vec<&ShapeList> = doc.pages.iter().map(|p| &p.shapes).chain(doc.masters.iter().map(|m| &m.shapes)).collect();
+        while let Some(list) = lists.pop() {
+            self.step(list.len())?;
+            for shape in list.iter() {
+                if self.read_faces(&shape.sheet, &mut found)? {
+                    return Ok(found.named);
+                }
+                if !shape.children.is_empty() {
+                    lists.push(&shape.children);
+                }
+            }
+        }
+        Ok(found.named)
+    }
+
+    /// Reads the cells of `sheet` that name faces, for [`Compare::faces_named`]. → whether every face looked for is named now.
+    fn read_faces(&mut self, sheet: &Sheet, found: &mut Named<'d>) -> Result<bool, Stop> {
+        self.step(sheet.sections.len())?;
+        for section in &sheet.sections {
+            let Some((_, face_cells)) = FACE_CELLS.iter().find(|(name, _)| section.name.as_str() == *name) else { continue };
+            self.step(section.rows.len())?;
+            for row in section.rows.iter().filter(|row| !row.del) {
+                if !found.row(row, face_cells, &self.meter) {
+                    return Err(Stop);
+                }
+            }
+            if found.all() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// The whole comparison.

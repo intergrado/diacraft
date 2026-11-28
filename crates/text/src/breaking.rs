@@ -31,8 +31,9 @@ pub(crate) struct LineSpan {
     pub hyphen: bool,
 }
 
-/// Where lines start and how long they may be. `x` is where the line's text starts, measured from the text area's left edge, which
-/// is where tab stops are measured from; `avail` is how much room it has.
+/// Where lines start and how long they may be. `x` is where the line's text starts, measured from the text area's near edge (its left edge, or its right
+/// edge in a right-to-left paragraph, which is laid out as the mirror image: `place.rs`), which is where tab stops are measured from; `avail` is how much
+/// room it has.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Measure {
     pub first_x: f64,

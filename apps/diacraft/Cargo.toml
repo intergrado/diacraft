@@ -32,8 +32,9 @@ craft-window = { workspace = true }
 craft-print = { workspace = true }
 egui = { workspace = true }
 # `wgpu` draws the window; `wayland` and `x11` are the Linux display servers; `accesskit` is the
-# accessibility tree. Not `default_fonts`: see crates/ui-egui/Cargo.toml.
-eframe = { workspace = true, features = ["accesskit", "wayland", "wgpu", "x11"] }
+# accessibility tree; `clipboard` connects egui's Copy, Cut and text fields to the system clipboard
+# instead of a private one. Not `default_fonts`: see crates/ui-egui/Cargo.toml.
+eframe = { workspace = true, features = ["accesskit", "clipboard", "wayland", "wgpu", "x11"] }
 jiff = { workspace = true }
 log = { workspace = true }
 # Waits for wgpu's futures in the graphics probe (`src/graphics.rs`), as eframe does for its own; in the lock already, through eframe.

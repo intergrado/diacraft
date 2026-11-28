@@ -1,14 +1,15 @@
 //! A shape's `Geometry` sections, read from its resolved sheet and built into paths by `diacraft_geom`.
 //!
 //! The sections and rows are the shape's effective ones (the master's rows and the shape's own, merged cell by cell),
-//! each cell read as saved. `geom` takes numbers, so this module is the one place a row's cells become a [`GeomRow`].
+//! each cell read as saved, **and a cell that holds a formula and no saved value worked out** (as every cell the renderer reads: `read.rs`): a row of
+//! `X` of `Width` and no value is 2 inches and not 0. `geom` takes numbers, so this module is the one place a row's cells become a [`GeomRow`].
 
-use diacraft_doc::{CellAddr, CellName, EffectiveRow, Resolved, Resolver, SheetRef};
+use diacraft_doc::{CellAddr, CellName, EffectiveRow, Resolved, Resolver, SectionKey, SheetRef};
 use diacraft_geom::kurbo::{BezPath, Size};
 use diacraft_geom::{BuiltPaths, GeomRow, Nurbs, Polyline, SectionFlags, build_paths};
 
 use crate::limits::MAX_GEOMETRY_SECTIONS;
-use crate::read::Cx;
+use crate::read::{Cx, Val};
 use crate::skips::SkipKind;
 
 /// The paths of one `Geometry` section, in the shape's own frame (drawing units, x right, y up).
@@ -30,9 +31,10 @@ pub(crate) struct ShapeGeometry {
     pub has_geometry: bool,
 }
 
-/// The cells of one row, by name.
+/// The cells of one row, by name: as saved, and **what the cells that hold a formula and no saved value work out to** (`worked`, by name).
 struct RowCells<'r, 'a> {
     cells: &'r [(CellName, Resolved<'a>)],
+    worked: Vec<(&'r CellName, Val)>,
 }
 
 impl<'a> RowCells<'_, 'a> {
@@ -40,13 +42,29 @@ impl<'a> RowCells<'_, 'a> {
         self.cells.iter().find(|(n, _)| n.as_str() == name).map(|(_, r)| r)
     }
 
-    /// The number a cell holds as saved, 0 for a cell the row lacks. A value that is not a number reads 0, as a missing one does.
+    fn worked(&self, name: &str) -> Option<&Val> {
+        self.worked.iter().find(|(n, _)| n.as_str() == name).map(|(_, v)| v)
+    }
+
+    /// The number a cell holds as saved, or worked out for a cell with no saved value, 0 for a cell the row lacks. A value that is not a number reads 0, as a missing one does.
     fn num(&self, name: &str) -> f64 {
+        if let Some(worked) = self.worked(name) {
+            return match worked {
+                Val::Num(n) if n.is_finite() => *n,
+                _ => 0.0,
+            };
+        }
         self.found(name).and_then(|r| r.value.cell).and_then(|c| c.value.as_ref()).and_then(|v| v.number()).unwrap_or(0.0)
     }
 
     /// The text of a cell, for the constructor cells.
     fn text(&self, name: &str) -> Option<&str> {
+        if let Some(worked) = self.worked(name) {
+            return match worked {
+                Val::Text(t) => Some(t),
+                _ => None,
+            };
+        }
         self.found(name).and_then(|r| r.value.cell).and_then(|c| c.value.as_ref()).map(|v| v.text())
     }
 }
@@ -86,9 +104,25 @@ fn geom_row(kind: &str, c: &RowCells<'_, '_>) -> Option<GeomRow> {
 /// The rows of a section, as `geom` rows, and how many were left out: a row of a type nobody lists. For a caller outside a frame (the engine's snapping
 /// builds a shape's paths from the rows it resolved); [`build_paths`](diacraft_geom::build_paths) takes the rows.
 pub fn geom_rows(rows: &[EffectiveRow<'_>]) -> (Vec<GeomRow>, usize) {
+    geom_rows_by(rows, |_, _, _| None)
+}
+
+/// [`geom_rows`] for a caller that reads cells itself and has a way to work out those that hold a formula and no saved value (the engine's snap, shape
+/// operations and pen read a shape's geometry here as the picture draws it): `worked` says for a cell of a row what the cell works out to, **a number for the cells that hold one and a
+/// text for a constructor** (`PolylineTo`'s `A`, `NURBSTo`'s `E`), and `None` leaves the cell read as saved.
+pub fn geom_rows_worked(
+    rows: &[EffectiveRow<'_>],
+    worked: impl Fn(&EffectiveRow<'_>, &CellName, &Resolved<'_>) -> Option<Val>,
+) -> (Vec<GeomRow>, usize) {
+    geom_rows_by(rows, worked)
+}
+
+/// [`geom_rows`] with `worked`, which says for a cell of a row what it works out to (`None`: it is read as saved): the cells that hold a formula and no saved value.
+fn geom_rows_by(rows: &[EffectiveRow<'_>], worked: impl Fn(&EffectiveRow<'_>, &CellName, &Resolved<'_>) -> Option<Val>) -> (Vec<GeomRow>, usize) {
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let cells = RowCells { cells: &row.cells };
+        let worked: Vec<(&CellName, Val)> = row.cells.iter().filter_map(|(name, found)| worked(row, name, found).map(|v| (name, v))).collect();
+        let cells = RowCells { cells: &row.cells, worked };
         if let Some(g) = row.row_type.as_deref().and_then(|kind| geom_row(kind, &cells)) {
             out.push(g);
         }
@@ -97,9 +131,13 @@ pub fn geom_rows(rows: &[EffectiveRow<'_>]) -> (Vec<GeomRow>, usize) {
     (out, skipped)
 }
 
-/// The rows of a section, as `geom` rows. A row of a type nobody lists is counted and left out.
-fn section_rows(cx: &Cx<'_, '_>, rows: &[EffectiveRow<'_>], who: &dyn Fn() -> String) -> Vec<GeomRow> {
-    let (out, skipped) = geom_rows(rows);
+/// The rows of the section `key` of the sheet `at`, as `geom` rows. A row of a type nobody lists is counted and left out. A cell that holds a formula and no saved value is
+/// worked out on the sheet (`Cx::val`, which keeps the answers).
+fn section_rows(cx: &Cx<'_, '_>, at: &SheetRef, key: &SectionKey, rows: &[EffectiveRow<'_>], who: &dyn Fn() -> String) -> Vec<GeomRow> {
+    let worked = |row: &EffectiveRow<'_>, name: &CellName, found: &Resolved<'_>| {
+        found.holds_unsaved_formula().then(|| cx.val(at, &CellAddr { section: Some(key.clone()), row: Some(row.key.clone()), cell: name.clone() }))
+    };
+    let (out, skipped) = geom_rows_by(rows, worked);
     if skipped > 0 {
         cx.note_n(SkipKind::GeometryRow, skipped, || format!("{}: a row with no known type", who()));
     }
@@ -124,7 +162,7 @@ pub(crate) fn build(cx: &Cx<'_, '_>, at: &SheetRef, size: Size, rows_left: usize
         if out.rows > rows_left {
             return None;
         }
-        let geom_rows = section_rows(cx, &rows, who);
+        let geom_rows = section_rows(cx, at, key, &rows, who);
         let flags = SectionFlags {
             no_fill: flag(cx, at, key.ix, "NoFill"),
             no_line: flag(cx, at, key.ix, "NoLine"),

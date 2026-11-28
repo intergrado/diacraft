@@ -56,6 +56,18 @@ slow-timeout = { period = "30s", terminate-after = 4 }
 # measured on beast, 2026-11-26); the renumber of 30,000 shapes (0.26 GB) and the others of that file are not listed.
 # Adds two (`conn_points_edges`, peak resident memory measured on beast, 2026-11-26): a drawing of one section of 200,000 rows read and counted by `shape.connection_edges` (0.57 GB), and the same
 # of 200,000 steps of no length (0.51 GB): the drawing and its merged rows are held at once.
+# Adds three (`sheet_hostile`, peak resident memory measured on beast, 2026-11-26): a cell read by 100,000 cells (0.42 GB: listed, since a loaded machine puts it past 500), a write to the document's sheet
+# over 64 pages of 2,000 shapes (0.61 GB), and 4,096 writes in one batch read by 100 cells each, 409,600 readers (2.0 GB). The others of that file, a chain of 10,000 cells, the heavy pages that spend the budget
+# and the storms of rows (under 70 MB each), are not listed.
+# Adds one (`shapeops_trim_memory`, peak resident memory of the child measured on beast, 2026-11-26): a Trim that cuts one shape of 9,999 separate segments into 9,999 shapes under
+# `ulimit -v 3000000` (0.59 GB); the others of that file (refused at 20,000 and 90,000 segments, 4,096 shapes of one segment, a Join of 4,096 lines: 0.11 to 0.43 GB) are not listed.
+# Adds one (`sheet_hostile`, peak resident memory measured on beast, 2026-11-26): a write through a chain over 64 pages of 2,000 shapes (0.55 GB; the same drawing with no formula that names a
+# page peaks at 0.38 GB and the chain of heavy pages at 33 MB: not listed).
+# Adds seven (peak resident memory of each test run alone in its own process, measured on beast, 2026-11-26, at a load of 60 to 100): in `shapeops_offset_fit_hostile`
+# a polygon of 600,000 points, past the 524,288 elements a command reads, built and refused (0.91 GB), a Fit Curve of 4,096 circles (0.83 GB), the Offsets of polygons of up to 100,000
+# vertices (0.63 GB) and of 5,000 lines into the 10,000 copies a command makes (0.58 GB); in `shapeops_offset_memory` the children of those two last (0.58 GB), of 4,096 rectangles offset
+# (0.64 GB) and of the Fit Curve of a sine wave of 100,000 rows, a circle of 100,000 points and 4,096 circles (0.83 GB), each under `ulimit -v 3000000`. The others of those files (0.03 to 0.48 GB)
+# are not listed.
 [test-groups.memory-heavy]
 max-threads = 2
 
@@ -261,8 +273,20 @@ filter = '''
       test(=save_check_before::the_writer_and_the_reader_each_run_once_for_a_dry_run_and_once_for_a_save) |
       test(=save_check_before::children::a_dry_run_with_no_room_refuses_in_words_in_a_child_and_one_with_room_gives_it_back) |
       test(=sheet_rows::a_section_at_the_most_rows_the_model_holds_takes_no_more) |
+      test(=sheet_hostile::a_write_to_a_cell_that_100000_cells_read_is_one_commit_of_a_few_steps_each) |
+      test(=sheet_hostile::a_write_to_the_documents_sheet_works_out_64_pages_of_2000_shapes_once_each) |
+      test(=sheet_hostile::a_write_through_a_chain_over_64_pages_of_2000_shapes_is_one_commit_within_the_budget) |
+      test(=sheet_hostile::a_batch_of_4096_writes_each_read_by_100_cells_is_one_commit_of_a_few_steps_each) |
       test(=conn_points_edges::rows_and_steps_are_counted_on_a_section_of_200000_rows) |
-      test(=conn_points_edges::a_section_of_200000_zero_length_steps_has_no_edge_and_its_steps_are_counted)
+      test(=conn_points_edges::a_section_of_200000_zero_length_steps_has_no_edge_and_its_steps_are_counted) |
+      test(=shapeops_trim_memory::a_comb_of_9999_separate_segments_is_trimmed_to_9999_pieces_in_a_bounded_address_space) |
+      test(=shapeops_offset_fit_hostile::a_polyline_of_more_rows_than_a_command_reads_is_refused_in_words_by_the_reading) |
+      test(=shapeops_offset_fit_hostile::fit_curve_of_4096_circles_is_one_call_and_two_recalculations) |
+      test(=shapeops_offset_fit_hostile::an_offset_of_a_polygon_of_many_vertices_is_made_or_refused_in_words_in_bounded_time) |
+      test(=shapeops_offset_fit_hostile::an_offset_that_makes_exactly_ten_thousand_shapes_is_made_and_one_more_is_refused) |
+      test(=shapeops_offset_memory::the_most_copies_a_command_makes_are_made_in_a_bounded_address_space) |
+      test(=shapeops_offset_memory::four_thousand_ninety_six_rectangles_are_offset_in_a_bounded_address_space) |
+      test(=shapeops_offset_memory::fit_curve_of_long_polylines_and_of_many_circles_ends_in_a_bounded_address_space)
 '''
 test-group = "memory-heavy"
 
@@ -296,7 +320,8 @@ test-group = "memory-heavy"
 # of the default period (measured alone only; it is not one of the four above, and has no gate figure of its own). A sixth: odg_untouched_routes's chains
 # of edits, saved and undone, took 65 s alone on a machine at a load of 17 to 49 (2026-11-22), and in the whole run on an Intel Mac of 2019 at 12 threads it
 # ran past the 120 seconds and failed; alone there it took 66 s. A seventh: the child test of `save_check_before`, which asks about a part of 256 MiB and saves it nine times under
-# `ulimit -v 3000000` (26 s alone, 2026-11-25).
+# `ulimit -v 3000000` (26 s alone, 2026-11-25). An eighth: `sheet_hostile`'s 4,096 writes read by 100 cells each build 409,600 formulas (a parse each) and
+# work them out: 30 s alone at a load of 70 (2026-11-26), where the other two big ones take 4 and 6.
 # Gates of many agents run together on one machine, and at a load of 66 the first of them ran past the 120 seconds above and failed a gate that had nothing wrong.
 # The first was tried at a smaller size: without its 175,000 loose rectangles it ends in the same refusal (more than 2,766 MiB of memory a save may hold) with a
 # third less CPU time (38 s against 58 s), which leaves the other three as slow as they are, and the loose rectangles are part of the input the review named; so
@@ -310,6 +335,17 @@ filter = '''
       test(=write_memory::a_save_of_the_file_with_250_big_attributes_past_the_gate_never_aborts_where_memory_runs_out) |
       test(=write_groups_cost::the_members_of_new_groups_are_gathered_once_for_each_and_sixty_thousand_groups_of_one_member_are_saved) |
       test(=odg_untouched_routes::w1_over_chains_of_edits_saves_and_undos_no_route_of_the_file_parts_from_the_model_in_silence) |
-      test(=save_check_before::children::a_dry_run_with_no_room_refuses_in_words_in_a_child_and_one_with_room_gives_it_back)
+      test(=save_check_before::children::a_dry_run_with_no_room_refuses_in_words_in_a_child_and_one_with_room_gives_it_back) |
+      test(=sheet_hostile::a_batch_of_4096_writes_each_read_by_100_cells_is_one_commit_of_a_few_steps_each)
 '''
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+# The hostile-file sweeps (`door::` in `crates/vsdx`, `odg`, `native` and `mxfile`, each `tests/it/door.rs`). Each makes 300 mutants of a few seeds and puts the ones the reader lets in
+# through the engine's open, a drawn page and three saves, every case on a thread of its own. Alone on beast (2026-11-26, a load of 20 to 60 from other work) the five took 9 s (`.vsdx`),
+# 54 s (the two `.odg` ones, one process), 16 s (`.diacraft`) and 3 s (draw.io) of CPU, the largest 182 MB at the peak: none is in the memory-heavy group. In the run of the five crates by nextest
+# (4,240 tests, 8 at a time) the wall clock was 36 s (`.vsdx`), 108 s (`.odg`), 189 s (`.fodg`), 88 s (`.diacraft`) and 24 s (draw.io): the flat one past the 120 seconds above and the packaged one near it, so they are given 600 seconds like the slow
+# ones above. A sweep's own limit is the budget it gives a case (at most 80 seconds, which a hang meets and ends the sweep with). A longer search (`DIACRAFT_DOOR_CASES=3000`) is run with
+# `cargo test`, not nextest: docs/development.md, "Hostile-file sweeps".
+[[profile.default.overrides]]
+filter = 'test(/^door::/)'
 slow-timeout = { period = "60s", terminate-after = 10 }

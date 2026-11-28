@@ -11,6 +11,8 @@
 //! outside the source. The edits made inside a unit that is moved belong to its payload and may lie inside the place it is taken out of. The
 //! sweep of a payload is recursive for a moved unit inside a moved unit, which is no deeper than the elements nest.
 
+use std::collections::HashSet;
+
 use super::{WriteError, WriteWork};
 use crate::limits::Limits;
 use crate::read::names::Ns;
@@ -55,13 +57,15 @@ pub(crate) struct Splicer<'a> {
     units: Vec<(usize, usize)>,
     /// The attributes written, for the check of the part made.
     pub(crate) written: Vec<WrittenAttr>,
+    /// The prefixes the edits declared on start tags, each by where its tag starts in the source: a tag is declared a prefix once, however many edits of it ask ([`Splicer::declare`]).
+    declared: HashSet<(usize, String)>,
     /// An edit or a note could not be kept for want of memory: [`Splicer::apply`] refuses.
     starved: bool,
 }
 
 impl<'a> Splicer<'a> {
     pub(crate) fn new(source: &'a [u8]) -> Splicer<'a> {
-        Splicer { source, edits: Vec::new(), units: Vec::new(), written: Vec::new(), starved: false }
+        Splicer { source, edits: Vec::new(), units: Vec::new(), written: Vec::new(), declared: HashSet::new(), starved: false }
     }
 
     /// An edit is kept by `try_reserve`, never by the abort a `Vec` makes: memory that is not had is noted, and [`Splicer::apply`] refuses.
@@ -87,6 +91,40 @@ impl<'a> Splicer<'a> {
             return;
         }
         self.written.push(WrittenAttr { tag_start, ns, local });
+    }
+
+    /// Declares `prefix` for `uri` on the start tag that starts at `tag_start` of the source, by an insertion at `at` (where the tag's attributes end): **once for a tag, however many edits ask**
+    /// (found by the hostile-file sweeps: the editor makes one `TagEdit` for each edit of a shape, a connector's ends and its path are two, and each declared the prefix it had chosen
+    /// for a namespace the place does not bind, so the tag held `xmlns:svg1` twice, which is not XML). Gives whether the declaration was made now; `false` for one the tag has from an
+    /// earlier edit, which the caller's attribute under the prefix is written beside.
+    ///
+    /// The key is the tag and the prefix and not the scope: an element inside another that declares the same prefix again is a nested scope, which XML Namespaces allows, and has its
+    /// own tag.
+    pub(crate) fn declare(&mut self, tag_start: usize, at: usize, prefix: &str, uri: &str) -> bool {
+        let key = (tag_start, prefix.to_owned());
+        if self.declared.contains(&key) {
+            return false;
+        }
+        if self.declared.try_reserve(1).is_err() {
+            self.starved = true;
+            return false;
+        }
+        self.declared.insert(key);
+        self.insert(at, format!(" xmlns:{prefix}=\"{}\"", escape_value(uri, b'"')));
+        true
+    }
+
+    /// [`Splicer::declare`] for each declaration of `text`, which the writer made in the form ` xmlns:prefix="uri"` ([`declarations_of`]): the declarations that a page's comments need
+    /// beside the ones an edit of the page's tag made. Text that is not in that form is put as it is (the writer makes no other).
+    pub(crate) fn declare_text(&mut self, tag_start: usize, at: usize, text: &str) {
+        match declarations_of(text) {
+            Some(list) => {
+                for (prefix, uri) in list {
+                    self.declare(tag_start, at, prefix, uri);
+                }
+            }
+            None => self.insert(at, text.to_owned()),
+        }
     }
 
     /// How many edits are waiting: what a caller that writes some may compare before and after, to tell whether it changed anything.
@@ -258,6 +296,38 @@ pub(crate) fn escape_value(text: &str, quote: u8) -> String {
     out
 }
 
+/// The declarations in `text`, each as `(prefix, uri)`, when `text` is nothing but declarations in the form the writer makes them (` xmlns:prefix="uri"`, one space before each, no
+/// quote in the URI, which is one of ODF's or DiaCraft's); `None` for any other text. The empty text holds none.
+pub(crate) fn declarations_of(text: &str) -> Option<Vec<(&str, &str)>> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let (prefix, after) = rest.strip_prefix(" xmlns:")?.split_once("=\"")?;
+        let (uri, tail) = after.split_once('"')?;
+        if prefix.is_empty() || prefix.contains([' ', '=', '"', '<', '>', '&']) || uri.contains(['<', '&']) {
+            return None;
+        }
+        found.try_reserve(1).ok()?;
+        found.push((prefix, uri));
+        rest = tail;
+    }
+    Some(found)
+}
+
+/// `first`, then the declarations of `more` whose prefix `first` does not declare: what two sets of declarations for one new start tag come to (a new page's own and its comments').
+/// A text that is not declarations in the writer's form is put after as it is.
+pub(crate) fn merged_declarations(first: &str, more: &str) -> String {
+    let (Some(held), Some(list)) = (declarations_of(first), declarations_of(more)) else { return format!("{first}{more}") };
+    let mut out = first.to_owned();
+    let mut seen: HashSet<&str> = held.iter().map(|(prefix, _)| *prefix).collect();
+    for (prefix, uri) in list {
+        if seen.insert(prefix) {
+            out.push_str(&format!(" xmlns:{prefix}=\"{uri}\""));
+        }
+    }
+    out
+}
+
 /// The bytes [`escape_value`] writes for `text`, counted without making them: what a value costs the memory a save holds before it is made.
 pub(crate) fn escaped_len(text: &str, quote: u8) -> u64 {
     text.chars().fold(0u64, |sum, c| sum.saturating_add(escaped(c, quote).map_or(c.len_utf8(), str::len) as u64))
@@ -284,6 +354,40 @@ mod tests {
             s.insert(0, "<".to_owned());
         });
         assert_eq!(out, "<<0345XY89!");
+    }
+
+    /// A prefix is declared on a tag once, however many edits of the tag ask; the same prefix on another tag, and another prefix on the same one, are each declared.
+    #[test]
+    fn a_prefix_is_declared_on_a_start_tag_once_however_many_edits_ask_for_it() {
+        let out = run("<a/><b/>", |s| {
+            assert!(s.declare(0, 2, "p1", "urn:p"), "the first asks");
+            assert!(!s.declare(0, 2, "p1", "urn:p"), "the second finds it made");
+            assert!(s.declare(0, 2, "q1", "urn:q"), "another prefix on the same tag");
+            assert!(s.declare(4, 6, "p1", "urn:p"), "the same prefix on another tag, a nested scope's own");
+            assert!(!s.declare(4, 6, "p1", "urn:p"));
+        });
+        assert_eq!(out, "<a xmlns:p1=\"urn:p\" xmlns:q1=\"urn:q\"/><b xmlns:p1=\"urn:p\"/>");
+    }
+
+    #[test]
+    fn declarations_the_writer_made_as_text_are_found_in_it_and_merged_once_by_prefix() {
+        let a = " xmlns:svg1=\"urn:s\" xmlns:draw1=\"urn:d\"";
+        assert_eq!(declarations_of(a), Some(vec![("svg1", "urn:s"), ("draw1", "urn:d")]));
+        assert_eq!(declarations_of(""), Some(Vec::new()));
+        for bad in ["x", " xmlns:=\"u\"", " xmlns:p", " xmlns:p=\"u", " xmlns:p=\"u\"x", "xmlns:p=\"u\"", " xmlns:p=\"u&amp;\"", " xmlns:a b=\"u\""] {
+            assert_eq!(declarations_of(bad), None, "{bad:?}");
+        }
+        assert_eq!(
+            merged_declarations(a, " xmlns:svg1=\"urn:s\" xmlns:text1=\"urn:t\""),
+            " xmlns:svg1=\"urn:s\" xmlns:draw1=\"urn:d\" xmlns:text1=\"urn:t\""
+        );
+        assert_eq!(merged_declarations("", a), a);
+        assert_eq!(merged_declarations(a, ""), a);
+        assert_eq!(merged_declarations(a, "junk"), format!("{a}junk"), "text that is no declarations is put as it is");
+        let out = run("<a/>", |s| s.declare_text(0, 2, &format!("{a} xmlns:svg1=\"urn:s\"")));
+        assert_eq!(out, "<a xmlns:svg1=\"urn:s\" xmlns:draw1=\"urn:d\"/>");
+        let out = run("<a/>", |s| s.declare_text(0, 2, "junk"));
+        assert_eq!(out, "<ajunk/>");
     }
 
     #[test]

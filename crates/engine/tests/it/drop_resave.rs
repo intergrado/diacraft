@@ -270,15 +270,24 @@ fn pin(s: &Session, id: u32) -> (f64, f64) {
     (frame.pin_x, frame.pin_y)
 }
 
+/// How many drawings [`starts`] gives: each has a test of its own below, so that no test runs more than a drawing's share of the grid.
+const STARTS: usize = 9;
+
 /// **A real edit after the Save As is still written, and what was left out stays out.** From each drawing, a Save As to each type with each of the options, then a shape moved (the first,
 /// which shows the object where there is one, and the last, a rectangle) and a Save: the edit is written, the file read again has the shape where the drawing has it, and the file holds nothing
 /// that the file the Save As wrote did not (no object or macro project is put back); the save after that is no edit. A `.diacraft` holds the whole drawing and is not told apart.
-#[test]
-fn an_edit_after_a_save_as_that_left_things_out_is_written_and_what_was_left_out_stays_out() {
+///
+/// **One test for each drawing** (`edit_grid_tests!`: the grid is 9 drawings by 4 types by 4 options by 2 shapes, 288 chains, each writing a file twice and reading it back): the whole grid in one
+/// test took 44 to 100 seconds alone on a busy machine, nearly all of it waiting for the disk (the file system's commits: the same test with its files on a RAM disk took 9 seconds, 5.7 of
+/// them the CPU's), and nextest ends a test at 120. Each test runs `at`'s share, a count of chains that does not move with the load (32 at most, 24 at the least); the whole grid is the ignored
+/// `the_whole_grid_of_edits_after_a_save_as_that_left_things_out`.
+fn edit_grid(only: usize) {
     let dir = Dir::new();
     let mut failures = Vec::new();
     let mut chains = 0;
-    for (at, (what, start)) in starts(&dir).into_iter().enumerate() {
+    let all = starts(&dir);
+    assert_eq!(all.len(), STARTS, "a drawing was added to `starts`: add its test to `edit_grid_tests!`, and raise STARTS");
+    for (at, (what, start)) in all.into_iter().enumerate().filter(|(at, _)| *at == only) {
         for target in TARGETS {
             for (word, asked) in asks() {
                 for (which, last) in [("first", false), ("last", true)] {
@@ -330,8 +339,42 @@ fn an_edit_after_a_save_as_that_left_things_out_is_written_and_what_was_left_out
             }
         }
     }
-    assert!(chains >= 240, "every drawing, type, option and shape: {chains} chains");
+    assert!(chains >= 24, "every type, option and shape of drawing {only}: {chains} chains");
     assert!(failures.is_empty(), "{} of {chains} chains failed:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// One test for each drawing of [`starts`], each named for it and in its order: `edit_grid(n)` is the grid of the nth.
+macro_rules! edit_grid_tests {
+    ($($name:ident: $at:expr,)*) => {
+        $(
+            #[test]
+            fn $name() {
+                edit_grid($at);
+            }
+        )*
+    };
+}
+
+edit_grid_tests! {
+    an_edit_after_a_save_as_from_an_odg_with_an_object_and_a_macro_project_is_written_and_what_was_left_out_stays_out: 0,
+    an_edit_after_a_save_as_from_an_odg_with_a_macro_project_is_written_and_what_was_left_out_stays_out: 1,
+    an_edit_after_a_save_as_from_a_vsdm_with_an_object_and_an_odf_macro_project_is_written_and_what_was_left_out_stays_out: 2,
+    an_edit_after_a_save_as_from_a_diacraft_with_an_object_and_a_macro_project_is_written_and_what_was_left_out_stays_out: 3,
+    an_edit_after_a_save_as_from_a_vsdm_with_a_vba_project_is_written_and_what_was_left_out_stays_out: 4,
+    an_edit_after_a_save_as_from_an_odg_that_carries_a_vba_project_is_written_and_what_was_left_out_stays_out: 5,
+    an_edit_after_a_save_as_from_a_diacraft_of_two_rectangles_and_a_macro_project_is_written_and_what_was_left_out_stays_out: 6,
+    an_edit_after_a_save_as_from_a_vsdx_with_a_user_section_before_a_layer_section_is_written_and_what_was_left_out_stays_out: 7,
+    an_edit_after_a_save_as_from_a_vsdx_with_a_layer_section_before_a_user_section_is_written_and_what_was_left_out_stays_out: 8,
+}
+
+/// **The whole grid of the edits in one test**, which the test of each drawing above splits (`#[ignore]`: nextest ends a test at 120 seconds, and the 288 chains took 44 to 100 seconds where
+/// the disk was busy). `cargo test -p diacraft-engine --test it drop_resave::the_whole_grid_of_edits_after_a_save_as_that_left_things_out -- --ignored`.
+#[test]
+#[ignore = "the whole grid of 288 chains in one test: a minute where the disk is busy"]
+fn the_whole_grid_of_edits_after_a_save_as_that_left_things_out() {
+    for at in 0..STARTS {
+        edit_grid(at);
+    }
 }
 
 /// **The options leave out what they are asked to, in every pair of formats** (the second bug of the report: a Save As from an `.odg` to another `.odg` ignored them). What is

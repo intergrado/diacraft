@@ -302,6 +302,40 @@ fn a_page_with_a_missing_doubled_or_misplaced_marker_is_refused_and_not_guessed_
     assert!(render("<main>\n  <!-- facts:begin -->").is_err());
 }
 
+/// What the page's line of dates says between its markers.
+fn asof_of(page: &str) -> String {
+    page.split("<!-- asof:begin -->").nth(1).and_then(|rest| rest.split("<!-- asof:end -->").next()).unwrap().to_owned()
+}
+
+#[test]
+fn the_line_of_dates_says_where_the_cells_come_from_and_names_a_black_box_only_when_a_cell_rests_on_one() {
+    // Every cell documented: the line says public documentation and nothing else, and never that the tools were not run.
+    let page = compare::render(&template(), &build(&matrix()).unwrap(), &settings(None)).unwrap();
+    let line = asof_of(&page);
+    assert!(line.contains("Every cell comes from public documentation: the pages of"), "{line}");
+    assert!(!line.contains("black box") && !line.contains("running"), "{line}");
+    // A cell of LibreOffice Draw that rests on a copy of it run as a black box, in a row or in the list of what only DiaCraft has, is named.
+    let says = "Every cell comes from public documentation or, for some of LibreOffice Draw's, from a copy of it run as a black box: the pages of";
+    let in_a_row = with(
+        &matrix(),
+        "basis = \"documented\"\nsources = [\"https://help.libreoffice.org",
+        "basis = \"oracle\"\nsources = [\"https://help.libreoffice.org",
+    );
+    let in_the_list =
+        with(&matrix(), "[only.libreoffice]\nlacks = \"yes\"\nbasis = \"documented\"", "[only.libreoffice]\nlacks = \"yes\"\nbasis = \"oracle\"");
+    for data in [in_a_row, in_the_list] {
+        let page = compare::render(&template(), &build(&data).unwrap(), &settings(None)).unwrap();
+        let line = asof_of(&page);
+        assert!(line.contains(says), "{line}");
+        assert!(!line.contains("running"), "{line}");
+    }
+    // A draw.io cell that says it was read from a black box is not LibreOffice Draw's: the line does not name one for it.
+    let drawio =
+        with(&matrix(), "basis = \"documented\"\nsources = [\"https://www.drawio.com", "basis = \"oracle\"\nsources = [\"https://www.drawio.com");
+    let page = compare::render(&template(), &build(&drawio).unwrap(), &settings(None)).unwrap();
+    assert!(!asof_of(&page).contains("black box"), "{}", asof_of(&page));
+}
+
 #[test]
 fn a_mark_is_a_shape_and_a_word_and_unknown_is_a_question_mark() {
     let data = build(&matrix_with(&rows().replacen("value = \"Not yet\"\nbasis = \"documented\"", "value = \"Not yet\"\nbasis = \"absent\"", 1), ""))

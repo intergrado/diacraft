@@ -85,19 +85,6 @@ fn found_on(doc: &Document, page: u32, ids: impl IntoIterator<Item = u32>) -> Ha
     crate::draw::find_named(doc, page, &ids.into_iter().collect()).unwrap_or_default()
 }
 
-/// The places a master brings when it is dropped centred at `centre` (paper inches) on a page of `k` drawing inches to a paper inch: its connection points, which
-/// `shape.drop` pulls with the new shape's box. The window's drop preview calls this where the command reads them off the shape it has made
-/// (`own_points`), so that the ghost lands where the drop does: the master's size is its drawing size at the page's scale, the box of the new shape is centred at `centre`, and at
-/// most [`MAX_OWN_POINTS`] places are given. A connector has none, and a place or a scale that is not a number gives none.
-pub fn dropped_points(spec: &crate::stencil::MasterSpec, centre: P, k: f64) -> Vec<P> {
-    if !(centre.0.is_finite() && centre.1.is_finite() && k.is_finite() && k > 0.0) {
-        return Vec::new();
-    }
-    // The pin is the centre, in drawing units, and the box's lower left is half its size from it; a point is its offset from that corner.
-    let (low_x, low_y) = (centre.0 * k - spec.width / 2.0, centre.1 * k - spec.height / 2.0);
-    spec.connection_offsets().into_iter().take(MAX_OWN_POINTS).map(|(x, y)| ((low_x + x) / k, (low_y + y) / k)).collect()
-}
-
 /// The pin of the shape `id` on the page, in paper inches: where its `LocPinX` and `LocPinY` are carried to the page, the point `shape.rotate` turns the shape about and where a
 /// turn's angle mark is drawn. A shape's pin is not the middle of its box, and in a turned group it is not its cells' `PinX` and `PinY` either. `None` for a shape that is not
 /// there or whose pin is not a finite number.
@@ -108,26 +95,6 @@ pub fn pin_of(doc: &Document, page: u32, id: u32) -> Option<P> {
     let k = units_per_inch(doc, page);
     let p = reader.to_page(&at, (reader.number(&sheet, "LocPinX"), reader.number(&sheet, "LocPinY")));
     (p.0.is_finite() && p.1.is_finite()).then_some((p.0 / k, p.1 / k))
-}
-
-/// [`dropped_points`] for a master of a stencil file (`stencil` is the opened file, `key` the master as `shape.drop` takes it: its `ID` or its name): the places the new shape
-/// will have when it is dropped centred at `centre` (paper inches) on `page` of `doc`, which `shape.drop` pulls with the shape's box. A file's master has no
-/// `MasterSpec`: its connection rows are in its own model, as formulas of its shape's size, and the dropped shape's places are what those come to on the instance. **So the
-/// accessor makes the drop on a copy of the document** (a copy shares everything with `doc` and is dropped at the end) **and reads the places off the shape it made, with
-/// `own_points`: the very places the command reads**, whatever the master's rows are (a point off every corner and middle of its box, a formula of the size, a master of several
-/// shapes). Empty for a master that is not in the stencil, a drop the command would refuse (a page that is full, a master with no shape), a page that is not there and a place
-/// that is not a number.
-pub fn dropped_points_of_file(doc: &Document, page: u32, stencil: &crate::stencil::OpenedStencil, key: &str, centre: P) -> Vec<P> {
-    if !(centre.0.is_finite() && centre.1.is_finite()) || doc.page(page).is_none() {
-        return Vec::new();
-    }
-    let Some(entry) = stencil.find(key) else { return Vec::new() };
-    let k = units_per_inch(doc, page);
-    let mut scratch = doc.clone();
-    match crate::stencil::drop_opened(&mut scratch, page, stencil, entry, centre.0 * k, centre.1 * k, 0) {
-        Ok(done) => own_points(&scratch, page, &[done.info.id], (0.0, 0.0)),
-        Err(_) => Vec::new(),
-    }
 }
 
 /// The box of the shapes `ids` on the page, in paper inches: the corners of each carried to the page. `None` if one is not there.

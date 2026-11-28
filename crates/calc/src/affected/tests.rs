@@ -18,7 +18,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use diacraft_doc::{
-    CellAddr, CellEdit, Connect, Connects, Document, Lookup, Owner, Row, RowKey, Shape, ShapeList, ShapeRef, SheetRef, Value as DocValue, WriteOrigin,
+    CellAddr, CellEdit, Connect, Connects, Document, Lookup, Owner, Row, RowKey, SectionKey, Shape, ShapeList, ShapeRef, SheetRef, Value as DocValue,
+    WriteOrigin,
 };
 use diacraft_formula::parse;
 use diacraft_testkit::build::{DocBuilder, MasterBuilder, PageBuilder, ShapeBuilder};
@@ -35,6 +36,8 @@ use crate::{CommitReport, commit_changed, commit_changed_with};
 thread_local! {
     /// What the graphs the tests looked at held, summed: entries through another sheet, readers of cells no text names, readers that found no sheet, graphs looked at.
     static SEEN: std::cell::RefCell<(usize, usize, usize, usize)> = const { std::cell::RefCell::new((0, 0, 0, 0)) };
+    /// The steps in which a section written whole reached cells that the edit's own changes did not, so that the comparison of the index with the walk for one is not empty.
+    static WHOLE_REACHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// A small generator of numbers: the property tests give a seed, and a failing case is told by it.
@@ -63,11 +66,12 @@ const MASTERS: u32 = 3;
 const GROUP_MASTER: u32 = 10 + MASTERS - 1;
 
 /// A formula for a cell of a shape of a page of `n` shapes: some read their own sheet only, some another by `ID` or by name, some carry a point between
-/// frames, measure text, walk a path, read a cell by a call, or name a shape that is not there.
+/// frames, measure text, walk a path, read a cell by a call, name a cell that is only an address (`GETVAL`, `GETREF`) or name a shape that is
+/// not there.
 fn formula(rng: &mut Rng, n: u32) -> String {
     let mut id = || 1 + u32::try_from(rng.next() % u64::from(n + 3)).unwrap_or(1);
     let (a, b) = (id(), id());
-    match rng.below(18) {
+    match rng.below(21) {
         0 => "Width*0.5".into(),
         1 => "User.A+PinX".into(),
         2 => "Geometry1.X2*2".into(),
@@ -85,7 +89,11 @@ fn formula(rng: &mut Rng, n: u32) -> String {
         14 => "Sheet.9999!PinX".into(),
         15 => format!("Sheet.{a}!Geometry1.X2+Sheet.{b}!Width"),
         16 => "ThePage!PageWidth".into(),
-        _ => format!("IF(Sheet.{a}!Width>1,Width,Sheet.{b}!Height)"),
+        17 => format!("IF(Sheet.{a}!Width>1,Width,Sheet.{b}!Height)"),
+        // An address is no link: the cell it names does not work this one out (the plain `Width` and `PinX` do).
+        18 => format!("GETVAL(Sheet.{a}!PinX)+Width"),
+        19 => "GetRef(User.A)*2+PinX".into(),
+        _ => format!("IF(Width>1,GETVAL(Sheet.{a}!Width),GETREF(User.a))+Sheet.{b}!Height"),
     }
 }
 
@@ -559,6 +567,20 @@ fn run(seed: u64, shapes: u32, steps: usize) -> Result<(), String> {
             }
             _ => {}
         }
+        // A route written whole (`Changes::sections`): the first section of one shape, chosen by the seed of the step, wakes the readers of any cell of it, in the index as in the walk.
+        let places = shapes_of(&doc);
+        if let Some(at) = places.get(usize::try_from(seed_of_step % (places.len().max(1) as u64)).unwrap_or(0)) {
+            let mut whole = changes.clone();
+            whole.sections.push((SheetRef::Shape(at.clone()), SectionKey::new("Geometry", Some(0))));
+            let kept = reached_by_index(&mut index, &doc, &whole, seed_of_step);
+            let walked = reached_by_walk(&doc, &whole, seed_of_step);
+            if kept != walked {
+                return Err(format!("step {step}, a section written whole at {at:?}: kept {kept:?}, walked {walked:?}"));
+            }
+            if kept.len() > reached_by_walk(&doc, &changes, seed_of_step).len() {
+                WHOLE_REACHED.with(|n| n.set(n.get() + 1));
+            }
+        }
         let (mut with_index, mut with_walk) = (doc.clone(), doc.clone());
         let a = commit_changed_with(&mut index, &mut with_index, &Budget::default(), EvalOptions::default(), 1, &changes);
         let b = commit_by_walk(&mut with_walk, &changes);
@@ -617,6 +639,8 @@ fn the_generated_edits_go_down_every_path_of_the_index() {
     }
     let (cross, dynamic, dangling, graphs) = SEEN.with(|s| *s.borrow());
     assert!(cross > 0 && dynamic > 0 && dangling > 0 && graphs > 0, "{cross} {dynamic} {dangling} {graphs}");
+    let whole = WHOLE_REACHED.with(std::cell::Cell::get);
+    assert!(whole > 0, "no section written whole reached a cell that the edit's changes did not");
     eprintln!("paths {counts:?}; entries {cross} through other sheets, {dynamic} dynamic, {dangling} dangling, in {graphs} graphs");
 }
 

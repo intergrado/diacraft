@@ -734,27 +734,33 @@ pub(crate) fn new_outline(sheet: &Sheet) -> Result<NewOutline, &'static str> {
     Ok(NewOutline { path, subpaths, reader_form, rows })
 }
 
+/// A glue point's coordinate as a share of the frame: the share its formula says (`0`, `Width`, `Width*k`), or, for any other cell, **its value** over the shape's size along the axis (CPDOUBLE.ODG:
+/// a point a doubling put on a curve is `PNTX(POINTALONGPATH(...))`, a point on a straight edge of a shape whose corners are lengths is a length, and another program keeps such a point where
+/// it stands, not by the formula; the formula rides in DiaCraft's data and the value is where the glue point is). `None` when the value is no number or the size no length.
+fn glue_share(cell: Option<&Cell>, axis: &str, size: Option<f64>) -> Option<f64> {
+    share_of(cell, axis).or_else(|| {
+        let value = cell?.value.as_ref()?.number().filter(|n| n.is_finite())?;
+        size.map(|s| value / s).filter(|share| share.is_finite())
+    })
+}
+
 /// The connection points of a new custom shape as its geometry's own glue points (the case of rows that are not the four standard ones):
 /// `draw:glue-points`, every row of the `Connection` section from row 0 in row order, in the view box `0 0 21600 21600` (a share *s* of the width is
 /// 21600 *s*, of the height 21600 (1 − *s*)), and `draw:glue-point-leaving-directions` from `DirX` and `DirY` (degrees clockwise as seen from the x axis, as the reader reads
-/// them) when every row has a way out. `None` when the rows are not `IX` 0, 1, 2, ... in order, or a coordinate is not in the forms DiaCraft's basic shapes use
-/// (the constant 0, `Width`, `Width*k`, and the same of `Height`): the reader would not number them as the model does, or LibreOffice would not keep them at their share
-/// when the frame is resized.
+/// them) when every row has a way out. `None` when the rows are not `IX` 0, 1, 2, ... in order (the reader would not number them as the model does), or a coordinate is no
+/// number. A coordinate in the forms DiaCraft's basic shapes use (the constant 0, `Width`, `Width*k`, and the same of `Height`) is written as that share, which LibreOffice keeps
+/// when the frame is resized; any other is written from its value ([`glue_share`]), the share of the frame it stands at now, with its formula carried in DiaCraft's data.
 pub(crate) fn glue_points_text(sheet: &Sheet) -> Option<(String, Option<String>)> {
-    let section = sheet.sections.iter().find(|s| s.name.as_str() == "Connection")?;
-    if section.rows.is_empty() {
-        return None;
-    }
+    glue_points_listed(&glue_points_of(sheet)?)
+}
+
+/// The text of `draw:glue-points` and, when every point has a way out, of `draw:glue-point-leaving-directions` for `list` ([`glue_points_text`]); `None` when a place is out of range.
+pub(crate) fn glue_points_listed(list: &[GluePoint]) -> Option<(String, Option<String>)> {
     let mut points = String::new();
     let mut angles = String::new();
     let mut every_way = true;
-    for (k, row) in section.rows.iter().enumerate() {
-        if row.ix != u32::try_from(k).ok() || row.del {
-            return None;
-        }
-        let x = share_of(row.cells.get("X"), "Width")?;
-        let y = share_of(row.cells.get("Y"), "Height")?;
-        let (px, py) = (x * 21600.0, (1.0 - y) * 21600.0);
+    for point in list {
+        let (px, py) = (point.x * 21600.0, (1.0 - point.y) * 21600.0);
         if !within(px) || !within(py) {
             return None;
         }
@@ -762,11 +768,10 @@ pub(crate) fn glue_points_text(sheet: &Sheet) -> Option<(String, Option<String>)
             points.push(' ');
         }
         points.push_str(&format!("{} {}", num(px), num(py)));
-        let (dx, dy) = (number(row, "DirX").unwrap_or(0.0), number(row, "DirY").unwrap_or(0.0));
-        if dx == 0.0 && dy == 0.0 {
+        let Some((dx, dy)) = point.way else {
             every_way = false;
             continue;
-        }
+        };
         // The angle the reader reads back as this way out: its unit vector with y flipped (`read::custom::listed_glue`).
         let degrees = (-dy).atan2(dx).to_degrees().rem_euclid(360.0);
         if !angles.is_empty() {
@@ -775,6 +780,100 @@ pub(crate) fn glue_points_text(sheet: &Sheet) -> Option<(String, Option<String>)
         angles.push_str(&num(degrees));
     }
     Some((points, every_way.then_some(angles)))
+}
+
+/// A connection point as a glue point says it: its place as a share of the frame (`x` from the left, `y` from the bottom) and the way out its `DirX` and `DirY` give, `None` for none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GluePoint {
+    pub x: f64,
+    pub y: f64,
+    pub way: Option<(f64, f64)>,
+}
+
+/// The most rows of a `Connection` section a save writes as glue points of the file (the engine's doubling stops at 256, a snap reads 256): a longer section is carried in DiaCraft's data
+/// alone.
+pub(crate) const MOST_GLUE_POINTS: usize = 4096;
+
+/// The rows of the shape's `Connection` section as glue points, in row order: `None` when it has none, has more than [`MOST_GLUE_POINTS`], is not numbered `IX` 0, 1, 2, ... in order
+/// with none deleted, or holds a coordinate that is no number (see [`glue_share`]).
+pub(crate) fn glue_points_of(sheet: &Sheet) -> Option<Vec<GluePoint>> {
+    let section = sheet.sections.iter().find(|s| s.name.as_str() == "Connection")?;
+    if section.rows.is_empty() || section.rows.len() > MOST_GLUE_POINTS {
+        return None;
+    }
+    let size = Size::of(sheet);
+    let mut out = Vec::with_capacity(section.rows.len());
+    for (k, row) in section.rows.iter().enumerate() {
+        if row.ix != u32::try_from(k).ok() || row.del {
+            return None;
+        }
+        let x = glue_share(row.cells.get("X"), "Width", size.w)?;
+        let y = glue_share(row.cells.get("Y"), "Height", size.h)?;
+        let (dx, dy) = (number(row, "DirX").unwrap_or(0.0), number(row, "DirY").unwrap_or(0.0));
+        out.push(GluePoint { x, y, way: (dx != 0.0 || dy != 0.0).then_some((dx, dy)) });
+    }
+    Some(out)
+}
+
+/// `draw:escape-direction` for a way out: `left`, `right`, `up` or `down` along an axis, `auto` for none or any other way.
+fn escape_direction(way: Option<(f64, f64)>) -> &'static str {
+    match way {
+        Some((dx, dy)) if dy == 0.0 && dx < 0.0 => "left",
+        Some((dx, dy)) if dy == 0.0 && dx > 0.0 => "right",
+        Some((dx, dy)) if dx == 0.0 && dy > 0.0 => "up",
+        Some((dx, dy)) if dx == 0.0 && dy < 0.0 => "down",
+        _ => "auto",
+    }
+}
+
+/// How a shape's frame stands to the page and the box LibreOffice measures its glue points in: the shape's size, its turn and mirrors as the model has them
+/// (`Angle`, `FlipX`, `FlipY`), and the box ([`crate::read::Boxed`]), which is what the reader places a `draw:glue-point` with ([`crate::read::Place`]). LibreOffice places such a point in the
+/// page's axes, from the box the shape takes up on the page, so a turned or mirrored shape's point is written there and not at its share of its own frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GlueFrame {
+    pub place: crate::read::Place,
+    pub size: (f64, f64),
+}
+
+impl GlueFrame {
+    /// The frame of `sheet`, whose glue points LibreOffice measures in `boxed`: `None` for a size that is no length above 0.
+    pub(crate) fn of(sheet: &Sheet, boxed: crate::read::Boxed) -> Option<GlueFrame> {
+        let size = Size::of(sheet);
+        let number = |name: &str| sheet.cell(name).and_then(|c| c.value.as_ref()?.number()).filter(|v| v.is_finite());
+        let place =
+            crate::read::Place { angle: number("Angle").unwrap_or(0.0), flip: (number("FlipX") == Some(1.0), number("FlipY") == Some(1.0)), boxed };
+        Some(GlueFrame { place, size: (size.w?, size.h?) })
+    }
+
+    /// Whether the shape is turned or mirrored in the model, or its box is not its frame's: the points are then written in the page's axes.
+    pub(crate) fn turned(&self) -> bool {
+        !self.place.is_own()
+    }
+}
+
+/// The attributes of a `draw:glue-point` element for `point`, in LibreOffice's own form: `draw:id`, `svg:x` and `svg:y` as lengths in centimetres from the
+/// centre of the box LibreOffice measures them in with no `draw:align` (a share *s* of the box from its centre is 10*s* cm; `y` runs down the page), and `draw:escape-direction`.
+/// **For a shape turned or mirrored on the page the box and the axes are the page's**: the point is the one the reader's mapping takes back to the point's place in the
+/// frame ([`crate::read::Place::page_share`]), and its way out is the page's own direction ([`crate::read::Place::page_direction`]). `None` when a length is not in range, or the frame
+/// has no box to say a place in.
+pub(crate) fn glue_point_attributes(id: usize, point: &GluePoint, frame: &GlueFrame) -> Option<[(&'static str, String); 4]> {
+    let (x, y, way) = if frame.turned() {
+        let (w, h) = frame.size;
+        let (sx, sy) = frame.place.page_share((point.x * w, point.y * h), frame.size)?;
+        (10.0 * sx, 10.0 * sy, point.way.map(|d| frame.place.page_direction(d)))
+    } else {
+        // The shape's own frame is the page's: a share of the frame from its centre, y down. A way out is the page's own too (the identity of the reader's mapping).
+        (10.0 * (point.x - 0.5), 10.0 * (0.5 - point.y), point.way)
+    };
+    if !within(x) || !within(y) {
+        return None;
+    }
+    Some([
+        ("id", id.to_string()),
+        ("x", format!("{}cm", num(x))),
+        ("y", format!("{}cm", num(y))),
+        ("escape-direction", escape_direction(way).to_owned()),
+    ])
 }
 
 /// `draw:modifiers` with the values at `changes` (place and value) replaced, the others as they were written.
@@ -1281,5 +1380,159 @@ mod tests {
         assert_eq!(turned.unwrap_err(), WORDS_FORM);
         let flat = ellipse([x, y, ("A", "1", "Width*0.5"), b, ("C", "1", "Width*0.5"), ("D", "1", "Height")]);
         assert_eq!(flat.unwrap_err(), WORDS_FORM);
+    }
+
+    /// A coordinate of a connection row in a test: its value and its formula.
+    type Coordinate<'a> = (&'a str, Option<&'a str>);
+
+    /// A shape 2 by 1 with the connection rows `rows` (X and Y as a coordinate each, then the way out).
+    fn with_points(rows: &[(Coordinate<'_>, Coordinate<'_>, (f64, f64))]) -> Sheet {
+        let mut sheet = Sheet::default();
+        for (name, v) in [("Width", "2"), ("Height", "1")] {
+            sheet.cells.insert(CellName::new(name), Cell::constant(Value::from_text(v)));
+        }
+        let mut section = Section::new("Connection", None);
+        for (i, ((xv, xf), (yv, yf), (dx, dy))) in rows.iter().enumerate() {
+            let mut r = Row { ix: Some(i as u32), ..Row::default() };
+            r.cells.insert(CellName::new("X"), Cell::read(*xf, Some(xv), Some("IN"), None, &mut 1_000));
+            r.cells.insert(CellName::new("Y"), Cell::read(*yf, Some(yv), Some("IN"), None, &mut 1_000));
+            r.cells.insert(CellName::new("DirX"), Cell::constant(Value::from_number(*dx).unwrap_or_else(|| Value::from_text("0"))));
+            r.cells.insert(CellName::new("DirY"), Cell::constant(Value::from_number(*dy).unwrap_or_else(|| Value::from_text("0"))));
+            section.rows.push(Arc::new(r));
+        }
+        sheet.sections.push(Arc::new(section));
+        sheet
+    }
+
+    /// **A row that is not a share of the frame is written from its value** (CPDOUBLE.ODG): a point a doubling put on a curve (`PNTX(POINTALONGPATH(...))`) or a constant length is the
+    /// share of the frame it stands at, and a row in the forms DiaCraft's basic shapes use is the share its formula says.
+    #[test]
+    fn a_connection_row_that_is_no_share_is_listed_from_its_value() {
+        let sheet = with_points(&[
+            (("1", Some("Width*0.5")), ("1", Some("Height")), (0.0, 1.0)),
+            (("0.5", Some("PNTX(POINTALONGPATH(Geometry1.Path,0.125,0,1))")), ("0.75", None), (0.0, 1.0)),
+            (("1.5", None), ("0", None), (0.0, -1.0)),
+        ]);
+        let (points, ways) = glue_points_text(&sheet).unwrap();
+        assert_eq!(
+            points, "10800 0 5400 5400 16200 21600",
+            "a share, a point on a curve at a quarter across and three quarters up, a length of 1.5 inches in a frame 2 wide"
+        );
+        assert_eq!(ways.as_deref(), Some("270 270 90"), "every row has a way out");
+        // A row with no value is no point.
+        let mut broken = with_points(&[(("1", None), ("1", None), (0.0, 1.0))]);
+        Arc::make_mut(&mut Arc::make_mut(&mut broken.sections[0]).rows[0]).cells.insert(CellName::new("X"), Cell::constant(Value::from_text("text")));
+        assert!(glue_points_text(&broken).is_none());
+        // A frame with no width gives no share to a length.
+        let mut flat = with_points(&[(("1", None), ("1", None), (0.0, 1.0))]);
+        flat.cells.insert(CellName::new("Width"), Cell::constant(Value::from_text("0")));
+        assert!(glue_points_text(&flat).is_none());
+    }
+
+    /// The rows are a list from 0 with none deleted and not more than [`MOST_GLUE_POINTS`]; a way out is none for 0 and 0; one row without a way out leaves the list of ways out out.
+    #[test]
+    fn the_rows_are_glue_points_only_when_numbered_from_0_in_order_and_a_missing_way_leaves_the_directions_out() {
+        let sheet = with_points(&[(("1", None), ("1", None), (0.0, 1.0)), (("0", None), ("0.5", None), (0.0, 0.0))]);
+        let list = glue_points_of(&sheet).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0], GluePoint { x: 0.5, y: 1.0, way: Some((0.0, 1.0)) });
+        assert_eq!(list[1].way, None);
+        assert_eq!(glue_points_text(&sheet).unwrap().1, None, "a row without a way out");
+        let mut gap = with_points(&[(("1", None), ("1", None), (0.0, 1.0)), (("0", None), ("0.5", None), (1.0, 0.0))]);
+        Arc::make_mut(&mut Arc::make_mut(&mut gap.sections[0]).rows[1]).ix = Some(3);
+        assert!(glue_points_of(&gap).is_none(), "a row numbered 3 after row 0: the reader would not number them as the model does");
+        let mut deleted = with_points(&[(("1", None), ("1", None), (0.0, 1.0))]);
+        Arc::make_mut(&mut Arc::make_mut(&mut deleted.sections[0]).rows[0]).del = true;
+        assert!(glue_points_of(&deleted).is_none());
+        let many: Vec<_> = (0..=MOST_GLUE_POINTS).map(|_| (("1", None), ("1", None), (0.0, 1.0))).collect();
+        assert!(glue_points_of(&with_points(&many)).is_none(), "past the most a save writes");
+        assert_eq!(glue_points_of(&with_points(&many[..MOST_GLUE_POINTS])).map(|l| l.len()), Some(MOST_GLUE_POINTS));
+    }
+
+    /// A frame that is the page's: no turn, no mirror.
+    fn plain_frame() -> GlueFrame {
+        GlueFrame { place: crate::read::Place { angle: 0.0, flip: (false, false), boxed: crate::read::Boxed::Frame }, size: (3.0, 2.0) }
+    }
+
+    /// A `draw:glue-point` element in LibreOffice's own form: lengths in centimetres from the frame's centre, 10 cm for a whole width or height, y down the
+    /// page, and an escape direction along an axis or `auto`.
+    #[test]
+    fn a_glue_point_element_is_in_centimetres_from_the_centre_with_y_down_and_an_escape_direction() {
+        let frame = plain_frame();
+        let at = |x: f64, y: f64, way: Option<(f64, f64)>| glue_point_attributes(7, &GluePoint { x, y, way }, &frame).unwrap();
+        let top = at(0.75, 1.0, Some((0.0, 1.0)));
+        assert_eq!(top, [("id", "7".to_owned()), ("x", "2.5cm".to_owned()), ("y", "-5cm".to_owned()), ("escape-direction", "up".to_owned())]);
+        let corner = at(0.0, 0.0, Some((-1.0, 0.0)));
+        assert_eq!((corner[1].1.as_str(), corner[2].1.as_str(), corner[3].1.as_str()), ("-5cm", "5cm", "left"));
+        let middle = at(0.5, 0.5, None);
+        assert_eq!((middle[1].1.as_str(), middle[2].1.as_str(), middle[3].1.as_str()), ("0cm", "0cm", "auto"));
+        assert_eq!(at(0.5, 0.5, Some((1.0, 0.0)))[3].1, "right");
+        assert_eq!(at(0.5, 0.5, Some((0.0, -1.0)))[3].1, "down");
+        assert_eq!(at(0.5, 0.5, Some((1.0, 1.0)))[3].1, "auto", "a way that is none of the four axes");
+        assert!(glue_point_attributes(0, &GluePoint { x: 1e300, y: 0.5, way: None }, &frame).is_none(), "a place out of range is no element");
+    }
+
+    /// **A point of a turned or mirrored shape is written in the page's axes**, from the box the shape takes up on the page: a frame 3 by 2 inches turned a quarter turn
+    /// takes up 2 by 3, and its top middle (the way out up) is on the page's left side, at the middle, going left; mirrored top to bottom, the same top middle is the page's bottom,
+    /// going down. The shape's way out follows.
+    #[test]
+    fn a_point_of_a_turned_or_mirrored_shape_is_written_in_the_pages_axes() {
+        let turned = |degrees: f64, flip: (bool, bool), boxed| GlueFrame {
+            place: crate::read::Place { angle: degrees.to_radians(), flip, boxed },
+            size: (3.0, 2.0),
+        };
+        let top = GluePoint { x: 0.5, y: 1.0, way: Some((0.0, 1.0)) };
+        let quarter = glue_point_attributes(4, &top, &turned(90.0, (false, false), crate::read::Boxed::Frame)).unwrap();
+        assert_eq!(
+            [quarter[1].1.as_str(), quarter[2].1.as_str(), quarter[3].1.as_str()],
+            ["-5cm", "0cm", "left"],
+            "the top middle of a frame turned a quarter turn counterclockwise is the middle of the page's left side"
+        );
+        let half = glue_point_attributes(4, &top, &turned(180.0, (false, false), crate::read::Boxed::Frame)).unwrap();
+        assert_eq!(
+            [half[1].1.as_str(), half[2].1.as_str(), half[3].1.as_str()],
+            ["0cm", "5cm", "down"],
+            "turned half a turn it is the page's bottom middle"
+        );
+        let mirrored = glue_point_attributes(4, &top, &turned(0.0, (false, true), crate::read::Boxed::Frame)).unwrap();
+        assert_eq!(
+            [mirrored[1].1.as_str(), mirrored[2].1.as_str(), mirrored[3].1.as_str()],
+            ["0cm", "5cm", "down"],
+            "mirrored top to bottom the top middle is the bottom"
+        );
+        let side = GluePoint { x: 1.0, y: 0.5, way: Some((1.0, 0.0)) };
+        let slanted = glue_point_attributes(4, &side, &turned(30.0, (false, false), crate::read::Boxed::Frame)).unwrap();
+        // The box of a 3 by 2 frame turned 30 degrees is (3 cos 30 + 2 sin 30) by (3 sin 30 + 2 cos 30); the right middle is 1.5 along the turned x axis from the centre.
+        let (c, s) = (30.0_f64.to_radians().cos(), 30.0_f64.to_radians().sin());
+        let (bw, bh) = (3.0 * c + 2.0 * s, 3.0 * s + 2.0 * c);
+        let want = (10.0 * 1.5 * c / bw, -10.0 * 1.5 * s / bh);
+        let got = (slanted[1].1.trim_end_matches("cm").parse::<f64>().unwrap(), slanted[2].1.trim_end_matches("cm").parse::<f64>().unwrap());
+        assert!((got.0 - want.0).abs() < 1e-5 && (got.1 - want.1).abs() < 1e-5, "{got:?} against {want:?}");
+        assert_eq!(slanted[3].1, "auto", "a way out turned 30 degrees is along no axis of the page");
+        // A whole ellipse's box is its own extent, tighter than its frame's.
+        let ellipse = glue_point_attributes(4, &side, &turned(30.0, (false, false), crate::read::Boxed::Ellipse)).unwrap();
+        let (ew, eh) = ((3.0 * c).hypot(2.0 * s), (3.0 * s).hypot(2.0 * c));
+        let want = (10.0 * 1.5 * c / ew, -10.0 * 1.5 * s / eh);
+        let got = (ellipse[1].1.trim_end_matches("cm").parse::<f64>().unwrap(), ellipse[2].1.trim_end_matches("cm").parse::<f64>().unwrap());
+        assert!((got.0 - want.0).abs() < 1e-5 && (got.1 - want.1).abs() < 1e-5, "{got:?} against {want:?}");
+        // A shape whose glue points are read in its own frame (an arc) is written there whatever its turn.
+        let own = glue_point_attributes(4, &side, &turned(30.0, (true, false), crate::read::Boxed::Own)).unwrap();
+        assert_eq!([own[1].1.as_str(), own[2].1.as_str(), own[3].1.as_str()], ["5cm", "0cm", "right"]);
+    }
+
+    /// The frame of a sheet: its size must be a length above 0, and its turn and mirrors are its cells'.
+    #[test]
+    fn the_glue_frame_of_a_sheet_is_its_size_turn_and_mirrors() {
+        let mut sheet = with_points(&[(("1", None), ("1", None), (0.0, 1.0))]);
+        for (name, v) in [("Angle", "0.5"), ("FlipX", "1"), ("FlipY", "0")] {
+            sheet.cells.insert(CellName::new(name), Cell::constant(Value::from_text(v)));
+        }
+        let frame = GlueFrame::of(&sheet, crate::read::Boxed::Frame).unwrap();
+        assert_eq!((frame.size, frame.place.angle, frame.place.flip), ((2.0, 1.0), 0.5, (true, false)));
+        assert!(frame.turned());
+        let plain = with_points(&[(("1", None), ("1", None), (0.0, 1.0))]);
+        assert!(!GlueFrame::of(&plain, crate::read::Boxed::Frame).unwrap().turned());
+        sheet.cells.insert(CellName::new("Width"), Cell::constant(Value::from_text("0")));
+        assert!(GlueFrame::of(&sheet, crate::read::Boxed::Frame).is_none(), "no width, no box");
     }
 }

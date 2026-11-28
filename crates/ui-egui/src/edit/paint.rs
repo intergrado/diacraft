@@ -205,9 +205,17 @@ pub const MAX_POINTS_MARKED: usize = 4_096;
 pub(super) const DASH: f32 = 5.0;
 pub(super) const GAP: f32 = 3.0;
 
-/// The paths that stand for an item in a preview: its geometry, or its box when it has none.
+/// The paths that stand for an item in a preview: what the page paints of its geometry (`Item::painted_paths`: a section the shape hides is not there), or its box when it paints none. A
+/// shape whose geometry is all hidden (a marker of a group's member) has no part in the preview.
 pub(super) fn preview_paths(item: &Item) -> Vec<Vec<P>> {
-    if item.outline.is_empty() { vec![item.corners.to_vec()] } else { item.outline.clone() }
+    let painted: Vec<Vec<P>> = item.painted_paths().cloned().collect();
+    if !painted.is_empty() {
+        painted
+    } else if item.hidden {
+        Vec::new()
+    } else {
+        vec![item.corners.to_vec()]
+    }
 }
 
 /// The most shapes a preview of a drag draws: a group of thousands of members is drawn by its box and the first of them, as a page of thousands of shapes is not read at all.
@@ -526,5 +534,36 @@ impl DiacraftApp {
             paint_marks(painter, t, cx, &gesture.landing.marks);
         }
         painter.circle(cx.screen_at(end), END_RADIUS, if free { t.glue_off } else { t.glue_on }, Stroke::new(1.5, t.edit_line));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use serde_json::json;
+
+    use super::*;
+
+    /// What a drag of a group draws is what its members paint: a BPMN gateway is its diamond and the box its name is typed in, and the markers it hides at its default Shape Data are not drawn
+    /// (nor their boxes).
+    #[test]
+    fn the_preview_of_a_group_draws_what_its_members_paint_and_nothing_of_the_markers_they_hide() {
+        let mut session = diacraft_engine::Session::new();
+        session.execute("file.new", &json!({})).unwrap();
+        let page = session.document().unwrap().pages.get(0).unwrap().id;
+        let dropped = session.execute("shape.drop", &json!({"master": "bpmn.gateway", "page": page, "x": 4.0, "y": 3.0})).unwrap();
+        let id = u32::try_from(dropped["id"].as_u64().unwrap()).unwrap();
+        let scene = Scene::build_all(session.document().unwrap(), page, session.revision()).unwrap();
+        let items = preview_items(&scene, &[id]);
+        assert!(items.iter().any(|item| item.hidden), "the gateway has hidden markers");
+        for item in items.iter().filter(|item| item.hidden) {
+            assert!(preview_paths(item).is_empty(), "a marker nobody can see has no part in a preview");
+        }
+        let paths: Vec<Vec<P>> = items.iter().copied().flat_map(preview_paths).collect();
+        assert_eq!(paths.len(), 2, "the diamond, and the box of the name: {paths:?}");
+        let mut lengths: Vec<usize> = paths.iter().map(Vec::len).collect();
+        lengths.sort_unstable();
+        assert_eq!(lengths, [4, 5], "a box has four corners and the diamond's outline comes back to its first: {paths:?}");
     }
 }

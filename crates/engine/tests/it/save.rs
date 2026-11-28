@@ -343,7 +343,7 @@ fn shapes_dropped_and_connected_are_saved_and_read_back_as_the_model() {
     assert_eq!(page.shapes.len(), 4, "three shapes and a connector");
     assert!(page.connects.len() >= 2, "the connector's two ends are glued: {:?}", page.connects);
     assert_eq!(page.connects, model.page(1).unwrap().connects, "the Connect rows survive as the model has them");
-    assert!(read.masters.iter().all(|m| m.unique_id.as_deref().is_some_and(|g| g.starts_with("{D1AC0001-"))), "the masters keep their fixed GUIDs");
+    assert!(read.masters.iter().all(|m| m.raw.get("BaseID").is_some_and(|g| g.starts_with("{D1AC0001-"))), "the masters keep their fixed BaseIDs");
     let instances = page.shapes.iter().filter(|s| s.master.is_some()).count();
     assert_eq!(instances, 3, "the three dropped shapes are instances of masters");
     // The package has the parts and the relationships a file needs for them.

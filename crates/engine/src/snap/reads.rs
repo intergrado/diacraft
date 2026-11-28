@@ -56,10 +56,12 @@ pub struct Counts {
     /// Times a command looked for the kept read of its page and found it, and times it found none and read the page itself.
     pub kept_found: usize,
     pub kept_missing: usize,
+    /// Drops made on a copy of the document to find the shape a master's drop makes (`snap::drop_preview`: the window's ghost and the places it is pulled by, U49).
+    pub drops: usize,
 }
 
 thread_local! {
-    static COUNTS: Cell<Counts> = const { Cell::new(Counts { page_reads: 0, index_builds: 0, target_builds: 0, kept_found: 0, kept_missing: 0 }) };
+    static COUNTS: Cell<Counts> = const { Cell::new(Counts { page_reads: 0, index_builds: 0, target_builds: 0, kept_found: 0, kept_missing: 0, drops: 0 }) };
 }
 
 /// What the calling thread has read since [`reset_counts`].

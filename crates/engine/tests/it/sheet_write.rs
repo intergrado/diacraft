@@ -916,3 +916,77 @@ fn a_batch_works_out_each_page_it_touched_once_and_a_masters_cell_only_the_pages
 fn doc_of(s: &Session) -> &Document {
     doc(s)
 }
+
+// ---- the sheets no page holds ------------------------------------------------------------------------------------------------
+
+/// A sheet's keys with `extra` beside them.
+fn on(keys: &Value, extra: Value) -> Value {
+    let mut params = keys.clone();
+    if let (Some(map), Some(more)) = (params.as_object_mut(), extra.as_object()) {
+        map.extend(more.clone());
+    }
+    params
+}
+
+/// A formula typed into a cell of a sheet that no page works out, in a chain of three cells: the cell is worked out as one typed on a shape is, the cells of its own sheet that read it
+/// follow it, a full recalculation finds nothing left over, and undo takes the write and what it worked out back together.
+fn a_chain_on(s: &mut Session, label: &str, keys: &Value) {
+    run(s, "sheet.add_section", on(keys, json!({"section": "User"})));
+    run(s, "sheet.add_row", on(keys, json!({"section": "User", "name": "B"})));
+    run(s, "sheet.add_row", on(keys, json!({"section": "User", "name": "C"})));
+    run(s, "sheet.set_cell", on(keys, json!({"cell": "User.Row_1.Value", "formula": "5"})));
+    let b = run(s, "sheet.set_cell", on(keys, json!({"cell": "User.B.Value", "formula": "User.Row_1.Value+1"})));
+    assert_eq!(b["value"], json!(6.0), "{label}: the cell written reads what its formula gives: {b}");
+    let c = run(s, "sheet.set_cell", on(keys, json!({"cell": "User.C.Value", "formula": "User.B.Value*2"})));
+    assert_eq!(c["value"], json!(12.0), "{label}: {c}");
+    // The cell they read is written again: both follow it.
+    run(s, "sheet.set_cell", on(keys, json!({"cell": "User.Row_1.Value", "formula": "8"})));
+    let read = |s: &mut Session, name: &str| run(s, "sheet.cell", on(keys, json!({"cell": name})))["value"].clone();
+    assert_eq!(
+        (read(s, "User.B.Value"), read(s, "User.C.Value")),
+        (json!(9.0), json!(18.0)),
+        "{label}: the cells that read the written one follow it"
+    );
+    let report = diacraft_calc::recalc_all(doc(s), &diacraft_calc::Budget::default());
+    assert!(report.differed.is_empty(), "{label}: a full recalculation differs from the drawing: {:?}", report.differed);
+    run(s, "edit.undo", json!({}));
+    assert_eq!((read(s, "User.B.Value"), read(s, "User.C.Value")), (json!(6.0), json!(12.0)), "{label}: undo");
+    assert_eq!(check_session(s), Ok(()));
+}
+
+/// The sheets no page works out: the document's, a style's, a master's page sheet, and a master's shape when no page holds an instance of it. The property test found the first of
+/// them left at the 0 it was given, whatever it read, and a full recalculation saying so. (A master's shape that a page holds an instance of is worked out by that page.)
+#[test]
+fn a_formula_in_the_sheet_of_the_document_a_style_a_masters_page_or_a_masters_shape_is_worked_out_and_followed() {
+    let master = MasterBuilder::new().shape(ShapeBuilder::new(5).cell_u("Width", "1", "IN"));
+    let page = PageBuilder::new().name("Page-1").shape(ShapeBuilder::new(10).cell_u("Width", "2", "IN"));
+    let mut s = session_of(DocBuilder::new().master(1, master).style(1, StyleBuilder::new().name("S1")).page(1, page).build());
+    for (label, keys) in [
+        ("the document", json!({"document": true})),
+        ("a style", json!({"style": 1})),
+        ("a master's page", json!({"master": 1})),
+        ("the shape of a master no page holds an instance of", json!({"master": 1, "id": 5})),
+    ] {
+        a_chain_on(&mut s, label, &keys);
+    }
+}
+
+/// A call that puts every cell back as it was is no change and no step, though the first write of it stood a value in the cell until the recalculation gave it the value it had (
+/// the property test found a batch that wrote a cell and wrote it back made an undo step, and the drawing after it was equal to the drawing before).
+#[test]
+fn a_batch_that_writes_a_cell_and_writes_it_back_is_no_step() {
+    let mut s = one_shape(ShapeBuilder::new(10).cell_u("Width", "2", "IN").formula("Height", "Width*2", "4"));
+    let anchor = state(&s);
+    let writes = json!([{"cell": "Height", "formula": "7"}, {"cell": "Height", "formula": "Width*2"}]);
+    let answer = run(&mut s, "sheet.set_cells", json!({"id": 10, "writes": writes}));
+    assert_eq!(state(&s), anchor, "the drawing, the history and the revision are as they were: {answer}");
+}
+
+/// The same chain on the shape of a master that a page holds an instance of, which the pages that hold one work out.
+#[test]
+fn a_formula_in_the_shape_of_a_master_a_page_holds_an_instance_of_is_worked_out_and_followed() {
+    let master = MasterBuilder::new().shape(ShapeBuilder::new(5).cell_u("Width", "1", "IN"));
+    let page = PageBuilder::new().name("Page-1").shape(ShapeBuilder::new(10).master(1));
+    let mut s = session_of(DocBuilder::new().master(1, master).page(1, page).build());
+    a_chain_on(&mut s, "the shape of a master with an instance", &json!({"master": 1, "id": 5}));
+}

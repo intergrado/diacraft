@@ -241,7 +241,7 @@ pub struct Item {
     /// The master's key in its stencil: its id for a built-in one, its `ID` as text for a file's.
     pub key: String,
     pub one_d: bool,
-    /// Whether the AutoConnect strip may offer it: no connector, no part of a structure, and of a stencil that feeds the strip.
+    /// Whether the AutoConnect strip may offer it: no connector, no part of a structure, no master that no connector joins, and of a stencil that feeds the strip.
     pub feeds: bool,
     pub json: Value,
 }
@@ -387,7 +387,8 @@ pub fn offer_gathered(opened: &OpenedStencils, held: &Held) -> Vec<(String, Item
 /// Our rule where the specification is silent. The strip shows the first four shapes of the stencil that is selected
 /// and that "not all stencils feed it (the Arrow Shapes stencil does not)", and no page says what the strip shows while such a stencil is selected. So: **a master feeds the strip** when it
 /// is no connector, **no part of a structure** (a Swimlane or a Separator, whose drop is put in a list of lanes or phases, and a stencil file's master whose shape is typed `Container` or
-/// `List`: `MasterEntry::part`) and of a stencil that feeds it (every built-in one but Arrow Shapes, and every stencil file). Such masters stay Quick Shapes where they are (the group is
+/// `List`: `MasterEntry::part`; and a built-in master of the container role, a package or a subject: `MasterSpec::is_container`), **no built-in master that no connector joins** (a title or a key, which have no connection point) and of a stencil that feeds it (every built-in one but Arrow
+/// Shapes, and every stencil file). Such masters stay Quick Shapes where they are (the group is
 /// the person's), and the strip passes over them. **A stencil that feeds the strip nothing** (Arrow Shapes, Cross-Functional Flowchart Shapes, a file of parts) gives it what the first open
 /// stencil that feeds it offers, in the order the window lists them: the default R3 names, "the stencil that follows the Quick Shapes stencil". → the stencil the masters are of, and them;
 /// `view`'s own id and none when no open stencil feeds the strip.

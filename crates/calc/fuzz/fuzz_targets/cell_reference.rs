@@ -13,6 +13,8 @@
 //! text (or is the parser's own length limit); and **the document is the same after**, which the borrow already says and a clone compared says again.
 //! A text of the mutating kind (`SETF`, a cycle, a chain of cells, `EVALTEXT` of `EVALTEXT`) is a value or an error within the budget.
 //!
+//! **`page_index_spans`** reads the same text for where the index of each `Pages[..]` qualifier sits: in order, inside the text on character boundaries, each between a `[` and a `]`.
+//!
 //! **`reference_spans`** reads the same text for where each cell reference sits in it: the parser's error when it does not parse (the one `parse` gives), else spans
 //! inside the text on character boundaries in the order the references begin, each covering text that read alone is the reference it holds, with its segments inside it; and
 //! **`Locator::locate`** finds the cell each of the first references names on the same document, within the same budget and never a panic, writing nothing.
@@ -24,7 +26,7 @@ use std::sync::OnceLock;
 
 use diacraft_calc::{Budget, EvalCtx, EvalOptions, EvalResult, Locator, MAX_REFERENCE_BYTES, cell_address, evaluate_text, reference_name};
 use diacraft_doc::{Cell, CellAddr, Document, RowKey, SheetRef, Value};
-use diacraft_formula::{Expr, parse, reference_spans};
+use diacraft_formula::{Expr, page_index_spans, parse, reference_spans};
 use libfuzzer_sys::fuzz_target;
 
 /// The most steps a run of the dry run may take: small, so that an input stays quick and a loop shows as the budget reached.
@@ -61,6 +63,17 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(cell_address(&spelled), Ok(addr), "`{spelled}` does not read back as the cell it was spelled for");
         }
         Err(e) => assert!(!e.to_string().is_empty()),
+    }
+
+    // Where the index of each `Pages[..]` qualifier sits: in the order of the text, on character boundaries, each between a `[` and a `]`, and no two overlap.
+    let mut last_end = 0;
+    for span in page_index_spans(&all) {
+        let (start, end) = (span.inside.start, span.inside.end);
+        assert!(last_end < start && start <= end && end < all.len(), "an index of {start}..{end} in {} bytes after {last_end}", all.len());
+        assert!(all.is_char_boundary(start) && all.is_char_boundary(end));
+        assert_eq!(all.as_bytes().get(start - 1), Some(&b'['));
+        assert_eq!(all.as_bytes().get(end), Some(&b']'));
+        last_end = end;
     }
 
     // Where the references of the text sit, and which cell each names.

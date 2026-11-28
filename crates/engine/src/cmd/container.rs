@@ -240,13 +240,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         match (named, around.is_empty()) {
             (Some(page), _) => page,
             (None, false) => page_for(doc, None, &around, ID)?,
-            (None, true) => doc
-                .pages
-                .iter()
-                .find(|pg| !pg.background)
-                .or_else(|| doc.pages.iter().next())
-                .map(|pg| pg.id)
-                .ok_or_else(|| bad(ID, "the document has no pages"))?,
+            (None, true) => doc.first_foreground_page().map(|pg| pg.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
         }
     };
     let (setup, k) = {

@@ -4,7 +4,7 @@
 //! tool can build a page without the session. The commands (`cmd/shape.rs`, `cmd/connector.rs`) check their parameters, convert paper
 //! inches to drawing units, and call these.
 //!
-//! * [`shapes`]: drop an instance of a master, move, resize, delete.
+//! * [`shapes`]: drop an instance of a master, move, resize, delete. [`drop_scale`]: what a drop does on a page of another drawing scale than the master's (the range of eight).
 //! * [`arrange`]: rotate, flip, drawing order and align; [`scale`]: several shapes, or a group, resized as one.
 //! * [`placement`] and [`line_ends`]: what the Size & Position window sends and reads: the pin, one size for several shapes, a line's ends and
 //!   length, and where a shape is; [`place`]: an absolute place for the pins of many shapes.
@@ -13,20 +13,32 @@
 //!   once for the commands that take many `ID`s.
 //! * [`local`]: a member that is an instance carries its master's `Geometry` itself, so that a reader that does not know the master draws it (
 //!   kept); [`nested`]: it holds its `Width`, `Height`, `PinX` and `PinY` as formulas of its group, as a file's does.
-//! * [`change`]: Change Shape: shapes swapped for another master, keeping their place, size, text, formatting, data and glue.
-//! * [`shapeops`]: Union, Combine, Fragment, Intersect and Subtract, on the path library the Craft apps share.
+//! * [`change`]: Change Shape: shapes swapped for another master, keeping their place, size, text, formatting, data and glue; `change_copy`: the cells the
+//!   new master's `ReplaceCopyCells` names, carried over whatever the locks say.
+//! * [`double_click`]: what a double click on a shape does as far as its `EventDblClick` says: a group whose cell calls `OPENGROUPWIN()` opens nothing and the status bar says
+//!   there are no group windows (OPENGROUPWIN).
+//! * [`shapeops`]: Union, Combine, Fragment, Intersect and Subtract, Join and Trim, and Offset and Fit Curve, on the path library
+//!   the Craft apps share.
+//! * [`alt_text`]: the title and the description of a shape, a page and a master, found through the master and set to the sheet's own row; [`accessibility`]: the first check over a drawing's pages and top-level
+//!   shapes, five rules, which only reads.
 //! * [`text_edit`]: the text of a shape: replace it, or a range of its characters with its runs and fields kept.
 //! * [`text_box`]: the shape the Text tool makes, a box of text with no master; [`text_block`]: a shape's text block on its own, where it is, and
 //!   moving, resizing and turning it.
 //! * [`connectors`]: add a connector glued at its ends, move an end. **Glue** is a `Connect` row and a formula on the end cell that names
 //!   the target's connection point (`PAR(PNT(Sheet.<id>!Connections.X<n>,Sheet.<id>!Connections.Y<n>))`), so a recalculation moves the end.
 //! * [`route`]: the right-angle route, written as `Geometry` rows with values after each recalculation.
+//! * [`routable`]: the cells that make a connector one the VSDX application routes again, `ObjType` 2 and `GlueType` 2, which a connector made here holds and one of DiaCraft's that lacks
+//!   them is given when it is routed again or saved across to a VSDX type.
 //! * [`obstacle`]: which shapes a route goes round (placeable by `ObjType`, a group of members, hidden layers, guides) and the write that gluing a connector makes
 //!   [`behavior`]: the Behavior dialog's Placement tab as cells, `shape.behavior` and `shape.set_behavior`.
 //! * [`routing`]: the page's routing settings, the Layout and Routing tab's cells, and the new route a new page style asks of the connectors that follow
 //!   the page; `style` holds the routing styles.
+//! * [`route_scene`]: the page's routing scene, which a session keeps and puts right by pointer: the obstacles and the legs of the connectors as the router takes them, and the page's
+//!   routing cells as its settings.
 //! * [`settle`]: after an edit, the recalculation of what it changed and what reads it (through `calc`, not of the whole page), and the routes
 //!   of the connectors it moved.
+//! * [`worked`]: a cell that holds a formula and no saved value, read as the picture draws it (by what the formula works out to) by the readers that edit and pick: the commands' reader,
+//!   the pointer's scene and the group's text target, with the steps for it shared by all the readers of one command.
 //! * [`page_setup`], [`page_fit`], [`pages`] and [`paper`]: a page's size, orientation, drawing scale, printer paper and Auto Size, the growth of
 //!   a page that has it on, and deleting and reordering pages.
 //!
@@ -36,17 +48,24 @@
 //! hook then recomputes. Here only the commands that move an end write rows, on exactly the connectors they moved, and an undo step
 //! simply holds the rows that were there.
 
+pub mod accessibility;
+pub mod alt_text;
 mod arrange;
 mod autoconnect;
 mod behavior;
 pub mod callout_preview;
 pub mod callouts;
 mod change;
+mod change_copy;
 mod clipboard;
 pub mod comments;
+pub mod conn_marker;
 pub mod conn_points;
+pub mod conn_refs;
 mod connectors;
 pub mod container;
+pub mod double_click;
+pub(crate) mod drop_scale;
 pub mod fields;
 pub mod find;
 mod glue;
@@ -78,10 +97,13 @@ mod refit;
 pub mod relayout;
 mod remap;
 mod reroute;
+mod reverse;
+pub(crate) mod routable;
 pub mod route;
 mod route_clear;
 #[cfg(test)]
 mod route_cost;
+pub(crate) mod route_scene;
 pub mod routing;
 mod rows;
 mod scale;
@@ -100,6 +122,9 @@ mod text_block;
 mod text_box;
 mod text_edit;
 pub(crate) mod ties;
+mod unpaged;
+pub(crate) mod walkglue;
+pub mod worked;
 
 use std::sync::Arc;
 
@@ -116,7 +141,13 @@ pub use change::{
     swapping_locked,
 };
 pub use clipboard::{Clipboard, Pasted, Placement, copy_shapes, cut_shapes, duplicate_shapes, paste_shapes};
-pub use connectors::{ConnectorInfo, End, Which, add_connector, add_connector_above, attach_connector, attach_connector_above, reconnect_connector};
+pub use connectors::{
+    ConnectorInfo, End, EndGlue, Which, add_connector, add_connector_above, attach_connector, attach_connector_above, connector_info,
+    reconnect_connector,
+};
+pub use drop_scale::{
+    Class as DropClass, EDGE_TOLERANCE as DROP_EDGE_TOLERANCE, Follow, RANGE as DROP_RANGE, class_of as drop_class_of, scale_of, usable_length,
+};
 pub use group::{Grouped, MAX_GROUP_DEPTH, MAX_UNGROUP_MEMBERS, Ungrouped, group_shapes, ungroup_shapes};
 pub use hand::{ConnectorPath, HAND_EDITED, LegSubject, MAX_HAND_POINTS, connector_path, edit_leg, leg_subject, moved_route, reset_connectors};
 pub use jump_settings::{JumpChange, LineJumpSettings, line_jump_settings, set_line_jumps};
@@ -136,8 +167,9 @@ pub use placement::{Glue, LineEnd, LineFacts, PinAt, Place, ShapePlacement, pin_
 pub(crate) use read::Reader;
 pub use read::{ConnectionPoint, Frame, Pose, connection_points, connection_points_within, shape_corners, shape_frame, units_per_inch};
 pub use refit::{Left, MAX_LEFT_LISTED, MAX_OWN_POINT_ROWS, MAX_REFIT_MEMBERS, MAX_REROUTED, Refit, refit_groups};
-pub(crate) use remap::{freeze_refs_of, sheet_refs};
+pub(crate) use remap::{freeze_refs_of, rewrite_refs, sheet_refs};
 pub use reroute::{MAX_CROSSING_POINT_ROWS, MAX_CROSSING_ROWS, Reroute, connector_reroute, set_reroute};
+pub use reverse::{MAX_REVERSE_ROWS, NotReversed, Reversal, reverse_ends};
 pub use scale::{MAX_SCALED_MEMBERS, Scaled, resize_shapes};
 /// For the Kani harnesses of the crate (`crate::kani_proofs`).
 #[cfg(kani)]
@@ -151,19 +183,27 @@ pub use select::{
     MAX_SHAPE_POINTS, Picked, Role as SelectRole, TypeQuery, by_region, by_type, choices as select_choices,
 };
 pub(crate) use settle::EditRoutes;
-pub use settle::{MAX_ROUTED_PER_EDIT, settle, settle_forced};
+#[cfg(test)]
+pub(crate) use settle::SETTLES;
+pub use settle::{MAX_ROUTED_PER_EDIT, settle, settle_forced, settle_pages};
+pub(crate) use settle::{route_recalculated, route_recalculated_on_within, route_recalculated_pages};
+pub use shapeops::{Args as ShapeOpsArgs, MAX_OFFSET as MAX_SHAPE_OPS_OFFSET, MIN_OFFSET as MIN_SHAPE_OPS_OFFSET};
 pub use shapeops::{MAX_OPERANDS as MAX_SHAPE_OPS_OPERANDS, MAX_PRODUCED as MAX_SHAPE_OPS_PRODUCED};
-pub use shapeops::{Made, Op, check as check_shape_ops, run as shape_ops};
-pub use shapes::{DropInfo, ShapesMoved, delete_shapes, drop_shape, drop_shape_above, move_shapes, move_shapes_leaving, resize_shape};
+pub use shapeops::{Made, Op, check as check_shape_ops, run as shape_ops, run_with as shape_ops_with};
+pub use shapes::{
+    DropInfo, MAX_CONNECTORS_ALONG, ShapesMoved, delete_shapes, drop_shape, drop_shape_above, drop_shape_following, glued_connectors, move_shapes,
+    move_shapes_leaving, resize_shape,
+};
 pub(crate) use shapes::{left_words, page_stats};
 pub use style::{
     ConnectorStyle, Flow, PathStyle, RouteStyle, StyleChoice, connector_style, lean_of, page_style, route_style_of, set_connector_route_style,
     set_connector_style, set_page_route_style, set_page_style,
 };
 pub(crate) use style::{path_style, style_of};
-pub use text_block::{BlockPlace, move_text_block, resize_text_block, rotate_text_block, text_block_place};
+pub use text_block::{BlockPlace, move_text_block, resize_text_block, rotate_text_block, text_block_in_frame, text_block_place};
 pub use text_box::{TextBoxInfo, add_text_box_above};
-pub use text_edit::{TextField, TextView, set_text, set_text_range, text_view};
+pub use text_edit::{TextField, TextView, set_text, set_text_range, shown_text_view, text_view};
+pub(crate) use text_edit::{kept_text, replaced, shown_parts};
 /// For the Kani harnesses of the crate (`crate::kani_proofs`).
 #[cfg(kani)]
 pub(crate) use {

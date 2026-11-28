@@ -44,11 +44,11 @@ use std::sync::Arc;
 
 use diacraft_calc::{Value as Calc, decode, encode, field_text, format_number, iso_to_serial, parse_decimal, read_quantity};
 use diacraft_doc::{
-    Cell, CellAddr, CellEdit, CellName, CellWrite, Document, EffectiveRow, Resolved, Resolver, RowKey, SectionKey, ShapeRef, SheetRef, Value,
-    WriteOrigin, WriteOutcome,
+    Cell, CellAddr, CellEdit, CellName, CellWrite, Document, Resolver, RowKey, SectionKey, ShapeRef, SheetRef, Value, WriteOrigin, WriteOutcome,
 };
 use diacraft_units::{Measure, Quantity, Unit, parse_unit};
 
+use super::worked::{RowView, Worked};
 use super::{Problem, require_shape, shape_mut};
 
 /// The most fields one shape holds, listed or defined.
@@ -294,35 +294,32 @@ fn take(text: &str, most: usize, spent: &mut usize) -> Result<String, Problem> {
     Ok(text.get(..end).unwrap_or_default().to_owned())
 }
 
-fn cell_of<'r, 'a>(row: &'r EffectiveRow<'a>, name: &str) -> Option<&'r Resolved<'a>> {
-    row.cells.iter().find(|(n, _)| n.as_str() == name).map(|(_, r)| r)
-}
-
-fn text_of(row: &EffectiveRow<'_>, name: &str, most: usize, spent: &mut usize) -> Result<String, Problem> {
-    match cell_of(row, name).and_then(|r| r.value.cell?.value.as_ref()) {
-        Some(v) => take(v.text(), most, spent),
+/// The text of cell `name`, read as the picture reads it: a cell that holds a formula and no saved value is what the formula works out to. A cell the row lacks is empty.
+fn text_of(row: &RowView<'_, '_>, name: &str, most: usize, spent: &mut usize) -> Result<String, Problem> {
+    match row.text(name) {
+        Some(text) => take(&text, most, spent),
         None => Ok(String::new()),
     }
 }
 
 /// The text of cell `name` as [`text_of`] reads it, `None` when the row has no such cell.
-fn held_text(row: &EffectiveRow<'_>, name: &str, most: usize, spent: &mut usize) -> Result<Option<String>, Problem> {
-    match cell_of(row, name).and_then(|r| r.value.cell?.value.as_ref()) {
-        Some(v) => take(v.text(), most, spent).map(Some),
+fn held_text(row: &RowView<'_, '_>, name: &str, most: usize, spent: &mut usize) -> Result<Option<String>, Problem> {
+    match row.text(name) {
+        Some(text) => take(&text, most, spent).map(Some),
         None => Ok(None),
     }
 }
 
-fn number_of(row: &EffectiveRow<'_>, name: &str) -> Option<f64> {
-    let v = cell_of(row, name)?.value.cell?.value.as_ref()?;
-    v.number().or_else(|| match v.text().trim().to_ascii_lowercase().as_str() {
+/// The number cell `name` holds: a number, or a truth value as a word, saved or worked out.
+fn number_of(row: &RowView<'_, '_>, name: &str) -> Option<f64> {
+    row.number(name).or_else(|| match row.text(name)?.trim().to_ascii_lowercase().as_str() {
         "true" => Some(1.0),
         "false" => Some(0.0),
         _ => None,
     })
 }
 
-fn whole_of(row: &EffectiveRow<'_>, name: &str) -> Option<u32> {
+fn whole_of(row: &RowView<'_, '_>, name: &str) -> Option<u32> {
     number_of(row, name).and_then(whole)
 }
 
@@ -351,26 +348,31 @@ fn read_at(doc: &Document, at: &ShapeRef) -> Result<Listed, Problem> {
     };
     let mut spent = 0usize;
     let mut keyed: Vec<(String, Field)> = Vec::with_capacity(rows.len().min(MAX_FIELDS));
-    for row in &rows {
-        let RowKey::Name(name) = &row.key else { continue };
+    // The cells of a row that hold a formula and no saved value are worked out, as the picture reads them: one reader for the shape's rows.
+    let worked = Worked::new(doc);
+    let sheet = SheetRef::Shape(at.clone());
+    let section = key();
+    for effective in &rows {
+        let RowKey::Name(name) = &effective.key else { continue };
+        let row = worked.row(&sheet, &section, effective);
         if keyed.len() >= MAX_FIELDS {
             return Err(Problem::failed(format!("the shape has more than {MAX_FIELDS} shape data fields, and at most {MAX_FIELDS} are read")));
         }
         // No `Type` cell, or an empty one, is 0; a number is kept whole or not at all.
-        let type_code = match cell_of(row, "Type").and_then(|r| r.value.cell?.value.as_ref()) {
+        let type_code = match row.text("Type") {
             None => Some(0),
-            Some(v) if v.text().trim().is_empty() => Some(0),
-            Some(v) => v.number().and_then(type_number),
+            Some(text) if text.trim().is_empty() => Some(0),
+            Some(_) => row.number("Type").and_then(type_number),
         };
         let known_kind = type_code.and_then(Kind::from_code);
         let kind = known_kind.unwrap_or(Kind::String);
-        let label = text_of(row, "Label", MAX_TEXT_CHARS, &mut spent)?;
-        let format = text_of(row, "Format", MAX_VALUE_CHARS, &mut spent)?;
-        let value = text_of(row, "Value", MAX_VALUE_CHARS, &mut spent)?;
-        let prompt = text_of(row, "Prompt", MAX_TEXT_CHARS, &mut spent)?;
-        let sort_key = text_of(row, "SortKey", MAX_TEXT_CHARS, &mut spent)?;
-        let unit = cell_of(row, "Value").and_then(|r| r.value.cell?.unit.as_deref()).map(str::to_owned);
-        let formula = cell_of(row, "Value").and_then(|r| r.formula.cell?.formula.text().map(str::to_owned));
+        let label = text_of(&row, "Label", MAX_TEXT_CHARS, &mut spent)?;
+        let format = text_of(&row, "Format", MAX_VALUE_CHARS, &mut spent)?;
+        let value = text_of(&row, "Value", MAX_VALUE_CHARS, &mut spent)?;
+        let prompt = text_of(&row, "Prompt", MAX_TEXT_CHARS, &mut spent)?;
+        let sort_key = text_of(&row, "SortKey", MAX_TEXT_CHARS, &mut spent)?;
+        let unit = row.unit("Value").map(str::to_owned);
+        let formula = row.found("Value").and_then(|r| r.formula.cell?.formula.text().map(str::to_owned));
         let shown = shown_of(kind, &value, unit.as_deref(), &format);
         let field = Field {
             row: name.to_string(),
@@ -385,10 +387,10 @@ fn read_at(doc: &Document, at: &ShapeRef) -> Result<Listed, Problem> {
             formula,
             shown,
             prompt,
-            invisible: number_of(row, "Invisible").is_some_and(|n| n != 0.0),
-            ask: number_of(row, "Verify").is_some_and(|n| n != 0.0),
-            lang_id: held_text(row, "LangID", MAX_TEXT_CHARS, &mut spent)?,
-            calendar: whole_of(row, "Calendar"),
+            invisible: number_of(&row, "Invisible").is_some_and(|n| n != 0.0),
+            ask: number_of(&row, "Verify").is_some_and(|n| n != 0.0),
+            lang_id: held_text(&row, "LangID", MAX_TEXT_CHARS, &mut spent)?,
+            calendar: whole_of(&row, "Calendar"),
             sort_key: String::new(),
         };
         keyed.push((sort_key.to_lowercase(), Field { sort_key, ..field }));
@@ -533,7 +535,7 @@ impl Stored {
 }
 
 /// A date and a time as `YYYY-MM-DDThh:mm:ss`, the forms a person types: `2026-03-04`, `2026-03-04 14:30` and `3/4/2026 2:30 pm`. The calendar decides whether it is a day.
-fn date_text(text: &str) -> Option<String> {
+pub(crate) fn date_text(text: &str) -> Option<String> {
     let t = text.trim();
     let (date, time) = match t.split_once(['T', ' ']) {
         Some((d, rest)) => (d, rest.trim()),
@@ -1101,14 +1103,15 @@ fn take_away(doc: &mut Document, page: u32, at: &ShapeRef, gone: &[&Field]) -> R
     let names: HashSet<&str> = gone.iter().map(|f| f.row.as_str()).collect();
     let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
     if shape.sheet.section(&key()).is_some() {
-        let sheet = Arc::make_mut(&mut shape.sheet);
-        let section = sheet.section_mut(&key()).map_err(|e| Problem::failed(e.to_string()))?;
-        section.rows.retain(|row| !row.name.as_deref().is_some_and(|n| names.contains(n)));
+        let mut counted = shape.counted_sheet();
+        let section = counted.section_mut(&key()).map_err(|e| Problem::failed(e.to_string()))?;
+        section.retain_rows(|row| !row.name.as_deref().is_some_and(|n| names.contains(n)));
     }
     let still: HashSet<String> = read_at(doc, at)?.fields.into_iter().map(|f| f.row).collect();
     for field in gone.iter().filter(|f| still.contains(&f.row)) {
         let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
-        let row = Arc::make_mut(&mut shape.sheet).row_mut(&key(), &RowKey::name(&field.row)).map_err(|e| Problem::failed(e.to_string()))?;
+        let mut counted = shape.counted_sheet();
+        let row = counted.row_mut(&key(), &RowKey::name(&field.row)).map_err(|e| Problem::failed(e.to_string()))?;
         row.del = true;
     }
     Ok(())
@@ -1118,7 +1121,8 @@ fn take_away(doc: &mut Document, page: u32, at: &ShapeRef, gone: &[&Field]) -> R
 fn finish_cells(doc: &mut Document, page: u32, at: &ShapeRef, patches: Vec<(String, Option<String>)>) -> Result<(), Problem> {
     for (row, unit) in patches {
         let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
-        let found = Arc::make_mut(&mut shape.sheet).row_mut(&key(), &RowKey::name(&row)).map_err(|e| Problem::failed(e.to_string()))?;
+        let mut counted = shape.counted_sheet();
+        let found = counted.row_mut(&key(), &RowKey::name(&row)).map_err(|e| Problem::failed(e.to_string()))?;
         if let Some(cell) = found.cells.get_mut(&CellName::new("Value")) {
             cell.unit = unit.map(|u| Arc::from(u.as_str()));
         }
@@ -1127,7 +1131,7 @@ fn finish_cells(doc: &mut Document, page: u32, at: &ShapeRef, patches: Vec<(Stri
     if let Some(shape) = shape_mut(doc, page, &at.path)
         && shape.sheet.section(&key()).is_some_and(|s| s.rows.is_empty() && s.cells.is_empty())
     {
-        Arc::make_mut(&mut shape.sheet).sections.retain(|s| s.name.as_str() != "Property");
+        shape.counted_sheet().retain_sections(|s| s.name.as_str() != "Property");
     }
     Ok(())
 }

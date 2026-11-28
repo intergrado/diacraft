@@ -14,7 +14,9 @@
 //! * The frame cells (`PinX` to `Height`, `Angle`, the flips when they are not 0, and the ends of a 1-D shape), and the style cells the writer has an
 //!   attribute for (the fill, the line, the vertical alignment and the margins), **each as a constant of the value the shape resolves to**: found by
 //!   inheritance through the master and the styles, a themed colour worked out, a palette index turned into its RGB (`formatting::look`, as the
-//!   renderer reads them).
+//!   renderer reads them). **A style cell keeps its formula beside the constant** when the shape holds one itself in a drawing of any kind, or has one from its master or a style
+//!   sheet that names nothing the copy lacks (a pattern that follows the shape's data), and the cap of a shape that follows the `Theme` style is held as a constant
+//!   when the shape holds a dash of its own, for the dash's form follows the cap (`cap_of_dash`).
 //! * The `Geometry` sections, and for a 2-D shape the `Connection` section, **merged with the master's**, each cell with the
 //!   formula it resolves to and the value this shape holds: the writer recognises a basic shape by the forms `Width*0.5` and `Height`.
 //! * A connector (a 1-D shape that is glued, that holds the route marker `connector.add` writes, or that holds a route cell already) has
@@ -57,18 +59,19 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_doc::{
-    Cell, CellAddr, CellName, ColorEntry, Document, FormulaSlot, Links, MAX_SHAPE_DEPTH, Master, Owner, RawAttrs, Resolved, Row, RowKey, Section,
-    Shape, ShapeList, ShapeRef, SharedVec, Sheet, SheetRef, Source, Style, Theme, Value,
+    Cell, CellAddr, CellName, ColorEntry, Document, FormulaSlot, Links, MAX_SHAPE_DEPTH, Master, Owner, RawAttrs, Rebind, Resolved, Row, RowKey,
+    Section, Shape, ShapeList, ShapeRef, SharedVec, Sheet, SheetRef, Source, Style, Theme, Value, cell_names, cells_changed, owner_places_after,
 };
 use diacraft_odg::{ShapeIndex, TEXT_OBJECT_ROW};
 
 use super::hold::Sizer;
-use crate::draw::{PathStyle, Reader as DrawReader, page_mut, path_style};
+use crate::draw::{PathStyle, Reader as DrawReader, page_mut, path_style, rewrite_refs, sheet_refs};
 use crate::formatting::{LookReader, LookVal, look_eval_ctx};
 use crate::stencil::number_text;
 
-/// The words of the refusal of a connector of the file glued to a shape the file lacks that name how the shape came back; `save.rs` gives that refusal the way
-/// out that works (a redo), since the undo that put the shape back is the change, and undoing again does not save.
+/// The words a refusal of the writer holds when it names an element an undo put back (a page the save took out of the file: `structure.rs`); `save.rs` gives such a refusal the
+/// way out that works (a redo), since the undo that put the page back is the change, and undoing again does not save. (A connector of the file glued to a shape an undo put back
+/// is no refusal: the writer writes the shape and the glue.)
 pub(crate) const PUT_BACK: &str = "put back by an undo";
 
 /// The name of the `User` row the reader gives an object DiaCraft cannot draw and has no picture of (`crates/render/src/placeholder.rs`).
@@ -144,7 +147,7 @@ const ENDS: [&str; 4] = ["BeginX", "BeginY", "EndX", "EndY"];
 /// The four margins of the text block, written together.
 const MARGINS: [&str; 4] = ["TopMargin", "BottomMargin", "LeftMargin", "RightMargin"];
 
-/// The cells of the fill and the line the writer has an attribute for, besides the ones a 1-D shape does not have.
+/// The cells of the fill and the line the writer has an attribute for.
 const STYLE_CELLS: [&str; 10] = [
     "FillPattern",
     "FillForegnd",
@@ -250,6 +253,9 @@ struct Made {
     master: Option<Arc<Master>>,
     glued: bool,
     style: Option<PathStyle>,
+    /// What the page selected of a theme (`theme::SELECTORS`): a shape that follows the `Theme` style through its master changes nothing of its own, or of the master, when its page takes a
+    /// theme, and its copy holds the link or the look as constants by what the page selects ([`Flattener::carried_link`]).
+    selection: [u32; 7],
 }
 
 /// What a copy depends on besides the shape and its master: the parts a cell is resolved through. A copy is given again only where these are the very ones.
@@ -385,21 +391,6 @@ enum PageBasis<'a> {
 }
 
 impl PageBasis<'_> {
-    /// A connector the file holds, glued to a shape it does not (a new shape, or one an undo put back after a save that deleted it): the writer refuses it too (`compare.rs`, `unglued`), and this
-    /// says so before a copy is made. It is refused in the writer's manner until a later change writes it. (A save from the model alone has no file, and nothing of it is the file's.)
-    fn check_glue(&self, page: &diacraft_doc::Page, work: &mut Work) -> Result<(), String> {
-        let PageBasis::Index(page_held) = self else { return Ok(()) };
-        for connect in page.connects.iter() {
-            work.tick(1)?;
-            if page_held.ordinal(connect.from_sheet).is_some() && page_held.ordinal(connect.to_sheet).is_none() {
-                return Err(String::from(
-                    "saving does not yet write this change: a connector of the file glued to a shape that is not in the file (a shape added, or put back by an undo: a later version writes it)",
-                ));
-            }
-        }
-        Ok(())
-    }
-
     /// Whether the shape is the file's: the index holds it, or (with no file) it holds the data of one.
     fn holds(&self, shape: &Shape) -> bool {
         match self {
@@ -456,8 +447,8 @@ pub(crate) fn flatten_on(doc: &Document, held: Basis<'_>, before: &Flattened, wo
             sizes.push(at);
         }
         let Some(page_held) = held.of_page(at) else { continue };
-        page_held.check_glue(page, work)?;
         let glued: HashSet<u32> = page.connects.iter().map(|c| c.from_sheet).collect();
+        let selection = crate::theme::selection_of(doc, page.id).unwrap_or_default().numbers();
         let (mut here, mut given, mut swapped): (Vec<usize>, Placed, Placed) = (Vec::new(), Vec::new(), Vec::new());
         for (pos, shape) in page.shapes.iter().enumerate() {
             flat.visited = flat.visited.saturating_add(1);
@@ -479,7 +470,11 @@ pub(crate) fn flatten_on(doc: &Document, held: Basis<'_>, before: &Flattened, wo
                     (Some(a), Some(b)) => Arc::ptr_eq(a, b),
                     _ => false,
                 };
-                let mut same = same_context && Arc::ptr_eq(&made.source, shape) && master_same && made.glued == glued.contains(&shape.id);
+                let mut same = same_context
+                    && Arc::ptr_eq(&made.source, shape)
+                    && master_same
+                    && made.glued == glued.contains(&shape.id)
+                    && made.selection == selection;
                 if same && let Some(style) = made.style {
                     work.tick(1)?;
                     let at = SheetRef::Shape(ShapeRef::top(
@@ -522,8 +517,8 @@ pub(crate) fn flatten_on(doc: &Document, held: Basis<'_>, before: &Flattened, wo
     let mut out = doc.clone();
     for at in sizes {
         let Some(page) = doc.pages.get(at) else { continue };
-        if let Some(target) = page_mut(&mut out, page.id) {
-            Arc::make_mut(&mut target.sheet).cells.remove("DrawingSizeType");
+        if let Some(mut counted) = out.counted_mut(&SheetRef::Page(page.id)) {
+            counted.remove_cell(&CellAddr::direct("DrawingSizeType"));
         }
     }
     for (at, swapped) in swaps.into_iter().chain(gives) {
@@ -552,6 +547,8 @@ pub(crate) fn flatten_on(doc: &Document, held: Basis<'_>, before: &Flattened, wo
     for (at, positions) in picks {
         let Some(page) = doc.pages.get(at) else { continue };
         let Some(page_held) = held.of_page(at) else { continue };
+        let selected = crate::theme::selection_of(doc, page.id).unwrap_or_default();
+        let (selection, themed_page) = (selected.numbers(), selected.is_themed());
         let glued: HashSet<u32> = page.connects.iter().map(|c| c.from_sheet).collect();
         let mut made: Vec<(usize, Arc<Shape>)> = Vec::new();
         made.try_reserve_exact(positions.len()).map_err(|_| "there is not enough memory to save the new shapes".to_owned())?;
@@ -567,6 +564,7 @@ pub(crate) fn flatten_on(doc: &Document, held: Basis<'_>, before: &Flattened, wo
                 masters: &masters,
                 styles: &styles,
                 theme,
+                themed_page,
                 group_names: &group_names,
                 page_held,
                 from_vsdx,
@@ -589,7 +587,7 @@ pub(crate) fn flatten_on(doc: &Document, held: Basis<'_>, before: &Flattened, wo
             }
             flat.flattened = flat.flattened.saturating_add(1);
             made.push((pos, Arc::clone(&entry.flat)));
-            kept.insert((page.id, shape.id), entry.made(shape, one.master_of(shape), glued.contains(&shape.id)));
+            kept.insert((page.id, shape.id), entry.made(shape, one.master_of(shape), glued.contains(&shape.id), selection));
         }
         if let Some(target) = page_mut(&mut out, page.id) {
             for (pos, shape) in made {
@@ -674,10 +672,12 @@ fn new_group_names(page: &diacraft_doc::Page, positions: &[usize], work: &mut Wo
 /// fill and no line**, so that the file draws nothing (the guide holds none of the two cells, and so draws with the root style's, in no program that draws guides).
 fn guide_copy(shape: &Arc<Shape>) -> Entry {
     let mut copy = (**shape).clone();
-    let sheet = Arc::make_mut(&mut copy.sheet);
+    let mut counted = copy.counted_sheet();
     for name in ["FillPattern", "LinePattern"] {
-        if sheet.cell(name).is_none() {
-            sheet.cells.insert(CellName::new(name), Cell::constant(Value::from_text("0")));
+        if counted.sheet.cell(name).is_none() {
+            // The cells go in as the writers of the model put a cell in, so the nodes of the guide stay after the cell they followed. A sheet at the most cells it may hold
+            // takes no more, and the guide is then copied as it is.
+            let _ = counted.set_cell(&CellAddr::direct(name), Cell::constant(Value::from_text("0")));
         }
     }
     Entry { flat: Arc::new(copy), lost: 0, style: None }
@@ -721,12 +721,22 @@ struct Entry {
 }
 
 impl Entry {
-    fn made(&self, source: &Arc<Shape>, master: Option<Arc<Master>>, glued: bool) -> Made {
-        Made { source: Arc::clone(source), flat: Arc::clone(&self.flat), lost: self.lost, master, glued, style: self.style }
+    fn made(&self, source: &Arc<Shape>, master: Option<Arc<Master>>, glued: bool, selection: [u32; 7]) -> Made {
+        Made { source: Arc::clone(source), flat: Arc::clone(&self.flat), lost: self.lost, master, glued, style: self.style, selection }
     }
 }
 
 /// What flattens one shape: the readers of the document, and where the shape is.
+/// What a formula of a master says once the shapes it names are the page's ([`Flattener::rebound`]).
+enum Named {
+    /// It names no shape, or the page's shapes by the same `ID`s.
+    Same,
+    /// The formula, with each `Sheet.<id>!` naming the page's shape.
+    As(String),
+    /// It names a shape of the master that nothing of the instance stands for.
+    Unbound,
+}
+
 struct Flattener<'a, 'd, 'c> {
     look: &'a LookReader<'d, 'c>,
     draw: &'a DrawReader<'d>,
@@ -739,18 +749,44 @@ struct Flattener<'a, 'd, 'c> {
     styles: &'a HashMap<u32, &'d Arc<Style>>,
     /// The `ID` of the `Theme` style, when the document has one: a new shape whose three links name it keeps them.
     theme: Option<u32>,
+    /// Whether the page selects a theme: a shape that follows the `Theme` style through the master's shape it stands for keeps the links there ([`Flattener::carried_link`]).
+    themed_page: bool,
     /// The names the page's new groups are given, by the group's `ID` ([`new_group_names`]).
     group_names: &'a HashMap<u32, Arc<str>>,
     /// What the file holds of the page: a member of a new group that it holds is a shape of the file put into the group (the writer refuses that in its own words).
     page_held: PageBasis<'a>,
-    /// The drawing came from a VSDX file (it holds the package data of one): the shapes' own formulas are kept ([`Flattener::own_formulas`]).
+    /// The drawing came from a VSDX file (it holds the package data of one): a formula of a member of a group or of a line that the reader works out is said lost, and counted for the save's words
+    /// ([`Flattener::own_formulas`]). The check after the save names it for a drawing of any origin.
     from_vsdx: bool,
 }
 
-/// Whether a formula is one the theme answers: a call of `THEMEGUARD` (a colour picked from the theme) or of `THEMEVAL` (Use Default), at its start.
-fn is_theme_formula(text: &str) -> bool {
-    let word = text.trim_start();
-    ["THEMEGUARD(", "THEMEVAL("].iter().any(|call| word.get(..call.len()).is_some_and(|head| head.eq_ignore_ascii_case(call)))
+/// The longest formula of a master or a style sheet that a copy is given beside the value of a style cell: the cost of looking at one is a step for each 64 bytes, and a formula longer than a
+/// pattern or a line end ever needs stays the constant it was.
+const MOST_INHERITED_FORMULA: usize = 1024;
+
+/// Whether the cell `name` is one of the style cells the copy holds as constants (the fill and the line the writer has an attribute for, the line ends and their sizes, the vertical alignment and the
+/// margins).
+fn is_style_cell(name: &str) -> bool {
+    STYLE_CELLS.contains(&name) || MARGINS.contains(&name) || ARROW_CELLS.iter().any(|(arrow, size)| name == *arrow || name == *size)
+}
+
+/// Whether `text` holds the `word`, in any case.
+fn mentions(text: &str, word: &str) -> bool {
+    !word.is_empty() && text.as_bytes().windows(word.len()).any(|w| w.eq_ignore_ascii_case(word.as_bytes()))
+}
+
+/// Whether the formula `cell` holds is one the copy keeps beside the value of a style cell: not a formula that is only a number (a master's `LinePattern` of `2` says what the
+/// constant says) nor the `RGB(r,g,b)` of the colour the cell shows ([`constant_colour`]), which the file's attribute says whole.
+fn keeps_style_formula(cell: &Cell) -> bool {
+    let Some(text) = cell.formula.text().map(str::trim) else { return false };
+    !text.is_empty() && text.parse::<f64>().is_err() && constant_colour(cell).is_none()
+}
+
+/// Whether a formula a shape has from its master or a style sheet asks for what the copy no longer has: the theme (`THEMEVAL`, `THEMEGUARD` and the rest, which ask the quick-style cells of a style
+/// the copy has no link to). **Another shape of the master (`Sheet.N`, which the instance reads as its own shape's number) is no longer one of them**: the copy names the
+/// shape of the instance that stands for it ([`Flattener::rebound`]).
+fn names_what_the_copy_lacks(text: &str) -> bool {
+    mentions(text, "theme")
 }
 
 /// The bits (`KINDS`) of what a shape holds that the writer has no attribute for.
@@ -775,11 +811,24 @@ impl Flattener<'_, '_, '_> {
         shape.master.and_then(|id| self.masters.get(&id)).map(|m| Arc::clone(m))
     }
 
-    /// The style the copy of `shape` keeps its three links to: the `Theme` style, when the three links of the shape name it, and none otherwise.
-    fn carried_link(&self, shape: &Shape) -> Option<u32> {
+    /// The style the copy of `shape` (at `at`) keeps its three links to: the `Theme` style, when the three links of the shape name it, and none otherwise. **A link the
+    /// shape has from the master's shape it stands for counts, on a page that selects a theme** (a theme links the masters' shapes, and an instance keeps no link of
+    /// its own), each family by the shape's own link and else the master's (step 3): the copy is the shape another program draws, with no master to ask, and a
+    /// file read again holds it on the style, so a variant moves it as it moved a shape that linked the style itself. On a page with no theme such a shape draws as the root style
+    /// does, and the copy holds that look as constants, as it did.
+    fn carried_link(&self, shape: &Shape, at: &ShapeRef) -> Option<u32> {
         let theme = self.theme?;
-        let l = shape.sheet.links;
-        (l.line == Some(theme) && l.fill == Some(theme) && l.text == Some(theme)).then_some(theme)
+        let own = shape.sheet.links;
+        if (own.line, own.fill, own.text) == (Some(theme), Some(theme), Some(theme)) {
+            return Some(theme);
+        }
+        if !self.themed_page {
+            return None;
+        }
+        let step = self.look.res.master_step(at).ok().flatten()?;
+        let theirs = self.look.res.shape(&step.shape)?.sheet.links;
+        let all = [(own.line, theirs.line), (own.fill, theirs.fill), (own.text, theirs.text)];
+        all.iter().all(|(own, theirs)| own.or(*theirs) == Some(theme)).then_some(theme)
     }
 
     /// Whether the copy holds the cell `name` as a constant: it does unless the shape keeps its links (`carried`) and **the cell is the style's**, found along them and
@@ -872,19 +921,19 @@ impl Flattener<'_, '_, '_> {
                 sheet.cells.insert(CellName::new(name), cell);
             }
         };
-        if !one_d {
-            if self.own(at, carried, "FillPattern", work)? {
-                put("FillPattern", self.number(at, "FillPattern", work)?);
-            }
-            if self.own(at, carried, "FillForegnd", work)? {
-                put("FillForegnd", self.colour(at, "FillForegnd", work)?);
-            }
-            if self.own(at, carried, "FillForegndTrans", work)? {
-                put("FillForegndTrans", self.number(at, "FillForegndTrans", work)?);
-            }
-            if self.num(at, "FillGradientEnabled", work)? != 0.0 && self.own(at, carried, "FillGradientEnabled", work)? {
-                put("FillGradientEnabled", self.number(at, "FillGradientEnabled", work)?);
-            }
+        // The fill of a 1-D shape is written too: the inside of a hollow line end takes it, so a connector's fill is part of its look and a save must keep it. ODF's
+        // graphic style has the same properties for every shape, which LibreOffice leaves unused on a line or a connector, and DiaCraft's reader gives them back as cells.
+        if self.own(at, carried, "FillPattern", work)? {
+            put("FillPattern", self.number(at, "FillPattern", work)?);
+        }
+        if self.own(at, carried, "FillForegnd", work)? {
+            put("FillForegnd", self.colour(at, "FillForegnd", work)?);
+        }
+        if self.own(at, carried, "FillForegndTrans", work)? {
+            put("FillForegndTrans", self.number(at, "FillForegndTrans", work)?);
+        }
+        if self.num(at, "FillGradientEnabled", work)? != 0.0 && self.own(at, carried, "FillGradientEnabled", work)? {
+            put("FillGradientEnabled", self.number(at, "FillGradientEnabled", work)?);
         }
         for (name, colour) in [("LinePattern", false), ("LineWeight", false), ("LineColor", true), ("LineColorTrans", false), ("LineCap", false)] {
             if self.own(at, carried, name, work)? {
@@ -983,7 +1032,10 @@ impl Flattener<'_, '_, '_> {
             sheet.sections.push(Arc::clone(section));
         }
         sheet.raw = without_ids(&shape.sheet.raw);
-        sheet.passthrough = shape.sheet.passthrough.clone();
+        // The nodes of the group's sheet and of the group count the cells and the sections the group had; the copy holds the frame as constants and the rest as it was, so the nodes are
+        // moved to stand after the cell or the section they followed.
+        sheet.take_places_of(&shape.sheet);
+        let owner_nodes = owner_places_after(&shape.passthrough, &shape.sheet, &sheet);
         let (mut members, mut lost): (Vec<Arc<Shape>>, Lost) = (Vec::new(), 0);
         members.try_reserve_exact(shape.children.len()).map_err(|_| "there is not enough memory to save the new shapes".to_owned())?;
         for (place, member) in shape.children.iter().enumerate() {
@@ -1026,7 +1078,7 @@ impl Flattener<'_, '_, '_> {
             foreign: shape.foreign.clone(),
             children: ShapeList::from_vec(members),
             raw: without_ids(&shape.raw),
-            passthrough: shape.passthrough.clone(),
+            passthrough: owner_nodes,
             // The slot goes with the copy, as `raw` and `passthrough` do, but for the ids of the file's own.
             ext: ext_without_ids(&shape.ext),
         };
@@ -1052,7 +1104,7 @@ impl Flattener<'_, '_, '_> {
         // And so the shape that was dropped after `theme.apply` follows `theme.variant` when the file is read again (the copy of it had the root's links
         // and the theme's look as constants, which no variant moves). Then a cell the shape has from the style, and from no cell of its own or of its master's, is left to the
         // link: a constant would be the look of the theme as it was, and would be the shape's own after the file is read again. Links of any other kind are the root's.
-        let carried = self.carried_link(shape);
+        let carried = self.carried_link(shape, &shape_ref);
         let link = carried.unwrap_or(0);
         let mut sheet = Sheet { links: Links { line: Some(link), fill: Some(link), text: Some(link) }, ..Sheet::default() };
         let mut put = |name: &str, cell: Option<Cell>| {
@@ -1101,9 +1153,12 @@ impl Flattener<'_, '_, '_> {
         // from its ends, so theirs are said lost.
         let frame_too = !one_d && matches!(&at, SheetRef::Shape(r) if r.path.len() == 1);
         self.style_cells(&at, carried, one_d, &mut sheet, work)?;
-        // A drawing from a VSDX file keeps all the shape's own formulas; any other keeps the **theme formulas** a palette pick writes (`THEMEGUARD(...)`, and `THEMEVAL()` of Use
-        // Default), so that a colour picked from the theme is a value in the file's attribute with its formula carried, and still follows the theme when the file is read again.
+        self.cap_of_dash(&at, carried, &mut sheet, work)?;
+        // **Every drawing keeps all the shape's own formulas** (a drawing that was not from a VSDX file kept only the theme formulas a palette pick writes, so a fixed colour's
+        // `RGB(r,g,b)`, a formula a person typed and the formulas of a pin were values in the file, and the check named them lost), and the formula of a style cell that a master or a style sheet gives it
+        // (a pattern, a line end) stays too.
         Self::own_formulas(shape, frame_too, self.glued.contains(&shape.id), self.from_vsdx, &mut sheet, work)?;
+        self.inherited_formulas(&at, &mut sheet, work)?;
         if one_d && shape.text.is_some() {
             Self::label_cells(shape, &mut sheet, work)?;
         }
@@ -1142,11 +1197,14 @@ impl Flattener<'_, '_, '_> {
         Self::own_rest(shape, one_d, &mut sheet, work)?;
         self.style_look(&at, shape, &mut sheet, work)?;
         sheet.raw = without_ids(&shape.sheet.raw);
-        sheet.passthrough = shape.sheet.passthrough.clone();
         // The text, whole: its characters, the markers of its runs, paragraphs and tabs, and its fields (the writer carries what a text holds beyond its characters in DiaCraft's
         // own data on the shape's style). Only the formatting a style sheet gives it is lost, and said. **What the shape shows through its master is the shape's own in the file**:
         // another program has no master to ask.
         let (text, foreign) = self.through_master(&shape_ref, shape, &mut sheet, work)?;
+        // The sheet is complete: the nodes of the shape's sheet and of the shape count the cells and the sections the shape had, and the copy holds the frame and the style as constants,
+        // the sections merged with the master's and the cells its master gives the text, so each node is moved to stand after the cell or the section it followed.
+        sheet.take_places_of(&shape.sheet);
+        let owner_nodes = owner_places_after(&shape.passthrough, &shape.sheet, &sheet);
         let mut lost = self.audit(shape, work)?;
         // A link to the `Theme` style the copy does not carry (the three links are not that one style: a master that links a style of its own for a family) is dropped:
         // said, as every other thing a new shape has that the file does not hold is.
@@ -1171,7 +1229,7 @@ impl Flattener<'_, '_, '_> {
             foreign,
             children: ShapeList::default(),
             raw: without_ids(&shape.raw),
-            passthrough: shape.passthrough.clone(),
+            passthrough: owner_nodes,
             // As for a group above.
             ext: ext_without_ids(&shape.ext),
         };
@@ -1194,7 +1252,9 @@ impl Flattener<'_, '_, '_> {
         if text.is_none() {
             return Ok((text, foreign));
         }
-        self.text_block_through_master(at, shape, master, sheet, work)?;
+        // A formula the copy takes from the master names the master's shapes: it must name the shapes of the page that stand for them ([`Flattener::rebound`]).
+        let rebind = Rebind { instance: step.instance.clone(), master: step.master };
+        self.text_block_through_master(at, shape, master, &rebind, sheet, work)?;
         // The rows the text names: a row of the master that no marker of the text reaches shows nothing, and the link to the master has it for the shape that is read again. Row 0 of the character and
         // paragraph rows is the one a text with no marker of its own is formatted by.
         let shown = text.as_deref().map_or(&[][..], |t| &t.parts[..]);
@@ -1242,10 +1302,12 @@ impl Flattener<'_, '_, '_> {
                 work.tick(wanted.len() as u64)?;
                 let mut picked = Section::new(name, master_section.ix);
                 work.tick(master_section.cells.len() as u64)?;
-                picked.cells = master_section.cells.clone();
+                for (cell_name, cell) in &master_section.cells {
+                    picked.cells.insert(cell_name.clone(), self.rebound_cell(&rebind, cell, work)?);
+                }
                 for ix in wanted {
                     if let Some(row) = master_section.row(&RowKey::Ix(*ix)) {
-                        picked.rows.push(Arc::clone(row));
+                        picked.rows.push(self.rebound_row(&rebind, row, work)?);
                     }
                 }
                 let own = by_ix.get(&master_section.ix).and_then(|at| own_sections.get(*at).map(|own| (*at, own)));
@@ -1272,7 +1334,15 @@ impl Flattener<'_, '_, '_> {
     /// The cells of the text block that the master shape holds and the shape does not, put into the copy **when the block they give is not the whole shape** (the default of every shape, which a file says by
     /// having none: a master that holds `TxtPinX` as `Width*0.5` is no block of its own, and an instance of it is given none, so that no instance is given data the file's markup says without it). The block
     /// is judged by what the cells resolve to for this shape, each against its default: the pin at the middle, the size of the shape, the text's pin at the middle of the block, no turn, no background.
-    fn text_block_through_master(&self, at: &ShapeRef, shape: &Shape, master: &Shape, sheet: &mut Sheet, work: &mut Work) -> Result<(), String> {
+    fn text_block_through_master(
+        &self,
+        at: &ShapeRef,
+        shape: &Shape,
+        master: &Shape,
+        rebind: &Rebind,
+        sheet: &mut Sheet,
+        work: &mut Work,
+    ) -> Result<(), String> {
         let here = SheetRef::Shape(at.clone());
         let inherited: Vec<(&str, &Cell)> = TEXT_BLOCK_CELLS
             .iter()
@@ -1304,25 +1374,26 @@ impl Flattener<'_, '_, '_> {
         }
         if differs {
             for (name, cell) in inherited {
-                sheet.cells.insert(CellName::new(name), cell.clone());
+                sheet.cells.insert(CellName::new(name), self.rebound_cell(rebind, cell, work)?);
             }
         }
         Ok(())
     }
 
-    /// **The shape's own formulas stay** (a formula that does not come back is a loss, even when its value does). Each cell of the frame and the style the copy holds as
-    /// the constant the shape resolves to (so that another program draws the shape as the drawing has it), and that the shape holds itself with a formula of its own, is the shape's cell, with the value
-    /// worked out where the shape's own is another (a colour told only by its case is the same): the writer writes the value in the file's attribute and carries the formula in DiaCraft's data on the
-    /// shape's style. An evidence run found 1,808 of 13,267 formulas of VSDX drawings lost on a trip through an `.odg` (`RGB()`, `GUARD`, `Sheet.N!` and the shape's own cells), where the copy held
-    /// constants.
-    fn own_formulas(shape: &Shape, frame_too: bool, glued: bool, all: bool, sheet: &mut Sheet, work: &mut Work) -> Result<(), String> {
+    /// **The shape's own formulas stay, in a drawing of any kind** (a formula that does not come back is a loss, even when its value does; made it so for a drawing
+    /// that was not from a VSDX file, where only the theme's formulas stayed). Each cell of the frame and the style the copy holds as the constant the shape resolves to (so that another program draws the
+    /// shape as the drawing has it), and that the shape holds itself with a formula of its own, is the shape's cell, with the value worked out where the shape's own is another (a colour told only by its
+    /// case is the same): the writer writes the value in the file's attribute and carries the formula in DiaCraft's data on the shape's style, and the shapes a formula names keep their `ID`s. An evidence
+    /// run found 1,808 of 13,267 formulas of VSDX drawings lost on a trip through an `.odg` (`RGB()`, `GUARD`, `Sheet.N!` and the shape's own cells), where the copy held constants; a
+    /// sweep of the commands found the same in a new drawing: a fixed colour's `RGB(r,g,b)`, a formula a person typed, the pin `Width*0`.
+    ///
+    /// **What the reader works out stays a value**: a member of a group has its place worked out from the group's frame and a line its frame from its ends, so a formula of the frame there is written as
+    /// its value. The check after the save names it for a drawing of any origin; for a drawing from a VSDX file (`says_lost`) it is counted too ([`Work::formulas_lost`]), for the save to say how many
+    /// (the saves of a new group and of a new line are pinned as saying nothing).
+    fn own_formulas(shape: &Shape, frame_too: bool, glued: bool, says_lost: bool, sheet: &mut Sheet, work: &mut Work) -> Result<(), String> {
         for (name, cell) in sheet.cells.iter_mut() {
             let Some(own) = shape.sheet.cells.get(name.as_str()) else { continue };
             if !matches!(own.formula, FormulaSlot::Local(_)) || own.formula.text() == cell.formula.text() {
-                continue;
-            }
-            // Outside a drawing from a VSDX file, only the formulas of the theme (a palette pick, Use Default).
-            if !all && !own.formula.text().is_some_and(is_theme_formula) {
                 continue;
             }
             work.tick(1)?;
@@ -1331,7 +1402,9 @@ impl Flattener<'_, '_, '_> {
                 continue;
             }
             if !frame_too && (FRAME.contains(&name.as_str()) || FRAME_IF_SET.contains(&name.as_str()) || ENDS.contains(&name.as_str())) {
-                work.formulas_lost = work.formulas_lost.saturating_add(1);
+                if says_lost {
+                    work.formulas_lost = work.formulas_lost.saturating_add(1);
+                }
                 continue;
             }
             let same = match (own.value.as_ref(), cell.value.as_ref()) {
@@ -1351,14 +1424,83 @@ impl Flattener<'_, '_, '_> {
         Ok(())
     }
 
+    /// **The formulas a shape's style cells have from its master or its style sheets stay**. The copy holds each style cell as the constant the shape resolves to, so a formula
+    /// found on the master or on a style sheet (an ERD relationship's `IF(Prop.Identifying,1,2)` for its pattern, and the formulas of its two line ends over the words of its Shape Data) was lost,
+    /// and the line, opened again, no longer followed its data. The cell keeps the constant as its value (the file's attribute says it, so another program draws what DiaCraft does) and takes the
+    /// formula, which the writer carries in DiaCraft's data on the shape's style as it carries the shape's own ([`Flattener::own_formulas`]).
+    ///
+    /// **Not every formula goes with the shape.** One that is only a number or the `RGB(r,g,b)` of the colour it shows is no more than the constant ([`keeps_style_formula`]). One that names the theme
+    /// ([`names_what_the_copy_lacks`]) stays the constant it was, and so does one too long to look at ([`MOST_INHERITED_FORMULA`]) and one a style sheet holds that names another shape. **One that
+    /// the master holds and that names another shape of the master (`Sheet.N`, which the instance reads as its own shape's number) is kept naming the shape of the instance that stands for it**
+    /// ([`Flattener::rebound`]: a member's line pattern that follows the group's shape data, `IF(STRSAME(Sheet.5!Prop.BpmnEventType,...),2,1)`), and stays the constant when
+    /// nothing of the instance stands for the shape: those are listed in the report of the task, and are no warning of the save.
+    fn inherited_formulas(&self, at: &SheetRef, sheet: &mut Sheet, work: &mut Work) -> Result<(), String> {
+        for (name, cell) in sheet.cells.iter_mut() {
+            if !is_style_cell(name.as_str()) || matches!(cell.formula, FormulaSlot::Local(_)) {
+                continue;
+            }
+            work.tick(1)?;
+            let Some(found) = self.look.res.resolve(at, &CellAddr::direct(name.as_str())) else { continue };
+            if !matches!(found.formula.source, Source::Master(_) | Source::Style { .. }) {
+                continue;
+            }
+            let Some(FormulaSlot::Local(formula)) = found.formula.cell.map(|c| &c.formula) else { continue };
+            if formula.source.len() > MOST_INHERITED_FORMULA {
+                continue;
+            }
+            work.tick(1 + u64::try_from(formula.source.len() / 64).unwrap_or(0))?;
+            if names_what_the_copy_lacks(&formula.source) {
+                continue;
+            }
+            // A formula of the master that names the master's shapes names the instance's; one of a style sheet names no shape of a page, and a shape nothing stands for is the constant.
+            let formula = if mentions(&formula.source, "sheet.") {
+                let Some(rebind) = &found.rebind else { continue };
+                match self.rebound(rebind, &formula.source, work)? {
+                    Named::Same => FormulaSlot::Local(Arc::clone(formula)),
+                    Named::As(text) => Cell::with_formula(&text, None).formula,
+                    Named::Unbound => continue,
+                }
+            } else {
+                FormulaSlot::Local(Arc::clone(formula))
+            };
+            let kept = Cell { formula, ..cell.clone() };
+            if keeps_style_formula(&kept) {
+                *cell = kept;
+            }
+        }
+        Ok(())
+    }
+
+    /// **A dash's form follows the cap** (a flat cap draws each mark a weight longer and each gap a weight shorter), so the dash a style names is the form of the cap the style has. A shape that
+    /// follows the `Theme` style takes the cap from it (the copy holds no cell the style gives, [`Flattener::own`], and the writer cannot work out what `THEMEVAL` gives), so the shape's own
+    /// dash of the table (a `LinePattern` of 2 to 23 the copy holds) would be named for the round cap that a file with no cap says, and a program that draws butt where the file states none draws it
+    /// a weight short. **The copy then holds the cap it resolves to**, written as the cap of the style that names the dash.
+    fn cap_of_dash(&self, at: &SheetRef, carried: Option<u32>, sheet: &mut Sheet, work: &mut Work) -> Result<(), String> {
+        if carried.is_none() || sheet.cells.contains_key("LineCap") {
+            return Ok(());
+        }
+        let dashed = sheet
+            .cells
+            .get("LinePattern")
+            .and_then(|c| c.value.as_ref())
+            .and_then(Value::number)
+            .is_some_and(|n| n.fract() == 0.0 && (2.0..=23.0).contains(&n));
+        if dashed && let Some(cell) = self.number(at, "LineCap", work)? {
+            sheet.cells.insert(CellName::new("LineCap"), cell);
+        }
+        Ok(())
+    }
+
     /// What the shape holds in its own sheet that no cell above carries, as it is (a cell with its formula, a section whole): the cells the copy was not given by name
     /// (the layer, the text block, the rounded corners, a shadow, the text's background and direction, a user cell) and the sections that are not merged with the master's
     /// (`Property`, `User`, the text's rows, any other). **The cells and sections of the shape's master are not copied**: the copy keeps the link and the writer writes the master
     /// into DiaCraft's document file. The place of a label on a line or a connector that holds no text is the engine's own and is left out: carried, it is written
     /// into the style of every connector (`diacraft:cells`) and read back as the connector's own, which a save of a connector of the file takes out again (`constants`), so
-    /// the second save of the same drawing would be an edit (measured: `odg_newsave_more`). It stays the one silent drop of the copy.
+    /// the second save of the same drawing would be an edit (measured: `odg_newsave_more`). It stays the one silent drop of the copy, **for a line that is no instance** ([`labelless`]):
+    /// the label cells of a line that stands for a master (or for a member of a group master) are carried, because a copy that leaves them out is read again with the cells its master holds,
+    /// and their values are the master's (a text block 1.5 long on a line 150 long at 1:100).
     fn own_rest(shape: &Shape, one_d: bool, sheet: &mut Sheet, work: &mut Work) -> Result<(), String> {
-        let labelless = one_d && shape.text.is_none();
+        let labelless = one_d && labelless(shape);
         for (name, cell) in shape.sheet.cells.iter() {
             work.tick(1)?;
             let n = name.as_str();
@@ -1438,6 +1580,78 @@ impl Flattener<'_, '_, '_> {
         Ok(false)
     }
 
+    /// **A formula the copy takes from the shape's master names the shapes of the page**. A formula found on a master says `Sheet.5!DropOnPageScale` for the master's shape 5, the
+    /// group, and an instance reads it as its own group (`Resolver::rebind`). The copy holds the cell as its own, and read again as a shape of the page `Sheet.5` is the page's shape 5, which is
+    /// another shape or none: a member's corner read the factor of a shape that was not its group (1, so the corner a hundredth of its length at 1:100), a marker's `NoShow` followed the shape data of
+    /// another shape, and an abstract class's name was never italic. So each `Sheet.<id>!` in such a formula is made to name the shape of the instance that stands for the master's `<id>`, which the
+    /// file gives back with the `ID` it has (a shape of the page keeps its `ID` through a file, and so does a group). A formula that names a master shape nothing of the instance stands for (a member
+    /// that was removed) names no shape a page has, and the cell is the constant of its value, as a formula that names a shape that is gone is (`draw::remap`); the save says so with the formulas it
+    /// writes as values.
+    fn rebound(&self, rebind: &Rebind, source: &str, work: &mut Work) -> Result<Named, String> {
+        let refs = sheet_refs(source);
+        work.tick(refs.len() as u64)?;
+        if refs.is_empty() {
+            return Ok(Named::Same);
+        }
+        let mut map: HashMap<u32, u32> = HashMap::new();
+        for (_, _, id) in refs {
+            if map.contains_key(&id) {
+                continue;
+            }
+            let Some(named) = self.look.res.rebind(rebind, id).and_then(|at| self.look.res.shape(&at)).map(|shape| shape.id) else {
+                return Ok(Named::Unbound);
+            };
+            map.insert(id, named);
+        }
+        Ok(rewrite_refs(source, &map).map_or(Named::Same, Named::As))
+    }
+
+    /// The cell `cell` of the master, as the copy holds it: its formula naming the shapes of the page ([`Flattener::rebound`]), and its value as it is.
+    fn rebound_cell(&self, rebind: &Rebind, cell: &Cell, work: &mut Work) -> Result<Cell, String> {
+        let FormulaSlot::Local(formula) = &cell.formula else { return Ok(cell.clone()) };
+        Ok(match self.rebound(rebind, &formula.source, work)? {
+            Named::Same => cell.clone(),
+            Named::As(text) => Cell { formula: Cell::with_formula(&text, None).formula, ..cell.clone() },
+            Named::Unbound => {
+                // Said as the shape's own formulas are (`own_formulas`): the save of a drawing from a VSDX file counts it, and the check after the save names it for a drawing of any origin.
+                if self.from_vsdx {
+                    work.formulas_lost = work.formulas_lost.saturating_add(1);
+                }
+                Cell { formula: FormulaSlot::Absent, error: None, ..cell.clone() }
+            }
+        })
+    }
+
+    /// The row `row` of the master with each of its cells so ([`Flattener::rebound_cell`]): the same row when none names a shape.
+    fn rebound_row(&self, rebind: &Rebind, row: &Arc<Row>, work: &mut Work) -> Result<Arc<Row>, String> {
+        let mut changed: Vec<(CellName, Cell)> = Vec::new();
+        for (name, cell) in &row.cells {
+            let FormulaSlot::Local(formula) = &cell.formula else { continue };
+            if !formula.source.as_bytes().windows("sheet.".len()).any(|w| w.eq_ignore_ascii_case(b"sheet.")) {
+                continue;
+            }
+            let now = self.rebound_cell(rebind, cell, work)?;
+            if now.formula.text() != cell.formula.text() || !matches!(now.formula, FormulaSlot::Local(_)) {
+                changed.push((name.clone(), now));
+            }
+        }
+        if changed.is_empty() {
+            return Ok(Arc::clone(row));
+        }
+        let mut copy = Row::clone(row);
+        copy.cells.extend(changed);
+        Ok(Arc::new(copy))
+    }
+
+    /// The cell a resolution found at `addr` of `at`, as a cell of its own ([`rebuilt`]); **a formula found on the master names the shapes of the page** ([`Flattener::rebound`]).
+    fn rebuilt(&self, at: &SheetRef, addr: &CellAddr, found: &Resolved<'_>, work: &mut Work) -> Result<Cell, String> {
+        let cell = rebuilt(found, self.look.worked(at, addr, found));
+        match &found.rebind {
+            Some(rebind) => self.rebound_cell(rebind, &cell, work),
+            None => Ok(cell),
+        }
+    }
+
     /// The sections called `name` that the shape has once its master's are merged in, each with the cells and rows it resolves to, put into `sheet`.
     fn sections(&self, at: &SheetRef, name: &str, sheet: &mut Sheet, work: &mut Work) -> Result<(), String> {
         let res = &self.look.res;
@@ -1455,7 +1669,7 @@ impl Flattener<'_, '_, '_> {
                 work.tick(1)?;
                 let addr = CellAddr { section: Some(key.clone()), row: None, cell: CellName::new(flag) };
                 if let Some(found) = res.resolve(at, &addr).filter(|r| r.value.cell.is_some() || r.formula.cell.is_some()) {
-                    section.cells.insert(CellName::new(flag), rebuilt(&found));
+                    section.cells.insert(CellName::new(flag), self.rebuilt(at, &addr, &found, work)?);
                 }
             }
             // The rows are counted before any is merged, held to what the budget has left: the merge of a section is paid for as it is asked, and a section
@@ -1478,7 +1692,8 @@ impl Flattener<'_, '_, '_> {
                     RowKey::Name(n) => row.name = Some(Arc::clone(n)),
                 }
                 for (cell_name, found) in &effective.cells {
-                    row.cells.insert(cell_name.clone(), rebuilt(found));
+                    let addr = CellAddr { section: Some(key.clone()), row: Some(effective.key.clone()), cell: cell_name.clone() };
+                    row.cells.insert(cell_name.clone(), self.rebuilt(at, &addr, found, work)?);
                 }
                 section.rows.push(Arc::new(row));
             }
@@ -1508,7 +1723,6 @@ fn section_over(master: &Section, own: &Section, work: &mut Work) -> Result<Sect
     out.cells = master.cells.clone();
     out.cells.extend(own.cells.iter().map(|(k, v)| (k.clone(), v.clone())));
     out.raw = own.raw.clone();
-    out.passthrough = own.passthrough.clone();
     out.ext = own.ext.clone();
     let mut by_key: HashMap<RowKey, usize> = HashMap::new();
     by_key.try_reserve(own.rows.len()).map_err(|_| "there is not enough memory to save the new shapes".to_owned())?;
@@ -1535,7 +1749,10 @@ fn section_over(master: &Section, own: &Section, work: &mut Work) -> Result<Sect
             continue;
         }
         let mut merged = Row::clone(row);
+        // The master's row holds the nodes it had among its cells: the cells the shape's row adds go in among them as a cell is put in.
+        let before = cell_names(&merged.passthrough, &merged.cells);
         merged.cells.extend(over.cells.iter().map(|(k, v)| (k.clone(), v.clone())));
+        cells_changed(&mut merged.passthrough, &before, &merged.cells);
         if over.row_type.is_some() {
             merged.row_type.clone_from(&over.row_type);
         }
@@ -1546,13 +1763,17 @@ fn section_over(master: &Section, own: &Section, work: &mut Work) -> Result<Sect
             out.rows.push(Arc::clone(row));
         }
     }
+    // The nodes among the shape's cells and rows follow the cell or the row they followed, in the cells and rows the master's are merged with.
+    out.take_places_of(own);
     Ok(out)
 }
 
-/// The cell a resolution found, as a cell of its own: the formula it resolved to when that is the cell's own, and the value this sheet holds.
-fn rebuilt(found: &Resolved<'_>) -> Cell {
+/// The cell a resolution found, as a cell of its own: the formula it resolved to when that is the cell's own, and the value this sheet holds, **or `worked`, what a cell
+/// that holds a formula and no saved value works out to**: the writer reads the outline and the look from values, and the copy is made for the save and is
+/// not the model.
+fn rebuilt(found: &Resolved<'_>, worked: Option<Value>) -> Cell {
     let formula = found.formula.cell.map(|c| c.formula.clone()).filter(|f| matches!(f, FormulaSlot::Local(_))).unwrap_or_default();
-    Cell { formula, value: found.value.cell.and_then(|c| c.value.clone()), unit: unit_of(found), ..Cell::default() }
+    Cell { formula, value: worked.or_else(|| found.value.cell.and_then(|c| c.value.clone())), unit: unit_of(found), ..Cell::default() }
 }
 
 /// The unit a resolution found: that of the cell that holds the value, else of the cell that holds the formula.
@@ -1567,6 +1788,15 @@ const COLOUR_CELLS: [&str; 2] = ["FillForegnd", "LineColor"];
 /// has no attribute for them, the reader makes none, and a connector that holds no text has no label for them to place, so the copy of such a connector has
 /// none (a connector with a text keeps them, and a change of one is the writer's refusal in words).
 const LABEL_CELLS: [&str; 8] = ["TxtPinX", "TxtPinY", "TxtLocPinX", "TxtLocPinY", "TxtAngle", "TxtWidth", "TxtHeight", "TextBkgnd"];
+
+/// Whether `shape` is a line or connector whose label cells are left out of its copy: it holds no text, **and it stands for no master's shape** (an instance, or a member of a group
+/// instance). The cells of a line of that kind come back as the reader gives none, and the line has no label for them to place. **An instance's do not**: its copy is linked to the master, and
+/// a line read again takes a cell it does not hold from the master, cached value and all, which is the value at the master's size and scale (a text block 1.5 long in a line of 150 drawing units
+/// at 1:100). So the cells an instance holds are carried, as a 2-D shape's are, and the shape read again holds the text block it had. `constants` takes the same rule for a shape of the file,
+/// so that an unedited save finds the cells it wrote.
+fn labelless(shape: &Shape) -> bool {
+    shape.text.is_none() && shape.master.is_none() && shape.master_shape.is_none()
+}
 
 /// A colour cell that holds `RGB(r,g,b)` of the colour it shows, as the constant it stands for. A colour a person chooses is written so by the
 /// format commands (`F="RGB(r,g,b)"`, `V="#rrggbb"`), which is the colour and no more: the formula names no cell, and a file holds the colour as the
@@ -1605,7 +1835,7 @@ fn constants(shape: &Arc<Shape>, depth: usize, work: &mut Work) -> Result<Option
         }
     }
     // The label cells of a connector with no text.
-    let unlabelled = shape.text.is_none() && shape.sheet.cell("BeginX").is_some() && LABEL_CELLS.iter().any(|name| shape.sheet.cell(name).is_some());
+    let unlabelled = labelless(shape) && shape.sheet.cell("BeginX").is_some() && LABEL_CELLS.iter().any(|name| shape.sheet.cell(name).is_some());
     let mut members: Option<Vec<Arc<Shape>>> = None;
     if depth < MAX_SHAPE_DEPTH && !shape.children.is_empty() {
         for (at, member) in shape.children.iter().enumerate() {
@@ -1632,19 +1862,21 @@ fn constants(shape: &Arc<Shape>, depth: usize, work: &mut Work) -> Result<Option
     work.charge(own, own.saturating_add(std::mem::size_of::<Shape>() as u64))?;
     let mut copy = Shape::clone(shape);
     if !swapped.is_empty() || !run_colours.is_empty() || unlabelled {
-        let sheet = Arc::make_mut(&mut copy.sheet);
+        let mut counted = copy.counted_sheet();
+        // (A colour cell the shape holds is put over by its own name: no cell is made, so no node moves.)
         for (name, cell) in swapped {
-            sheet.cells.insert(name, cell);
+            counted.sheet.cells.insert(name, cell);
         }
         for (at, row_at, cell) in run_colours {
-            let row = sheet.sections.get_mut(at).map(Arc::make_mut).and_then(|section| section.rows.get_mut(row_at)).map(Arc::make_mut);
+            let row = counted.sheet.sections.get_mut(at).map(Arc::make_mut).and_then(|section| section.rows.get_mut(row_at)).map(Arc::make_mut);
             if let Some(row) = row {
+                // (The `Color` cell the row holds is put over by its own name: no cell is made.)
                 row.cells.insert(CellName::new("Color"), cell);
             }
         }
         if unlabelled {
             for name in LABEL_CELLS {
-                sheet.cells.remove(name);
+                counted.remove_cell(&CellAddr::direct(name));
             }
         }
     }

@@ -309,8 +309,8 @@ fn autoconnect(s: &mut Session, p: &Value) -> Result<Value> {
         let name = dropped.as_ref().map(|d| d.name.clone());
         (size.map_or(0.0, |s| s.0 / k), size.map_or(0.0, |s| s.1 / k), name)
     };
-    let glue = |glue: Option<(u32, u32)>| glue.map_or(Value::Null, |(id, point)| json!({ "id": id, "point": point }));
-    Ok(json!({
+    let glue = super::connector::glue_json;
+    let mut out = json!({
         "page": page,
         "from": from,
         "direction": word_of(dir),
@@ -324,5 +324,15 @@ fn autoconnect(s: &mut Session, p: &Value) -> Result<Value> {
         "height": height,
         "x": made.centre.0 / k,
         "y": made.centre.1 / k,
-    }))
+    });
+    // A master dropped beyond the range of eight of the page's drawing scale says the factor it wrote, and one whose ratio could not be used says why (`draw/drop_scale.rs`).
+    if let Some(info) = &dropped {
+        if let Some(factor) = info.drop_scale {
+            out["drop_on_page_scale"] = json!(factor);
+        }
+        if let Some(note) = &info.note {
+            out["notes"] = json!([note]);
+        }
+    }
+    Ok(out)
 }

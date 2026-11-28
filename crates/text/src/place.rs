@@ -1,10 +1,18 @@
 //! Where a paragraph's lines start across the block and how tall each is.
 //!
-//! A line's left limit `a` is the area's left edge plus `IndLeft`, plus `IndFirst` on a paragraph's first line, and its right limit
-//! `z` is the area's right edge less `IndRight`; a place outside the block moves to the nearest point on its edge, and an `IndRight`
-//! too large for the room gives way to `IndLeft`. Left-aligned text starts at `a`, right-aligned ends at `z`, centred is
+//! A line's near limit `a` is the area's near edge plus `IndLeft`, plus `IndFirst` on a paragraph's first line, and its far limit
+//! `z` is the area's far edge less `IndRight`; a place outside the block moves to the nearest point on its edge, and an `IndRight`
+//! too large for the room gives way to `IndLeft`. Text aligned to the start begins at `a`, aligned to the end finishes at `z`, centred is
 //! centred between them, all by the line's width without its trailing spaces. Justified text stretches the gaps of every line but a
 //! paragraph's last. A bullet sits at `a` on the first line and pushes that line's text in by `TextPosAfterBullet`.
+//!
+//! **A right-to-left paragraph is the mirror image** (design call, which replaced the rule
+//! that alignment 0 and 2 keep their sides). The near edge of a left-to-right paragraph is the block's left and the far one its right; the near edge of a
+//! right-to-left one is the right and the far one the left. So `IndLeft`, the start indent, is on the right and `IndRight`, the stop indent, on the left, the
+//! first-line indent counts from the start indent, a bullet stands at the right, and tab stops are measured from the right edge. Everything is measured, broken
+//! into lines and placed as for a left-to-right paragraph, in a frame whose origin is the near edge and whose `x` runs away from it, and only
+//! then turned about the block's width into the block's own frame ([`align`]): alignment 0 is the start (the near side) in either direction, and 2 the end
+//! (the far side), which is what puts a line aligned 0 against the right. A paragraph with any other `Flags` than 1 is not touched.
 
 use std::ops::Range;
 
@@ -26,12 +34,11 @@ pub(crate) struct LinePlan {
     /// The width without trailing spaces, with a hyphen if the line ends at a soft hyphen.
     pub width: f64,
     pub chars: Range<usize>,
-    /// Where the text starts, in the block's frame, and the room it has, filled by [`align`].
+    /// The left edge of the line's text, in the block's frame, and the stretch of each of its spaces: filled by [`align`].
     pub x: f64,
     pub extra_per_space: f64,
     pub overflow: bool,
-    /// The left limit the line's text may start at, and the bullet's place (the first line of a bulleted paragraph).
-    pub a_text: f64,
+    /// The left edge of the bullet (the first line of a bulleted paragraph).
     pub bullet_x: Option<f64>,
 }
 
@@ -43,8 +50,10 @@ pub(crate) struct ParaPlan {
     pub tab_adv: Vec<f64>,
     pub lines: Vec<LinePlan>,
     pub bullet: Option<BulletMark>,
-    /// The right limit of the block's room for this paragraph, or `None` when the block is as wide as its widest line.
+    /// The far limit of the block's room for this paragraph, from its near edge, or `None` when the block is as wide as its widest line.
     pub z: Option<f64>,
+    /// The block's width, which a right-to-left paragraph's places are turned about, or `None` when the block is as wide as its widest line.
+    pub width: Option<f64>,
 }
 
 /// Clamp `v` to `lo..=hi` without panicking when the range is empty (a block of negative width): `hi` wins.
@@ -52,15 +61,17 @@ pub(crate) fn clamp_to(v: f64, lo: f64, hi: f64) -> f64 {
     v.max(lo).min(hi)
 }
 
-/// Where this paragraph's lines start and how much room they have. `gap` is how far the first line's text is pushed in by a bullet.
+/// Where this paragraph's lines start and how much room they have, as distances from its near edge (the block's left, or its right for a right-to-left
+/// paragraph): the measure for breaking, where the first and later lines start and the far limit. `gap` is how far the first line's text is pushed in by a
+/// bullet. The measure's places, which tab stops are measured by, are from the text area's near edge, inside the margin.
 pub(crate) fn measure(block: &BlockStyle, width: Option<f64>, style: &ParaStyle, gap: f64) -> (Measure, f64, f64, Option<f64>) {
     let hi = width.unwrap_or(f64::INFINITY);
-    let a_first = clamp_to(block.left + style.ind_left + style.ind_first, 0.0, hi);
-    let a_rest = clamp_to(block.left + style.ind_left, 0.0, hi);
-    let z = width.map(|w| clamp_to(w - block.right - style.ind_right, 0.0, hi));
+    let (near, far) = if style.rtl { (block.right, block.left) } else { (block.left, block.right) };
+    let a_first = clamp_to(near + style.ind_left + style.ind_first, 0.0, hi);
+    let a_rest = clamp_to(near + style.ind_left, 0.0, hi);
+    let z = width.map(|w| clamp_to(w - far - style.ind_right, 0.0, hi));
     let room = |a: f64, pushed: f64| z.map_or(f64::INFINITY, |z| z.max(a) - a - pushed);
-    let m =
-        Measure { first_x: a_first + gap - block.left, first_avail: room(a_first, gap), rest_x: a_rest - block.left, rest_avail: room(a_rest, 0.0) };
+    let m = Measure { first_x: a_first + gap - near, first_avail: room(a_first, gap), rest_x: a_rest - near, rest_avail: room(a_rest, 0.0) };
     (m, a_first, a_rest, z)
 }
 
@@ -126,18 +137,22 @@ pub(crate) fn plan_lines(
                 x: 0.0,
                 extra_per_space: 0.0,
                 overflow: false,
-                a_text: 0.0,
                 bullet_x: None,
             }
         })
         .collect()
 }
 
-/// Set where every line of a paragraph starts, once the right limit is known. `a_first` and `a_rest` are the left limits, `gap` the
-/// first line's bullet push, `z` the right limit.
-pub(crate) fn align(para: &mut ParaPlan, a_first: f64, a_rest: f64, gap: f64, z: f64) {
+/// Set where every line of a paragraph starts, once the far limit is known. `a_first` and `a_rest` are the near limits, `gap` the first line's bullet push, `z`
+/// the far limit (all from the paragraph's near edge, as [`measure`] gives them), and `edge` the width of the block a right-to-left paragraph is turned about.
+pub(crate) fn align(para: &mut ParaPlan, a_first: f64, a_rest: f64, gap: f64, z: f64, edge: f64) {
     let n = para.lines.len();
     let has_bullet = para.bullet.is_some();
+    let bullet_width = para.bullet.as_ref().map_or(0.0, |b| b.width);
+    let rtl = para.style.rtl;
+    // From the near edge, alignment 0 puts a line against the near side and 2 against the far one, in either direction: that is what puts a right-to-left
+    // line aligned 0 against the right. The places below are all from the near edge.
+    let align = para.style.align;
     for (i, line) in para.lines.iter_mut().enumerate() {
         let first = line.span.start == 0;
         let a = if first { a_first } else { a_rest };
@@ -145,21 +160,24 @@ pub(crate) fn align(para: &mut ParaPlan, a_first: f64, a_rest: f64, gap: f64, z:
         let z = z.max(a_text);
         let room = z - a_text;
         let spaces = para.shaped.clusters.get(line.span.start..line.span.end).unwrap_or(&[]).iter().filter(|c| c.space).count();
-        line.a_text = a_text;
-        line.bullet_x = (first && has_bullet).then_some(a);
         line.overflow = line.width > room + EPS;
-        line.x = match para.style.align {
+        let start = match align {
             Align::Left => a_text,
             Align::Centre => (a_text + z) / 2.0 - line.width / 2.0,
             Align::Right => z - line.width,
             Align::Justify | Align::Distribute => {
                 let last = i + 1 == n;
-                if (para.style.align == Align::Distribute || !last) && spaces > 0 && room > line.width + EPS {
+                if (align == Align::Distribute || !last) && spaces > 0 && room > line.width + EPS {
                     line.extra_per_space = (room - line.width) / spaces as f64;
                     line.width = room;
                 }
                 a_text
             }
         };
+        // Turned about the block's width, a right-to-left line's near edge is its right one: its left edge is `edge` less where it starts and how wide it is.
+        // The bullet, which draws from its left edge, is turned the same way.
+        let (x, bullet_x) = if rtl { (edge - start - line.width, edge - a - bullet_width) } else { (start, a) };
+        line.x = x;
+        line.bullet_x = (first && has_bullet).then_some(bullet_x);
     }
 }

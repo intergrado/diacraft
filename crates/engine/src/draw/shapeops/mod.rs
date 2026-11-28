@@ -1,8 +1,18 @@
-//! Shape operations: Union, Combine, Fragment, Intersect and Subtract.
+//! Shape operations: Union, Combine, Fragment, Intersect and Subtract, Join and Trim, and Offset and Fit Curve.
 //!
-//! **What they do.** Each builds new shapes out of the geometry of the shapes named, or, for Subtract, changes the first one. The areas the shapes' paths fill
+//! **What they do.** Each builds new shapes out of the geometry of the shapes named, or, for Subtract and Fit Curve, changes the shapes named in place (Subtract the first
+//! one only), and Offset keeps the originals. The areas the shapes' paths fill
 //! are worked out by `craft-pathops` (the path library the Craft apps share: curve-preserving booleans on `kurbo::BezPath`, with refusals and counted limits);
 //! what comes out is written back as `Geometry` rows by [`rows`], with the frame of R9, or for Combine carried row by row ([`carry`]).
+//!
+//! **Join and Trim work on paths, not areas.** [`runs`] reads each operand's stroke as paths (one for each `MoveTo`); [`join`] chains the ones whose ends meet;
+//! [`trim`] cuts them where they cross or touch, with [`snap`] moving the end of an open path within the closure tolerance onto the path it touches and
+//! [`ops::trim_pieces`] asking the library's Outline for the stretches; [`rows::section_of_run`] writes a path as a section. They are bounded as the others are: the
+//! reading is counted, the library's own limits hold, and what they add (the steps of the end search, the cap of 10,000 shapes) is counted and refused in words.
+//!
+//! **Offset and Fit Curve work on paths too** and share [`runs`] and its writer of rows (with `ArcTo` for the arcs of Fit Curve): [`offset`] is Offset, a
+//! stroke outline cut at its caps for an open path and the library's offset for the closed ones of a section, each worked on near its own origin; [`fit`] is Fit Curve
+//! The library's refit of every stretch of every shape in one call, arcs found in the input for the circles flag, the rows of a shape changed in place.
 //!
 //! **Where the conversion lives.** Here in `draw`, beside the commands, and not in `geom` (layer 0): reading a shape's geometry needs its sheet, its master
 //! and its poses (the document model, layer 1, and the renderer's reader of a row's cells), and writing it needs the cells' own helpers. The paths and the
@@ -22,17 +32,23 @@
 //!    at the front of the container, what reads them is calculated, and the result is the one undo step the caller's edit makes.
 //!
 //! **Our choices** that the specification leaves open are in `docs/editing-commands.md` ("Shape operations") and listed in
-//! the check list. The reference app was not inspected, and our output has not been opened in it by the project.
+//! the check list.
 
 mod apply;
 mod carry;
+mod fit;
+mod join;
 mod look;
+mod offset;
 mod operand;
 mod ops;
 mod rows;
+mod runs;
+mod snap;
 mod ties;
+mod trim;
 
-pub use apply::{Made, check, run};
+pub use apply::{Made, check, run, run_with};
 pub use operand::MAX_OPERANDS;
 
 /// What the drawing tools (`draw/pen.rs`) share with Combine's writer: a row of any kind in absolute coordinates, written as the shares of a box (`carry::row_of`), and read
@@ -40,7 +56,7 @@ pub use operand::MAX_OPERANDS;
 pub(crate) use carry::{CRow, NurbsKnots, carry, row_of};
 pub(crate) use rows::{Frame, flagged};
 
-/// The five operations of this task.
+/// The nine operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     /// One shape with the outline of all.
@@ -53,6 +69,75 @@ pub enum Op {
     Intersect,
     /// The first shape less the area the others cover.
     Subtract,
+    /// One shape holding the paths of all, those that abut chained into one section.
+    Join,
+    /// One shape for each stretch of the paths between the places they cross or touch.
+    Trim,
+    /// Parallel paths on each side of each path, the originals kept.
+    Offset,
+    /// Fewer segments within a tolerance, each shape changed in place.
+    FitCurve,
+}
+
+/// What a command is given besides the shapes: the distance of Offset, and the tolerance and flags of Fit Curve. The others read none of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Args {
+    /// Offset's distance, in the cells' own units (inches on a page of the default scale): positive.
+    pub distance: f64,
+    /// Fit Curve's tolerance, in the same units: how far the new paths may stray from the old ones. 0 asks for an exact match.
+    pub tolerance: f64,
+    /// Fit Curve's flags: a sum of [`Args::PERIODIC`], [`Args::DO_CIRCLES`] and [`Args::ABRUPT`].
+    pub flags: u32,
+}
+
+impl Args {
+    /// `visSplinePeriodic`: a closed path is fitted as a loop, so the seam where it closes is not forced to be a vertex.
+    pub const PERIODIC: u32 = 1;
+    /// `visSplineDoCircles`: circular arcs for what is found to be circular, and not splines.
+    pub const DO_CIRCLES: u32 = 2;
+    /// `visSplineAbrupt`: a spline is broken wherever the direction changes abruptly.
+    pub const ABRUPT: u32 = 4;
+    /// The three together: the flags are a sum of some of them, so they are at most this.
+    pub const ALL: u32 = 7;
+
+    /// Whether the arguments are ones `op` can run with, and if not why not in words: Offset's distance is positive, finite and no smaller than [`MIN_OFFSET`] and no larger
+    /// than [`MAX_OFFSET`], Fit Curve's tolerance is not negative, finite and no larger than [`MAX_REACH`], and its flags a sum of the three. The other operations
+    /// take none.
+    pub(crate) fn check(&self, op: Op) -> Result<(), crate::draw::Problem> {
+        use crate::draw::Problem;
+        match op {
+            Op::Offset => {
+                if !self.distance.is_finite() || self.distance <= 0.0 {
+                    return Err(Problem::bad("Offset needs a distance above 0 (a number that is not finite, 0 and less are refused)"));
+                }
+                if self.distance < MIN_OFFSET {
+                    return Err(Problem::bad(format!(
+                        "Offset needs a distance of at least {MIN_OFFSET}: a result is accurate to 1E-4, so a nearer copy cannot be told from the shape"
+                    )));
+                }
+                if self.distance > MAX_OFFSET {
+                    return Err(Problem::bad(format!(
+                        "Offset needs a distance of at most {MAX_OFFSET} (a copy of a path is a stroke of twice the distance, and a stroke more than {MAX_WORK_EXTENT} across is too large for the path library)"
+                    )));
+                }
+            }
+            Op::FitCurve => {
+                if !self.tolerance.is_finite() || self.tolerance < 0.0 {
+                    return Err(Problem::bad("Fit Curve needs a tolerance of 0 or more (0 asks for an exact match)"));
+                }
+                if self.tolerance > MAX_REACH {
+                    return Err(Problem::bad(format!("Fit Curve needs a tolerance of at most {MAX_REACH}")));
+                }
+                if self.flags > Args::ALL {
+                    return Err(Problem::bad(
+                        "Fit Curve's flags are 0 or a sum of 1 (periodic splines), 2 (circular arcs) and 4 (break at abrupt changes)",
+                    ));
+                }
+            }
+            Op::Union | Op::Combine | Op::Fragment | Op::Intersect | Op::Subtract | Op::Join | Op::Trim => {}
+        }
+        Ok(())
+    }
 }
 
 impl Op {
@@ -64,14 +149,18 @@ impl Op {
             Op::Fragment => "shape.fragment",
             Op::Intersect => "shape.intersect",
             Op::Subtract => "shape.subtract",
+            Op::Join => "shape.join",
+            Op::Trim => "shape.trim",
+            Op::Offset => "shape.offset",
+            Op::FitCurve => "shape.fit_curve",
         }
     }
 
-    /// The fewest shapes the command takes: Fragment takes one, the others two.
+    /// The fewest shapes the command takes: Fragment, Trim, Offset and Fit Curve take one, the others two.
     pub const fn fewest(self) -> usize {
         match self {
-            Op::Fragment => 1,
-            Op::Union | Op::Combine | Op::Intersect | Op::Subtract => 2,
+            Op::Fragment | Op::Trim | Op::Offset | Op::FitCurve => 1,
+            Op::Union | Op::Combine | Op::Intersect | Op::Subtract | Op::Join => 2,
         }
     }
 
@@ -83,6 +172,10 @@ impl Op {
             Op::Fragment => "Fragment",
             Op::Intersect => "Intersect",
             Op::Subtract => "Subtract",
+            Op::Join => "Join",
+            Op::Trim => "Trim",
+            Op::Offset => "Offset",
+            Op::FitCurve => "Fit Curve",
         }
     }
 
@@ -92,9 +185,28 @@ impl Op {
         matches!(self, Op::Union | Op::Intersect | Op::Subtract)
     }
 
-    /// Whether the originals are deleted: every operation but Subtract deletes all of them; Subtract keeps the first shape and deletes the others.
-    pub(crate) const fn keeps_first(self) -> bool {
-        matches!(self, Op::Subtract)
+    /// Whether the command deletes the operand at place `k` of the shapes named: Union, Combine, Fragment, Intersect, Join and Trim delete them all, Subtract all but the
+    /// first, and Offset and Fit Curve none (Offset keeps the originals, R38, and Fit Curve changes them in place).
+    pub(crate) const fn deletes(self, k: usize) -> bool {
+        match self {
+            Op::Union | Op::Combine | Op::Fragment | Op::Intersect | Op::Join | Op::Trim => true,
+            Op::Subtract => k != 0,
+            Op::Offset | Op::FitCurve => false,
+        }
+    }
+
+    /// Whether the command changes the vertices of the operand at place `k`: Subtract's first shape, and every shape of Fit Curve.
+    pub(crate) const fn edits_vertices(self, k: usize) -> bool {
+        match self {
+            Op::Subtract => k == 0,
+            Op::FitCurve => true,
+            Op::Union | Op::Combine | Op::Fragment | Op::Intersect | Op::Join | Op::Trim | Op::Offset => false,
+        }
+    }
+
+    /// Whether a shape the command makes holds the first shape's text: Union, Combine, Intersect and Join do; Fragment, Trim and Offset make shapes with none.
+    pub(crate) const fn gives_text(self) -> bool {
+        matches!(self, Op::Union | Op::Combine | Op::Intersect | Op::Join)
     }
 }
 
@@ -138,6 +250,23 @@ impl Budget {
 /// the drawing writes them for each shape and the cells are held by each. A plain shape with a gradient of five stops (three cells each) under 10,000 pieces is about
 /// 400,000, and the recalculation that follows holds about a kilobyte for each cell, which a million cells fill.
 pub(crate) const MAX_LOOK_UNITS: usize = 500_000;
+
+/// The nearest an Offset's copy may be (SHAPEOPS-PRECISION): curved edges of a result are within 1E-4 of the exact one, so a copy nearer than that cannot be told from
+/// the shape it copies. In the cells' own units. Ours, not the reference app's.
+pub const MIN_OFFSET: f64 = 1.0e-4;
+
+/// The farthest a coordinate, a distance or a tolerance may be from nothing, in the cells' own units: the path library's sweep takes coordinates up to about 7E13, and the
+/// work near the origin that a command does (the middle of what is worked on moved to it) leaves this much to the shapes' size and to the arguments.
+pub(crate) const MAX_REACH: f64 = 5.0e13;
+
+/// The most a path library call may be given to work on, in the cells' own units, for Offset: the sweep's tolerance is 64 units of the last place of a coordinate, which is
+/// under 1E-5 for coordinates up to 7E8 after the paths are moved to their own middle, and Offset works at 1,000 times the size, where the tolerance it is given (0.01) is
+/// the same 1E-5. It is half the extent of a section and twice the distance, so shapes any distance apart (up to what the cells hold) are each worked on near its own
+/// origin, and a distance is refused past half of it (the farthest copy is a stroke of twice the distance from the path).
+pub(crate) const MAX_WORK_EXTENT: f64 = 7.0e8;
+
+/// The farthest an Offset's copy may be, the same limit seen from the distance: a stroke of twice the distance has to be inside [`MAX_WORK_EXTENT`].
+pub const MAX_OFFSET: f64 = MAX_WORK_EXTENT / 2.0;
 
 // ---- the precision (SHAPEOPS-PRECISION) --------------------------------------------------------------------------------
 

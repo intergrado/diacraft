@@ -27,6 +27,7 @@ use diacraft_doc::{
 };
 
 use crate::index::ReaderIndex;
+use crate::pages::PageNames;
 
 /// What an edit changed on one page.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -39,6 +40,13 @@ pub struct Changes {
     /// row of no cells, or one that is a `RelLineTo` where it was a `LineTo` with the same `X` and `Y`. No cell reports these, and a function that
     /// reads a whole section (the path functions) reads them.
     pub rows: Vec<(SheetRef, SectionKey, Option<RowKey>)>,
+    /// The `Geometry` sections whose rows an edit **wrote whole** (a route replaces every row of its connector's section, the rows it keeps, the rows it adds and those it takes away,
+    /// with no word of which): a cell that reads any cell of one is a reader of the change, whichever cell it names (`Sheet.6!Geometry1.X2`, the `Y` of the last row, a row that the
+    /// section does not have now), and so is a function that reads the whole section. For the sections [`Changes::rows`] gives with `None`, which work out the readers of the whole
+    /// section only: there the cells that were written are named, and a reader of one is found by the cell. Other sections are not listed in the graph this way (a reference to a
+    /// cell of one is found by the cell alone), so a section given here that is not a `Geometry` section works out the readers of the whole section, as `rows` does.
+    /// `changes_between` never sets it.
+    pub sections: Vec<(SheetRef, SectionKey)>,
     /// Shapes that are new, or have another master than before: every cell they hold, and every cell they inherit, counts as changed.
     pub fresh: Vec<SheetRef>,
     /// The `ID`s of the shapes taken out (nested ones too): a formula that names one now reads nothing.
@@ -56,6 +64,22 @@ pub struct Changes {
     /// instances use are worked out where the edit changed theirs. With none, no inherited cell is given to any instance and no master
     /// is worked out.
     pub since: Since,
+    /// With [`Changes::whole_page`]: the caller works out every other page of the document the same way, so no page is left reading a cell this pass changed, and the pass does not go after
+    /// the cells of other pages that name this one through `Pages[..]` ([`crate::commit_changed_across`] does, otherwise, in one more commit). Set by the engine for an edit of the
+    /// document's sheet or a style, which works every page out whole, in page order, on operands that are worked out where they stand.
+    pub other_pages_worked: bool,
+    /// The commit is for the readers of what was written, and there may be none (the rows of a route, written after the recalculation of the edit that moved the connector, and the
+    /// label cells with them: [`Changes::sections`] names the rows). **The cells in [`Changes::cells`] hold the values that were written to them** and are not worked out, as they are otherwise: what reads
+    /// them (and the rows) is. A commit that finds no cell to work out is no commit: nothing is worked out, and the counts of `work` do not move, so that an edit on a page that
+    /// nothing reads a route on makes the one commit it made. `changes_between` never sets it.
+    pub only_if_read: bool,
+    /// Cells to work out whether or not anything says they changed: they are worked out, written where the result differs, and the cells that read them follow only if they were written (a
+    /// cell of [`Changes::cells`] is taken as changed and its readers are worked out whatever comes of it). [`crate::commit_changed_across`] fills it with the cells that name the pages
+    /// [`Changes::page_names`] says were given another reading.
+    pub reread: Vec<(SheetRef, CellAddr)>,
+    /// The page names an edit to the pages themselves (a page renamed, added, copied, deleted or moved) gave another reading, from [`PageNames::between`]. [`crate::commit_changed_across`] works
+    /// out the cells that name them, in the one commit. Ignored by [`crate::commit_changed_with`].
+    pub page_names: PageNames,
 }
 
 /// The document an edit started from ([`Changes::since`]), shared. Two are equal when both say none, or both hold equal documents: it says what the
@@ -94,7 +118,14 @@ impl std::fmt::Debug for Since {
 impl Changes {
     /// Whether nothing changed.
     pub fn is_empty(&self) -> bool {
-        !self.whole_page && self.cells.is_empty() && self.rows.is_empty() && self.fresh.is_empty() && self.removed.is_empty()
+        !self.whole_page
+            && self.cells.is_empty()
+            && self.rows.is_empty()
+            && self.sections.is_empty()
+            && self.fresh.is_empty()
+            && self.removed.is_empty()
+            && self.reread.is_empty()
+            && self.page_names.is_empty()
     }
 }
 

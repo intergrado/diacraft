@@ -1,6 +1,6 @@
 # DiaCraft feature comparison matrix: the data of the comparison page of the website.
-# How to read it, the rules and the sources are in docs/parity-matrix.md. Cells come from public documentation, not from
-# running the apps; LibreOffice was also run as a black box to read its file filters, Gallery themes and shape handles.
+# How to read it, the rules and the sources are in docs/parity-matrix.md. Cells come from public documentation;
+# LibreOffice was also run as a black box to read its file filters, Gallery themes and shape handles.
 
 version = 1
 checklist = "docs/parity-checklist.md"
@@ -4149,7 +4149,7 @@ area = "files"
 id = "format-odg"
 feature = "OpenDocument drawings (.odg, .otg, .fodg)"
 checklist = []
-diacraft = { rule = "manual", value = "Partial", source = "docs/file-format-parity.md", note = "the OpenDocument Graphics row: read and written in their own format, with what is not held named" }
+diacraft = { rule = "manual", value = "Partial", source = "docs/file-format-parity.md", note = "the OpenDocument Graphics row: read and written in their own format, with dashes, glue and connection points written for other programs, and what is not held named" }
 reference = { value = "Not yet", edition = "none", source = "absent", note = "no vendor page read lists OpenDocument drawings among the formats it opens or saves" }
 [row.libreoffice]
 value = "Full"
@@ -4173,7 +4173,7 @@ area = "files"
 id = "format-drawio"
 feature = "draw.io diagrams (.drawio)"
 checklist = []
-diacraft = { rule = "manual", value = "Not yet", source = "docs/file-format-parity.md", note = "the Common diagram formats row: opening draw.io files is scheduled, not built" }
+diacraft = { rule = "manual", value = "Not yet", source = "docs/file-format-parity.md", note = "the Common diagram formats row: no command opens a draw.io file, and nothing writes one" }
 reference = { value = "Not yet", edition = "none", source = "absent", note = "no vendor page read lists draw.io files among the formats it opens or saves" }
 [row.libreoffice]
 value = "Not yet"
@@ -5059,7 +5059,7 @@ area = "platforms"
 id = "platform-linux"
 feature = "Desktop app for Linux"
 checklist = []
-diacraft = { rule = "manual", value = "Full", source = "docs/hardware-parity.md", note = "downloads for x86_64 and ARM64" }
+diacraft = { rule = "manual", value = "Full", source = "docs/hardware-parity.md", note = "an AppImage, a .deb, an .rpm and a .tar.gz for x86_64 and ARM64" }
 reference = { value = "Not yet", edition = "none", source = "compare-plans", note = "the desktop app is for Windows PCs only; the web app runs in a browser on Linux" }
 [row.libreoffice]
 value = "Full"

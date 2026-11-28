@@ -1,4 +1,4 @@
-//! How a template names the stencils it opens (ours; moved it into DiaCraft's own part).
+//! How a template names the stencils it opens (ours; moved it into DiaCraft's own part), and how a **drawing** does (ours; issue 7 of the demo video: a drawing saved from the Basic Network Diagram template reopened without its network stencils).
 //!
 //! The list lives in **DiaCraft's solution part** (`Document::diacraft`, the same part the Snap & Glue options live in),
 //! in a child `stencils` of the `Data` element whose attribute `open` is a list of **built-in stencil ids** (`stencil.list`: `basic`,
@@ -15,9 +15,16 @@
 //! * **A name is never a path.** An entry that is not the id of a built-in stencil is counted as ignored and nothing is read for it: a template is a
 //!   file somebody sent, and opening what it names would let it choose which of the reader's files DiaCraft reads. A stencil file is opened by
 //!   `stencil.open`, by the person.
-//! * Bounded: only the first 4 KiB of the text and the first [`MAX_NAMES`] entries are looked at, whatever the attribute holds.
+//! * Bounded: only the first 4 KiB of the text and the first [`MAX_NAMES`] entries are looked at, whatever the attribute holds, and the answer says in words
+//!   that more was named ([`StencilNames::cut`]).
 //! * **Written only when it says something**: a list that is the stencils a new drawing has is no child (and a part with nothing else in it is no part),
 //!   so a template with the default stencils is the file it would have been without this rule.
+//!
+//! **A drawing is given the same list**. The list rides in the part of every format that carries DiaCraft's data (`.diacraft`, VSDX, `.odg`), so a drawing made
+//! from a template carries its template's list, a save writes the stencils open at that moment (`cmd/file.rs`, `with_stencil_list`), and **`file.open` opens exactly what the list
+//! names**, with the same rules of what a name is ([`stencils_of_drawing`]). A drawing with **no** list opens the stencils a new drawing has **and the built-in stencils its masters
+//! came from** ([`stencils_of_masters`]): a file saved before this rule, one from another program, or one whose list could not be written, still has the shapes of its masters at hand.
+//! Stencils opened from files are never named.
 
 use diacraft_doc::Document;
 
@@ -42,6 +49,8 @@ pub struct StencilNames {
     pub ids: Vec<&'static str>,
     /// How many entries named something else (a path, a stencil that does not exist, a repeat): counted and not followed.
     pub ignored: usize,
+    /// Whether the text named more than was looked at: it ran past the first 4 KiB, or held more than [`MAX_NAMES`] entries. The rest is not looked at, and the words say so.
+    pub cut: bool,
 }
 
 impl StencilNames {
@@ -74,8 +83,9 @@ pub fn stencil_names(doc: &Document) -> Option<StencilNames> {
 pub(super) fn parse(text: &str) -> StencilNames {
     // The cut is made at a character boundary: a multi-byte letter across it is dropped, not split.
     let end = (0..=text.len().min(MAX_SCAN_BYTES)).rev().find(|at| text.is_char_boundary(*at)).unwrap_or(0);
-    let mut names = StencilNames::default();
-    for entry in text.get(..end).unwrap_or_default().split(';').take(MAX_NAMES) {
+    let mut names = StencilNames { cut: end < text.len(), ..StencilNames::default() };
+    let mut entries = text.get(..end).unwrap_or_default().split(';');
+    for entry in entries.by_ref().take(MAX_NAMES) {
         let entry = entry.trim();
         if entry.is_empty() {
             continue;
@@ -85,6 +95,8 @@ pub(super) fn parse(text: &str) -> StencilNames {
             _ => names.ignored += 1,
         }
     }
+    // Entries after the ones looked at: the first one that says anything makes the cut, and the rest are not walked (the text is at most 4 KiB, whatever it holds).
+    names.cut |= entries.any(|entry| !entry.trim().is_empty());
     names
 }
 
@@ -99,4 +111,51 @@ pub fn set_stencil_names(doc: &mut Document, ids: &[&str]) -> bool {
         return doc.set_diacraft_child(STENCILS_CHILD, None);
     }
     doc.set_diacraft_child(STENCILS_CHILD, Some(&[(OPEN_ATTR, known.join(";").as_str())]))
+}
+
+/// The built-in stencils whose masters `doc` holds, in the order of the catalogue, each once. A master of a built-in stencil is known by its fixed `BaseID`
+/// (`MasterSpec::guid`, which every copy keeps) or, failing that, its `UniqueID`; the masters of a stencil file, and the hidden masters that no stencil holds (the custom line ends), name
+/// none. One walk of the masters, a lookup in a table for each.
+pub fn stencils_of_masters(doc: &Document) -> Vec<&'static str> {
+    let mut found: Vec<&'static str> = Vec::new();
+    for master in doc.masters.iter() {
+        let mut named = master.raw.get("BaseID").into_iter().chain(master.unique_id.as_deref());
+        if let Some(id) = named.find_map(stencil::stencil_of_guid)
+            && !found.contains(&id)
+        {
+            found.push(id);
+        }
+    }
+    stencil::stencils().iter().map(|s| s.id).filter(|id| found.contains(id)).collect()
+}
+
+/// What `file.open` opens for a drawing, and what it tells of the list.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DrawingStencils {
+    /// The built-in stencils to open, in the order the Shapes window lists them, each once.
+    pub ids: Vec<&'static str>,
+    /// How many entries of the list named something else (see [`StencilNames::ignored`]).
+    pub ignored: usize,
+    /// Whether the list named more than was looked at (see [`StencilNames::cut`]).
+    pub cut: bool,
+    /// Whether the drawing holds a list that names stencils, and the stencils are its list's.
+    pub listed: bool,
+}
+
+/// The built-in stencils a drawing opens with: **exactly the ones its list names** when it has one that names a stencil that can be opened (the same rules as a template's, [`StencilNames`]),
+/// and otherwise **the stencils a new drawing has and the built-in stencils its masters came from** ([`stencils_of_masters`]), in the order of the catalogue. A drawing's masters name the stencils
+/// of a file saved before the list was kept, of one another program made, and of one whose list could not be written. An empty list opens none (a template made for none, saved as a drawing).
+pub fn stencils_of_drawing(doc: &Document) -> DrawingStencils {
+    let names = stencil_names(doc);
+    if let Some(listed) = names.as_ref().filter(|n| !n.ids.is_empty() || n.ignored == 0) {
+        return DrawingStencils { ids: listed.ids.clone(), ignored: listed.ignored, cut: listed.cut, listed: true };
+    }
+    let mut ids = default_ids();
+    for id in stencils_of_masters(doc) {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    let (ignored, cut) = names.map_or((0, false), |n| (n.ignored, n.cut));
+    DrawingStencils { ids, ignored, cut, listed: false }
 }

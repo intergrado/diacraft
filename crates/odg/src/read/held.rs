@@ -18,7 +18,7 @@
 //! | [`Value::Shadow`] | every `shadow` attribute of the style (`draw:shadow`, `-color`, `-opacity`, `-offset-x`, `-offset-y`, `-blur`, `loext:shadow-*`) | `ShdwPattern`, `ShapeShdwType` |
 //! | [`Value::TextJustify`], [`Value::TextPadding`], [`Value::TextWriting`] | `draw:textarea-vertical-align="justify"`; `fo:padding` as one attribute; the graphic style's `style:writing-mode` | `VerticalAlign`; the four margins; `TextDirection` |
 //! | [`Value::TabStops`] | the graphic style's `style:tab-stop-distance` and its `style:tab-stops` element | none |
-//! | [`Value::Frame2d`], [`Value::CircleCentre`], [`Value::Frame1d`] | a shape's `draw:transform` with its `svg:x`, `svg:y`, `svg:width` and `svg:height` (a 1-D shape's `svg:x1` to `svg:y2`); the form a circle or ellipse given by its centre was written in | none: judged by the pose on the page |
+//! | [`Value::Frame2d`], [`Value::CircleCentre`], [`Value::Frame1d`] | a shape's `draw:transform` with its `svg:x`, `svg:y`, `svg:width` and `svg:height` (a 1-D shape's `svg:x1` to `svg:y2`); the form a circle or ellipse given by its centre was written in; **an attribute the reader does not read as the attribute it is** (a length that is no length, a transform that does not close) **is not held**, and the report says it was read as absent ([`pairs_read`]) | none: judged by the pose on the page |
 //! | [`Value::Layer`] | `draw:layer` | none |
 //! | [`Value::EnhancedGeometry`] | **nothing but its stamp**: the element itself stays in the shape's kept markup (`odf.kept`), where the splice writer reads it | the `Geometry` sections and the `User` rows `ODFEq<i>` |
 //! | [`Value::Route`], [`Value::ConnectorType`] | a connector's `svg:d`, `svg:viewBox` and `draw:line-skew`; its `draw:type` (or, when it has none, an empty value: its absence) | none |
@@ -322,20 +322,32 @@ pub(crate) fn style_templates<'t>(
     Ok(out)
 }
 
+/// Whether cells with the `LinePattern` `pattern` and the `LineCap` `cap` write the dash of DiaCraft's own that `own` (the pattern and the flat form its name says) names: the pattern is the name's, and the
+/// cap is the flat one (`LineCap` 1) exactly when the name says the flat form (the writer names a dash for the form its own cap draws). A cell that is not there, or not a number, gives none.
+pub(crate) fn cells_give_dash(own: (u8, bool), pattern: Option<f64>, cap: Option<f64>) -> bool {
+    pattern == Some(f64::from(own.0)) && own.1 == (cap == Some(1.0))
+}
+
 /// The values a shape gets from the templates of its own automatic graphic style `graphic`: the foreign dash, the foreign markers and the widths of DiaCraft's own, and the
 /// others as they are. Each is charged ([`super::cost::HELD`]) before it is made; its stamp is that of `sheet`, the shape's sheet as read.
 pub(crate) fn from_style(r: &mut Reader, set: &StyleSet, graphic: Option<usize>, sheet: &Sheet, out: &mut Vec<Held>) -> Result<(), OdgError> {
     let Some(style) = graphic.and_then(|g| set.get(g)) else { return Ok(()) };
+    // Whether the style itself names a dash DiaCraft wrote **and the cells give the same name back**: the pattern the dash's name says is the `LinePattern` the reader made of it (its lengths are the
+    // table's), and the form its name says is the form the style's own cap draws (`LineCap` 1 is flat). That dash is regenerated from the cells, as for a new shape; any other
+    // (another make's, one the drawing does not hold, and one of ours whose cells say another name: a style that names a dash and says no stroke has no pattern, a cap that is another style's)
+    // is held as written.
+    let regenerated = || {
+        let Some(Typed::Dash(Name::Found(index))) = style.own_prop(Kind::Graphic, P::StrokeDash).map(|p| &p.typed) else { return false };
+        let Some((pattern, flat)) = set.dash(*index).and_then(|d| d.own) else { return false };
+        let number = |cell: &str| sheet.cell(cell).and_then(|c| c.value.as_ref()).and_then(diacraft_doc::Value::number);
+        cells_give_dash((pattern, flat), number("LinePattern"), number("LineCap"))
+    };
     for template in &style.templates {
         let value = match template.value {
-            Value::Dash => {
-                // A dash DiaCraft wrote is regenerated from the cells; any other (one the drawing does not hold included) is held.
-                let own = match style.own_prop(Kind::Graphic, P::StrokeDash).map(|p| &p.typed) {
-                    Some(Typed::Dash(Name::Found(index))) => set.dash(*index).is_some_and(|d| d.own.is_some()),
-                    _ => false,
-                };
-                if own { continue } else { Value::Dash }
-            }
+            Value::Dash if regenerated() => continue,
+            // The stroke of a style whose dash the cells regenerate is held no more than that dash is: the cells say both. The stroke of a style that names none, or one the
+            // cells cannot say, is held, and the writer then names no dash of DiaCraft's own beside it (`write::held`).
+            Value::DashStroke if regenerated() => continue,
             Value::ForeignMarker(end) => match marker_of(style, end) {
                 // No line end (an empty name), or no marker name of its own (a width alone): the width is held under the width's value, and the name is the cells' to write. (an
                 // empty name's width and centre flag were held by nothing, so a style written again said neither, and the end read its parent's width.)
@@ -374,6 +386,31 @@ fn marker_of(style: &OdfStyle, end: End) -> Option<Marker> {
 /// The attributes of `attrs` that `wanted` names (by namespace and local name), as written, in the order written.
 fn pairs_of<'t>(attrs: &Attrs<'t>, wanted: &[(Ns, &str)]) -> Vec<(&'t str, &'t str)> {
     attrs.iter().filter(|a| wanted.iter().any(|(ns, local)| a.ns == *ns && a.local == *local)).map(|a| (a.name, a.value)).collect()
+}
+
+/// [`pairs_of`] for the attributes of a shape's frame, **less each one the reader does not read as the attribute it is** (`svg:y2="infcm"`, `NaNcm`, `1e999cm` and `1e308cm` are no length, a
+/// length being a decimal number and a unit; a transform that does not close is none either). The frame is held as text and given back as it was while the cells are as the read made
+/// them; the reader read such an attribute as absent, and a text it does not read, held and written back, was a file the save made and then refused ("the reader does not read what the
+/// save wrote as y2", found by the hostile-file sweeps: a drawing that opened could not be saved as an `.odg`). Such a text is not held, and the report says so, once
+/// whatever the number, in words that hold none of the file's text. The writer reads a frame attribute that is not held as the reader did, absent.
+fn pairs_read<'t>(r: &mut Reader, attrs: &Attrs<'t>, wanted: &[(Ns, &str)]) -> Vec<(&'t str, &'t str)> {
+    let mut unread = 0u64;
+    let pairs: Vec<(&'t str, &'t str)> = attrs
+        .iter()
+        .filter(|a| wanted.iter().any(|(ns, local)| a.ns == *ns && a.local == *local))
+        .filter(|a| {
+            let reads = super::readback::reads(a.ns, a.local, a.value);
+            unread = unread.saturating_add(u64::from(!reads));
+            reads
+        })
+        .map(|a| (a.name, a.value))
+        .collect();
+    if unread > 0 {
+        r.warn_counted("frame_attribute_unread", unread, || {
+            "a coordinate, a size or a transform of a shape is no value the reader reads (a length is a decimal number and a unit): it was read as absent, and its text is not kept".to_owned()
+        });
+    }
+    pairs
 }
 
 /// A list of attributes shared by every shape that holds the same one: a list that is short is interned, up to [`super::shapes::MOST_SHARED`] of them, and a repeat costs nothing.
@@ -443,11 +480,11 @@ pub(crate) fn from_element(r: &mut Reader, shared: &mut Shared, src: &Source<'_,
     }
     // A 1-D shape's ends as written, with the transform when it has one (every segment, since the model writer judges a connector's route by them).
     if src.one_d {
-        let pairs = pairs_of(a, &[(Ns::Svg, "x1"), (Ns::Svg, "y1"), (Ns::Svg, "x2"), (Ns::Svg, "y2"), (Ns::Draw, "transform")]);
+        let pairs = pairs_read(r, a, &[(Ns::Svg, "x1"), (Ns::Svg, "y1"), (Ns::Svg, "x2"), (Ns::Svg, "y2"), (Ns::Draw, "transform")]);
         put(r, shared, out, Value::Frame1d, pairs, Passthrough::new())?;
     }
     if src.transform && !src.one_d && src.kind != Kindof::Group {
-        let pairs = pairs_of(a, &[(Ns::Svg, "x"), (Ns::Svg, "y"), (Ns::Svg, "width"), (Ns::Svg, "height"), (Ns::Draw, "transform")]);
+        let pairs = pairs_read(r, a, &[(Ns::Svg, "x"), (Ns::Svg, "y"), (Ns::Svg, "width"), (Ns::Svg, "height"), (Ns::Draw, "transform")]);
         put(r, shared, out, Value::Frame2d, pairs, Passthrough::new())?;
     }
     let has = |ns: Ns, local: &str| a.peek(ns, local).is_some();
@@ -457,7 +494,7 @@ pub(crate) fn from_element(r: &mut Reader, shared: &mut Shared, src: &Source<'_,
         _ => false,
     };
     if centred {
-        let pairs = pairs_of(a, &[(Ns::Svg, "cx"), (Ns::Svg, "cy"), (Ns::Svg, "r"), (Ns::Svg, "rx"), (Ns::Svg, "ry")]);
+        let pairs = pairs_read(r, a, &[(Ns::Svg, "cx"), (Ns::Svg, "cy"), (Ns::Svg, "r"), (Ns::Svg, "rx"), (Ns::Svg, "ry")]);
         put(r, shared, out, Value::CircleCentre, pairs, Passthrough::new())?;
     }
     match src.kind {
@@ -902,4 +939,25 @@ pub(crate) fn shape_data<'t>(
         Arc::make_mut(text).ext.make_mut().odf = odf_text;
     }
     keep(r, shape, OdfShape { kept, style_name, held: held_values, units })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cells_give_dash;
+
+    #[test]
+    fn the_cells_give_a_dash_of_diacraft_when_the_pattern_and_the_form_of_the_cap_are_its_names() {
+        // The round form: the pattern is the name's and the cap is not the flat one (round, square, or none stated).
+        for cap in [None, Some(0.0), Some(2.0), Some(f64::NAN)] {
+            assert!(cells_give_dash((4, false), Some(4.0), cap), "{cap:?}");
+            assert!(!cells_give_dash((4, true), Some(4.0), cap), "a flat name under {cap:?}");
+        }
+        // The flat form: the cap is `LineCap` 1.
+        assert!(cells_give_dash((4, true), Some(4.0), Some(1.0)));
+        assert!(!cells_give_dash((4, false), Some(4.0), Some(1.0)), "a round name under a flat cap");
+        // Another pattern, no pattern (a style that says no stroke) and a pattern that is no number give none.
+        for pattern in [Some(5.0), Some(1.0), Some(0.0), Some(4.5), None, Some(f64::NAN)] {
+            assert!(!cells_give_dash((4, false), pattern, None), "{pattern:?}");
+        }
+    }
 }

@@ -340,3 +340,56 @@ fn a_page_is_drawn_over_the_background_page_it_names_and_the_background_is_not_s
     assert_eq!(w.state().window_state()["selection"], json!([red]));
     assert_eq!(w.state().ui_panics(), 0);
 }
+
+// ---------------------------------------------------------------------------------------------------------------------- the page a drawing opens on
+
+/// A window on the drawing the file at `path` holds, opened as a person opens one.
+fn window_on(path: &std::path::Path) -> Window {
+    let mut session = diacraft_engine::Session::new();
+    session.execute("file.open", &json!({"path": path.to_str().unwrap()})).unwrap();
+    let app = diacraft_ui_egui::DiacraftApp::new(session, None).with_inline_pictures(diacraft_ui_egui::render_worker::bundled_drawer());
+    let mut w = crate::support::fast_window(app, [1280.0, 800.0]);
+    w.rest();
+    w
+}
+
+/// A drawing with a background page, saved and opened again, opens on the first page that is not a background, whatever place the file lists the pages in, and the tabs put the background
+/// pages after the others, set apart (a file lists its background pages first, and the window of the file names a page that is not one).
+#[test]
+fn a_drawing_with_a_background_page_opens_on_a_foreground_page_and_its_tabs_put_the_background_last() {
+    for extension in ["vsdx", "diacraft"] {
+        let dir = crate::support::TempDir::new("start-page");
+        let path = dir.file(&format!("start.{extension}"));
+        let mut made = diacraft_engine::Session::new();
+        made.execute("file.new", &json!({})).unwrap();
+        made.execute("page.add", &json!({"background": true})).unwrap();
+        made.execute("page.add", &json!({"name": "Second"})).unwrap();
+        made.execute("file.save_as", &json!({"path": path.to_str().unwrap()})).unwrap();
+        let w = window_on(&path);
+        assert_eq!(names(&w), ["VBackground-1", "Page-1", "Second"], "{extension}: the file lists the background page first");
+        assert_eq!(shown_page(&w), 1, "{extension}: the drawing opens on `Page-1`, a page that is not a background");
+        let mut tabs = elements_named(&w, "page-tab.");
+        tabs.sort_by(|a, b| a.1.min.x.total_cmp(&b.1.min.x));
+        let order: Vec<&str> = tabs.iter().map(|(n, ..)| n.as_str()).collect();
+        assert_eq!(order, ["page-tab.1", "page-tab.3", "page-tab.2"], "{extension}: the background's tab is the last");
+        let gap = tabs[2].1.min.x - tabs[1].1.max.x;
+        assert!(gap > 4.0, "{extension}: a gap sets the background's tab apart: {gap}");
+    }
+}
+
+/// A file an earlier build wrote names a background page in its window and in `TopPage` (it took the model's first page, which lists the backgrounds first): the window opens on the first
+/// page that is not a background all the same, as it does whatever the window says, and the background's tab is the last.
+#[test]
+fn a_file_whose_window_names_its_background_page_still_opens_on_a_foreground_page() {
+    let dir = crate::support::TempDir::new("start-window");
+    // The demo drawing's `Frame` (id 4) is its background page; its window and its document settings name it.
+    let windows = crate::fixture::WINDOWS_PART.replace(r#"WindowType="Drawing""#, r#"WindowType="Drawing" ContainerType="Page" Page="4""#);
+    let bytes = crate::fixture::demo_builder(Some(&windows)).document_extra(r#"<DocumentSettings TopPage="4"/>"#).build();
+    let path = crate::fixture::write(dir.path(), "earlier.vsdx", &bytes);
+    let w = window_on(&path);
+    assert_eq!(shown_page(&w), 1, "`Overview`, the first page that is not a background, and not `Frame`");
+    let mut tabs = elements_named(&w, "page-tab.");
+    tabs.sort_by(|a, b| a.1.min.x.total_cmp(&b.1.min.x));
+    let order: Vec<&str> = tabs.iter().map(|(n, ..)| n.as_str()).collect();
+    assert_eq!(order, ["page-tab.1", "page-tab.2", "page-tab.3", "page-tab.4"], "the background's tab is the last");
+}

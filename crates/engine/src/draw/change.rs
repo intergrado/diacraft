@@ -26,6 +26,8 @@
 //!   that it has too is the master's and the shape's own values for it are not kept.
 //! * With `ReplaceLockFormat` on the new master the shape's own line, fill and text cells, its gradients and its style
 //!   links are not kept; with `ReplaceLockText` and a text of its own on the new master, the shape's own text is not.
+//! * The cells the new master's `ReplaceCopyCells` names (a `DEPENDSON` call) are carried from the shape to
+//!   the result, as a value or a formula, and beat the locks and the shape data above; where the new master has no such cell only the value is copied (`change_copy.rs`).
 //! * A connector end glued to a connection point the new master has stays glued to it, and the recalculation moves the end. An end glued
 //!   to a point the new master lacks, or to a member that is gone, is glued to the nearest point of the shape, and **let go where it is**
 //!   when the shape has no point at all. Both are said in the answer. An end glued to the whole of the shape stays.
@@ -40,10 +42,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use diacraft_calc::{Budget, Changes};
+use diacraft_calc::Changes;
 use diacraft_doc::{
-    Cell, CellAddr, CellName, Document, MAX_CELLS_PER_CONTAINER, MAX_SECTIONS_PER_SHEET, MAX_SHAPE_DEPTH, Origin, Owner, Resolved, Resolver, Row,
-    RowKey, Section, SectionKey, Shape, ShapeRef, ShapeType, Sheet, SheetRef, Source, Value,
+    Cell, CellAddr, CellName, Document, Links, MAX_CELLS_PER_CONTAINER, MAX_SECTIONS_PER_SHEET, MAX_SHAPE_DEPTH, Origin, Owner, Passthrough,
+    Resolved, Resolver, Row, RowKey, Section, SectionKey, Shape, ShapeRef, ShapeType, Sheet, SheetRef, Source, Value, owner_places_after_where,
 };
 
 use super::connectors::{Which, frame_cells, reconnect_unsettled, release_end};
@@ -141,6 +143,11 @@ struct NewMaster {
     has_text: bool,
     locks: Locks,
     replace_locked: bool,
+    /// The master's one shape, and the cells its `ReplaceCopyCells` names (`change_copy.rs`). A master of several shapes has neither.
+    sheet: Option<SheetRef>,
+    copy: Vec<diacraft_formula::CellRef>,
+    /// The style links of the master's one shape, which an instance with none of its own follows ([`own_links`]). A master of several shapes has none to give.
+    links: Option<Links>,
 }
 
 fn top_sheet(mid: u32, at: usize) -> SheetRef {
@@ -183,10 +190,33 @@ fn master_facts(doc: &Document, mid: u32) -> Result<NewMaster, Problem> {
                 has_text: shape.text.as_ref().is_some_and(|t| !t.parts.is_empty()),
                 locks: Locks { format: flag("ReplaceLockFormat"), data: flag("ReplaceLockShapeData"), text: flag("ReplaceLockText") },
                 replace_locked: flag("LockReplace"),
+                copy: super::change_copy::list_of(doc, &sheet),
+                sheet: Some(sheet),
+                links: Some(shape.sheet.links),
             })
         }
-        _ => Ok(NewMaster { id: mid, name, one_d: false, has_text: false, locks: Locks::default(), replace_locked: false }),
+        _ => Ok(NewMaster {
+            id: mid,
+            name,
+            one_d: false,
+            has_text: false,
+            locks: Locks::default(),
+            replace_locked: false,
+            sheet: None,
+            copy: Vec::new(),
+            links: None,
+        }),
     }
+}
+
+/// The style links a changed shape keeps as its own: those of `links` that name another style than the new master's one shape links for the family, no link counting as
+/// the root's, which is what a shape with none reads. A link that is the master's says nothing the master does not (DiaCraft follows the master shape's link when the instance has none,
+/// step 3), and the VSDX application reads an instance's own link before the master's cells of that family, so it would hide the master's line ends, pattern and fill
+/// there: the connector tool's links to the root, on a connector changed to a connector master, are dropped. `master` is `None` for a master of several shapes: every link is kept.
+fn own_links(links: Links, master: Option<Links>) -> Links {
+    let Some(master) = master else { return links };
+    let own = |mine: Option<u32>, masters: Option<u32>| mine.filter(|id| *id != masters.unwrap_or(0));
+    Links { line: own(links.line, master.line), fill: own(links.fill, master.fill), text: own(links.text, master.text) }
 }
 
 /// The locks that turn swapping off for the document and for the page (`DocLockReplace`, `PageLockReplace`).
@@ -309,7 +339,7 @@ fn number_of(cell: &Cell) -> Option<f64> {
 }
 
 /// A data row cell as the shape is to hold it: the shape's own cell as it is, any other as the constant it has now.
-fn kept_cell(found: &Resolved<'_>) -> Option<Cell> {
+pub(super) fn kept_cell(found: &Resolved<'_>) -> Option<Cell> {
     if found.formula.source == Source::Local
         && let Some(cell) = found.formula.cell
     {
@@ -446,18 +476,18 @@ fn merged_sheet(
             put_cell(&mut cells, CellName::new(pin), half)?;
         }
     }
-    let skip = |section: &Section| {
-        let name = section.name.as_str();
-        // A two-dimensional shape's outline and points are the new master's; its shape data is carried over row by row; the gradients are formatting.
-        (!old.one_d && matches!(name, "Geometry" | "Connection"))
-            || name == "Property"
-            || (locks.format && matches!(name, "FillGradient" | "LineGradient"))
-    };
+    let skip = |section: &Section| replaced(old, locks, section);
     let mut sections: Vec<Arc<Section>> = Vec::new();
     let mut seen: HashSet<(&str, Option<u32>)> = HashSet::new();
     for section in held.sections.iter().inspect(|_| note_step()).filter(|s| !skip(s)) {
         seen.insert((section.name.as_str(), section.ix));
-        sections.push(Arc::clone(section));
+        // The points a two-dimensional shape took from the new master are originals, so the marker of the points a doubling made (a row of its own `User`
+        // section) goes with the points it named; the rest of the section stays.
+        match marker_free(section, old.one_d) {
+            Some(Some(without)) => sections.push(Arc::new(without)),
+            Some(None) => {}
+            None => sections.push(Arc::clone(section)),
+        }
     }
     if let Some(b) = base {
         for section in b.sections.iter().inspect(|_| note_step()) {
@@ -477,9 +507,39 @@ fn merged_sheet(
         let from = base.map(|b| b.links).unwrap_or_default();
         diacraft_doc::Links { line: held.links.line.or(from.line), fill: held.links.fill.or(from.fill), text: held.links.text.or(from.text) }
     };
-    let sheet = Sheet { links, cells, sections, raw: held.raw.clone(), passthrough: held.passthrough.clone(), ext: held.ext.clone() };
+    let mut sheet = Sheet { links, cells, sections, raw: held.raw.clone(), passthrough: Passthrough::new(), ext: held.ext.clone() };
+    // The sheet is made again from the shape's: each unknown node of the sheet stays after the cell or the section it followed (the sections the new master gives are new, whatever the
+    // old ones were called).
+    sheet.take_places_of_where(held, |section| !replaced(old, locks, section));
     sheet.check_limits().map_err(|e| Problem::failed(format!("the changed shape would break a limit of a sheet: {e}")))?;
     Ok(sheet)
+}
+
+/// The `User` section of a two-dimensional shape without the marker of the points a doubling made: `None` when the section holds no such row (or is
+/// not a `User` section, or the shape is one-dimensional and keeps its points), `Some(None)` when nothing else is in it and it goes, else the section without the row.
+fn marker_free(section: &Section, one_d: bool) -> Option<Option<Section>> {
+    let is_marker = |row: &diacraft_doc::Row| row.name.as_deref() == Some(super::conn_marker::MARKER_ROW);
+    if one_d || section.name.as_str() != "User" || !section.rows.iter().any(|row| is_marker(row)) {
+        return None;
+    }
+    let mut without = section.clone();
+    without.retain_rows(|row| !is_marker(row));
+    let bare = without.rows.is_empty()
+        && without.cells.is_empty()
+        && !without.del
+        && without.raw.is_empty()
+        && without.passthrough.is_empty()
+        && without.ext.is_empty();
+    Some(if bare { None } else { Some(without) })
+}
+
+/// Whether a section of the old shape goes with the change (the new master's takes its place): a two-dimensional shape's outline and points are the new master's, its shape data is carried
+/// over row by row, and the gradients are formatting.
+fn replaced(old: &Old, locks: Locks, section: &Section) -> bool {
+    let name = section.name.as_str();
+    (!old.one_d && matches!(name, "Geometry" | "Connection"))
+        || name == "Property"
+        || (locks.format && matches!(name, "FillGradient" | "LineGradient"))
 }
 
 /// The shape as it is once it is changed: the old shape, with the new master, members and `Type`, and the merged sheet.
@@ -490,15 +550,19 @@ fn merged_shape(
     dropped: Option<&Shape>,
     (new_numbers, keeps): (&HashMap<&'static str, f64>, (bool, bool)),
 ) -> Result<Shape, Problem> {
-    let sheet = merged_sheet(old, dropped.map(|d| &*d.sheet), new_numbers, new.locks, keeps)?;
+    let mut sheet = merged_sheet(old, dropped.map(|d| &*d.sheet), new_numbers, new.locks, keeps)?;
+    sheet.links = own_links(sheet.links, new.links);
     let mut shape = (*old.shape).clone();
     shape.master = Some(new.id);
     shape.master_shape = None;
     shape.del = false;
     if let Some(d) = dropped {
         shape.kind = d.kind.clone();
-        shape.children = d.children.clone();
+        // The members are the new master's: the unknown nodes among the old ones stay after the member of the same `ID`, and go with the member before it when there is none.
+        shape.edit_members(|members| *members = d.children.clone());
     }
+    // The nodes of the shape count the cells and the sections of its sheet, which is made again.
+    shape.passthrough = owner_places_after_where(&old.shape.passthrough, &old.shape.sheet, &sheet, |section| !replaced(old, new.locks, section));
     shape.sheet = Arc::new(sheet);
     if old.auto_name {
         let name = instance_name(&new.name, id);
@@ -533,13 +597,14 @@ struct Dropped {
 fn drop_instance(doc: &mut Document, page: u32, to: &Replacement<'_>, above: u32, takes_the_id_of: u32) -> Result<Dropped, Problem> {
     let (id, highest) = match to {
         Replacement::Builtin(spec) => {
-            let info = super::drop_shape_above(doc, page, spec, 0.0, 0.0, above)?;
+            // The trial instance is no drop on the page: the shape it stands in for keeps the size it has, so the page's drawing scale does not scale it (`drop_scale.rs`).
+            let info = super::drop_shape_following(doc, page, spec, (0.0, 0.0), above, super::Follow::Never)?;
             // The members of a group master's instance have `ID`s above its own: the highest on the page is the last of them.
             let highest = super::page_stats(doc, page).map_or(info.id, |(highest, _)| highest.max(info.id));
             (info.id, highest)
         }
         Replacement::Opened { stencil, entry } => {
-            let done = stencil::drop_opened(doc, page, stencil, entry, 0.0, 0.0, above)?;
+            let done = stencil::drop_opened_following(doc, page, stencil, entry, (0.0, 0.0), above, super::Follow::Never)?;
             (done.info.id, done.highest_id)
         }
     };
@@ -639,9 +704,9 @@ fn write_data(doc: &mut Document, page: u32, at: &ShapeRef, rows: &[OwnedRow], l
         return Ok(());
     }
     let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
-    let sheet = Arc::make_mut(&mut shape.sheet);
-    sheet.sections.push(Arc::new(section));
-    sheet.check_limits()?;
+    let mut counted = shape.counted_sheet();
+    counted.push_section(Arc::new(section));
+    counted.sheet.check_limits()?;
     Ok(())
 }
 
@@ -661,12 +726,7 @@ fn recalculate(doc: &mut Document, page: u32, cells: Vec<(SheetRef, CellAddr)>) 
     if cells.is_empty() {
         return Ok(());
     }
-    let report =
-        crate::calc_index::commit_changed(doc, &Budget::default(), crate::measure::eval_options(), page, &Changes { cells, ..Changes::default() });
-    if report.budget_exhausted || report.memory_exhausted {
-        return Err(Problem::failed("the page is too large to recalculate"));
-    }
-    Ok(())
+    super::settle::commit(doc, page, &Changes { cells, ..Changes::default() })
 }
 
 /// What a changed shape needs after the recalculation.
@@ -674,6 +734,8 @@ struct Done {
     id: u32,
     at: ShapeRef,
     old: Old,
+    /// The cells the new master's `ReplaceCopyCells` names that the shape had, read before the change (`change_copy.rs`).
+    carry: Vec<super::change_copy::Carried>,
 }
 
 /// Puts the centre of a two-dimensional shape's box back where it was, when the new master's pin is elsewhere in the box. A pin that is a
@@ -815,6 +877,7 @@ pub fn change_shapes(doc: &mut Document, page: u32, ids: &[u32], to: &Replacemen
             Verdict::Unchanged => report.unchanged.push(id),
             Verdict::Change => {
                 let old = gather(doc, &at, id)?;
+                let carry = if new.copy.is_empty() { Vec::new() } else { super::change_copy::carried(doc, &at, new.sheet.as_ref(), &new.copy) };
                 let made = if old.one_d { None } else { Some(drop_instance(doc, page, to, above, id)?) };
                 let (dropped, numbers, highest, keeps) = match made {
                     Some(d) => (Some(d.shape), d.numbers, d.highest, d.keeps),
@@ -847,7 +910,7 @@ pub fn change_shapes(doc: &mut Document, page: u32, ids: &[u32], to: &Replacemen
                 let merged = merged_shape(&old, id, &new, dropped.as_deref(), (&numbers, keeps))?;
                 *shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))? = merged;
                 report.changed.push(id);
-                done.push(Done { id, at, old });
+                done.push(Done { id, at, old, carry });
             }
         }
     }
@@ -873,6 +936,8 @@ pub fn change_shapes(doc: &mut Document, page: u32, ids: &[u32], to: &Replacemen
     recalculate(doc, page, moved)?;
     for d in &done {
         write_data(doc, page, &d.at, &d.old.data, new.locks.data)?;
+        // The cells the new master lists have the last word: they beat the locks and the shape data above.
+        super::change_copy::put(doc, page, &d.at, &d.carry)?;
         if d.old.nested && !d.old.one_d {
             let mut listed = vec![d.at.clone()];
             listed.extend(below(doc, &d.at));

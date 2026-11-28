@@ -31,26 +31,37 @@
 //!
 //! **Names are checked at the write that sets them** ([`check_page_name`]), never by a pass over the whole document: an imported
 //! page with a blank name must not stop every other edit.
+//!
+//! **The language of a run** is a cell (`LangID`) that files hold as they wrote it. [`lang`] reads a language tag by the syntax of RFC 5646 ([`lang::parse`]) and says
+//! what a value means in a drawing ([`lang::effective`]: a language, no language, or the document's own), so that the renderer, the proofer and AutoCorrect read one
+//! answer; a value is never rewritten by reading it.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod alt_text;
 mod catalogue;
 mod cell;
 mod comments;
 mod diacraft_data;
 mod document;
+pub mod lang;
 mod name;
 pub mod odf;
 pub mod package;
+mod page_names;
 mod part;
+mod places;
 mod raw;
 mod resolve;
+pub mod root_text;
 mod shape;
 mod shared;
 mod sheet;
 mod sheet_ref;
 mod snap_words;
 pub mod stamp;
+mod string_unit;
+pub use string_unit::units_are_ours_to_state;
 mod theme_data;
 mod value;
 mod window_flags;
@@ -62,8 +73,8 @@ mod kani_proofs;
 
 pub use catalogue::{
     CellClass, CellInfo, DISPLAY_ORDER, DisplaySection, Family, Keying, SECTION_NAMES, SECTION_SPELLINGS, SectionKind, SectionRules, SheetKind,
-    cell_info, display_group, display_section, ix_to_row_number, keying, listed_cells, next_row_number, row_number_to_ix, section_class,
-    section_for_spelling, section_rules, section_spelling,
+    cell_info, direct_cell_spelling, display_group, display_section, ix_to_row_number, keying, listed_cells, next_row_number, row_number_to_ix,
+    rows_inherit_type, section_class, section_for_spelling, section_rules, section_spelling,
 };
 pub use cell::{Cell, CellExtra, FormulaSlot, INHERIT_MARKER, NO_FORMULA_MARKER, Origin};
 pub use comments::{
@@ -80,8 +91,10 @@ pub use odf::{
     DefFamily, Definition, Held, HeldGroup, HeldStyleValue, KeptStyle, MAX_DEFINITIONS, MAX_LIST_LEVELS, OdfDoc, OdfListLevel, OdfPage, OdfParagraph,
     OdfRow, OdfRun, OdfShape, OdfStyle, OdfText, OdfTextStyle, TextGroup,
 };
-pub use package::{ContentTypeRow, CustomProp, Ext, ExtData, Format, Kept, MAX_PARTS, Part, PartRole, Rel, VsdxHeld, VsdxRest};
+pub use package::{ContentTypeRow, CustomProp, DIACRAFT_APPLICATION, Ext, ExtData, Format, Kept, MAX_PARTS, Part, PartRole, Rel, VsdxHeld, VsdxRest};
+pub use page_names::{is_page_and_digits, page_name_key};
 pub use part::{Connect, Connects, Master, Page, SchemeId, Style, Theme};
+pub use places::{Counted, cell_names, cells_changed, owner_places_after, owner_places_after_where};
 pub use raw::{Passthrough, Placed, RawAttrs, RawElement, RawNode};
 pub use resolve::{
     DefaultSpec, EffectiveRow, Located, MAX_STYLE_STEPS, MasterStep, Member, Rebind, Resolved, Resolver, ResolverStats, RowShape, Source, Warnings,
@@ -131,8 +144,12 @@ pub const MAX_SHAPES_PER_PAGE: usize = 1_000_000;
 /// few a drawing defines. A lookup of an entry is a scan of this many at the most.
 pub const MAX_COLOR_ENTRIES: usize = 4_096;
 
-/// Longest page name, in characters.
+/// Longest page name the model holds, in characters: what a file may give a page.
 pub const MAX_NAME_CHARS: usize = 255;
+
+/// Longest name a command gives a page, in characters: **a page name has at most 31 characters** (the page setup dialog's Page Properties tab). A name a file holds stays as it is,
+/// up to [`MAX_NAME_CHARS`]; [`check_given_page_name`] is the rule of the commands that name a page.
+pub const MAX_PAGE_NAME_CHARS: usize = 31;
 
 /// What can be wrong with a page, a name, a write or a document.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -141,8 +158,17 @@ pub enum DocError {
     EmptyName,
     #[error("a page name must be at most {max} characters", max = MAX_NAME_CHARS)]
     NameTooLong,
+    /// A name a command gave a page that has more than [`MAX_PAGE_NAME_CHARS`] characters.
+    #[error("a page name must be at most {max} characters", max = MAX_PAGE_NAME_CHARS)]
+    PageNameTooLong,
     #[error("a page name must not contain control characters")]
     ControlCharacter,
+    /// A name a command gave a page that is "page" and digits (`page1`): programs that open the drawing rename such a page ([`is_page_and_digits`]).
+    #[error("a page name must not be \"page\" and digits (page1, Page2), which programs that open the drawing rename: give the page another name")]
+    PageNameReserved,
+    /// A name a command gave a page that another page has, compared without regard to case ([`page_name_key`]).
+    #[error("another page has this name, and names are compared without regard to case: give the page another name")]
+    PageNameTaken,
     #[error("no page has id {0}")]
     NoSuchPage(u32),
     #[error("a document holds at most {max} pages", max = MAX_PAGES)]
@@ -209,7 +235,23 @@ pub fn check_text(text: &str) -> Result<(), TextProblem> {
     Ok(())
 }
 
-/// Checks a page name by [`check_text`].
+/// Checks a page name by [`check_text`]: the rule of the model, which holds the name of any file (at most [`MAX_NAME_CHARS`] characters). [`Document::add_page`],
+/// [`Document::rename_page`] and the audit use it, so that an importer can name a page as its file does.
 pub fn check_page_name(name: &str) -> Result<(), DocError> {
     check_text(name).map_err(DocError::from)
+}
+
+/// Checks the name a command gives a page: the rule of [`check_page_name`], **at most [`MAX_PAGE_NAME_CHARS`] characters**, counted as characters and not bytes, and **not "page" and
+/// digits** ([`is_page_and_digits`]). The commands that name a page (`page.add`, `page.rename`, `page.duplicate`) use it before they write, and
+/// [`Document::check_free_page_name`] adds that no other page has the name; a reader does not, so a name a file holds stays as it is.
+pub fn check_given_page_name(name: &str) -> Result<(), DocError> {
+    // One past the limit is enough to know the name is too long, however long it is.
+    if name.chars().take(MAX_PAGE_NAME_CHARS + 1).count() > MAX_PAGE_NAME_CHARS {
+        return Err(DocError::PageNameTooLong);
+    }
+    check_page_name(name)?;
+    if is_page_and_digits(name) {
+        return Err(DocError::PageNameReserved);
+    }
+    Ok(())
 }

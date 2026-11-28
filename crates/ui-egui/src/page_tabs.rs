@@ -50,8 +50,8 @@ fn rename_field() -> Id {
     Id::unique("page_tab_rename")
 }
 
-/// The most characters a page's name takes in the box of a tab.
-const NAME_BOX_CHARS: usize = 64;
+/// The most characters a page's name takes in the box of a tab: a page name has at most 31 characters (the engine refuses a longer one).
+const NAME_BOX_CHARS: usize = diacraft_engine::doc::MAX_PAGE_NAME_CHARS;
 
 /// The width of the menu a right click on a tab opens, in points.
 const MENU_WIDTH: f32 = 190.0;
@@ -395,14 +395,19 @@ impl DiacraftApp {
         self.note("page-tabs.all", r, true);
         let mut chosen = None;
         egui::Popup::menu(&resp.on_hover_text("All pages")).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
-            ui.set_min_width(160.0);
-            for (id, name) in pages {
-                let row = ui.selectable_label(*id == current, name);
-                self.note(format!("all-pages.{id}"), row.rect, true);
-                if row.clicked() {
-                    chosen = Some(*id);
+            // A drawing can have more pages than the window has room for: the list scrolls, and the arrow keys follow. Its width is its longest name's, and no less than 160 points.
+            let font = egui::TextStyle::Button.resolve(ui.style());
+            let widest = pages.iter().map(|(_, name)| text_width(ui, name, &font)).fold(0.0_f32, f32::max);
+            let width = (widest + ui.spacing().button_padding.x * 2.0 + 8.0).max(160.0);
+            widgets::menu_scroll::tall_menu(ui, t, width, |ui| {
+                for (id, name) in pages {
+                    let row = ui.selectable_label(*id == current, name);
+                    self.note(format!("all-pages.{id}"), row.rect, true);
+                    if row.clicked() {
+                        chosen = Some(*id);
+                    }
                 }
-            }
+            });
         });
         if let Some(id) = chosen
             && let Err(e) = self.execute("page.select", &json!({ "id": id }))

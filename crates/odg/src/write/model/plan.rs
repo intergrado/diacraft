@@ -109,6 +109,10 @@ pub(super) fn of<'a>(
             *slot = None;
         }
     }
+    // The drawing's language is written as `dc:language` where the model holds no core language of its own and `DocLangID` is a language tag: a read gives it back as the core language.
+    if props.language.is_none() {
+        props.language = crate::lang::declared(doc).map(|tag| std::sync::Arc::from(tag.as_str()));
+    }
     // The parts. Thumbnails: the one passed replaces any the model holds, unless the content is as it was read.
     let replaced = options.thumbnail.is_some() && !options.content_unchanged;
     let (mut parts, mut meta_part, mut settings_part, mut signed) = (Vec::new(), None, None, false);

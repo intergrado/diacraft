@@ -1,0 +1,3 @@
+# The help map: place <TAB> target <TAB> note. A place is `ribbon:<ControlId>`, `group:<GroupId>`, `tab:<TabId>`, `dialog:<id>` or
+# `dialog:<id>/<tab>`, `pane:<word>`, `backstage:<page>`, `window:<area>` or `cmd:<command id>`. A target is a topic id, a topic id
+# and `#anchor`, or `none` with a note that says why the place has no topic yet. A group covers the controls of it that have no row of their own.

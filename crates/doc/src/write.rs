@@ -10,11 +10,13 @@ use std::sync::Arc;
 use diacraft_formula::Formula;
 
 use crate::DocError;
+use crate::catalogue::rows_inherit_type;
 use crate::cell::{Cell, FormulaSlot};
 use crate::document::Document;
+use crate::places::Counted;
 use crate::resolve::{Carried, Resolver};
-use crate::sheet::{CellAddr, Lookup, Sheet};
-use crate::sheet_ref::{Owner, SheetRef};
+use crate::sheet::{CellAddr, Lookup, RowKey, SectionKey};
+use crate::sheet_ref::SheetRef;
 use crate::value::Value;
 
 /// What a write puts in a cell.
@@ -133,9 +135,9 @@ impl Document {
                 carried = resolver.into_carried();
                 judged
             };
-            let done = judged.and_then(|(protected, inheritable)| {
-                let target = self.sheet_mut(&sheet).ok_or(DocError::NoSuchSheet)?;
-                apply(target, write, protected, inheritable)
+            let done = judged.and_then(|judged| {
+                let mut target = self.counted_mut(&sheet).ok_or(DocError::NoSuchSheet)?;
+                apply(&mut target, write, judged)
             });
             match done {
                 Ok(outcome) => outcomes.push(outcome),
@@ -147,54 +149,22 @@ impl Document {
         }
         Ok(outcomes)
     }
-
-    /// The sheet `at` names, to change: every `Arc` on the way is made unique first, so a copy of the document that shares them
-    /// keeps what it had (`Arc::make_mut`). `None` for a sheet that is not there, and then nothing was copied.
-    pub(crate) fn sheet_mut(&mut self, at: &SheetRef) -> Option<&mut Sheet> {
-        self.sheet_of(at)?;
-        match at {
-            SheetRef::Document => Some(Arc::make_mut(&mut self.sheet)),
-            SheetRef::Style(id) => {
-                let found = self.styles.iter().position(|s| s.id == *id)?;
-                let style = Arc::make_mut(self.styles.get_mut(found)?);
-                Some(Arc::make_mut(&mut style.sheet))
-            }
-            SheetRef::Page(id) => {
-                let found = self.pages.iter().position(|p| p.id == *id)?;
-                let page = Arc::make_mut(self.pages.get_mut(found)?);
-                Some(Arc::make_mut(&mut page.sheet))
-            }
-            SheetRef::Master(id) => {
-                let found = self.masters.iter().position(|m| m.id == *id)?;
-                let master = Arc::make_mut(self.masters.get_mut(found)?);
-                Some(Arc::make_mut(&mut master.sheet))
-            }
-            SheetRef::Shape(at) => {
-                let list = match at.owner {
-                    Owner::Page(id) => {
-                        let found = self.pages.iter().position(|p| p.id == id)?;
-                        &mut Arc::make_mut(self.pages.get_mut(found)?).shapes
-                    }
-                    Owner::Master(id) => {
-                        let found = self.masters.iter().position(|m| m.id == id)?;
-                        &mut Arc::make_mut(self.masters.get_mut(found)?).shapes
-                    }
-                };
-                let (first, rest) = at.path.split_first()?;
-                let mut shape = Arc::make_mut(list.get_mut(usize::try_from(*first).ok()?)?);
-                for step in rest {
-                    shape = Arc::make_mut(shape.children.get_mut(usize::try_from(*step).ok()?)?);
-                }
-                Some(Arc::make_mut(&mut shape.sheet))
-            }
-        }
-    }
 }
 
-/// What the document says now about one write: whether the cell is guarded against it, and whether there is anything for a clear to go
-/// back to. A write of an evaluation that is not a cached result is refused: only that is an evaluation's (it keeps the formula as it is,
+/// What the document says now about one write.
+struct Judged {
+    /// Whether the cell is guarded against the write.
+    protected: bool,
+    /// Whether there is anything for a clear to go back to.
+    inheritable: bool,
+    /// The type `T` the row the write reaches is to be given, when it has none and the master's row has one ([`type_to_give`]).
+    row_type: Option<Arc<str>>,
+}
+
+/// What the document says now about one write: whether the cell is guarded against it, whether there is anything for a clear to go
+/// back to, and the type a row of the cell is to be given. A write of an evaluation that is not a cached result is refused: only that is an evaluation's (it keeps the formula as it is,
 /// which is why a guard does not stop it; a value or a clear under that origin would remove the guard).
-fn judge(resolver: &Resolver<'_>, sheet: &SheetRef, write: &CellWrite) -> Result<(bool, bool), DocError> {
+fn judge(resolver: &Resolver<'_>, sheet: &SheetRef, write: &CellWrite) -> Result<Judged, DocError> {
     if write.origin == WriteOrigin::Evaluation && !matches!(write.edit, CellEdit::Cached { .. }) {
         return Err(DocError::EvaluationEdit);
     }
@@ -204,20 +174,64 @@ fn judge(resolver: &Resolver<'_>, sheet: &SheetRef, write: &CellWrite) -> Result
     let protected =
         !write.origin.passes_a_guard() && resolver.resolve(sheet, &write.addr).is_some_and(|r| r.formula.cell.is_some_and(Cell::is_guarded));
     let inheritable = matches!(write.edit, CellEdit::ClearFormula) && resolver.inherits(sheet, &write.addr);
-    Ok((protected, inheritable))
+    let row_type = match (&write.addr.section, &write.addr.row) {
+        (Some(section), Some(row)) => type_to_give(resolver, sheet, section, row),
+        _ => None,
+    };
+    Ok(Judged { protected, inheritable, row_type })
+}
+
+/// The type `T` a row of an instance is to be given: that of the master's row it overrides, when the section is one whose rows take it ([`rows_inherit_type`]), the row the
+/// sheet holds has none (it is not there yet, or an older build wrote it without), and the master's row has one. An instance holds a row of its own only where a cell differs from
+/// the master's, and **a row of a `Geometry` section with no `T` is no segment to a program that reads the row alone** (it draws one edge, or none), where the files of the sample-file run write the type on every
+/// such row. `None` for a row with a type of its own, one deleted here, a sheet that is no shape, no master or a master with no such row.
+fn type_to_give(resolver: &Resolver<'_>, sheet: &SheetRef, section: &SectionKey, row: &RowKey) -> Option<Arc<str>> {
+    if !rows_inherit_type(section.name.as_str()) {
+        return None;
+    }
+    let held = resolver.sheet(sheet)?.section(section).and_then(|s| s.row(row));
+    if held.is_some_and(|r| r.row_type.is_some() || r.del) {
+        return None;
+    }
+    resolver.inherited_row_type(sheet, section, row)
+}
+
+/// Gives the row `row` of `section`, which the sheet holds with no type, the type `t`. → whether it did: a row that is not there, one with a type of its own and one deleted here are left as they
+/// are.
+fn give_type(target: &mut Counted<'_>, section: &SectionKey, row: &RowKey, t: Arc<str>) -> Result<bool, DocError> {
+    let wants = target.sheet.section(section).and_then(|s| s.row(row)).is_some_and(|r| r.row_type.is_none() && !r.del);
+    if !wants {
+        return Ok(false);
+    }
+    target.row_mut(section, row)?.row_type = Some(t);
+    Ok(true)
+}
+
+impl Document {
+    /// Gives the row `row` of `section` of the shape `sheet`, which it holds with no `T`, the type of the master's row ([`type_to_give`]): what a write to a cell of such a row
+    /// does (`Document::write_batch`), for a writer that puts a cell in with the sheet's own methods. → whether a type was given: a row that is not there, one with a type of its own, a section
+    /// whose rows take none, a shape with no master and a master with no such row are left as they are.
+    pub fn give_row_type(&mut self, sheet: &SheetRef, section: &SectionKey, row: &RowKey) -> Result<bool, DocError> {
+        let Some(t) = type_to_give(&Resolver::new(self), sheet, section, row) else {
+            return Ok(false);
+        };
+        let mut target = self.counted_mut(sheet).ok_or(DocError::NoSuchSheet)?;
+        give_type(&mut target, section, row, t)
+    }
 }
 
 /// One write of a batch, on the sheet it is for.
-fn apply(target: &mut Sheet, write: CellWrite, protected: bool, inheritable: bool) -> Result<WriteOutcome, DocError> {
+fn apply(target: &mut Counted<'_>, write: CellWrite, judged: Judged) -> Result<WriteOutcome, DocError> {
+    let Judged { protected, inheritable, row_type } = judged;
     let CellWrite { addr, edit, origin } = write;
     // A write into a deleted row or section is refused whatever the guard says: it would be lost.
-    if let Some(what) = target.deleted_part(&addr) {
+    if let Some(what) = target.sheet.deleted_part(&addr) {
         return Err(DocError::Deleted(what));
     }
     if protected {
         return Ok(if origin == WriteOrigin::DataRefresh { WriteOutcome::Skipped } else { WriteOutcome::KeptGuarded });
     }
-    let old = match target.lookup(&addr) {
+    let old = match target.sheet.lookup(&addr) {
         Lookup::Found(cell) => Some(cell.clone()),
         _ => None,
     };
@@ -255,6 +269,12 @@ fn apply(target: &mut Sheet, write: CellWrite, protected: bool, inheritable: boo
         }
         CellEdit::Cell(cell) => cell,
     };
+    // A text the cell holds says `STR` (`string_unit.rs`): the cell of an instance that holds a cached result of an inherited formula says it too, the unit of the master's cell being none of its own.
+    let mut new = new;
+    new.fit_string_unit(addr.section.as_ref().map(|key| key.name.as_str()), addr.cell.as_str());
     target.set_cell(&addr, new)?;
+    if let (Some(t), Some(section), Some(row)) = (row_type, &addr.section, &addr.row) {
+        give_type(target, section, row, t)?;
+    }
     Ok(WriteOutcome::Written)
 }

@@ -47,6 +47,6 @@ pub fn add_text_box_above(
     }
     let id = highest.max(above).checked_add(1).ok_or_else(|| Problem::failed("no shape ids are left on the page"))?;
     let shape = text_box_shape(id, (x, y), (width, height), text);
-    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.push(Arc::new(shape));
+    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.push_shape(Arc::new(shape));
     Ok(TextBoxInfo { id, width, height })
 }

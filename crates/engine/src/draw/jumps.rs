@@ -13,9 +13,13 @@
 //!   none (the pass read every route whole each time a connector was routed: ten thousand routes of 4,000 rows were 16 to 40 million rows for the move of one).
 //! * **When.** After a command routes connectors (`settle`, a hand edit) the routed ones are rebuilt, and so is every connector whose legs cross the
 //!   old or the new route of one of them (a neighbour whose crossings changed) **that has a hop to make or take away**: one that has no hop and
-//!   needs none (its rows and its new path are a `MoveTo` and `LineTo` rows only) keeps the rows it has, however they are written; no other connector is
+//!   needs none (its rows and its new path are a `MoveTo` and `LineTo` rows only) keeps the rows it has, however they are written, **the rows the router has just
+//!   written and the rows of a rebuild of every connector included** (a route is written where a hop is made, taken away or moved, and nowhere else); no other connector is
 //!   touched (the `.odg` save relies on it). A command that changes the page's jump cells rebuilds every connector. Each is
-//!   rebuilt from the route it has with its jumps taken out (the rows' ends with the points on a leg dropped) and the other connectors' likewise.
+//!   rebuilt from the route it has with its jumps taken out (the rows' ends with the points on a leg dropped) and the other connectors' likewise. A connector whose rows
+//!   come out as they are is not written, and rows are as they are when every cell is the same and the numbers are the same numbers, however they are spelled (`-0` is `0`:
+//!   the router wrote one sign of a zero, a point of the route in the connector's own frame being a hair either side of 0, and the rebuild worked out the other, and wrote
+//!   the route again for nothing; a zero is `0` in the number text the editing commands write, `stencil::number_text`, and a route a file holds with a `-0` keeps its text).
 //! * **A connector on a locked layer** is never rewritten, a rebuild of every connector included: it takes no jump and loses none, and a
 //!   connector that crosses it carries a jump over it only where the code below gives that one the jump.
 //! * **Which connector carries it** (the page's `LineJumpCode`, absent as in every file's root: 1): 0 none; 1 the flatter leg of the two, 2 the steeper;
@@ -35,7 +39,7 @@
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
-use diacraft_doc::{CellAddr, Document, Owner, Row, ShapeRef, SheetRef};
+use diacraft_doc::{Cell, CellAddr, Document, Owner, Row, ShapeRef, SheetRef, Value};
 
 use super::Problem;
 use super::connectors::{inherited_rows, route_section_rows, write_route};
@@ -78,10 +82,11 @@ fn spend(work: &mut u64, n: usize) -> bool {
     true
 }
 
-// The pairs of legs the tests of this file have tested, for the tests that hold the work of a rebuild to a count.
+// The pairs of legs the tests of this file have tested, for the tests that hold the work of a rebuild to a count, and the routes a rebuild has written.
 #[cfg(test)]
 thread_local! {
     static PAIRS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static WRITTEN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// A crossing nearer than this to an end of a leg is the leg meeting another, not crossing it.
@@ -160,7 +165,7 @@ fn route_read(reader: &Reader<'_>, sheet: &SheetRef, pose: &Pose, rows_left: &mu
     }
     *rows_left = rows_left.checked_sub(held)?;
     let Some(rows) = reader.resolver().effective_rows(sheet, &key) else { return Some(None) };
-    Some(route_of_rows(&rows, pose).map(|points| (points, follows_width(&rows))))
+    Some(route_of_rows(reader, sheet, &rows, pose).map(|points| (points, follows_width(&rows))))
 }
 
 /// The connectors of page `page` that take part, in drawing order, found in one walk of its top-level shapes, their routes read within `rows_left`. `None` when there
@@ -401,6 +406,49 @@ fn rows_are_plain(rows: &[Arc<Row>]) -> bool {
     !rows.is_empty() && rows.iter().enumerate().all(|(i, row)| row.row_type.as_deref() == Some(if i == 0 { "MoveTo" } else { "LineTo" }))
 }
 
+/// Whether two values are the same: the same text, or two numbers that are equal, so that `-0` and `0` and a number spelled twice are one value. A value that is no number (a
+/// word, `NaN`, `1.#INF`) is the same only as the same text, and a number is never a word.
+fn same_value(a: Option<&Value>, b: Option<&Value>) -> bool {
+    match (a, b) {
+        (Some(x), Some(y)) => x == y || x.number().zip(y.number()).is_some_and(|(p, q)| p == q),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// Whether two cells are the same to a route: every field, and the value by [`same_value`].
+fn same_cell(a: &Cell, b: &Cell) -> bool {
+    // Every field is named, so that a field a cell gains is a compile error here and not a difference no one compares.
+    let Cell { formula, value, unit, error, raw, extra } = a;
+    *formula == b.formula
+        && *unit == b.unit
+        && *error == b.error
+        && *raw == b.raw
+        && *extra == b.extra
+        && same_value(value.as_ref(), b.value.as_ref())
+}
+
+/// Whether two rows are the same: every field, and the cells by [`same_cell`].
+fn same_row(a: &Row, b: &Row) -> bool {
+    let Row { name, ix, local_name, row_type, del, cells, raw, passthrough, ext } = a;
+    *name == b.name
+        && *ix == b.ix
+        && *local_name == b.local_name
+        && *row_type == b.row_type
+        && *del == b.del
+        && *raw == b.raw
+        && *passthrough == b.passthrough
+        && *ext == b.ext
+        && cells.len() == b.cells.len()
+        && cells.iter().all(|(n, cell)| b.cells.get(n).is_some_and(|other| same_cell(cell, other)))
+}
+
+/// Whether two lists of rows are the same route: row for row the same ([`same_row`]), the numbers compared as numbers, so that a route that differs from the one just written
+/// only by the sign of a zero is that route (`-0` is `0`: a route a file holds with a `-0` is not written again for the rows the pass has with a `0`, and the file's text stays).
+fn same_rows(a: &[Arc<Row>], b: &[Arc<Row>]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| Arc::ptr_eq(x, y) || same_row(x, y))
+}
+
 /// A connector's route to write: where it is, its rows, and the rows its master gives it.
 type Rewrite = (Vec<u32>, Vec<Arc<Row>>, Option<Vec<u32>>);
 
@@ -486,11 +534,14 @@ pub(crate) fn refresh(doc: &mut Document, before: &Document, page: u32, rerouted
             }
             let others: Vec<&Part> = everyone.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, p)| *p).collect();
             let Some(path) = path_of(me, &others, &settings, &mut work) else { return Ok(()) };
-            // A connector the command did not route, which the rebuild reached because its legs cross the old or the new route of one that was, is rewritten
-            // only when its route changes: a hop is made or taken away. One that has no hop and needs none keeps the rows it has, though they are not the rows
-            // this writes (a route a file made, or a point on a leg, which a rebuild takes out): rewriting them changed a connector nobody had touched, and
-            // a save of the drawing wrote its path again (class F2).
-            if !all && !changed.contains(&me.id) && is_plain(&path) {
+            // A connector is rewritten only when its route changes: a hop is made, taken away or moved. One that has no hop and needs none keeps the rows it has,
+            // though they are not the rows this writes. For a connector the command did not route, which the rebuild reached because its legs cross the old or the
+            // new route of one that was, they are a route a file made, or a point on a leg, which a rebuild takes out: rewriting them changed a connector nobody
+            // had touched, and a save of the drawing wrote its path again (class F2). For one the command routed they are the router's
+            // rows, which are the router's numbers: the rows this works out are worked out from the points they give, snapped and rounded again, and a unit
+            // in the ninth place from the router's, so that a page of right angles that cross nothing was written again after the router, and again by every rebuild
+            // after that (32 of 48 routes, and more at the second rebuild).
+            if is_plain(&path) {
                 // The look at the rows is charged to the budget of the rebuild, before it is made.
                 if !spend(&mut work, route_row_count(doc, &me.at)) {
                     return Ok(());
@@ -502,14 +553,25 @@ pub(crate) fn refresh(doc: &mut Document, before: &Document, page: u32, rerouted
             let segs = local(&path, &me.pose);
             let inherited = inherited_rows(&reader, &me.at);
             let rows = rows::rows(&segs, me.follow_width);
-            if current_rows(doc, &me.at).as_deref() != Some(route_section_rows(rows.clone(), &inherited).as_slice()) {
+            let wanted = route_section_rows(rows.clone(), &inherited);
+            if !current_rows(doc, &me.at).is_some_and(|held| same_rows(&held, &wanted)) {
                 writes.push((me.at.path.clone(), rows, inherited));
             }
         }
         writes
     };
+    let mut rewritten: Vec<ShapeRef> = Vec::with_capacity(writes.len());
     for (path, rows, inherited) in writes {
         write_route(doc, page, &path, rows, &inherited)?;
+        #[cfg(test)]
+        WRITTEN.with(|c| c.set(c.get().saturating_add(1)));
+        rewritten.push(ShapeRef { owner: Owner::Page(page), path });
+    }
+    // The rows are written after the recalculation of the edit that moved the connectors, so what reads a route that was given a hop, or lost one (a shape tied to it by
+    // `POINTALONGPATH`, a text that shows its length), is worked out now, and nothing else is (`Changes::only_if_read`). A recalculation that runs out of its budget is no refusal of
+    // the edit, whose jumps are made: what reads the routes holds what it held, as it did before it was worked out here, so the result is let go.
+    if !rewritten.is_empty() {
+        let _ = super::settle::recalculate_written(doc, page, &rewritten, Vec::new());
     }
     Ok(())
 }
@@ -776,11 +838,240 @@ mod tests {
         let before = small.clone();
         PAIRS.with(|c| c.set(0));
         refresh(&mut small, &before, 1, &[], true).unwrap();
+        // The two cross nothing, so each keeps its rows, and the look at them is a step a row (the 201 rows each holds) beside the pairs.
         assert_eq!(
             PAIRS.with(std::cell::Cell::get),
-            2 * 200 * 201,
-            "each of the two connectors tests the 200 legs it has against the 201 points of the other"
+            2 * 200 * 201 + 2 * 201,
+            "each of the two connectors tests the 200 legs it has against the 201 points of the other, and is looked at for its 201 rows"
         );
+        assert_eq!(small, before, "and neither is written");
+    }
+
+    /// The routes of `n` connectors of ours with free ends, each in a band of the page of its own so that none crosses another: right angles that go round, as the router writes them.
+    fn bands(n: u32) -> (Document, Vec<u32>) {
+        use super::super::connectors::{End, attach_connector};
+        let mut doc = Document::new_blank();
+        let mut ids = Vec::new();
+        for k in 0..n {
+            let x = 2.0 + f64::from(k % 8);
+            let dy = [-1.0, -0.5, 0.3, 0.5, 1.0, 0.7][usize::try_from(k / 8).unwrap() % 6];
+            let y = 3.0 * f64::from(k);
+            ids.push(attach_connector(&mut doc, 1, &End::Point { x: 1.0, y }, &End::Point { x: 1.0 + x, y: y + dy }).unwrap().id);
+        }
+        (doc, ids)
+    }
+
+    /// The rows of the route section of connector `id`, as it holds them.
+    fn held(doc: &Document, id: u32) -> Vec<Arc<Row>> {
+        let at = doc.find_shape(Owner::Page(1), id).unwrap();
+        current_rows(doc, &at).unwrap()
+    }
+
+    /// The value text of the cell `name` of a row.
+    fn text_of(row: &Row, name: &str) -> String {
+        row.cells.iter().find(|(n, _)| n.as_str() == name).and_then(|(_, c)| c.value.as_ref()).map(|v| v.text().to_owned()).unwrap_or_default()
+    }
+
+    /// The row with the value of its cell `name` given as `text`, the cell as it was in all else.
+    fn with_text(row: &Arc<Row>, name: &str, text: &str) -> Arc<Row> {
+        let mut row = Row::clone(row);
+        let cell = row.cells.iter().find(|(n, _)| n.as_str() == name).map(|(_, c)| c.clone()).unwrap_or_default();
+        row.cells.insert(diacraft_doc::CellName::new(name), diacraft_doc::Cell { value: Some(diacraft_doc::Value::from_text(text)), ..cell });
+        Arc::new(row)
+    }
+
+    /// Whether two routes hold the same numbers, cell for cell, by a comparison of the test's own: the same text, or two numbers that are equal.
+    fn same_numbers(a: &[Arc<Row>], b: &[Arc<Row>]) -> bool {
+        let same = |x: &str, y: &str| x == y || x.parse::<f64>().ok().zip(y.parse::<f64>().ok()).is_some_and(|(p, q)| p == q);
+        a.len() == b.len()
+            && a.iter().zip(b).all(|(x, y)| {
+                x.cells.len() == y.cells.len() && x.cells.keys().all(|name| same(&text_of(x, name.as_str()), &text_of(y, name.as_str())))
+            })
+    }
+
+    /// A route as the router wrote it is not written again by the rebuild after it for the sign of a zero. The rows of a route are in the connector's own frame, where a point on its
+    /// axis is a hair either side of 0 and nine places of rounding make it a `0` or a `-0`; the pass worked out the other sign than the router wrote, and wrote the route again. (A
+    /// route the pass works out may differ from the router's in the ninth place, which is no zero and is not looked at here.)
+    #[test]
+    fn a_route_just_written_is_not_written_again_by_the_pass_for_the_sign_of_a_zero() {
+        let (mut doc, ids) = bands(48);
+        let before = doc.clone();
+        super::super::settle::settle_forced(&mut doc, &before, 1, &[], &ids, &ids).unwrap();
+        for id in &ids {
+            let rows = held(&doc, *id);
+            assert!(rows.len() >= 2, "connector {id} was routed");
+            for row in rows {
+                for name in ["X", "Y"] {
+                    assert_ne!(text_of(&row, name), "-0", "connector {id}, a row's {name}: no `-0` is written into a cell");
+                }
+            }
+        }
+        // The routes are written now. A rebuild of every one of them, with the page as the router left it: a route it writes is not the numbers that were there.
+        let router_left = doc.clone();
+        refresh(&mut doc, &router_left, 1, &ids, false).unwrap();
+        for id in &ids {
+            let (old, new) = (held(&router_left, *id), held(&doc, *id));
+            assert!(old == new || !same_numbers(&old, &new), "connector {id} was written again with the numbers it had");
+        }
+    }
+
+    /// A page of connectors that cross nothing has no route written by the pass: the rows the router wrote have no hop to make and none to take away, and the pass keeps them as they
+    /// are. Working the rows out again from the points they give, which are snapped and rounded again, made them a unit in the ninth place from the router's, in a third of
+    /// the routes of this page, and in more at the rebuild after that.
+    #[test]
+    fn a_page_of_connectors_that_cross_nothing_has_no_route_written_by_the_pass() {
+        let (mut doc, ids) = bands(48);
+        let before = doc.clone();
+        WRITTEN.with(|c| c.set(0));
+        super::super::settle::settle_forced(&mut doc, &before, 1, &[], &ids, &ids).unwrap();
+        assert_eq!(WRITTEN.with(std::cell::Cell::get), 0, "the pass wrote routes after the router of a page where no connector crosses another");
+        // A rebuild of every one of them, with the page as the router left it, and a second.
+        for round in 1..=2 {
+            let left = doc.clone();
+            refresh(&mut doc, &left, 1, &ids, false).unwrap();
+            assert_eq!(WRITTEN.with(std::cell::Cell::get), 0, "rebuild {round} wrote routes of connectors that need no hop");
+            assert!(doc == left, "rebuild {round} changed the page");
+        }
+        // The page's jump cells changed rebuilds every connector: a connector that needs no hop keeps its rows there too, so a rebuild of every one writes nothing, and nor
+        // does a second (the rows the rebuild worked out from the points were not a fixed point: three more were written at the second).
+        for round in 1..=2 {
+            let left = doc.clone();
+            refresh(&mut doc, &left, 1, &[], true).unwrap();
+            assert_eq!(WRITTEN.with(std::cell::Cell::get), 0, "rebuild {round} of every connector wrote routes of connectors that need no hop");
+            assert!(doc == left, "rebuild {round} of every connector changed the page");
+        }
+    }
+
+    /// A route a file holds with a `-0` where the pass works out a `0` is the route it is: nothing is written, and the file's own text stays.
+    #[test]
+    fn a_route_that_holds_a_negative_zero_where_the_pass_has_a_zero_is_not_written_again() {
+        use super::super::connectors::{End, add_connector};
+        let mut doc = Document::new_blank();
+        let id = add_connector(&mut doc, 1, &End::Point { x: 1.0, y: 1.0 }, &End::Point { x: 5.0, y: 3.0 }).unwrap().id;
+        let mut rows = held(&doc, id);
+        assert_eq!(text_of(&rows[0], "X"), "0", "the route starts at the connector's own origin");
+        rows[0] = with_text(&rows[0], "X", "-0");
+        write_route(&mut doc, 1, &[0], rows, &None).unwrap();
+        let before = doc.clone();
+        WRITTEN.with(|c| c.set(0));
+        refresh(&mut doc, &before, 1, &[id], false).unwrap();
+        assert_eq!(WRITTEN.with(std::cell::Cell::get), 0, "a `-0` and a `0` are one number");
+        assert!(doc == before);
+        assert_eq!(text_of(&held(&doc, id)[0], "X"), "-0", "the text the file has is the text it keeps");
+    }
+
+    /// The control of the two above: a hop whose bow is a thousandth off the one the pass works out is a number that differs, and the route is written again with the bow it has.
+    #[test]
+    fn a_route_whose_hop_differs_by_a_number_is_written_again() {
+        use super::super::connectors::{End, add_connector};
+        let mut doc = Document::new_blank();
+        let level = add_connector(&mut doc, 1, &End::Point { x: 2.0, y: 4.0 }, &End::Point { x: 8.0, y: 4.0 }).unwrap().id;
+        add_connector(&mut doc, 1, &End::Point { x: 5.0, y: 1.0 }, &End::Point { x: 5.0, y: 7.0 }).unwrap();
+        let right = held(&doc, level);
+        assert_eq!(
+            right.iter().map(|r| r.row_type.as_deref().unwrap_or("")).collect::<Vec<_>>(),
+            ["MoveTo", "LineTo", "ArcTo", "LineTo"],
+            "the level one carries the hop"
+        );
+        let mut rows = right.clone();
+        let bow = text_of(&rows[2], "A").parse::<f64>().unwrap();
+        rows[2] = with_text(&rows[2], "A", &(bow - 0.001).to_string());
+        write_route(&mut doc, 1, &[0], rows, &None).unwrap();
+        let before = doc.clone();
+        WRITTEN.with(|c| c.set(0));
+        refresh(&mut doc, &before, 1, &[level], false).unwrap();
+        assert_eq!(WRITTEN.with(std::cell::Cell::get), 1, "a number that differs is a route to write");
+        assert_eq!(held(&doc, level), right, "the rows are the ones the pass works out");
+    }
+
+    /// The rows a connector the command routed keeps are the router's where no hop is made or taken away, and the pass still writes where one is: a hop is made for a crossing, taken away
+    /// when the crossing goes (the other connector routed away), and made again, each of them one route written and no other.
+    #[test]
+    fn a_routed_connector_is_written_where_a_hop_is_made_or_taken_away_and_nowhere_else() {
+        use super::super::connectors::{End, add_connector};
+        let mut doc = Document::new_blank();
+        let level = add_connector(&mut doc, 1, &End::Point { x: 2.0, y: 4.0 }, &End::Point { x: 8.0, y: 4.0 }).unwrap().id;
+        let upright = add_connector(&mut doc, 1, &End::Point { x: 5.0, y: 1.0 }, &End::Point { x: 5.0, y: 7.0 }).unwrap().id;
+        let kinds = |doc: &Document, id: u32| held(doc, id).iter().map(|r| r.row_type.clone().unwrap_or_default().to_string()).collect::<Vec<_>>();
+        assert_eq!(kinds(&doc, level), ["MoveTo", "LineTo", "ArcTo", "LineTo"], "the level one carries the hop over the upright one");
+        assert_eq!(kinds(&doc, upright), ["MoveTo", "LineTo"], "and the upright one is as the router wrote it");
+        // The upright connector is routed away from the level one, and the level one, which it crosses no more, is routed in the same edit: its hop goes.
+        let at = doc.find_shape(Owner::Page(1), upright).unwrap();
+        let pose = Reader::new(&doc).pose(&SheetRef::Shape(at.clone()));
+        let before = doc.clone();
+        write_route(&mut doc, 1, &at.path, rows::rows(&local(&rows::polyline(&[(5.0, 1.0), (5.0, 3.0)]), &pose), false), &None).unwrap();
+        WRITTEN.with(|c| c.set(0));
+        refresh(&mut doc, &before, 1, &[level, upright], false).unwrap();
+        assert_eq!(
+            WRITTEN.with(std::cell::Cell::get),
+            1,
+            "the level connector's route, which had a hop that is not needed: the upright one is as the router wrote it"
+        );
+        assert_eq!(kinds(&doc, level), ["MoveTo", "LineTo"], "the hop is taken away");
+        // The upright one is routed back across it: the level one has the hop again, and the upright one is not written.
+        let before = doc.clone();
+        write_route(&mut doc, 1, &at.path, rows::rows(&local(&rows::polyline(&[(5.0, 1.0), (5.0, 7.0)]), &pose), false), &None).unwrap();
+        WRITTEN.with(|c| c.set(0));
+        refresh(&mut doc, &before, 1, &[upright], false).unwrap();
+        assert_eq!(WRITTEN.with(std::cell::Cell::get), 1, "the level connector, a neighbour that has a hop to make");
+        assert_eq!(kinds(&doc, level), ["MoveTo", "LineTo", "ArcTo", "LineTo"], "the hop is made again");
+        // Nothing else to do: a rebuild of both, routed or not, writes nothing.
+        let left = doc.clone();
+        WRITTEN.with(|c| c.set(0));
+        refresh(&mut doc, &left, 1, &[level, upright], false).unwrap();
+        refresh(&mut doc, &left, 1, &[], true).unwrap();
+        assert_eq!(WRITTEN.with(std::cell::Cell::get), 0);
+        assert!(doc == left);
+    }
+
+    /// Routes are the same rows when every field is the same and the values are the same text or two numbers that are equal: `-0` and `0`, and a number spelled twice. A value that
+    /// is no number is the same only as the same text, and a number is never a word.
+    #[test]
+    fn two_routes_are_the_same_rows_where_their_numbers_are_equal_and_everything_else_is_the_same() {
+        let route = |x: &str, y: &str| {
+            let mut rows = rows::rows(&[Seg::Move((0.0, 0.0)), Seg::Line((2.0, 1.0))], false);
+            let last = rows.len() - 1;
+            rows[last] = with_text(&with_text(&rows[last], "X", x), "Y", y);
+            rows
+        };
+        let base = route("2", "1");
+        assert!(same_rows(&base, &base));
+        assert!(same_rows(&base, &route("2", "1")));
+        assert!(same_rows(&route("0", "0"), &route("-0", "-0")), "a zero and a negative zero");
+        assert!(same_rows(&route("-0", "0"), &route("0", "-0")));
+        assert!(same_rows(&base, &route("2.0", "1.000")), "a number spelled twice");
+        assert!(same_rows(&base, &route("2e0", "10e-1")));
+        assert!(!same_rows(&base, &route("2.000001", "1")), "a number that differs");
+        assert!(!same_rows(&route("0", "0"), &route("1e-12", "0")), "however little");
+        assert!(!same_rows(&base, &route("two", "1")), "a number and a word");
+        assert!(same_rows(&route("two", "1"), &route("two", "1")), "the same word");
+        assert!(!same_rows(&route("NaN", "1"), &route("nan", "1")), "two words that differ are two, and none is a number");
+        assert!(same_rows(&route("NaN", "1"), &route("NaN", "1")), "the same text is the same");
+        assert!(!same_rows(&base, &base[..1]), "a row fewer");
+        assert!(!same_rows(&[], &base));
+        assert!(same_rows(&[], &[]));
+        // Everything else is as it is: the type, the key, a unit, a formula, a row's deletion, a cell more.
+        let with = |change: &dyn Fn(&mut Row)| {
+            let mut rows = base.clone();
+            let last = rows.len() - 1;
+            let mut row = Row::clone(&rows[last]);
+            change(&mut row);
+            rows[last] = Arc::new(row);
+            rows
+        };
+        assert!(!same_rows(&base, &with(&|row| row.row_type = Some(Arc::from("MoveTo")))));
+        assert!(!same_rows(&base, &with(&|row| row.ix = Some(7))));
+        assert!(!same_rows(&base, &with(&|row| row.del = true)));
+        assert!(!same_rows(&base, &with(&|row| row.name = Some(Arc::from("n")))));
+        let cell = |row: &Row| row.cells.iter().find(|(n, _)| n.as_str() == "X").map(|(_, c)| c.clone()).unwrap();
+        let put = |row: &mut Row, name: &str, cell: diacraft_doc::Cell| {
+            row.cells.insert(diacraft_doc::CellName::new(name), cell);
+        };
+        assert!(!same_rows(&base, &with(&|row| put(row, "X", cell(row).with_unit("MM")))), "a unit");
+        let formula = |row: &Row| diacraft_doc::Cell::with_formula("Width*1", cell(row).value.clone()).with_unit("IN");
+        assert!(!same_rows(&base, &with(&|row| put(row, "X", formula(row)))), "a formula");
+        let one = diacraft_doc::Cell::constant(diacraft_doc::Value::from_text("1"));
+        assert!(!same_rows(&base, &with(&|row| put(row, "A", one.clone()))), "a cell more");
     }
 
     #[test]

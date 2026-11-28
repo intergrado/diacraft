@@ -7,13 +7,11 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use super::{MAX_INDEX_BYTES, Node, Parser, Res, is_name_char, is_name_start};
+use super::{MAX_INDEX_BYTES, MAX_NAME_BYTES, Node, Parser, Res, is_name_char, is_name_start};
 use crate::{Call, CellRef, Expr, Index, ParseErrorKind, Qualifier, RefSpan, Segment, SegmentSpan};
 
 /// The most qualifiers before a cell. Real formulas have one or two (`Pages[A]!Sheet.9!EndY`).
 const MAX_QUALIFIERS: usize = 16;
-/// The longest name, in bytes: the scan for its end stops here.
-const MAX_NAME_BYTES: usize = 1024;
 
 /// One part of a chain joined by `!`.
 enum Part {

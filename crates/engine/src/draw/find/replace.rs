@@ -13,7 +13,7 @@
 //! * *Shape data and user-defined cells*: the cell's `Value`. A quoted-string formula stays a quoted-string formula with the new text, a constant stays a constant (and
 //!   must still read as text, not as a number), and a cell a formula works out is left. A cell with `GUARD` on it is left.
 //!
-//! After the writes, what reads a changed text or cell is recalculated once for the page ([`settle_cells`]).
+//! After the writes, what reads a changed text or cell is recalculated once for the page ([`settle_cells_on_pages`]).
 //!
 //! **A shape on a locked layer is passed over**: a replace across a page, the drawing or a selection that holds a group names no shape it
 //! edits, so the registry's rule does not see the shapes it reaches. Each shape is judged by its own `LayerMember`, a member of a group by its own; every match
@@ -21,14 +21,14 @@
 
 use std::sync::Arc;
 
-use diacraft_doc::{CellAddr, CellEdit, CellWrite, Document, Owner, ShapeRef, SheetRef, Text, TextPart, Value, WriteOrigin, WriteOutcome};
+use diacraft_doc::{CellAddr, CellEdit, CellWrite, Document, Owner, ShapeRef, SheetRef, TextPart, Value, WriteOrigin, WriteOutcome};
 
 use super::pattern::{Pattern, Refused, Work};
 use super::source::{CellHow, How, Kind, Source, Why, Within, quoted, sources, stays_text};
 use super::walk::{Flow, Scope, walk};
 use super::{Cursor, MAX_FIND_STEPS, MAX_REPLACEMENTS, Spot, check_scope, too_big};
-use crate::draw::settle::settle_cells;
-use crate::draw::{MAX_TEXT_CHARS, Problem, shape_mut};
+use crate::draw::settle::settle_cells_on_pages;
+use crate::draw::{MAX_TEXT_CHARS, Problem, kept_text, shape_mut};
 
 /// The most skipped matches a result lists: the count is exact.
 pub const MAX_SKIPPED_LISTED: usize = 100;
@@ -431,6 +431,7 @@ pub fn replace(
         return Ok(result);
     }
     // The writes. Names and texts are written to the shapes; cells go through the document's batch of writes, which judges a guard.
+    let was = doc.clone();
     let mut cell_writes: Vec<(SheetRef, CellWrite)> = Vec::new();
     let mut touched: Vec<(SheetRef, CellAddr)> = Vec::new();
     let mut cell_places: Vec<(usize, usize)> = Vec::new();
@@ -453,12 +454,14 @@ pub fn replace(
                     }
                 }
                 (How::Text { .. }, _) => {
-                    let shape = shape_mut(doc, plan.page, &plan.path).ok_or_else(|| Problem::failed("a shape went away"))?;
-                    let Some(text) = shape.text.as_ref() else { continue };
+                    let Some(text) = doc.shape(&sheet_ref).and_then(|shape| shape.text.as_ref()) else { continue };
                     let parts = rewrite_parts(&text.parts, &place.apply, with);
-                    // As `set_text_range`: the ODF data of the text goes with it, for the writer to match its paragraphs by content.
+                    // As `set_text_range`: the ODF data of the text goes with it, for the writer to match its paragraphs by content, and a text replaced to nothing stays an empty `Text`
+                    // of its own over a master's text.
                     let ext = text.ext.clone();
-                    shape.text = if parts.is_empty() { None } else { Some(Arc::new(Text { parts, ext })) };
+                    let kept = kept_text(doc, &sheet_ref, parts, ext);
+                    let shape = shape_mut(doc, plan.page, &plan.path).ok_or_else(|| Problem::failed("a shape went away"))?;
+                    shape.text = kept;
                     touched.push((SheetRef::Shape(sheet_ref.clone()), CellAddr::direct("TheText")));
                 }
                 (How::Cell { key, how }, Some(new)) => {
@@ -512,11 +515,15 @@ pub fn replace(
         }
     }
     result.shapes = shapes;
-    for page in &pages {
-        let cells: Vec<(SheetRef, CellAddr)> =
-            touched.iter().filter(|(sheet, _)| matches!(sheet, SheetRef::Shape(at) if at.owner == Owner::Page(*page))).cloned().collect();
-        settle_cells(doc, *page, cells)?;
-    }
+    let by_page: Vec<(u32, Vec<(SheetRef, CellAddr)>)> = pages
+        .iter()
+        .map(|page| {
+            let cells = touched.iter().filter(|(sheet, _)| matches!(sheet, SheetRef::Shape(at) if at.owner == Owner::Page(*page))).cloned().collect();
+            (*page, cells)
+        })
+        .collect();
+    // The connectors glued to the shapes the recalculation moved are routed again within one budget for all the pages.
+    settle_cells_on_pages(doc, &was, by_page)?;
     result.pages = pages;
     if let (Some((spot, start, _)), Some(plan)) = (at, plans.first())
         && result.replaced > 0

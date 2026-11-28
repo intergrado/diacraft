@@ -21,7 +21,9 @@ mod cell;
 mod edit;
 mod grid;
 mod keys;
+mod menu;
 mod pairs;
+mod rows;
 mod scroll;
 mod tabs;
 mod view;
@@ -114,6 +116,8 @@ pub struct SheetTab {
     pub(crate) page_w: f32,
     /// The width the lines are laid out in, as the last frame had it: how many columns of pairs fit.
     pub(crate) view_w: f32,
+    /// What the selection is, for the controls of the Sections, Rows and Editing groups, with what it was made for.
+    pub(crate) facts: Option<(BarKey, rows::Facts)>,
     /// Where the selected cell was drawn in the last frame.
     pub(crate) sel_rect: Option<Rect>,
 }
@@ -141,6 +145,7 @@ impl SheetTab {
             page_lines: 10,
             page_w: 400.0,
             view_w: 0.0,
+            facts: None,
             sel_rect: None,
         }
     }
@@ -220,6 +225,8 @@ pub struct SheetState {
     pub(crate) menu: Option<egui::Pos2>,
     /// The names of the rows the last frame drew, with their inks.
     pub(crate) row_names: Vec<(String, &'static str)>,
+    /// The Insert Section card, while it is open (the Edit Formula card is the open edit of a tab, `in_card`).
+    pub(crate) insert: Option<cards::InsertCard>,
 }
 
 impl Default for SheetState {
@@ -246,6 +253,7 @@ impl Default for SheetState {
             changed_at: None,
             menu: None,
             row_names: Vec::new(),
+            insert: None,
         }
     }
 }
@@ -295,6 +303,7 @@ impl SheetState {
             self.bar = None;
             self.painted.clear();
             self.menu = None;
+            self.insert = None;
             return;
         }
         if i < self.active || self.active >= self.tabs.len() {
@@ -317,6 +326,7 @@ impl SheetState {
         self.changed_at = None;
         self.menu = None;
         self.row_names.clear();
+        self.insert = None;
     }
 }
 
@@ -404,6 +414,7 @@ impl DiacraftApp {
                 made = (1, view.rows_visited);
                 tab.view = Some(view);
                 tab.bar = None;
+                tab.facts = None;
             }
             if let Some(view) = tab.view.as_mut() {
                 tab.scroll.first = view.arrange(tab.arrange_version, &tab.hidden, &tab.collapsed, pair_columns(tab.view_w), tab.scroll.first);
@@ -414,7 +425,12 @@ impl DiacraftApp {
                     if truncated && let Some(Sel::Cell { .. }) = &tab.selected {
                         whole_wanted = text_ref(&text).map(|r| (tab.place.clone(), r));
                     }
-                    tab.bar = Some((key, text, footer));
+                    tab.bar = Some((key.clone(), text, footer));
+                }
+                // What the selection is, for the controls of the Sections, Rows and Editing groups: made again only when the drawing or the selection changes.
+                if tab.facts.as_ref().is_none_or(|(k, _)| *k != key) {
+                    let facts = rows::facts_of(view, doc, tab.place.kind(), tab.selected.as_ref());
+                    tab.facts = Some((key, facts));
                 }
             }
         }
@@ -550,6 +566,8 @@ impl DiacraftApp {
             "pairColumns": view.map_or(0, |v| v.visual().columns),
             "rowNames": sheet.row_names.iter().map(|(label, ink)| json!({"label": label, "ink": ink})).collect::<Vec<_>>(),
             "menu": sheet.menu.is_some(),
+            "card": self.sheet_card_json(),
+            "ops": self.sheet_ops_json(),
         })
     }
 
@@ -633,6 +651,12 @@ impl DiacraftApp {
             "window.sheetCollapse" => self.sheet_collapse_command(id, p),
             "window.sheetSelect" => self.sheet_select_command(id, p),
             "window.sheetEdit" => self.sheet_edit_command(id, p),
+            "window.sheetInsertRow" => self.sheet_insert_row_command(id, p),
+            "window.sheetDeleteRow" => self.sheet_delete_row_command(id),
+            "window.sheetInsertSection" => self.sheet_insert_section_command(id, p),
+            "window.sheetDeleteSection" => self.sheet_delete_section_command(id),
+            "window.sheetEditFormula" => self.sheet_edit_formula_command(id, p),
+            "window.sheetAddRow" => self.sheet_add_row_command(id, p),
             other => Err(EngineError::UnknownCommand(shown(other, 64))),
         }
     }

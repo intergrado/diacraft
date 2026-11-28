@@ -439,7 +439,7 @@ pub fn insert_picture(doc: &mut Document, page: u32, info: &Info, bytes: Arc<[u8
     let id = highest.max(above).checked_add(1).ok_or_else(|| Problem::failed("no shape ids are left on the page"))?;
     let (media, shared) = media_for(doc, info, bytes)?;
     let shape = crate::stencil::picture_shape(id, (x, y), (w, h), info.format.foreign_type(), media);
-    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.push(Arc::new(shape));
+    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.push_shape(Arc::new(shape));
     super::layers::join_active(doc, page, id)?;
     // A page with Auto Size on grows to take the picture in, in the same undo step.
     super::fit_page(doc, page, &[id])?;

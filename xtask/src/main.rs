@@ -15,15 +15,16 @@ use std::process::ExitCode;
 
 use xtask::ci::{Outcome, Step, run_steps};
 use xtask::{
-    assets, brands, cargo, deny, docs_check, fuzzcheck, has_cargo_tool, kani, layers, licenses, mcp, metadata, parity, root, run, stats, version,
+    assets, brands, cargo, deny, docs_check, fuzzcheck, has_cargo_tool, help, kani, langdata, layers, licenses, mcp, metadata, parity, root, run,
+    stats, version,
 };
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
 
 commands:
-  ci              fmt --check, clippy -D warnings, fuzz check, kani check, test, doctest, assets, brands, docs, site, deny,
-                  licenses --check, parity --check, layers, wasm (stops at the first failure; prints a `CI summary:` block)
+  ci              fmt --check, clippy -D warnings, fuzz check, kani check, test, doctest, assets, brands, docs, help check,
+                  site, deny, licenses --check, parity --check, layers, wasm (stops at the first failure; prints a `CI summary:` block)
   test            the workspace tests (cargo nextest when installed, else cargo test), then the doctests
   fuzz-check      type-check every fuzz crate (a folder named fuzz, a `cargo-fuzz = true` line, or a dependency on libfuzzer-sys) with
                   `cargo check --all-targets --all-features` and `--cfg fuzzing` on the stable toolchain: no nightly, no sanitizer, no C++
@@ -35,6 +36,19 @@ commands:
                   given), each with a 300 s limit. Fails, naming the harness, on a failure, a timeout, or a `kani::cover!` no input reaches; fails
                   without Kani 0.68.0 (cargo install --locked kani-verifier --version 0.68.0, then cargo kani setup). Minutes: not part of ci,
                   which only compiles the harnesses (the `kani check` step: `cargo kani --only-codegen`, skipped without Kani 0.68.0)
+  help check | help --write
+                  hold the help tree (`help/`) to the rules of its format with the parser the program reads it with: each topic reads within its limits and its
+                  header is complete, ids are unique, named by their file, and none that was published is lost, every `topic:` link and `#anchor` resolves, every
+                  `ctl:` names a ribbon control and every `cmd:` a registered command, every topic is in a section or `unlisted`, the tips table and the help map name
+                  only controls, commands, places and topics that exist, the sites a link may open are the site's own, and the words follow the rules of `brands`;
+                  each problem is printed as `file:line: what`. `--write` runs that check and writes what is generated from the tree (nothing yet). `help` alone is
+                  this text
+  langdata --cldr <DIR> --icu <DIR> [--i18n-source <FILE>] [--check]
+                  write the four generated tables of `diacraft_doc::lang` (crates/doc/src/lang: lcid.rs, names.rs, quotes.rs, scripts.rs): LCID numbers and
+                  language tags from ICU4C's locmap.cpp, English names of languages, quotation marks and likely scripts from Unicode CLDR's JSON, both data under the
+                  Unicode License V3 at the releases pinned in xtask/src/langdata.rs. It reads folders you made (docs/development.md) and fetches nothing; each
+                  source is checked first (CLDR version and licence, ICU licence, locmap.cpp's SHA-256). --i18n-source refuses a CLDR release other than the one
+                  craft-i18n's data record names; --check writes nothing and fails naming each committed table that is not what the sources give. Not part of ci
   layers          enforce the crate dependency layering (design section 6)
   assets          check that every asset file (anything under assets/ or docs/images/, and any file whose extension is an image,
                   icon, font, colour-profile, audio, video, PDF, CAD, metafile or diagram-document format) has a row in ATTRIBUTION.md
@@ -97,6 +111,7 @@ fn main() -> ExitCode {
         Some("test") => cmd_test().and_then(|()| cmd_doctests()),
         Some("fuzz-check") => report("fuzz check", fuzzcheck::run()),
         Some("kani") => kani::parse_jobs(&rest).and_then(|jobs| report("kani", kani::prove(jobs))),
+        Some("langdata") => langdata::run(&root(), &rest),
         Some("layers") => cmd_layers(),
         Some("assets") => assets::run(&root()),
         Some("brands") => brands::run(&root()),
@@ -111,6 +126,7 @@ fn main() -> ExitCode {
         Some("wasm") => report("wasm", cmd_wasm()),
         Some("stats") => cmd_stats(&rest),
         Some("version") => version::run(&root(), &rest),
+        Some("help") if !rest.is_empty() => help::run(&root(), &rest),
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");
             Ok(())
@@ -250,6 +266,7 @@ fn cmd_ci() -> Result<(), String> {
         ("assets", Box::new(|| assets::run(&root()).map(|()| Outcome::Ok))),
         ("brands", Box::new(|| brands::run(&root()).map(|()| Outcome::Ok))),
         ("docs", Box::new(|| docs_check::run(&root()).map(|()| Outcome::Ok))),
+        ("help check", Box::new(|| help::check::run(&root()).map(|()| Outcome::Ok))),
         ("site", Box::new(|| site::run(&root().join("site"), &[]).map(|()| Outcome::Ok))),
         ("deny", Box::new(deny::run)),
         ("licenses --check", Box::new(|| licenses::run(&root(), &["--check"]).map(|()| Outcome::Ok))),

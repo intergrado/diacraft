@@ -15,6 +15,8 @@ diacraft-calc = { workspace = true }
 diacraft-geom = { workspace = true }
 # Re-Layout Page: the placement of a diagram's shapes by its connectors, as a graph layout (`draw/relayout`).
 diacraft-layout = { workspace = true }
+# The kept routing scene (`draw/route_scene.rs`): the obstacles and the wires of a page are held as the router's `Obstacles` and `Wires`, within its `Work` budget.
+diacraft-route = { workspace = true }
 diacraft-color = { workspace = true }
 diacraft-doc = { workspace = true }
 # The formulas of a shape glued to a guide are read as trees, to tell which cells a pin reads (`snap/hold.rs`).
@@ -32,10 +34,16 @@ diacraft-odg = { workspace = true }
 diacraft-native = { workspace = true }
 # What the model holds, counted (`model_guard`): an edit that would make a drawing hold more than an open takes is refused in words.
 diacraft-sheetxml = { workspace = true }
+# draw.io files (layer 3, a file format, as `odg` and `native` are): the engine will open them (`file.open`) with this reader. It is declared here, where its user is, so that the workspace's
+# entry for the crate is used (cargo warns of an entry that no member uses, on every command); nothing in the engine calls it yet, and `src/lib.rs` names it (`use ... as _`) so that cargo does
+# not report the dependency as unused.
+diacraft-mxfile = { workspace = true }
 # The object snaps (`snap/osnap.rs`) work on kurbo paths, which the geometry crate builds a shape's rows into.
 kurbo = { workspace = true }
 # Crash-safe replacement of a file: a temporary file beside the target, then a rename (shared with the other craft apps).
 craft-atomic = { workspace = true }
+# The person's settings: `config.toml`, the dictionaries and the AutoCorrect lists, saved atomically and bounded. The engine re-exports the crate as `prefs`.
+diacraft-prefs = { workspace = true }
 # Path operations on kurbo paths: Union, Fragment, Intersect and Subtract work on the areas the shapes' paths fill.
 craft-pathops = { workspace = true }
 # Snapping on kurbo types: the targets of a page, the query, the marks. `snap/adapter.rs` is the engine's side of it.
@@ -53,6 +61,10 @@ diacraft-container = { workspace = true }
 # `O_NONBLOCK`, so that a path swapped for a pipe between the check and the open does not block the reader (`file.rs`).
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+# The file a handle holds is the file at the checked path (`file_access.rs`): on Windows its volume serial number and file index, which `same_file::Handle` gives and the standard library does not.
+[target.'cfg(windows)'.dependencies]
+same-file = { workspace = true }
 
 [dev-dependencies]
 # The counts of the work the model and the recalculation do (`work` in each), which the tests of what a command costs read: a count does not move

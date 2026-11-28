@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use super::container::Side;
 use super::flowchart_tests::Dir;
-use super::group_master::{MemberFrame, MemberSpec};
+use super::group_master::{Factor, MemberFrame, MemberSpec, drop_factor};
 use super::kit;
 use super::*;
 use crate::Session;
@@ -526,7 +526,7 @@ fn every_container_command_leaves_a_container_masters_outline_as_its_master_draw
     let start = formulas(&s);
     assert!(
         start.iter().any(|(_, f)| !f.is_empty()) && start.iter().any(|(_, f)| f.is_empty()),
-        "the outline is formulas and a fixed length: {start:?}"
+        "the outline is formulas and the constant 0: {start:?}"
     );
     // Fit to Contents, Margins, Automatic Resize (the container is brought to its setting now): each changes the box and none the outline's formulas.
     run(&mut s, "container.fit", json!({ "ids": [pen] }));
@@ -545,10 +545,11 @@ fn every_container_command_leaves_a_container_masters_outline_as_its_master_draw
     master_draws(&s);
     run(&mut s, "container.lock", json!({ "ids": [pen], "locked": false }));
     master_draws(&s);
-    // The outline is the master's formulas at the container's size: the tab is the master's 0.4 by 0.2 inch whatever the size.
+    // The outline is the master's formulas at the container's size: the tab is the master's 0.4 by 0.2 inch whatever the size. A fixed length is its length times the factor of the page's drop
+    // scale, so the tab's width is a formula that holds the length and is 0.4 here, where the drop wrote no factor.
     let doc = s.document().unwrap();
     assert_eq!(formulas(&s), start, "after every command the outline is the master's formulas");
-    assert!(outline(&s).iter().any(|(_, f, v)| f.is_empty() && v == "0.4"), "the tab is still 0.4 inch wide");
+    assert!(outline(&s).iter().any(|(_, f, v)| f == "0.4*IF(DropOnPageScale>0,DropOnPageScale,1)" && v == "0.4"), "the tab is still 0.4 inch wide");
     assert!(near(live(doc, page, pen, "Height"), draw::shape_frame(doc, page, pen).unwrap().height));
     // A style is a look of the gallery, which would replace the master's: refused in words, and nothing changes. So is a heading, which is part of a style.
     let before = s.document().unwrap().clone();
@@ -564,6 +565,20 @@ fn every_container_command_leaves_a_container_masters_outline_as_its_master_draw
     .unwrap();
     run(&mut s, "container.style", json!({ "ids": [gallery], "style": "strip" }));
     run(&mut s, "container.heading", json!({ "ids": [gallery], "side": "left" }));
+}
+
+// ---- the factor of the page's drop scale ------------------------------------------------------------------------------------------------
+
+/// The factor by which a fixed length follows the page's drop scale is one text wherever it is written: a shape of one piece reads its own `DropOnPageScale`, a member of a
+/// group the group's (`Sheet.5`, the master's top-level shape), each falling back to 1 where the cell is found nowhere and reads 0; the macro a table of frames is written with makes the same
+/// text as the function that makes the rest.
+#[test]
+fn the_factor_of_the_drop_scale_is_one_text_wherever_it_is_written() {
+    assert_eq!(drop_factor(Factor::Shape), "IF(DropOnPageScale>0,DropOnPageScale,1)");
+    let group = format!("IF(Sheet.{MASTER_SHAPE_ID}!DropOnPageScale>0,Sheet.{MASTER_SHAPE_ID}!DropOnPageScale,1)");
+    assert_eq!(drop_factor(Factor::Group), group);
+    assert_eq!(scaled!("0.08"), format!("0.08*{group}"));
+    assert_eq!(scaled!("1"), format!("1*{group}"));
 }
 
 // ---- the kit's compartments -----------------------------------------------------------------------------------------------------------
@@ -587,7 +602,11 @@ fn compartments_stack_from_the_top_and_the_group_is_as_tall_as_they_are() {
     let (head, body, foot) = (top.children.get(0).unwrap(), top.children.get(1).unwrap(), top.children.get(2).unwrap());
     assert_eq!(text(head, "Width"), "GUARD(Sheet.5!Width)");
     assert_eq!(text(head, "PinX"), "GUARD(Sheet.5!Width*0.5)");
-    assert_eq!(text(head, "Height"), "GUARD(MAX(0.05,TEXTHEIGHT(TheText,Width)))");
+    assert_eq!(
+        text(head, "Height"),
+        "GUARD(MAX(0.05*IF(Sheet.5!DropOnPageScale>0,Sheet.5!DropOnPageScale,1),TEXTHEIGHT(TheText,Width)))",
+        "the least height is the master's on paper and follows the group's factor, 1 where the group holds none"
+    );
     assert_eq!(text(head, "PinY"), "GUARD(Sheet.5!Height-Height*0.5)");
     assert_eq!(text(body, "PinY"), "GUARD(Sheet.5!Height-Sheet.6!Height-Height*0.5)");
     assert_eq!(text(foot, "PinY"), "GUARD(Sheet.5!Height-Sheet.6!Height-Sheet.7!Height-Height*0.5)");
@@ -933,4 +952,58 @@ fn a_shape_changed_to_a_group_master_becomes_the_group_and_follows_its_text() {
     let doc = s.document().unwrap();
     let sum: f64 = [first, first + 1, first + 2].iter().map(|m| live(doc, page, *m, "Height")).sum();
     assert!(near(live(doc, page, rect, "Height"), sum), "the changed shape is as tall as its compartments");
+}
+
+// ---- a page of another drawing scale ----------------------------------------------------------------------------------
+
+/// A built-in group master is dropped by the code a stencil file's is (`place`), so the range of eight reaches it: on a page at 1:100 the group keeps its size on paper (its
+/// `Width` and `DropOnPageScale` are written, its members follow by the formulas they inherit), its height, the sum of its compartments' and kept by `LockHeight`, stays a formula,
+/// and the box is centred at the drop point. Within the range, and for the trial instance Change Shape makes (`Follow::Never`), nothing is written.
+#[test]
+fn a_built_in_group_master_follows_the_pages_drawing_scale_beyond_the_range_of_eight() {
+    let mut s = blank();
+    let page = page_of(&s);
+    run(&mut s, "page.scale", json!({"paper": 1.0, "drawing": 100.0}));
+    let card = drop_at(&mut s, &CARD, 500.0, 600.0);
+    let doc = s.document().unwrap();
+    let held = |name: &str| shape_of(doc, page, card).sheet.cells.get(&diacraft_doc::CellName::new(name)).cloned();
+    assert!(near(held("DropOnPageScale").and_then(|c| c.value?.number()).unwrap(), 100.0), "the factor is written");
+    assert!(near(held("Width").and_then(|c| c.value?.number()).unwrap(), 160.0), "the width is the master's times the ratio");
+    assert!(
+        !held("Height").is_some_and(|c| matches!(c.formula, FormulaSlot::Absent)),
+        "the height is the sum of the compartments', a formula `LockHeight` keeps: it is not replaced by a value"
+    );
+    for member in [card + 1, card + 2, card + 3] {
+        assert!(near(cached(doc, page, member, "Width"), 160.0), "member {member} follows the group's width");
+        assert!(
+            !shape_of(doc, page, member).sheet.cells.contains_key(&diacraft_doc::CellName::new("DropOnPageScale")),
+            "no member holds a factor of its own"
+        );
+    }
+    let corners = draw::shape_corners(doc, page, card).unwrap();
+    let (xs, ys): (Vec<f64>, Vec<f64>) = (corners.iter().map(|p| p.0).collect(), corners.iter().map(|p| p.1).collect());
+    let middle = |v: &[f64]| (v.iter().copied().fold(f64::INFINITY, f64::min) + v.iter().copied().fold(f64::NEG_INFINITY, f64::max)) / 2.0;
+    assert!(near(middle(&xs), 500.0) && near(middle(&ys), 600.0), "the box is centred at the drop point: {corners:?}");
+
+    // Within the range the drop is as it was: nothing is written on the group.
+    let mut s = blank();
+    let page = page_of(&s);
+    run(&mut s, "page.scale", json!({"paper": 1.0, "drawing": 4.0}));
+    let card = drop_at(&mut s, &CARD, 5.0, 6.0);
+    let doc = s.document().unwrap();
+    for name in ["DropOnPageScale", "Width"] {
+        assert!(!shape_of(doc, page, card).sheet.cells.contains_key(&diacraft_doc::CellName::new(name)), "{name} is not written within the range");
+    }
+    // Change Shape's trial instance follows no scale: the same drop on the page at 1:100 writes nothing.
+    let mut s = blank();
+    let page = page_of(&s);
+    run(&mut s, "page.scale", json!({"paper": 1.0, "drawing": 100.0}));
+    let above = s.id_floor(page);
+    let info = s
+        .edit("Drop shape", |doc| {
+            draw::drop_shape_following(doc, page, &CARD, (5.0, 6.0), above, draw::Follow::Never).map_err(|p| p.into_engine("shape.drop"))
+        })
+        .unwrap();
+    assert_eq!(info.drop_scale, None);
+    assert!(!shape_of(s.document().unwrap(), page, info.id).sheet.cells.contains_key(&diacraft_doc::CellName::new("DropOnPageScale")));
 }

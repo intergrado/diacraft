@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Features of the free Visio alternative · DiaCraft</title>
-  <meta name="description" content="What DiaCraft 0.2.3 does: shapes, stencils, connectors, themes, layers, formulas, Visio and OpenDocument files, export, the browser version and AI agents." />
+  <meta name="description" content="What DiaCraft 0.2.4 does: shapes, stencils, connectors, themes, layers, formulas, Visio and OpenDocument files, export, the browser version and AI agents." />
   <link rel="canonical" href="https://diacraft.dev/features" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="DiaCraft" />
   <meta property="og:title" content="Features of the free Visio alternative · DiaCraft" />
-  <meta property="og:description" content="What DiaCraft 0.2.3 does: shapes, stencils, connectors, themes, layers, formulas, Visio and OpenDocument files, export, the browser version and AI agents." />
+  <meta property="og:description" content="What DiaCraft 0.2.4 does: shapes, stencils, connectors, themes, layers, formulas, Visio and OpenDocument files, export, the browser version and AI agents." />
   <meta property="og:url" content="https://diacraft.dev/features" />
   <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
@@ -17,7 +17,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Features of the free Visio alternative · DiaCraft" />
-  <meta name="twitter:description" content="What DiaCraft 0.2.3 does: shapes, stencils, connectors, themes, layers, formulas, Visio and OpenDocument files, export, the browser version and AI agents." />
+  <meta name="twitter:description" content="What DiaCraft 0.2.4 does: shapes, stencils, connectors, themes, layers, formulas, Visio and OpenDocument files, export, the browser version and AI agents." />
   <meta name="twitter:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta name="twitter:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
@@ -31,7 +31,7 @@
     {
       "@context": "https://schema.org",
       "@type": "WebPage",
-      "description": "What DiaCraft 0.2.3 does: shapes, stencils, connectors, themes, layers, formulas, Visio and OpenDocument files, export, the browser version and AI agents.",
+      "description": "What DiaCraft 0.2.4 does: shapes, stencils, connectors, themes, layers, formulas, Visio and OpenDocument files, export, the browser version and AI agents.",
       "inLanguage": "en",
       "isPartOf": {
         "@type": "WebSite",
@@ -63,11 +63,11 @@
         <div class="page-title">
           <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Features</span></p>
           <h1>What DiaCraft <em>does.</em></h1>
-          <p class="lead">Everything that works in DiaCraft 0.2.3, area by area. DiaCraft is a free, open-source diagram editor and Visio alternative for Linux, Windows, macOS and the browser: it opens, edits and saves Visio and OpenDocument drawings, and keeps new drawings in its own <code>.diacraft</code> format. Each area links to its guide where there is one. <a href="/feature-comparison.html">See how it compares with Visio and other diagram tools, feature by feature.</a></p>
+          <p class="lead">Everything that works in DiaCraft 0.2.4, area by area. DiaCraft is a free, open-source diagram editor and Visio alternative for Linux, Windows, macOS and the browser: it opens, edits and saves Visio and OpenDocument drawings, and keeps new drawings in its own <code>.diacraft</code> format. Each area links to its guide where there is one. <a href="/feature-comparison.html">See how it compares with Visio and other diagram tools, feature by feature.</a></p>
         </div>
         <div class="title-block">
           <dl class="spec">
-            <div><dt>Release</dt><dd><b>0.2.3</b></dd></div>
+            <div><dt>Release</dt><dd><b>0.2.4</b></dd></div>
             <div><dt>Price</dt><dd><b>Free</b>, no account</dd></div>
             <div><dt>Licence</dt><dd>MIT or Apache 2.0</dd></div>
             <div><dt>Platforms</dt><dd>Linux · Windows · macOS · Browser</dd></div>
@@ -87,7 +87,7 @@
             <li><strong>Arrange.</strong> Align shapes, rotate them by a quarter turn, flip them, bring them to the front or send them to the back, one step or all the way, and group and ungroup them. Groups can hold groups, and a second click on a selected group selects the shape under the pointer.</li>
             <li><strong>Copy and delete.</strong> Cut, copy, paste and Duplicate (Ctrl+D), or drag with Ctrl held to copy. Paste carries shapes to another page of the same drawing. Delete removes the shapes selected and the connectors glued to them.</li>
             <li><strong>Draw your own shapes.</strong> Home → Tools → Drawing Tools has Rectangle, Ellipse, Line, Arc, Freeform and Pencil. Go on from the end of an open path to build one shape, and close the path to fill it.</li>
-            <li><strong>Shape operations.</strong> Union, Combine, Fragment, Intersect and Subtract make new shapes from the shapes selected. They are in the Operations menu at the end of the Draw tab, and in the Developer tab’s.</li>
+            <li><strong>Shape operations.</strong> Union, Combine, Fragment, Intersect and Subtract make new shapes from the shapes selected, Join chains lines whose ends meet into one path, Trim cuts shapes and lines where they cross, Offset draws a copy of a path on each side of it (the Operations menu asks for the distance), and Fit Curve remakes the paths of a shape from fewer segments within a tolerance, with circular arcs where the path is round. They are in the Operations menu at the end of the Draw tab (which also has Fit Curve), and in the Developer tab’s.</li>
             <li><strong>Change Shape.</strong> Replace the shapes selected with a master of an open stencil, in one step.</li>
             <li><strong>Find and Replace.</strong> Find searches shape text, Shape Data, shape names and user-defined cells in the selection, the page or every page, and Replace changes shape text one match at a time or all at once.</li>
             <li><strong>Insert.</strong> Put a PNG, JPEG, BMP, EMF or WMF picture on the page. Link a shape to a page, another shape or a web address, and Ctrl+click it to follow the link. Insert fields from eight categories and symbols into a shape’s text.</li>
@@ -104,15 +104,20 @@
           <h2>Shapes, stencils and templates</h2>
           <p>The Shapes window shows one stencil at a time as a grid of cards, with a chooser above it. A connector’s card shows its line ends and pattern, and a group master’s card draws its members. DiaCraft’s own shapes are drawn by the project.</p>
           <ul>
-            <li><strong>Nine built-in stencils, 86 shapes.</strong> Basic Shapes, Basic Flowchart, Decorative Shapes, Arrow Shapes, Gane-Sarson, Cross-Functional Flowchart Shapes, Organization Chart Shapes, Network Devices, and Computers and Devices. More Shapes lists them by category and opens the ones a drawing left out.</li>
+            <li><strong>Sixteen built-in stencils, 174 shapes.</strong> Basic Shapes, Basic Flowchart, Decorative Shapes, Arrow Shapes, Gane-Sarson, Cross-Functional Flowchart Shapes, Organization Chart Shapes, UML Class, UML Use Case, UML Sequence, BPMN Shapes, C4 Model, Network Devices, Computers and Devices, Crow’s Foot Database Notation and Chen’s Database Notation. A blank drawing opens the first seven, a template opens its own, and More Shapes lists them all by category and opens the others.</li>
+            <li><strong>UML.</strong> UML Class has Class, Interface, Enumeration, Package, Data Type, Object and Note, with Association, Directed Association, Aggregation, Composition, Generalization, Realization, Dependency and Note Link lines. A class is its name, its attributes and its operations, each compartment growing with the lines typed in it, and its name is italic when its Abstract field is set. UML Use Case has Actor, Use Case, Subject and Note, with Association, Include, Extend, Generalization and Note Link lines. UML Sequence has Lifeline and Actor Lifeline, whose connection points are at the same heights on every lifeline so that a message between two of them is level, Activation, Combined Fragment with its operator in its tag, Destruction, Operand Separator, Interaction Use and Note, with Message, Asynchronous Message, Reply Message, Create Message, Self Message and Note Link lines. A package, a subject and a combined fragment are containers.</li>
+            <li><strong>BPMN.</strong> BPMN Shapes has 19 shapes after BPMN 2.0.2: Task, Gateway, Start, Intermediate and End Event, Sub-Process, Expanded Sub-Process, Call Activity, Data Object, Data Store, Message, Group, Text Annotation, Pool and Lane, with Sequence Flow, Message Flow, Association and Data Association lines. A task’s type, an event’s trigger, a gateway’s type, an activity’s loop, multi-instance, ad hoc and compensation markers and its border are fields in the Shape Data window, and the shape draws what you choose. A Pool dropped on the page makes a pool with a lane, a Lane dropped on a pool adds one, and a flow keeps the line pattern BPMN gives it.</li>
+            <li><strong>C4 model.</strong> C4 Model has Person, Software System, Container, Component, Database Container, Queue Container, Boundary, Deployment Node, Infrastructure Node, Diagram Title, Key and the Relationship line. An element shows its name, a type line such as <code>[Container: Rust]</code> and its description from its Shape Data, its colour follows the page’s theme, and one marked External is grey. A boundary and a deployment node are containers, and deployment nodes nest.</li>
+            <li><strong>Database notations.</strong> Crow’s Foot Database Notation has Entity, Entity with Keys and Note, with Relationship, One to One, One to Many, Many to Many and Note Link lines: each end of a relationship is one of four marks, exactly one, zero or one, one or many or zero or many, set in the Shape Data window, and a relationship that is not identifying is dashed. Chen’s Database Notation has Entity, Weak Entity, Relationship, Identifying Relationship, Attribute, Key Attribute, Multivalued Attribute, Derived Attribute and Associative Entity, with a Link line and a double Total Participation line.</li>
+            <li><strong>Shapes made of parts.</strong> A class, an entity, a lifeline, a combined fragment, a BPMN event and the C4 key are groups of parts that follow the shape. It is selected and moved whole and typing goes to its name; a double-click on a compartment of a selected class edits that compartment, and a line typed in a class or an entity makes it taller in the same undo step, while a resize changes only its width.</li>
             <li><strong>Network shapes.</strong> Network Devices has a router, a switch, a firewall, a cloud, a wireless access point, a load balancer, a modem, the internet, an Ethernet bar, a ring network, the zigzag Comm-link and the Network Link connector. Computers and Devices has seven servers, a desktop, a laptop, a rack server, a tablet, a mobile phone, a telephone, a printer, storage and a user. Each device has Shape Data in up to three groups, for its equipment, its network and, on a computer, its processor, memory, operating system and hard drive, and the label under a networked device shows its network name over its IP address.</li>
             <li><strong>Stencil files.</strong> Open a Visio stencil (<code>.vssx</code>, <code>.vssm</code>) or a DiaCraft stencil (<code>.diacraft-stencil</code>) from More Shapes → Open Stencil, and drag its shapes onto the page.</li>
             <li><strong>Search for shapes.</strong> Type in the Search shapes box and press Enter to search every stencil. The shapes you use most can go at the top of a stencil as Quick Shapes.</li>
             <li><strong>Masters.</strong> A shape dropped from a stencil keeps its link to its master and takes what it does not set itself from it, and the drawing saves the master with it.</li>
-            <li><strong>Six templates.</strong> File → New offers a blank drawing and Basic Diagram, Basic Flowchart, Cross-Functional Flowchart, Organization Chart, Data Flow Model (Gane-Sarson) and Basic Network Diagram. Each template opens its page and its stencils, and its tile shows a description and a larger picture before you create the drawing.</li>
+            <li><strong>Thirteen templates.</strong> File → New offers a blank drawing and Basic Diagram, Basic Flowchart, Cross-Functional Flowchart, Organization Chart, UML Class, UML Use Case, UML Sequence, BPMN Diagram, C4 Model Diagram, Basic Network Diagram, Crow’s Foot Database Notation, Chen’s Database Notation and Data Flow Model (Gane-Sarson). Each template opens its page and its stencils, and its tile shows a description and a larger picture before you create the drawing. A drawing saved from a template opens the same stencils when you open it again.</li>
             <li><strong>Template files.</strong> A Visio template (<code>.vstx</code>, <code>.vstm</code>), an OpenDocument template (<code>.otg</code>) or a DiaCraft template starts a new, untitled drawing, and its first save asks for a name of its own.</li>
           </ul>
-          <p><a href="/flowcharts.html">Flowcharts</a> · <a href="/org-charts.html">Org charts</a></p>
+          <p><a href="/flowcharts.html">Flowcharts</a> · <a href="/org-charts.html">Org charts</a> · <a href="/architecture-diagrams.html">Architecture diagrams</a></p>
         </section>
         <section id="connectors">
           <h2>Connectors and glue</h2>
@@ -122,7 +127,9 @@
             <li><strong>Glue that follows.</strong> Move, resize or turn a shape, and the connectors glued to it are routed again. A connector set to Reroute As Needed, Never Reroute or Reroute on Crossover, or one whose route you edited, keeps the corners in the middle of its route where they are on the page, and its end legs stretch to follow. Drag a connector’s end to glue it somewhere else, or to free it.</li>
             <li><strong>Lines.</strong> Design → Layout → Connectors sets right-angle, straight or curved lines for the connectors selected, or the page’s default for new ones, and so do Right-Angle Connector, Straight Connector and Curved Connector in a connector’s right-click menu. Show Line Jumps draws a jump where two connectors cross.</li>
             <li><strong>Edit a route.</strong> Drag the handle in the middle of a leg of a right-angle connector to move that leg. A connector’s right-click menu has Reset Connector and a Reroute menu: Reroute Freely, Reroute As Needed, Never Reroute and Reroute on Crossover.</li>
-            <li><strong>Labels and arrowheads.</strong> Type a label on a connector, and choose its line ends from 46. A custom line end that names a line-end master of the drawing is drawn from that master.</li>
+            <li><strong>Reverse Ends.</strong> A connector’s right-click menu, Rotate Shapes under Home → Arrange → Position and the menu of the Connector button on Home → Tools have Reverse Ends, and Ctrl+Alt+R does the same: the begin and the end of the connectors and lines selected swap with their glue, so the arrowhead is at the other end and the route and the label stay where they are.</li>
+            <li><strong>Connection points.</strong> Ctrl+Alt+K doubles the connection points of the edge under the pointer, or of every edge of the shapes selected, with a point in the middle of each gap, and Ctrl+Alt+Shift+K halves them again, taking away only the points the last doubling added. A shape’s right-click menu has a Connection Points submenu, and Home → Tools → Connection Point has the same two rows. Old points stay where they are and connectors stay glued, and an edge whose new points would be closer than the minimum distance set in File → Options → Advanced is left as it is. A shape with no connection points is glued to as a whole.</li>
+            <li><strong>Labels and arrowheads.</strong> Type a label on a connector, and choose its line ends from 46. A custom line end that names a line-end master of the drawing is drawn from that master, and the inside of a hollow line end takes the shape’s fill. A connector DiaCraft makes has no fill, so its hollow ends are see-through until you give it one.</li>
             <li><strong>Layout and Routing.</strong> The Page Setup dialog’s Layout and Routing tab sets the page’s routing style and direction and its line jumps (which lines, their style and their size), with a preview, and its Spacing dialog sets the gaps between shapes and connectors. A new style routes again the connectors that follow the page and reroute freely. Separate, Overlap, Appearance and the spacing are saved with the drawing.</li>
             <li><strong>Routing settings by command.</strong> <code>page.routing</code> and <code>page.set_routing</code> read and set the page’s routing style and spacing, <code>connector.path</code> gives the corners of a connector’s route, and <code>shape.behavior</code> and <code>shape.set_behavior</code> set how a shape takes part in routing. Routing styles with a direction, such as a flowchart or a tree from top to bottom, are kept in the drawing and drawn as right-angle routes, and a new style for the page routes the connectors that follow it again.</li>
           </ul>
@@ -133,8 +140,10 @@
           <ul>
             <li><strong>Type.</strong> Select a shape and type, or double-click it to edit its text. The Text tool (Ctrl+2) makes a text box where you click or drag. The Text Block tool moves, sizes and turns the block of a shape’s text, and Rotate Text turns it a quarter. On a group whose <code>IsTextEditTarget</code> cell is FALSE, typing edits the member on top of it.</li>
             <li><strong>Font and paragraph.</strong> Any font on your computer at any size, bold, italic, underline, strikethrough, a colour, and Change Case. Text is set left, centred, right or justified, at the top, middle or bottom of its block, with bullets in seven marks, indents, right-to-left text and vertical text. The Text dialog (F11) has Font, Paragraph and Text Block tabs.</li>
+            <li><strong>Right to left.</strong> Home → Paragraph → Right-to-Left turns a paragraph round: its indents, alignment, bullet and tab stops are mirrored, and the text box edits it right to left as it is drawn, with the caret and the selection following the screen. The window’s menus and boxes show Arabic and Hebrew letters with faces it takes from your computer.</li>
+            <li><strong>Languages.</strong> Each run of text is drawn and measured in its language, the one its file gives it or the drawing’s own, which the text shaper and Change Case use, and an OpenDocument drawing keeps the language of each run.</li>
             <li><strong>Fill.</strong> A solid colour, a gradient with stops you place, or one of 23 patterns, each with a transparency.</li>
-            <li><strong>Line.</strong> A colour, a weight, one of 23 dashes, 46 line ends, compound lines, caps, a transparency and gradient lines.</li>
+            <li><strong>Line.</strong> A colour, a weight, one of 23 dashes, 46 line ends (the inside of a hollow one painted with the shape’s fill), compound lines drawn as two or three bands that share the weight, caps, a transparency and gradient lines.</li>
             <li><strong>Shadow.</strong> Ten presets, and Shadow Options for the colour, transparency, size, blur, angle and distance.</li>
             <li><strong>Colours.</strong> Every colour menu has the theme’s colours, its variant’s, standard and recent colours, and More Colors for any colour by RGB or hex.</li>
             <li><strong>The Format Shape pane.</strong> Fill, line and shadow in a pane at the right, where a slider shows its value on the page as you drag it.</li>
@@ -148,7 +157,7 @@
             <li><strong>Styles.</strong> A shape takes what it does not set itself from its master and from the drawing’s styles, as a VSDX file holds them. Drawing Explorer lists the styles, masters and pages of a drawing.</li>
             <li><strong>Layers.</strong> Layer Properties makes, renames and removes layers, and sets for each whether it is shown, printed, active or locked, whether its shapes snap and glue, and its colour and transparency. Assign to Layer puts the shapes selected on layers.</li>
             <li><strong>Containers.</strong> Insert → Container puts one of 14 containers round the shapes selected. Its members move, copy and delete with it, and a shape dropped into it joins it. The Container Format tab sets the margins and the heading style, fits the container to its contents or resizes it as they change, locks it, selects its contents or disbands it.</li>
-            <li><strong>Swimlanes.</strong> The Cross-Functional Flowchart template starts with three lanes and three phases. A shape dropped into a lane moves with the lane, and the Cross-Functional Flowchart tab adds lanes and separators, turns the lanes and rotates their labels.</li>
+            <li><strong>Swimlanes.</strong> The Cross-Functional Flowchart template starts with three lanes and three phases. A shape dropped into a lane moves with the lane, and the Cross-Functional Flowchart tab adds lanes and separators, turns the lanes and rotates their labels. The template's page grows by a sheet when a lane no longer fits on it.</li>
             <li><strong>Org charts.</strong> The Organization Chart template has six position shapes, each with five Shape Data fields. Drop a position on its manager to link the two and lay the chart out. The Org Chart tab lays out the whole chart in six ways, sets out one manager’s team in four, and puts a photo on a position.</li>
           </ul>
           <p><a href="/org-charts.html">Org charts</a> · <a href="/architecture-diagrams.html">Architecture diagrams</a></p>
@@ -169,19 +178,32 @@
             <li><strong>The ShapeSheet window.</strong> Turn on the Developer tab under File → Options → Customize Ribbon, then choose Developer → Shape Design → Show ShapeSheet, or right-click a shape or the page. The window opens the sheet of a shape, the page or the document, and Drawing Explorer opens a style’s or a master’s, each in a tab of an area below the drawing, beside it or in its place.</li>
             <li><strong>Read a sheet.</strong> Sections come in one order. Each cell shows its formula and its value, or only one of them (the Formulas and Values boxes of the ShapeSheet Design tab). A cell the sheet holds is blue with a dot, an inherited one plain and an error in its own colour, and the tooltip says where a cell comes from. Sections can be hidden or folded, and the formula bar under the ribbon shows the whole formula of the cell selected. A group of cells is laid out as names and values in columns, a column’s edge can be dragged, and the name of a row whose formula has an error is red.</li>
             <li><strong>Edit a cell.</strong> Double-click a cell or press F2 to edit its formula, start typing to replace it, or edit it in the formula bar. Enter, Tab or a click on another cell commits it as one undo step, and Escape leaves it as it was. As you type, the bar shows what the formula works out to. A refused formula stays open with the reason in words and its fault underlined, an empty formula makes the cell inherit again, and the cells a change worked out again are marked until the next one. Ctrl+C and Ctrl+V copy a formula, and the arrow keys, Home, End, Page Up and Page Down move around the sheet.</li>
+            <li><strong>Rows and sections in the window.</strong> The Sections and Rows groups of the ShapeSheet Design tab add and delete sections and rows. Insert in Sections opens a card of check boxes for the sections a sheet can take, and the right-click menu of a cell, a row’s number or a section’s header has Insert Row (before the selected row), Insert Row After (in Geometry), Delete Row, Insert Section and Delete Section. Each is one step of Undo, a control the rules refuse is dimmed with the reason in its tooltip, and the foot of the sheet says what was done. Shape Data, Link and Shape Action add a row to the sheet, and Edit Formula, or Ctrl+E, opens a larger editor of several lines for the formula of the cell selected.</li>
             <li><strong>Set any cell by command.</strong> <code>sheet.set_cell</code> and <code>sheet.set_cells</code> write a formula or a value into any cell of any sheet, from the command line, the MCP server or the control channel. Each call is one undo step and is applied whole or not at all, and an empty formula makes a cell inherit again.</li>
             <li><strong>Rows and sections by command.</strong> <code>sheet.add_row</code>, <code>sheet.delete_row</code>, <code>sheet.add_section</code> and <code>sheet.delete_section</code> add and delete rows and sections, each as one undo step. A row inserted in the middle of a shape’s or a page’s section moves the rows after it up one number, and the formulas and glued connectors that named a moved row follow it; an insert into rows a shape takes from its master first gives the shape its own copy of them.</li>
             <li><strong>Read and try by command.</strong> <code>sheet.read</code>, <code>sheet.cell</code> and <code>sheet.sections</code> read a sheet, and <code>sheet.evaluate</code> works a formula out on a sheet without writing it.</li>
+            <li><strong>Formulas that reach further.</strong> A formula that reads a cell of another page, through <code>Pages[...]</code>, or of the document’s sheet, a style or a master, is worked out in the same edit as the cell it reads, and so is one that names a page when a page is renamed, added, copied, deleted or moved. A cell that reads a connector’s route follows the route. <code>SETF</code> writes its target when its own cell is worked out, Change Shape carries over the cells the new master’s <code>ReplaceCopyCells</code> names, and <code>LockVariation</code> keeps a shape’s variant when a theme or a variant is applied. A cell that holds a formula and no saved value, as some files have, is worked out wherever it is drawn, shown or edited.</li>
           </ul>
           <p><a href="/guides/command-line.html">Run commands from the command line</a></p>
         </section>
         <section id="pages">
           <h2>Pages, page setup and printing</h2>
           <ul>
-            <li><strong>Pages.</strong> Add, insert, delete, rename, duplicate and reorder pages from the page tabs, by dragging a tab or with Reorder Pages, and move between them.</li>
+            <li><strong>Pages.</strong> Add, insert, delete, rename, duplicate and reorder pages from the page tabs, by dragging a tab or with Reorder Pages, and move between them. A page’s name has up to 31 characters, and no two pages share a name.</li>
             <li><strong>Background pages.</strong> Make a background page, or turn a page into one, and assign it to the pages that need it. Its shapes, such as a frame and a title block, show on those pages and are edited on its own tab.</li>
-            <li><strong>Page setup.</strong> Design → Page Setup sets the orientation, the size (a named size or your own) and Auto Size, which grows the page as shapes go past its edge. The Page Setup dialog sets the printer paper, the page size, the drawing scale (a listed scale or your own, with units) and the page’s name, type and background, and its Layout and Routing tab sets how the page’s connectors are routed and jump.</li>
+            <li><strong>Page setup.</strong> Design → Page Setup sets the orientation, the size (a named size or your own) and Auto Size, which grows the page as shapes go past its edge. The Page Setup dialog sets the printer paper, the page size, the drawing scale (a listed scale or your own, with units) and the page’s name, type and background, and its Layout and Routing tab sets how the page’s connectors are routed and jump. A shape dropped from a stencil that was drawn at another scale keeps its size in the drawing when the two scales are within a factor of eight of each other, and keeps its size on paper when they are further apart.</li>
             <li><strong>Print.</strong> File → Print previews each sheet, with a map of the sheets for a page that takes several, and prints all pages or the current one, in colour or in black and white, to your system’s printer or as a PDF.</li>
+          </ul>
+        </section>
+        <section id="accessibility">
+          <h2>Alt text and the accessibility check</h2>
+          <p>A shape, a page and a master each carry a title and a description that a screen reader speaks in place of the picture. They are typed in the window and checked in the Accessibility pane, and set and checked by command, from <code>diacraft-cli run</code>, the MCP server’s <code>command_run</code> and the control channel.</p>
+          <ul>
+            <li><strong>In the window.</strong> The Format Shape pane’s Alt Text tab has a Title and a Description for the shapes selected, with Clear Alt Text, and Edit Alt Text in a shape’s right-click menu opens it; the Page Setup dialog’s Alt Text tab holds the page’s. A text a shape takes from its master shows in grey until the shape has its own, and Use master’s title and Use master’s description go back to the master’s.</li>
+            <li><strong>The Accessibility pane.</strong> Review → Check Accessibility opens it: it lists the errors and warnings of the check below by rule, checks again after each edit, and an item shows the shape or the page with a button that puts it right, Add Alt Text, Rename Page or Edit Hyperlink.</li>
+            <li><strong>Set alt text.</strong> <code>shape.alt_text</code>, <code>page.alt_text</code> and <code>master.alt_text</code> read, set and clear the title and the description, each change one undo step. A shape dropped from a master shows the master’s alt text until it has its own, and a text protected by <code>GUARD</code> is refused in words.</li>
+            <li><strong>Check a drawing.</strong> <code>review.check_accessibility</code> looks at every page that is not a background and the shapes on it, and lists shapes and pages with no alt text, alt text that holds a file name or a web address, pages that keep a default name such as Page-1, and hyperlinks with no description. Each finding names the command and the parameters that put it right.</li>
+            <li><strong>In an SVG.</strong> An SVG export gives each shape a <code>&lt;title&gt;</code> and a <code>&lt;desc&gt;</code> from its alt text, or its name as the title when it has none, and the page’s alt text to the file.</li>
           </ul>
         </section>
         <section id="files">
@@ -189,12 +211,14 @@
           <p>DiaCraft opens, edits and saves Visio drawings, stencils and templates, OpenDocument drawings and templates, and its own <code>.diacraft</code> files. Save keeps a drawing in the type it came in, and Save As writes it as another.</p>
           <ul>
             <li><strong>Visio files.</strong> Drawings (<code>.vsdx</code>, <code>.vsdm</code>) open for editing, templates (<code>.vstx</code>, <code>.vstm</code>) start a new drawing, and stencils (<code>.vssx</code>, <code>.vssm</code>) open from More Shapes. Save writes the file back as the same type, and the parts of the file that DiaCraft does not use are kept.</li>
-            <li><strong>OpenDocument drawings.</strong> An <code>.odg</code> opens for editing, an <code>.otg</code> starts a new drawing, and a flat <code>.fodg</code> is written back to its own file by Save. An edit is written into the file’s own markup, and the rest of the file is kept as it was. A new shape is written as the outline it draws, arcs included, so other programs draw the built-in flowchart, data flow and network shapes by their own outlines.</li>
+            <li><strong>OpenDocument drawings.</strong> An <code>.odg</code> opens for editing, an <code>.otg</code> starts a new drawing, and a flat <code>.fodg</code> is written back to its own file by Save. An edit is written into the file’s own markup, and the rest of the file is kept as it was. A new shape is written as the outline it draws, arcs included, so other programs draw the built-in flowchart, data flow and network shapes by their own outlines, and the Comm-link’s zigzag and the Self Message’s loop as they are while they are glued to nothing (a glued one is a connector that other programs draw as a straight line and keep glued). The 22 dash patterns are written as dashes other programs draw, a connector’s glue is written when you reconnect, reverse, glue or free an end, doubled and halved connection points are written as glue points, and each run keeps its language.</li>
             <li><strong>The .diacraft format.</strong> A new drawing is saved as <code>.diacraft</code> first. The file holds the pages, shapes, styles and pictures, keeps the details that came from a VSDX or OpenDocument drawing without storing the original file, and has a public specification. Stencils and templates have <code>.diacraft-stencil</code> and <code>.diacraft-template</code>.</li>
             <li><strong>Save As across the formats.</strong> A VSDX drawing can be saved as any of the six VSDX types, as <code>.diacraft</code>, <code>.odg</code> or <code>.otg</code>; an OpenDocument drawing as <code>.odg</code>, <code>.otg</code>, <code>.diacraft</code> or a VSDX type; and a <code>.diacraft</code> drawing as any of them. Where the new type cannot hold part of a drawing, a card says what, in words, and after the save DiaCraft reads the new file back and names what differs.</li>
             <li><strong>Macros.</strong> The macro project of a <code>.vsdm</code>, <code>.vssm</code> or <code>.vstm</code> is kept as file data and never run. Save As to a type that cannot carry it asks whether to leave it out or to save as the macro-enabled type.</li>
             <li><strong>The Save dialog</strong> offers the drawing’s own type first and changes the extension of the name to the type you choose. The title marks a drawing with unsaved changes, and DiaCraft asks before it closes one, and before it replaces a file that changed on disk.</li>
             <li><strong>Window settings.</strong> Whether the grid, rulers, guides and connection points show is saved with the drawing.</li>
+            <li><strong>Alt text</strong> of shapes, pages and masters is kept in a VSDX or <code>.diacraft</code> file as the sheet’s rows, and a shape’s in an <code>.odg</code> as its <code>svg:title</code> and <code>svg:desc</code>.</li>
+            <li><strong>Page order.</strong> A VSDX file DiaCraft writes lists its background pages first, and a plain Save keeps a file’s own order.</li>
             <li><strong>Damaged and very large files</strong> are refused in words, and the drawing you have open stays as it was.</li>
             <li><strong>Check a save first.</strong> The command <code>file.check_compatibility</code> says what a save as a given type would carry and what it would lose, and writes nothing.</li>
           </ul>
@@ -205,10 +229,21 @@
           <ul>
             <li><strong>From the window.</strong> File → Export, or View → Export → Picture, writes the page on view as PNG, SVG or PDF. The file is made from a copy of the drawing on a thread of its own, so you can go on working.</li>
             <li><strong>From the command line.</strong> <code>diacraft-cli export</code> writes any page, with <code>--dpi</code> up to 2400 for a PNG, letters as text or as outlines in an SVG or a PDF, and <code>--transparent</code> for no white paper under the drawing.</li>
-            <li><strong>What each format holds.</strong> A PNG is the page as the window draws it. An SVG has vector paths, gradients, blurred shadows and text as text where the font allows it. A PDF has vector paths, gradients, pictures and searchable text in an embedded subset of the font where its licence allows embedding, and draws a blurred shadow hard-edged.</li>
+            <li><strong>What each format holds.</strong> A PNG is the page as the window draws it. An SVG has vector paths, gradients, blurred shadows, text as text where the font allows it, and each shape’s alt text or name as its title. A PDF has vector paths, gradients, pictures and searchable text in an embedded subset of the font where its licence allows embedding, and draws a blurred shadow hard-edged.</li>
             <li><strong>Print to PDF.</strong> Print’s Save as PDF writes what a printer would be given, with a page for each sheet.</li>
           </ul>
           <p><a href="/guides/command-line.html">Export a page from the command line</a></p>
+        </section>
+        <section id="downloads">
+          <h2>Downloads for Linux, Windows and macOS</h2>
+          <p>Each download holds the app, the command line tool <code>diacraft-cli</code>, and the licences of DiaCraft and of the libraries it is built from. The release page has a <code>SHA256SUMS.txt</code> file to check them against.</p>
+          <ul>
+            <li><strong>Linux,</strong> for Intel/AMD and ARM64 with glibc 2.35 or newer: an AppImage, a <code>.deb</code> for Debian and Ubuntu, an <code>.rpm</code> for Fedora, or a <code>.tar.gz</code> with an <code>install.sh</code> that adds DiaCraft to your application menu. The <code>.deb</code> and the <code>.rpm</code> also install the command line’s shell completions and manual pages.</li>
+            <li><strong>Windows 10 or 11,</strong> for Intel/AMD and ARM64: an <code>.msi</code> that installs for you alone with no administrator rights, puts <code>diacraft-cli</code> on your <code>PATH</code> and lists DiaCraft under “Open with” for <code>.diacraft</code>, <code>.vsdx</code> and <code>.odg</code>, or a portable <code>.zip</code>.</li>
+            <li><strong>macOS 11 or newer,</strong> with a build for Apple silicon and one for Intel Macs: a disk image to drag DiaCraft.app onto Applications, or a <code>.zip</code>.</li>
+            <li><strong>Unsigned.</strong> The downloads carry no publisher’s signature, so Windows may ask you to confirm the first time you open DiaCraft, and macOS asks.</li>
+          </ul>
+          <p><a href="/#download">Go to the downloads</a></p>
         </section>
         <section id="browser">
           <h2>The browser version</h2>
@@ -230,6 +265,8 @@
             <li><strong><code>run</code></strong> runs any of the editor’s commands, one by one or from a file, and <code>commands</code> lists them.</li>
             <li><strong><code>roundtrip</code> and <code>compare --content</code></strong> check that a drawing saved through another format comes back with the same content.</li>
             <li><strong><code>mcp</code></strong> starts the MCP server.</li>
+            <li><strong><code>completions</code></strong> writes the completion script of bash, zsh, fish, PowerShell or Elvish, for the command line or for the app: it completes the commands, their options and values, the command ids of <code>run --cmd</code> and drawings by their type. <code>man</code> writes a manual page for the program and for each command.</li>
+            <li><strong>Help in colour.</strong> At a terminal, <code>--help</code> is in colour and wrapped to its width, and in a pipe it is plain text; <code>--color</code> and <code>NO_COLOR</code> decide. The JSON is never coloured.</li>
           </ul>
           <p><a href="/guides/command-line.html">Convert drawings from the command line</a></p>
         </section>
@@ -239,6 +276,7 @@
           <ul>
             <li><strong>Two ways to work.</strong> With <code>--headless</code> the agent has a drawing session of its own; with <code>--connect 127.0.0.1:7997</code> it edits the drawing you see in the window.</li>
             <li><strong>The tools.</strong> <code>command_list</code> finds the commands and their parameters, <code>command_run</code> runs one, <code>command_batch</code> runs up to 256 as one undo step, and <code>doc_inspect</code> describes the drawing. With the window, <code>ui_inspect</code> and <code>ui_screenshot</code> show the agent what you see.</li>
+            <li><strong>Folders you grant.</strong> <code>--automation-read-root</code> and <code>--automation-write-root</code>, or the variables <code>DIACRAFT_AUTOMATION_READ_ROOT</code> and <code>DIACRAFT_AUTOMATION_WRITE_ROOT</code>, keep the files the agent’s commands read to the first folders and the files they save, export and print to the second, and the server tells the client which they are. A path outside is refused in words that do not name it. With none given, the agent reaches any file you can.</li>
             <li><strong>MCP bundles.</strong> Each release has a <code>.mcpb</code> bundle for each system and processor of the downloads, which an app that installs MCP servers takes with no configuration to write.</li>
           </ul>
           <p><a href="/guides/agents.html">Draw with an AI agent</a></p>
@@ -250,6 +288,7 @@
             <li><strong>Commands.</strong> <code>engine.execute</code> runs any command, <code>engine.commands</code> lists them, and <code>document.inspect</code> describes the drawing.</li>
             <li><strong>The window.</strong> <code>ui.inspect</code>, <code>ui.screenshot</code>, <code>ui.elements</code>, and <code>ui.click</code>, <code>ui.drag</code>, <code>ui.key</code> and the others, drive the window as a person would. The window’s own commands open its panes, dialogs and ShapeSheet tabs, and drive the ShapeSheet’s editor.</li>
             <li><strong>Local and on request.</strong> The port is open only when you start the app with it, and it has no password: use it while a program drives the app. A connection left idle for five minutes is closed.</li>
+            <li><strong>Folders you grant.</strong> Start the app with <code>--automation-read-root</code> and <code>--automation-write-root</code> to keep the files the channel’s requests read and write to those folders; <code>ui.inspect</code> names them.</li>
           </ul>
           <p><a data-repo="/blob/HEAD/docs/control-protocol.md" href="https://github.com/intergrado/diacraft/blob/HEAD/docs/control-protocol.md">Read the control protocol</a></p>
         </section>
@@ -257,8 +296,9 @@
           <h2>Privacy</h2>
           <ul>
             <li><strong>No account and no telemetry.</strong> Draw, save and export offline.</li>
-            <li><strong>Only what you ask for.</strong> The control port listens on your own computer, the MCP server uses the connection you give it, a print goes to your system’s print service, and a licence link opens in your browser.</li>
+            <li><strong>Only what you ask for.</strong> The control port listens on your own computer, the MCP server uses the connection you give it, an agent’s files can be kept to the folders you grant, a print goes to your system’s print service, and a licence link opens in your browser.</li>
             <li><strong>In the browser,</strong> a file you open is read on your computer, and nothing is uploaded or stored.</li>
+            <li><strong>One settings file.</strong> The desktop app keeps its settings in <code>config.toml</code> in your system’s settings folder, written once when it first starts with the language of your text taken from your system; <code>diacraft-cli run</code> and the MCP server share it, and <code>DIACRAFT_NO_PREFS</code> makes a run read and write none.</li>
           </ul>
           <p><a href="/privacy.html">Privacy details</a></p>
         </section>
@@ -275,8 +315,10 @@
             <li><a href="#layout"><span>Layout</span></a></li>
             <li><a href="#shapesheet"><span>Formulas and the ShapeSheet window</span></a></li>
             <li><a href="#pages"><span>Pages, page setup and printing</span></a></li>
+            <li><a href="#accessibility"><span>Alt text and the accessibility check</span></a></li>
             <li><a href="#files"><span>Files: open, save and convert</span></a></li>
             <li><a href="#export"><span>Export to PNG, SVG and PDF</span></a></li>
+            <li><a href="#downloads"><span>Downloads for Linux, Windows and macOS</span></a></li>
             <li><a href="#browser"><span>The browser version</span></a></li>
             <li><a href="#cli"><span>The command line</span></a></li>
             <li><a href="#agents"><span>The MCP server and AI agents</span></a></li>
@@ -316,7 +358,7 @@
         <div><p class="label">Guides</p><a href="/guides/">All guides</a><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
         <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
       </nav>
-      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.</p>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. draw.io is a registered trademark of draw.io Ltd. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group, the Object Management Group or draw.io Ltd.</p>
     </div>
   </footer>
 </body>

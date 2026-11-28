@@ -106,7 +106,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "List Guides",
             [],
             None,
-            "page: whole number, optional, the id of the page (default: the first page)",
+            "page: whole number, optional, the id of the page (default: the first page that is not a background)",
             has_document,
             guide_list
         ),
@@ -488,7 +488,7 @@ fn guide_list(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.document().ok_or_else(|| failed(ID, "no document open"))?;
     let page = match optional_whole(p, "page", ID)? {
         Some(page) => page,
-        None => doc.pages.iter().next().map(|pg| pg.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
+        None => doc.first_foreground_page().map(|pg| pg.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
     };
     let (guides, left_out) = list_guides(doc, page).ok_or_else(|| bad(ID, format!("there is no page {page}")))?;
     let listed: Vec<Value> =

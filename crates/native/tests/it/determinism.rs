@@ -90,8 +90,32 @@ fn child() {
 /// The digests of the 50-shape drawing, and the first model the fixed generator makes, as written at the vocabulary freeze of 1.1. A change here is a change of the bytes a
 /// model gives: of the vocabulary, the order or the deflate of a part, and it is made on purpose, with the test that says why. **APPID moved it** (the digest of `c65b86151acc1efb`
 /// before): every part names the namespace of the domain `diacraft.app` in its root, which is shorter than the one before, and nothing else of the bytes changed (the stamps that the
-/// parts' content gives are the ones they gave, `vectors.rs`).
-const PINNED_DRAWING: &str = "defd6ec513128578bfb6e9bf7fcc3b2abf29bb24ee01687c3065e4d7eaff6e5f";
+/// parts' content gives are the ones they gave, `vectors.rs`). **Moved it** (`defd6ec5...` before): the root style of a new drawing holds `DropOnPageScale` 1, one cell
+/// more in `document.xml`, and nothing else of the bytes changed: `PINNED_DRAWING_WITHOUT_THE_FACTOR` is the digest the drawing had, which it has again once the cell is taken out of
+/// its root (`the_drawing_is_the_bytes_it_was_but_for_the_cell_in_its_root`). **Moved it** (`1d4c3933...` before): the root style of a new drawing states the text cells the
+/// renderer assumes, a `Paragraph` row, the rest of the text block and the cells of the first run, and nothing else of the bytes changed (`PINNED_DRAWING_WITHOUT_THE_TEXT_CELLS`).
+const PINNED_DRAWING: &str = "61100a8fb2b06921df2c9a5c006afe66d073a9a3725f041838bc0b21b2166b78";
+
+/// The digest of the 50-shape drawing before its root style stated the text cells the renderer assumes: the pin of `PINNED_DRAWING` as moved it, which the drawing has again
+/// once those cells are taken out of its root (`the_drawing_is_the_bytes_it_was_but_for_the_text_cells_in_its_root`).
+const PINNED_DRAWING_WITHOUT_THE_TEXT_CELLS: &str = "1d4c3933e002e2332b420dd23c2d32d4370035980468088f0ec3237087eb9637";
+
+/// The digest of the 50-shape drawing before the root style held `DropOnPageScale`: the pin of the vocabulary freeze, as APPID moved it.
+const PINNED_DRAWING_WITHOUT_THE_FACTOR: &str = "defd6ec513128578bfb6e9bf7fcc3b2abf29bb24ee01687c3065e4d7eaff6e5f";
+
+/// The drawing with the cell, and the text cells, out of its root writes the bytes the writer wrote before they were there: the encoder is as it was, and those cells are what moved the pins.
+#[test]
+fn the_drawing_is_the_bytes_it_was_but_for_the_cell_in_its_root() {
+    let bytes = write_doc(&diacraft_testkit::fixtures::without_root_factor(drawing()));
+    assert_eq!(sha256_hex(&bytes), PINNED_DRAWING_WITHOUT_THE_FACTOR);
+}
+
+/// The drawing with the text cells out of its root writes the bytes it wrote with `DropOnPageScale` and none of them.
+#[test]
+fn the_drawing_is_the_bytes_it_was_but_for_the_text_cells_in_its_root() {
+    let bytes = write_doc(&diacraft_testkit::fixtures::without_root_text_cells(drawing()));
+    assert_eq!(sha256_hex(&bytes), PINNED_DRAWING_WITHOUT_THE_TEXT_CELLS);
+}
 
 #[test]
 fn two_processes_write_the_same_bytes() {

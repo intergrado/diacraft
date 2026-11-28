@@ -22,7 +22,10 @@ mod names;
 
 pub use build::{Built, build};
 pub use catalogue::{Seed, TemplateSpec, find, is_path, registered, templates};
-pub use names::{MAX_NAMES, STENCILS_CHILD, StencilNames, set_stencil_names, stencil_names, stencils_opened_by};
+pub use names::{
+    DrawingStencils, MAX_NAMES, STENCILS_CHILD, StencilNames, set_stencil_names, stencil_names, stencils_of_drawing, stencils_of_masters,
+    stencils_opened_by,
+};
 
 #[cfg(test)]
 mod tests;

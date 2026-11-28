@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Enterprise and integration architecture diagrams · DiaCraft</title>
-  <meta name="description" content="Draw enterprise and integration architecture diagrams with containers, labelled connectors and layers. No ArchiMate stencil yet. Free and open source." />
+  <meta name="description" content="Draw enterprise and integration architecture diagrams with C4 model and UML shapes, containers, labelled connectors and layers. No ArchiMate stencil yet." />
   <link rel="canonical" href="https://diacraft.dev/architecture-diagrams" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="DiaCraft" />
   <meta property="og:title" content="Enterprise and integration architecture diagrams · DiaCraft" />
-  <meta property="og:description" content="Draw enterprise and integration architecture diagrams with containers, labelled connectors and layers. No ArchiMate stencil yet. Free and open source." />
+  <meta property="og:description" content="Draw enterprise and integration architecture diagrams with C4 model and UML shapes, containers, labelled connectors and layers. No ArchiMate stencil yet." />
   <meta property="og:url" content="https://diacraft.dev/architecture-diagrams" />
   <meta property="og:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta property="og:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
@@ -17,7 +17,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Enterprise and integration architecture diagrams · DiaCraft" />
-  <meta name="twitter:description" content="Draw enterprise and integration architecture diagrams with containers, labelled connectors and layers. No ArchiMate stencil yet. Free and open source." />
+  <meta name="twitter:description" content="Draw enterprise and integration architecture diagrams with C4 model and UML shapes, containers, labelled connectors and layers. No ArchiMate stencil yet." />
   <meta name="twitter:image" content="https://diacraft.dev/assets/social.jpg" />
   <meta name="twitter:image:alt" content="DiaCraft diagramming software, illustrated with an octopus connecting shapes." />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#efe9dc" />
@@ -31,7 +31,7 @@
     {
       "@context": "https://schema.org",
       "@type": "WebPage",
-      "description": "Draw enterprise and integration architecture diagrams with containers, labelled connectors and layers. No ArchiMate stencil yet. Free and open source.",
+      "description": "Draw enterprise and integration architecture diagrams with C4 model and UML shapes, containers, labelled connectors and layers. No ArchiMate stencil yet.",
       "inLanguage": "en",
       "isPartOf": {
         "@type": "WebSite",
@@ -63,13 +63,13 @@
         <div class="page-title">
           <p class="label label-wire crumb"><a href="/">DiaCraft</a><i aria-hidden="true">/</i><span>Architecture diagrams</span></p>
           <h1>Enterprise and integration <em>architecture diagrams.</em></h1>
-          <p class="lead">Show how systems, applications and data connect, with the shapes DiaCraft has today: boxes and other basic shapes in containers, network devices and computers, connectors with labels and arrowheads, layers for each view and Shape Data on each system.</p>
-          <p class="sub">DiaCraft has no stencil for a modelling notation such as ArchiMate, UML or BPMN, and no icon sets for cloud services or integration patterns. This page says what you can draw with the general shapes.</p>
+          <p class="lead">Show how systems, applications and data connect, with the shapes DiaCraft has today: the C4 model’s people, systems, containers and components, UML and BPMN shapes, boxes and other basic shapes in containers, network devices and computers, connectors with labels and arrowheads, layers for each view and Shape Data on each system.</p>
+          <p class="sub">DiaCraft has stencils for the C4 model, UML and BPMN, and none yet for ArchiMate or for the icons of cloud services and integration patterns. This page says what you can draw with them and with the general shapes.</p>
           <div class="actions"><a class="btn" href="/#download">Download DiaCraft <span class="arrow arrow-down" aria-hidden="true"></span></a><a data-app="" href="https://diacraft.app/" class="btn btn-ghost">Open DiaCraft in your browser <span class="arrow" aria-hidden="true"></span></a></div>
         </div>
         <div class="title-block">
           <dl class="spec">
-            <div><dt>Shapes</dt><dd><b>86</b> in nine stencils</dd></div>
+            <div><dt>Shapes</dt><dd><b>174</b> in sixteen stencils</dd></div>
             <div><dt>Groups</dt><dd>14 container styles</dd></div>
             <div><dt>Views</dt><dd>Layers, pages and background pages</dd></div>
             <div><dt>Exports</dt><dd>SVG · PDF · PNG</dd></div>
@@ -79,11 +79,24 @@
     </header>
     <div class="wrap doc">
       <article class="prose">
+        <section id="c4">
+          <h2>C4 model diagrams</h2>
+          <p>Choose <strong>File → New → C4 Model Diagram</strong> for the C4 Model stencil beside the Basic Shapes. It has a Person, a Software System, a Container, a Component, a Database Container and a Queue Container, a Boundary, a Deployment Node and an Infrastructure Node, a Diagram Title, a Key and the Relationship line, so one template serves the system context, container, component and deployment views.</p>
+          <ul>
+            <li><strong>Text from Shape Data.</strong> Each element shows its name, a type line such as <code>[Container: PostgreSQL]</code> and its description, from fields you fill in the Shape Data window. A relationship shows its description over its technology.</li>
+            <li><strong>Colours from the theme.</strong> People, software systems, containers and components each have their own shade of the theme’s accent, and an element whose External field is set turns grey. The Key shows a sample of each kind in the same colours.</li>
+            <li><strong>Boundaries and nodes are containers.</strong> A shape dropped inside a Boundary or a Deployment Node joins it and moves with it, and deployment nodes nest. A boundary’s kind is enterprise, software system, container or group, and a node shows how many instances it has.</li>
+          </ul>
+        </section>
+        <section id="uml-bpmn">
+          <h2>UML and BPMN</h2>
+          <p>For the software inside a container, the UML Class, UML Use Case and UML Sequence templates open their stencils: classes with compartments that grow as you type, interfaces and packages; actors, use cases and subjects; lifelines, messages and combined fragments. For the business processes the systems serve, the BPMN Diagram template opens tasks, gateways, events, pools and lanes after BPMN 2.0.2. For the data, the crow’s foot and Chen database notations each have a template too. <a href="/features.html#stencils">Every stencil, on the Features page</a></p>
+        </section>
         <section id="systems">
           <h2>Systems, applications and data stores</h2>
           <p>Draw each system or application as a shape. Basic Shapes has 12 figures, from the rectangle and the ellipse to the hexagon. For a database, use the Database shape of Basic Flowchart or the Data Store of Gane-Sarson. For the infrastructure under them, use the network stencils.</p>
           <ul>
-            <li><strong>Make your own shapes</strong> with the Rectangle, Ellipse, Line, Arc, Freeform and Pencil tools, and combine shapes with Union, Combine, Fragment, Intersect and Subtract.</li>
+            <li><strong>Make your own shapes</strong> with the Rectangle, Ellipse, Line, Arc, Freeform and Pencil tools, and combine shapes with Union, Combine, Fragment, Intersect and Subtract, join lines with Join, cut shapes where they cross with Trim, draw parallel copies of a path with Offset, and simplify a path with Fit Curve.</li>
             <li><strong>Network and computers.</strong> Network Devices and Computers and Devices have a router, a switch, a firewall, a cloud, the internet, servers for databases, the web, files, mail, applications and printing, desktops, laptops, phones and more. Each device has Shape Data for its equipment, and a networked device has fields for its network too, with a label that shows its network name over its IP address. The Basic Network Diagram template opens them.</li>
             <li><strong>Insert a picture</strong> for a logo or an icon you have the rights to use.</li>
             <li><strong>Open a stencil file</strong> (<code>.vssx</code>, <code>.vssm</code> or <code>.diacraft-stencil</code>) from More Shapes → Open Stencil to drag its shapes onto the page.</li>
@@ -131,7 +144,7 @@
         <section id="limits">
           <h2>What it does not have yet</h2>
           <ul>
-            <li><strong>Notations and icons.</strong> No stencil for a modelling notation such as ArchiMate, UML or BPMN, and no icon sets for cloud services or integration patterns.</li>
+            <li><strong>Notations and icons.</strong> No ArchiMate stencil, and no icon sets for cloud services or integration patterns.</li>
             <li><strong>External data.</strong> A shape cannot be linked to a spreadsheet or a database: its Shape Data is typed in.</li>
             <li><strong>An early release.</strong> Many controls of the window are shown but do not work yet.</li>
           </ul>
@@ -141,6 +154,8 @@
         <nav class="toc" aria-label="On this page">
           <p class="label">On this page</p>
           <ol>
+            <li><a href="#c4"><span>C4 model diagrams</span></a></li>
+            <li><a href="#uml-bpmn"><span>UML and BPMN</span></a></li>
             <li><a href="#systems"><span>Systems and data stores</span></a></li>
             <li><a href="#containers"><span>Containers</span></a></li>
             <li><a href="#flows"><span>Connections and data flows</span></a></li>
@@ -183,7 +198,7 @@
         <div><p class="label">Guides</p><a href="/guides/">All guides</a><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
         <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
       </nav>
-      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.</p>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. draw.io is a registered trademark of draw.io Ltd. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group, the Object Management Group or draw.io Ltd.</p>
     </div>
   </footer>
 </body>

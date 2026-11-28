@@ -28,6 +28,13 @@ use crate::draw::layers::shape_layers;
 use crate::draw::scan::{self, Scan};
 use crate::draw::{Pose, Problem, Reader};
 
+// How many rows the scan for a shown path has looked at on this thread, for the test that holds the check of Offset and Fit Curve to the first rows of each shape. Not kept
+// outside tests.
+#[cfg(test)]
+thread_local! {
+    pub(super) static ROWS_SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The most rows of the page's `Layer` section that are read, for the locks.
 const MAX_LAYERS: usize = 4_096;
 
@@ -53,6 +60,8 @@ pub(super) struct Sect {
     pub no_quick_drag: bool,
     /// The rows as numbers, in the shape's own frame: kept for Combine, which carries them, and empty for the others.
     pub rows: Vec<GeomRow>,
+    /// How many rows the section holds, kept or not: what Fit Curve compares a fit's rows with.
+    pub row_count: usize,
     /// The path as drawn, with a gap at each move.
     pub stroke: BezPath,
     /// The ring that is filled: every move a straight edge, closed once.
@@ -145,10 +154,11 @@ fn locked_layers(reader: &Reader<'_>, page: u32) -> Result<HashSet<u32>, Problem
         .collect())
 }
 
-/// The text of a cell directly under a sheet, as found by inheritance.
+/// The text of a cell directly under a sheet, as found by inheritance: a cell that holds a formula and no saved value is what the formula works out to, as the
+/// picture reads it.
 fn text_of(reader: &Reader<'_>, sheet: &SheetRef, addr: &CellAddr) -> Option<String> {
     let found = reader.resolver().resolve(sheet, addr)?;
-    found.value.cell.and_then(|c| c.value.as_ref()).map(|v| v.text().to_owned())
+    reader.worked().text_of(sheet, addr, &found)
 }
 
 /// Whether the shape is a container or a list: `User.msvStructureType` says so.
@@ -213,15 +223,14 @@ pub(super) fn validate(doc: &Document, page: u32, op: Op, ids: &[u32]) -> Result
             return Err(Problem::bad(format!("{} cannot work on it: {why}", op.name())));
         }
     }
-    // The locks: a command that deletes an operand is refused when the operand cannot be deleted; Subtract's first shape is not deleted but its vertices
-    // are changed.
+    // The locks: a command that deletes an operand is refused when the operand cannot be deleted; a command that changes an operand's vertices (Subtract's first
+    // shape, every shape of Fit Curve) is refused when they are locked. Offset deletes and changes nothing, so no lock refuses it.
     for (k, (id, at)) in shapes.iter().enumerate() {
         let sheet = SheetRef::Shape(at.clone());
-        let deleted = !(op.keeps_first() && k == 0);
-        if deleted && reader.number(&sheet, "LockDelete") != 0.0 {
+        if op.deletes(k) && reader.number(&sheet, "LockDelete") != 0.0 {
             return Err(Problem::bad(format!("shape {id} cannot be deleted (`LockDelete`), so {} is refused", op.name())));
         }
-        if op.keeps_first() && k == 0 && reader.number(&sheet, "LockVtxEdit") != 0.0 {
+        if op.edits_vertices(k) && reader.number(&sheet, "LockVtxEdit") != 0.0 {
             return Err(Problem::bad(format!("shape {id} has its vertices locked (`LockVtxEdit`), so {} is refused", op.name())));
         }
     }
@@ -305,7 +314,7 @@ fn sections(
         budget.rows = budget.rows.checked_sub(raw).ok_or_else(|| too_much("too many rows in all the shapes"))?;
         let Some(Ok(rows)) = res.effective_rows_within(&sheet, &key, raw) else { continue };
         budget.bytes = budget.bytes.checked_sub(constructor_bytes(&rows)).ok_or_else(|| too_much("too much constructor text in all the shapes"))?;
-        let (geom, _) = diacraft_render::geom_rows(&rows);
+        let (geom, _) = reader.worked().geom_rows(&sheet, &key, &rows);
         let bound = Bound { curve_work: budget.work, path_elements: budget.elements };
         let built = diacraft_geom::build_paths_bounded(&geom, Size::new(size.0, size.1), rules::FILL_RUN_JOIN, bound)
             .map_err(|e| too_much(&format!("a section cannot be built ({e})")))?;
@@ -323,6 +332,7 @@ fn sections(
             flags,
             no_snap: flag(reader, &sheet, key.ix, "NoSnap"),
             no_quick_drag: flag(reader, &sheet, key.ix, "NoQuickDrag"),
+            row_count: geom.len(),
             rows: if keep_rows { geom } else { Vec::new() },
             covers: ops::may_cover_area(&fill),
             open: has_open_run(&stroke),
@@ -355,11 +365,64 @@ pub(super) fn read(doc: &Document, op: Op, picked: &Picked, budget: &mut Budget)
         if !(map.as_coeffs().iter().all(|c| c.is_finite()) && size.0.is_finite() && size.1.is_finite()) {
             return Err(Problem::failed(format!("shape {id} has a position or a size that is not a number")));
         }
-        let sections = sections(&reader, *id, at, size, map, budget, op == Op::Combine)?;
+        // Fit Curve changes a shape in place, in the shape's own frame: its sections are read there, which is where the rows are written. The others work in the container's.
+        let into = if op == Op::FitCurve { Affine::IDENTITY } else { map };
+        let sections = sections(&reader, *id, at, size, into, budget, op == Op::Combine)?;
         operands.push(Operand { id: *id, at: at.clone(), size, map, sections });
     }
     needs(op, &operands)?;
     Ok(operands)
+}
+
+/// Whether the shape at `at` shows some path, judged from the types of the rows alone: some shown `Geometry` section (not `NoShow`) with a row that is not a `MoveTo`, in the
+/// section as the shape holds it or as its master does. Nothing is built and no cell is read but the section's `NoShow`, and the rows are looked at until one is found.
+/// Sections and rows are charged to `budget` as [`sections`] charges them, so that what is scanned is bounded by what a command reads. (A row of the shape that gives a type of
+/// its own to one of the master's is not told from the master's: a shape that this finds a path in and the reading does not is refused by the command, with the same words.)
+fn shows_a_path(reader: &Reader<'_>, id: u32, at: &ShapeRef, budget: &mut Budget) -> Result<bool, Problem> {
+    let sheet = SheetRef::Shape(at.clone());
+    let res = reader.resolver();
+    let too_much = |what: &str| Problem::failed(format!("shape {id} has more geometry than a shape operation reads: {what}"));
+    let keys = match res.effective_sections_within(&sheet, "Geometry", MAX_SECTIONS_PER_SHAPE) {
+        Some(Ok(keys)) => keys,
+        Some(Err(n)) => return Err(too_much(&format!("{n} sections, at most {MAX_SECTIONS_PER_SHAPE}"))),
+        None => return Ok(false),
+    };
+    for key in keys {
+        budget.sections = budget.sections.checked_sub(1).ok_or_else(|| too_much("too many sections in all the shapes"))?;
+        if flag(reader, &sheet, key.ix, "NoShow") {
+            continue;
+        }
+        let Some(raw) = res.rows_held(&sheet, &key).filter(|n| *n > 0) else { continue };
+        budget.rows = budget.rows.checked_sub(raw).ok_or_else(|| too_much("too many rows in all the shapes"))?;
+        let draws = res.section_layers(&sheet, &key).unwrap_or_default().iter().any(|layer| {
+            layer.rows.iter().any(|row| {
+                #[cfg(test)]
+                ROWS_SCANNED.with(|c| c.set(c.get().saturating_add(1)));
+                !row.del && row.row_type.as_deref().is_some_and(|kind| !matches!(kind, "MoveTo" | "RelMoveTo"))
+            })
+        });
+        if draws {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether Offset or Fit Curve could run on these shapes, as far as what they need of the geometry: a shown path in each, and nothing more. It is the cheap form of
+/// [`read`] for the two, which need no fill area: a scan of row types ([`shows_a_path`]), where reading builds every stroke and fill of every shape (a shape of 100,000 rows
+/// took 140 ms to be asked about). The document is not changed.
+pub(super) fn check_paths(doc: &Document, op: Op, picked: &Picked, budget: &mut Budget) -> Result<(), Problem> {
+    let reader = Reader::new(doc);
+    for (id, at) in &picked.shapes {
+        if !shows_a_path(&reader, *id, at, budget)? {
+            return Err(no_geometry(op, *id));
+        }
+    }
+    Ok(())
+}
+
+fn no_geometry(op: Op, id: u32) -> Problem {
+    Problem::bad(format!("{} cannot work on shape {id}: it has no geometry to draw (text only, or every section hidden)", op.name()))
 }
 
 /// What each command needs of the geometry: a path in each operand, and a fill area where the command says so. Whether a shape has a fill area is judged from
@@ -368,11 +431,7 @@ pub(super) fn read(doc: &Document, op: Op, picked: &Picked, budget: &mut Budget)
 fn needs(op: Op, operands: &[Operand]) -> Result<(), Problem> {
     for operand in operands {
         if !operand.has_path() {
-            return Err(Problem::bad(format!(
-                "{} cannot work on shape {}: it has no geometry to draw (text only, or every section hidden)",
-                op.name(),
-                operand.id
-            )));
+            return Err(no_geometry(op, operand.id));
         }
         if op.needs_fill_area() && !operand.has_fill() {
             return Err(Problem::bad(format!(

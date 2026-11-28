@@ -60,12 +60,13 @@ pub(crate) fn key_of(name: &str) -> Option<Key> {
     parse_marker(name).map(|m| Key { number: m.number, band: m.band.unwrap_or(0) })
 }
 
-/// **A definition of `office:styles` of DiaCraft's own that a style names**: a line end's marker, or a gradient or a hatch ([`super::fx`]). Each is made from its name, so that a save
-/// that names one adds it when the file lacks it, and takes it out when no style names it after the save, by the same rules.
+/// **A definition of `office:styles` of DiaCraft's own that a style names**: a line end's marker, a gradient or a hatch ([`super::fx`]), or a dash ([`super::dash`]). Each is
+/// made from its name, so that a save that names one adds it when the file lacks it, and takes it out when no style names it after the save, by the same rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Def {
     Marker(Key),
     Fx(super::fx::Fx),
+    Dash(super::dash::DashKey),
 }
 
 impl Def {
@@ -74,12 +75,16 @@ impl Def {
         match self {
             Def::Marker(key) => key.name(),
             Def::Fx(fx) => fx.name(),
+            Def::Dash(dash) => dash.name(),
         }
     }
 
-    /// The definition of DiaCraft's own that a name is: a marker by its number and band, a gradient or a hatch by what its name spells.
+    /// The definition of DiaCraft's own that a name is: a marker by its number and band, a gradient or a hatch by what its name spells, a dash by its pattern and cap form.
     pub(crate) fn of_name(name: &str) -> Option<Def> {
-        key_of(name).map(Def::Marker).or_else(|| super::fx::Fx::of_name(name).map(Def::Fx))
+        key_of(name)
+            .map(Def::Marker)
+            .or_else(|| super::fx::Fx::of_name(name).map(Def::Fx))
+            .or_else(|| super::dash::DashKey::of_name(name).map(Def::Dash))
     }
 }
 
@@ -258,6 +263,17 @@ impl Editor<'_, '_> {
                     }
                     text.push_str(&element(key, &made, &pfx.draw, &pfx.svg, &pfx.declare));
                 }
+                Def::Dash(dash) => {
+                    // Eight attributes at most: charged before the element is made.
+                    for _ in 0..8 {
+                        self.work.charge_attribute(self.limits)?;
+                    }
+                    let made = dash.element(&pfx.draw, &pfx.declare);
+                    if made.is_empty() {
+                        return Err(WriteError::Unsupported("a dash whose definition could not be made"));
+                    }
+                    text.push_str(&made);
+                }
                 Def::Fx(fx) => {
                     // Up to ten stops and a dozen attributes: charged before the element is made.
                     let attributes = match fx {
@@ -330,7 +346,7 @@ pub(crate) fn check(
         if !wrote.contains(&key) {
             continue;
         }
-        // A gradient or a hatch is made from its name, which is what the check found by.
+        // A gradient, a hatch or a dash is made from its name, which is what the check found by.
         let Def::Marker(key) = key else {
             if found.len() > 1 {
                 return Err(failed("a definition of DiaCraft's name is in office:styles twice"));

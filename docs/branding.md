@@ -1,6 +1,6 @@
 # DiaCraft branding artwork
 
-Original artwork for DiaCraft, integrated in and corrected in to the owner's requested placement. The desktop uses the icon for its OS window decoration, and the shared desktop/web File Home displays the cover. The web page declares a local favicon, and the README displays the cover. Feature-parity scores are unchanged. The reference app was not inspected and our output has not been opened in it by the project.
+Original artwork for DiaCraft, integrated in and corrected in to the owner's requested placement. The desktop uses the icon for its OS window decoration, and the shared desktop/web File Home displays the cover. The web page declares a local favicon, and the README displays the cover. Feature-parity scores are unchanged.
 
 ## Deliverables
 

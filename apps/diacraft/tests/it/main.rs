@@ -1,5 +1,5 @@
 //! Integration tests for the desktop app's parts: the command line, the control server's transport against
-//! a fake inbox, the logger, which GPU draws the window (`graphics`), and the macOS bundle's program name (`bundle`). None of them opens a window but
+//! a fake inbox, the logger, which GPU draws the window (`graphics`), what a start remembers about graphics tests that never returned (`marker`), the tries a start goes through when the usual graphics fail (`fallback`), what a start that failed tells the person (`failure`), and the macOS bundle's program name (`bundle`). None of them opens a window but
 //! `window`'s, which is ignored unless asked for: it starts the app on this machine's screen.
 //!
 //! Tests may unwrap and panic: a failing assertion is the point of a test.
@@ -13,8 +13,11 @@ mod build_info;
 mod bundle;
 mod control_props;
 mod control_transport;
+mod failure;
+mod fallback;
 mod graphics;
 mod logging;
+mod marker;
 mod window;
 
 use std::sync::{Mutex, OnceLock};

@@ -10,7 +10,8 @@
 //!   account has AutoConnect use (`community-report`), and [`DEFAULT_GAP`] where the page holds none;
 //! * a connector is glued from the source's connection point that **faces that way** (its direction through the shape's turns and flips, the nearest to
 //!   the middle of that side if several face it) to the new shape's point that faces back; where a shape has no point facing so, the nearest pair is
-//!   taken. The connector is the page's default style, routed as `connector.add` routes it.
+//!   taken; a shape with no connection point (a group, a plain box of a file) is glued to as a whole, as `connector.add` glues it. The connector is
+//!   the page's default style, routed as `connector.add` routes it.
 //!
 //! Our rule: a place that another shape of the page already holds is slid along, to the next free one on the perpendicular line:
 //! a box's width (or height) and a gap further, alternately to one side and the other, up to [`MAX_SLIDES`] times. So a second arrow on the same side
@@ -22,8 +23,8 @@
 //! neighbour of shape `from` on the arrow `dir` ([`neighbour`]) is the top-level shape of the page, other than a connector, a guide or `from`, that lies **beyond that
 //! side of `from`'s box** (its near side no nearer than the side) **and shares some of its extent across** (the boxes' ranges along the other axis overlap by more
 //! than nothing, so a shape that is only diagonal is not "to the right"), the nearest first (a tie goes to the one whose centre is nearer the line through `from`'s
-//! centre, then to the lower `ID`), **that has a connection point** to be glued to. A group has none (`connector.add` refuses it) and is passed over. **If the nearest
-//! such shape is joined to `from` already** by a connector (either way round) there is no neighbour: the click makes a copy, as an arrow does that has nothing to join,
+//! centre, then to the lower `ID`), **that a connector can be glued to** (its layers allow glue; one with no connection point, a group among them, is glued to as a whole).
+//! **If the nearest such shape is joined to `from` already** by a connector (either way round) there is no neighbour: the click makes a copy, as an arrow does that has nothing to join,
 //! and never a second connector between the same two shapes; the shapes beyond are not looked at. [`autoconnect_join`] joins `from` to a shape that is there (a click's
 //! neighbour, or the shape a drag from an arrow was let go on) with the connector, from `from`'s point that faces the arrow to the nearest point of
 //! the other shape, or to the one a drag named.
@@ -277,7 +278,8 @@ fn joined(doc: &Document, page: u32, a: u32, b: u32) -> bool {
 
 /// The shape a click on the arrow `dir` of shape `from` joins on `page`: the nearest neighbour in that direction, or `None` when there is none, when
 /// the nearest is joined to `from` already, or when `from` is not a shape of the page that has arrows (a connector, a shape that is not there). A shape whose layers allow no
-/// glue is passed over, as a group is.
+/// glue is passed over, and so is one whose `Connection` section holds more rows than a call reads. A shape that has no connection point is a neighbour like
+/// any other: the connector is glued to the whole of it.
 pub fn neighbour(doc: &Document, page: u32, from: u32, dir: Dir) -> Option<u32> {
     let reader = Reader::new(doc);
     let at = reader.find(page, from)?;
@@ -310,10 +312,10 @@ pub fn neighbour(doc: &Document, page: u32, from: u32, dir: Dir) -> Option<u32> 
         }
     }
     found.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.total_cmp(&y.1)).then(x.2.cmp(&y.2)));
-    // The nearest that a connector can be glued to; a group has no point and is passed over.
+    // The nearest that a connector can be glued to: a shape with no connection point is glued to as a whole; one whose section is past what a call reads is passed over.
     let nearest = found.into_iter().find(|(.., i)| {
         let candidate = diacraft_doc::ShapeRef { owner: diacraft_doc::Owner::Page(page), path: vec![u32::try_from(*i).unwrap_or(u32::MAX)] };
-        reader.connection_points_within(&candidate, MAX_POINT_ROWS).is_some_and(|points| !points.is_empty())
+        reader.connection_points_within(&candidate, MAX_POINT_ROWS).is_some()
     })?;
     (!joined(doc, page, from, nearest.2)).then_some(nearest.2)
 }

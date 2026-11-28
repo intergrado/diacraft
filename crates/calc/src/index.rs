@@ -7,10 +7,12 @@
 //! edit (measured it with a profiler). The answer for a formula does not change when another shape is edited, so the **graph is kept**: it is
 //! made once for a page, and an edit finds the shapes it replaced, by pointer, and puts right what it read of those and nothing else.
 //!
-//! **What is kept.** A [`ReaderIndex`] holds the graph of one page, the page it was made for (the allocation, held, so that a pointer to it is never
-//! another page's), and what the graph reads of the rest of the document: the masters, the styles and the names of the pages. For each sheet that reads
-//! beyond itself it holds what the sheet put in the graph, so that the sheet's old entries can be taken out when its formulas change. A page with no
-//! formula that reads beyond its sheet holds an empty graph, and a document that reads none is held for nothing.
+//! **What is kept.** A [`ReaderIndex`] holds the graph of the page the last edit was on, the page it was made for (the allocation, held, so that a pointer to
+//! it is never another page's), and what the graph reads of the rest of the document: the masters, the styles and the names of the pages. For each sheet that
+//! reads beyond itself it holds what the sheet put in the graph, so that the sheet's old entries can be taken out when its formulas change. A page with no
+//! formula that reads beyond its sheet holds an empty graph, and a document that reads none is held for nothing. **Beside it** (F40) it holds
+//! the graphs of the pages a change reached through a cell that names a page (`Pages[..]`), each made when a change first reached a cell of the page and kept in step
+//! the same way, up to [`MAX_KEPT_PAGES`]; and the listing of the sheets of every page that name a page, which `pages.rs` makes and keeps.
 //!
 //! **How it is brought up to date** ([`ReaderIndex::sync`]), whatever the edits since it was made (a command's edit, its undo, a redo, a file opened over
 //! the one it was made for):
@@ -47,6 +49,7 @@ use diacraft_doc::{
 use crate::affected::{Found, Key, MasterCross, Reader, classify_sheet, pose_keys};
 use crate::changes::{KnownShapes, SectionFormulas, each_own_cell, each_section_cell, end_cells};
 use crate::eval::Evaluator;
+use crate::pages::PageLinks;
 use crate::recalc::walk_page;
 use crate::rules::KEY_BYTES;
 
@@ -248,10 +251,10 @@ impl Graph {
 }
 
 /// A shape an edit replaced, with a sheet that is another allocation than before.
-struct Replaced {
-    sheet: SheetRef,
-    was: Arc<Sheet>,
-    now: Arc<Sheet>,
+pub(crate) struct Replaced {
+    pub(crate) sheet: SheetRef,
+    pub(crate) was: Arc<Sheet>,
+    pub(crate) now: Arc<Sheet>,
 }
 
 /// Whether two shapes are the same shape in the same place as far as what a reader of its sheet reads goes: its `ID` and names (a reference finds a sheet by
@@ -270,7 +273,14 @@ fn same_identity(a: &Shape, b: &Shape) -> bool {
 /// order of a walk of the page. Whole lists and whole chunks and shapes that are the same allocation are skipped, so the cost is what the edit replaced.
 /// Each shape looked at is a step. `false` when the two are not the same shapes in the same places (a length that differs, an `ID`, a name or a master
 /// that differs, a tree deeper than the walk goes, or the steps ran out).
-fn replaced_in(old: &ShapeList, new: &ShapeList, owner: Owner, path: &mut Vec<u32>, out: &mut Vec<Replaced>, ev: &mut Evaluator<'_, '_>) -> bool {
+pub(crate) fn replaced_in(
+    old: &ShapeList,
+    new: &ShapeList,
+    owner: Owner,
+    path: &mut Vec<u32>,
+    out: &mut Vec<Replaced>,
+    ev: &mut Evaluator<'_, '_>,
+) -> bool {
     if old.is_same_list_as(new) {
         return true;
     }
@@ -318,7 +328,11 @@ fn replaced_in(old: &ShapeList, new: &ShapeList, owner: Owner, path: &mut Vec<u3
 /// route of each, thousands of rows of constants, twice): with as many sections in both, the cells directly under the sheets are compared, then each section
 /// that is not shared with the one in its place. (Sheets that are the same part by part are the same; a difference found part by part where the whole lists
 /// would agree, a formula moved between two sections of one key, only makes the sheet classified again.)
-fn same_formulas(ev: &mut Evaluator<'_, '_>, was: &Sheet, now: &Sheet) -> Option<bool> {
+pub(crate) fn same_formulas(ev: &mut Evaluator<'_, '_>, was: &Sheet, now: &Sheet) -> Option<bool> {
+    // **The links to the styles are what a sheet's inherited formulas are found by**: a sheet given another style reads what that style's formulas read.
+    if was.links != now.links {
+        return Some(false);
+    }
     if was.sections.len() != now.sections.len() {
         return same_formula_lists(ev, local_formulas(was, None), local_formulas(now, None));
     }
@@ -337,13 +351,15 @@ fn same_formulas(ev: &mut Evaluator<'_, '_>, was: &Sheet, now: &Sheet) -> Option
 }
 
 /// The cells of `sheet` that hold a formula, with it, in the order a walk of the sheet meets them: all of them (`None`), or those of one part: directly under the
-/// sheet (`Some(None)`), or of the section in place `n` (`Some(Some(n))`).
-fn local_formulas<'a>(sheet: &'a Sheet, part: Option<Option<usize>>) -> Vec<(CellAddr, &'a Arc<diacraft_doc::Formula>)> {
+/// sheet (`Some(None)`), or of the section in place `n` (`Some(Some(n))`). With **how many cells hold `Inh`** (the formula they take is the chain's: the cell that turns into one, or out of
+/// one, changes what the sheet reads), which costs no step.
+fn local_formulas<'a>(sheet: &'a Sheet, part: Option<Option<usize>>) -> Formulas<'a> {
     let mut out: Vec<(CellAddr, &'a Arc<diacraft_doc::Formula>)> = Vec::new();
-    let mut take = |addr: CellAddr, cell: &'a diacraft_doc::Cell| {
-        if let FormulaSlot::Local(formula) = &cell.formula {
-            out.push((addr, formula));
-        }
+    let mut inherit = 0_usize;
+    let mut take = |addr: CellAddr, cell: &'a diacraft_doc::Cell| match &cell.formula {
+        FormulaSlot::Local(formula) => out.push((addr, formula)),
+        FormulaSlot::Inherit => inherit = inherit.saturating_add(1),
+        _ => {}
     };
     match part {
         None => {
@@ -359,23 +375,25 @@ fn local_formulas<'a>(sheet: &'a Sheet, part: Option<Option<usize>>) -> Vec<(Cel
             }
         }
     }
-    out
+    Formulas { list: out, inherit }
+}
+
+/// What [`local_formulas`] found: the cells that hold a formula, and the number that hold `Inh`.
+struct Formulas<'a> {
+    list: Vec<(CellAddr, &'a Arc<diacraft_doc::Formula>)>,
+    inherit: usize,
 }
 
 /// Whether two lists of formulas, by their places, are the same: the comparison [`same_formulas`] makes, of the whole sheets or of a part of each.
-fn same_formula_lists(
-    ev: &mut Evaluator<'_, '_>,
-    before: Vec<(CellAddr, &Arc<diacraft_doc::Formula>)>,
-    after: Vec<(CellAddr, &Arc<diacraft_doc::Formula>)>,
-) -> Option<bool> {
+fn same_formula_lists(ev: &mut Evaluator<'_, '_>, before: Formulas<'_>, after: Formulas<'_>) -> Option<bool> {
     // Each formula looked at is a step, as asking it whether it reads beyond its sheet was.
-    if !ev.steps(before.len().saturating_add(after.len())) {
+    if !ev.steps(before.list.len().saturating_add(after.list.len())) {
         return None;
     }
-    if before.len() != after.len() {
+    if before.list.len() != after.list.len() || before.inherit != after.inherit {
         return Some(false);
     }
-    for ((a_addr, a), (b_addr, b)) in before.iter().zip(after.iter()) {
+    for ((a_addr, a), (b_addr, b)) in before.list.iter().zip(after.list.iter()) {
         if a_addr != b_addr {
             return Some(false);
         }
@@ -435,7 +453,6 @@ fn same_pages(a: &SharedVec<Arc<Page>>, b: &SharedVec<Arc<Page>>) -> bool {
 /// A page's graph, with what it was made for.
 #[derive(Debug)]
 struct Built {
-    page_id: u32,
     /// The page the graph describes, held, so that a pointer to it is none other's.
     page: Arc<Page>,
     /// What the graph reads of the rest of the document.
@@ -453,7 +470,6 @@ impl Built {
     /// The graph of `page`, made by a walk of the page. `None` when the budget ran out on the way.
     fn make(ev: &mut Evaluator<'_, '_>, doc: &Document, page: &Arc<Page>) -> Option<Built> {
         let mut built = Built {
-            page_id: page.id,
             page: Arc::clone(page),
             masters: doc.masters.clone(),
             styles: doc.styles.clone(),
@@ -563,11 +579,22 @@ fn connect_entries(ev: &mut Evaluator<'_, '_>, page: &Page) -> Found {
     found
 }
 
-/// The readers of the cells of one page, kept from one edit to the next: see the module documentation. A new one holds nothing and the first commit
+/// The most pages whose graphs are kept at once beside the one an edit is on: the pages a change reached through a `Pages[..]` reference, which a later edit reaches again.
+pub const MAX_KEPT_PAGES: usize = 256;
+
+/// The readers of the cells of the pages an edit reaches, kept from one edit to the next: see the module documentation. A new one holds nothing and the first commit
 /// that is given it makes the graph.
+///
+/// **One page's graph is the rule and others are the exception**: the page an edit is on has its graph made and kept, as it always had; a page that a change
+/// reaches through a formula that names it (`pages.rs`) has its own made when the change first reaches a cell of it, and kept in step with the edits since the same way. They are let go of
+/// together past [`MAX_KEPT_PAGES`] or [`MAX_KEPT_BYTES`], the page of the edit last, so a document with no formula that names a page keeps what it always did.
 #[derive(Debug, Default)]
 pub struct ReaderIndex {
-    built: Option<Built>,
+    built: HashMap<u32, Built>,
+    /// The page the last commit was for: its graph is the last to go.
+    primary: Option<u32>,
+    /// The sheets that name a page, for every page (`pages.rs`).
+    pub(crate) links: PageLinks,
     /// What [`crate::changes_between_with`] remembers of the page's shapes between one call and the next.
     known: KnownShapes,
 }
@@ -578,14 +605,16 @@ impl ReaderIndex {
         ReaderIndex::default()
     }
 
-    /// What the graph kept is charged, as accounted (`0` when none is kept): what a session counts of it, and what a commit that uses it is charged first.
+    /// What the graphs kept are charged, as accounted (`0` when none is kept): what a session counts of them, and what a commit that uses one is charged first.
     pub fn held_bytes(&self) -> u64 {
-        self.built.as_ref().map_or(0, |b| b.graph.bytes)
+        self.built.values().map(|b| b.graph.bytes).fold(self.links.bytes, u64::saturating_add)
     }
 
-    /// Lets the graph go, and what is remembered of the page's shapes.
+    /// Lets the graphs go, and what is remembered of the page's shapes.
     pub fn clear(&mut self) {
-        self.built = None;
+        self.built.clear();
+        self.primary = None;
+        self.links.clear();
         self.known = KnownShapes::default();
     }
 
@@ -596,16 +625,37 @@ impl ReaderIndex {
 
     /// Brings the graph to the state of page `page_id` of `doc` and gives it, made again whole if it was not for this page or changed in a way it does not
     /// follow. The graph is charged to the commit's budget (what it held, then what the work of this edit adds). `None`, and no graph kept, when the budget
-    /// ran out or the page is not there.
+    /// ran out or the page is not there. This is the page the commit is for.
     pub(crate) fn sync(&mut self, ev: &mut Evaluator<'_, '_>, doc: &Document, page_id: u32) -> Option<&Graph> {
-        let kept = self.built.take();
-        let page: Arc<Page> = Arc::clone(doc.pages.iter().find(|p| p.id == page_id)?);
+        self.primary = Some(page_id);
+        self.sync_page(ev, doc, page_id);
+        self.graph_of(page_id)
+    }
+
+    /// The graph of `page_id` as it was last brought up to date, if one is kept.
+    pub(crate) fn graph_of(&self, page_id: u32) -> Option<&Graph> {
+        self.built.get(&page_id).map(|b| &b.graph)
+    }
+
+    /// Brings the listing of the sheets that name a page to the state of `doc` (`pages.rs`).
+    pub(crate) fn sync_links(&mut self, ev: &mut Evaluator<'_, '_>, doc: &Document) {
+        self.links.sync(ev, doc, false);
+    }
+
+    /// [`ReaderIndex::sync_links`] for a change to the pages themselves: the sheets of a drawing of one page are listed too, since a page deleted down to one leaves cells that name a page
+    /// that is not there.
+    pub(crate) fn sync_links_for_pages(&mut self, ev: &mut Evaluator<'_, '_>, doc: &Document) {
+        self.links.sync(ev, doc, true);
+    }
+
+    /// [`ReaderIndex::sync`] for any page: whether its graph is kept, up to date.
+    pub(crate) fn sync_page(&mut self, ev: &mut Evaluator<'_, '_>, doc: &Document, page_id: u32) -> bool {
+        let kept = self.built.remove(&page_id);
+        let Some(page) = doc.pages.iter().find(|p| p.id == page_id).map(Arc::clone) else { return false };
         let mut built: Option<Built> = None;
-        if let Some(mut old) = kept
-            && old.page_id == page_id
-        {
+        if let Some(mut old) = kept {
             if !ev.ctx.hold_bytes(old.graph.bytes) {
-                return None;
+                return false;
             }
             if old.bring_up_to_date(ev, doc, &page) {
                 built = Some(old);
@@ -621,19 +671,29 @@ impl ReaderIndex {
             tally::bump(&tally::MADE);
             built = Built::make(ev, doc, &page);
         }
-        self.built = built;
-        self.built.as_ref().map(|b| &b.graph)
+        match built {
+            Some(kept) => {
+                self.built.insert(page_id, kept);
+                true
+            }
+            None => false,
+        }
     }
 
-    /// Ends a commit: a graph more than [`MAX_KEPT_BYTES`] is let go of.
+    /// Ends a commit: graphs that are more than [`MAX_KEPT_BYTES`] or [`MAX_KEPT_PAGES`] are let go of.
     pub(crate) fn finish(&mut self) {
         self.finish_within(MAX_KEPT_BYTES);
     }
 
-    /// [`ReaderIndex::finish`] for a graph that may be `most` bytes.
+    /// [`ReaderIndex::finish`] for graphs that may be `most` bytes: the pages other than the commit's go first, then its own.
     pub(crate) fn finish_within(&mut self, most: u64) {
+        if self.built.len() > MAX_KEPT_PAGES || self.held_bytes() > most {
+            let primary = self.primary;
+            self.built.retain(|id, _| Some(*id) == primary);
+        }
         if self.held_bytes() > most {
-            self.built = None;
+            self.built.clear();
+            self.links.clear();
         }
     }
 }

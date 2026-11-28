@@ -10,11 +10,13 @@
 //! small capitals and complex script; shapes at nominal advances, with no kerning; breaks
 //! lines at Unicode opportunities, greedily, trimming trailing spaces and splitting a word too wide for the line;
 //! orders right-to-left text by the Unicode bidirectional algorithm; sets each line from its largest size, `SpLine` and
-//! the baseline three quarters down its box; and aligns lines inside margins and indents.
+//! the baseline three quarters down its box; and aligns lines inside margins and indents. A right-to-left
+//! paragraph (`Flags` 1) mirrors: its indents, alignment, bullet and tab stops are the mirror image of a left-to-right one's (see the `place` module).
 //! It places tabs, bullets, underlines and strikeouts, and the one rectangle of a text background.
 //!
 //! Vertical text (`TextDirection` 1) is laid out down the block: columns from the right edge to the left, an East Asian letter upright and
-//! the others on their sides ([`GlyphRun::turned`]), by the layout across in a block turned the other way up (see the `vertical` module).
+//! the others on their sides ([`GlyphRun::turned`]), by the layout across in a block turned the other way up (see the `vertical` module),
+//! with the underline of a Japanese or Korean run on the right of its column.
 //!
 //! **What it doesn't do:** a field's evaluation: a field's displayed characters are just a run.
 //!

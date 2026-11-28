@@ -69,6 +69,18 @@ pub(super) fn check(root: &Path, dir: &Path, settings: &Settings, pages: &[Strin
                 continue;
             }
             let href = super::app::attribute(tag, "href").ok_or_else(|| format!("{page}: the link of {download} has no href"))?;
+            // A file that came with a later release is none of this release's: the page of the release is its link, as a draft's is, and never the address of a file.
+            if !xtask::version::release_has(&settings.version, download) {
+                let release_page = settings::direct_address(settings, "");
+                if href != release_page {
+                    let first = xtask::version::DOWNLOAD_SINCE.iter().find(|(id, _)| *id == download).map_or("", |(_, since)| *since);
+                    return Err(format!(
+                        "{page}: the link of {download} is {href}, and that file first came with v{first}, so the release v{} has none: the link is the page of the release, {release_page}",
+                        settings.version
+                    ));
+                }
+                continue;
+            }
             let name = href.strip_prefix(&folder).filter(|name| !name.is_empty() && !name.contains(['/', '?', '#'])).ok_or_else(|| {
                 format!("{page}: the link of {download} is {href}, and not a file of the release v{}: {folder}<file>", settings.version)
             })?;
@@ -243,6 +255,34 @@ mod tests {
         let error =
             check(&root.0, &root.0.join("site"), &settings, &pages(&root, r#"<a data-download="linux-riscv-tgz" href="x">x</a>"#)).unwrap_err();
         assert!(error.contains("not one of the downloads"), "{error}");
+    }
+
+    /// A file that came with a later release (the `.rpm`, with 0.2.4) is linked as a file only by the pages made for that release or a later one: before it, the link is the page of the
+    /// release, and a link that names the file would be a dead download, which the check refuses.
+    #[test]
+    fn a_file_that_came_with_a_later_release_is_not_linked_by_the_pages_made_for_an_earlier_one() {
+        let root = Root::new(
+            "name: Release\n  checksums:\n    steps:\n      - run: |\n          expected=$(printf '%s\\n' \"diacraft-$VERSION-linux-x86_64.rpm\" | sort | tr '\\n' ' ')\n",
+        );
+        let mut settings = settings();
+        settings.assets.values_mut().for_each(String::clear);
+        let rpm = "diacraft-{version}-linux-x86_64.rpm";
+        settings.assets.insert("linux-x86_64-rpm".into(), rpm.into());
+        let anchor =
+            |href: &str| format!(r#"<a data-repo="/releases/download" href="{href}" data-download="linux-x86_64-rpm" data-asset="{rpm}">x</a>"#);
+        let site = root.0.join("site");
+        // Before 0.2.4 the link is the page of the release, and the file is a dead download.
+        let before = Settings { version: "0.2.3".into(), ..settings.clone() };
+        check(&root.0, &site, &before, &pages(&root, &anchor(&direct_address(&before, "")))).unwrap();
+        let error = check(&root.0, &site, &before, &pages(&root, &anchor(&direct_address(&before, rpm)))).unwrap_err();
+        assert!(error.contains("linux-x86_64-rpm") && error.contains("first came with v0.2.4"), "{error}");
+        // From 0.2.4 the link is the file, and the page of the release is no file.
+        for version in ["0.2.4-rc.1", "0.2.4", "0.3.0"] {
+            let from = Settings { version: version.into(), ..settings.clone() };
+            check(&root.0, &site, &from, &pages(&root, &anchor(&direct_address(&from, rpm)))).unwrap();
+            let error = check(&root.0, &site, &from, &pages(&root, &anchor(&direct_address(&from, "")))).unwrap_err();
+            assert!(error.contains(&format!("not a file of the release v{version}")), "{error}");
+        }
     }
 
     #[test]

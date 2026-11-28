@@ -29,7 +29,7 @@
 
 use diacraft_doc::{Connect, Master, Page, Shape, Sheet, Style, Text};
 use diacraft_opc::xml::{El, Node};
-use diacraft_sheetxml::patch::{Items, after_last, at_end, is_ours, patch_list, sync_attrs};
+use diacraft_sheetxml::patch::{Items, after_last, at_end, is_ours, patch_list, same_unknown_nodes, sync_attrs};
 pub(super) use diacraft_sheetxml::patch::{match_items, set_attr};
 
 use super::WriteError;
@@ -112,7 +112,7 @@ pub(super) fn refuse_a_new_picture(shape: &Shape) -> R<()> {
 fn patch_shape(el: &mut El, sc: &Scope, base: &Shape, now: &Shape) -> R<()> {
     sync_attrs(el, &shape_attrs(base), &shape_attrs(now));
     patch_sheet_children(el, sc, &base.sheet, &now.sheet)?;
-    unsupported_unless(base.passthrough == now.passthrough, "a change to the unknown elements of a shape")?;
+    unsupported_unless(same_unknown_nodes(&base.passthrough, &now.passthrough), "a change to the unknown elements of a shape")?;
     unsupported_unless(
         base.data1 == now.data1 && base.data2 == now.data2 && base.data3 == now.data3,
         "a change to Data1, Data2 or Data3 of a shape",
@@ -305,7 +305,7 @@ pub(super) fn add_page_rels(el: &mut El, sc: &Scope, wanted: &[(usize, String)])
 
 fn patch_page_row(el: &mut El, sc: &Scope, base: &Page, now: &Page, new_rel: &mut dyn FnMut(&Page) -> Option<String>) -> R<()> {
     sync_attrs(el, &page_attrs(base), &page_attrs(now));
-    unsupported_unless(base.passthrough == now.passthrough, "a change to the unknown elements of a page row")?;
+    unsupported_unless(same_unknown_nodes(&base.passthrough, &now.passthrough), "a change to the unknown elements of a page row")?;
     patch_sheet_only(el, sc, "PageSheet", &["Rel"], &base.sheet, &now.sheet)?;
     // A page that had no part and has one now gets its `Rel`.
     if base.rel_id.is_none()
@@ -345,7 +345,7 @@ pub(super) fn patch_masters(
 
 fn patch_master_row(el: &mut El, sc: &Scope, base: &Master, now: &Master, new_rel: &mut dyn FnMut(&Master) -> Option<String>) -> R<()> {
     sync_attrs(el, &master_attrs(base), &master_attrs(now));
-    unsupported_unless(base.passthrough == now.passthrough, "a change to the unknown elements of a master row")?;
+    unsupported_unless(same_unknown_nodes(&base.passthrough, &now.passthrough), "a change to the unknown elements of a master row")?;
     unsupported_unless(base.icon == now.icon, "a change to the icon of a master")?;
     patch_sheet_only(el, sc, "PageSheet", &["Icon", "Rel"], &base.sheet, &now.sheet)?;
     if base.rel_id.is_none()
@@ -377,6 +377,6 @@ pub(super) fn patch_styles(el: &mut El, sc: &Scope, base: &[&Style], now: &[&Sty
 
 fn patch_style(el: &mut El, sc: &Scope, base: &Style, now: &Style) -> R<()> {
     sync_attrs(el, &style_attrs(base), &style_attrs(now));
-    unsupported_unless(base.passthrough == now.passthrough, "a change to the unknown elements of a style")?;
+    unsupported_unless(same_unknown_nodes(&base.passthrough, &now.passthrough), "a change to the unknown elements of a style")?;
     patch_sheet_children(el, sc, &base.sheet, &now.sheet)
 }

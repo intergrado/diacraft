@@ -220,7 +220,8 @@ fn mixed_batch_vsdx_roundtrip_retains_masters_geometry_text_and_connector_glue()
     for (id, spec) in &ids {
         assert_eq!(instance_geometry(s.document().unwrap(), *id), instance_geometry(doc, *id), "{}", spec.id);
         let master = doc.master(shape(&reopened, *id).master.unwrap()).unwrap();
-        assert_eq!(master.unique_id.as_deref(), Some(spec.guid().as_str()));
+        assert_eq!(master.unique_id.as_deref(), Some(spec.unique_id().as_str()), "{}: the master reopened keeps its UniqueID", spec.id);
+        assert_eq!(master.raw.get("BaseID"), Some(spec.guid().as_str()), "{}: and its BaseID", spec.id);
         assert_eq!(text_view(doc, 1, *id).unwrap().chars, if spec.is_connector() { "Order data" } else { spec.name });
     }
     let after = render(&reopened);

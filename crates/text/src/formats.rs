@@ -47,6 +47,13 @@ pub(crate) fn no_name(name: &str) -> bool {
     n.is_empty() || n == "0"
 }
 
+/// Is a culture name Japanese or Korean? Its primary language subtag says so, in any case, with `-` or `_` after it (`ja-JP`, `ko_KR`, `JA`, `jpn`, `kor`).
+/// An empty name, `x-none` and every other language say no. In vertical text such a run is underlined on the right of its column (`vertical.rs`,
+pub(crate) fn japanese_or_korean(lang: &str) -> bool {
+    let primary = lang.split(['-', '_']).next().unwrap_or_default();
+    ["ja", "jpn", "ko", "kor"].iter().any(|tag| primary.eq_ignore_ascii_case(tag))
+}
+
 /// The lines a character format asks for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Decor {
@@ -148,6 +155,7 @@ pub(crate) enum TabAlign {
 #[derive(Clone, Debug)]
 pub(crate) struct ParaStyle {
     pub align: Align,
+    /// `Flags` 1: the paragraph is right to left, and mirrors (`place.rs`).
     pub rtl: bool,
     pub ind_first: f64,
     pub ind_left: f64,
@@ -155,7 +163,7 @@ pub(crate) struct ParaStyle {
     pub sp_before: f64,
     pub sp_after: f64,
     pub sp_line: f64,
-    /// Custom tab stops, nearest first, positions from the text area's left edge.
+    /// Custom tab stops, nearest first, positions from the text area's start edge: its left edge, or its right edge in a right-to-left paragraph.
     pub tabs: Vec<(f64, TabAlign)>,
 }
 

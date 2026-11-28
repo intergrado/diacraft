@@ -34,7 +34,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             None,
             "text: text, the comment: at most 65536 bytes, not blank, no control character but a line break or a tab; \
              id: whole number, optional, the shape the comment is on (default: the page); \
-             page: whole number, optional, the id of the page (default: the first page with the shape, else the first page). \
+             page: whole number, optional, the id of the page (default: the first page with the shape, else the first page that is not a background). \
              The author is the one `comment.author` says, and the date and time are now, in UTC. A comment on a shape stays with it when it moves, and adding one turns the markers on. \
              A drawing holds at most 100000 comments and 32 MiB of their text. One undo step",
             has_document,

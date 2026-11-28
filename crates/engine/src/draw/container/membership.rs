@@ -19,7 +19,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use diacraft_doc::{CellName, Document, ShapeType};
+use diacraft_doc::{CellAddr, Document, ShapeType};
 
 use super::page::{Page, Unique};
 use crate::draw::ties::{IN_CONTAINER, IN_LIST, LIST_MEMBERS, MAX_TIE_MARKS, MEMBERS, ON_EDGE, Ties};
@@ -234,14 +234,14 @@ impl Graph {
         for (at, source) in writes {
             let index = u32::try_from(at).map_err(|_| Problem::failed("a shape's place is out of range"))?;
             let shape = shape_mut(doc, page, &[index]).ok_or_else(|| Problem::failed("a shape went away"))?;
-            let sheet = std::sync::Arc::make_mut(&mut shape.sheet);
-            let old = sheet.cell("Relationships").cloned();
+            let mut counted = shape.counted_sheet();
+            let old = counted.sheet.cell("Relationships").cloned();
             if source == "SUM()" {
-                sheet.cells.remove("Relationships");
+                counted.remove_cell(&CellAddr::direct("Relationships"));
             } else {
                 let mut cell = diacraft_doc::Cell::with_formula(&source, Some(diacraft_doc::Value::from_text("0")));
                 cell.unit = old.and_then(|c| c.unit);
-                sheet.cells.insert(CellName::new("Relationships"), cell);
+                counted.set_cell(&CellAddr::direct("Relationships"), cell).map_err(|e| Problem::failed(e.to_string()))?;
             }
             written += 1;
         }

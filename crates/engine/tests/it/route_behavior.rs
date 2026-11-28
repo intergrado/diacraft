@@ -1,7 +1,8 @@
 //! What a route goes round, and the Behavior commands (`shape.behavior`, `shape.set_behavior`). The rules are the design's section 1.2,
 //! and the owner's rulings of
 //! 2026-11-25: **Q2** (gluing a connector writes `ObjType` 1 on a shape that reads none of 1, 2 and 4) and **Q3** (DiaCraft's own masters of the basic, flowchart, organization
-//! chart and Gane-Sarson shapes hold `ObjType` 1, and containers, swimlanes, callouts, decorative shapes, arrows and text hold none).
+//! chart and Gane-Sarson shapes hold `ObjType` 1, and containers, callouts, decorative shapes, arrows and text hold none), with item 2 as amended it and
+//! built it: the Swimlane and Separator masters, the lanes, the phases and both lists of a cross-functional flowchart hold 4, and its frame holds 1.
 //!
 //! Every new cell is **saved and opened again in the three formats** (`.diacraft`, VSDX and `.odg`), from a new drawing (the model writers) and from a file edited and saved in its
 //! own format (the splice), and a connector no edit reached keeps its rows, byte for byte.
@@ -114,15 +115,9 @@ fn the_decorative_and_arrow_masters_hold_none() {
 }
 
 #[test]
-fn the_swimlane_container_and_callout_masters_do_not() {
-    // A swimlane structure, a container, a callout and a text box (which has no master) are no shape people join in the sense of Q3: no `ObjType`.
-    let (mut s, _) = crate::swimlane::made("horizontal");
-    let page = doc(&s).page(1).unwrap();
-    let lanes: Vec<u32> = page.shapes.iter().map(|shape| shape.id).collect();
-    assert!(!lanes.is_empty());
-    for id in lanes {
-        assert_eq!(objtype(doc(&s), id), None, "swimlane part {id}");
-    }
+fn a_container_a_callout_and_a_text_box_hold_none() {
+    // A container, a callout and a text box (which has no master) are no shape people join in the sense of Q3: no `ObjType`.
+    let mut s = blank_session();
     let container = id_of(&run(&mut s, "container.add", json!({"x": 4.25, "y": 5.5, "width": 4.0, "height": 3.0})));
     let callout = id_of(&run(&mut s, "callout.insert", json!({"x": 4.0, "y": 5.0, "style": "speech_box", "text": "Hello"})));
     let text = text_box(&mut s, 6.0, 2.0);
@@ -131,12 +126,200 @@ fn the_swimlane_container_and_callout_masters_do_not() {
     }
 }
 
+// ---- item 2: the cross-functional parts hold 4, and the frame holds 1 -----------------------------------------------
+
+/// The ids of a cross-functional structure `swimlane.create` answered: `(frame, lane list, phase list, lanes, phases)`.
+fn parts_of(made: &Json) -> (u32, u32, u32, Vec<u32>, Vec<u32>) {
+    let one = |key: &str| u32::try_from(made[key].as_u64().unwrap()).unwrap();
+    (one("frame"), one("lane_list"), one("phase_list"), crate::swimlane::ids(&made["lanes"]), crate::swimlane::ids(&made["phases"]))
+}
+
 #[test]
-fn an_instance_reads_the_one_of_its_master_and_holds_no_cell_of_its_own() {
+fn the_lanes_the_phases_and_both_lists_a_window_made_hold_objtype_4_and_the_frame_holds_1() {
+    // A cross-functional flowchart made by the window with two lanes: each lane, the list of lanes and the list of phases read 4, as the reference's do; the outer frame reads 1.
+    for orientation in ["horizontal", "vertical"] {
+        let (mut s, made) = crate::swimlane::made(orientation);
+        let (frame, lane_list, phase_list, lanes, phases) = parts_of(&made);
+        assert_eq!((lanes.len(), phases.len()), (2, 2));
+        let d = doc(&s);
+        // No master: the cell is each shape's own.
+        assert_eq!((own(d, frame, "ObjType"), objtype(d, frame)), (Some(1.0), Some(1.0)), "{orientation}: the frame");
+        for (what, id) in [("the list of lanes", lane_list), ("the list of phases", phase_list)]
+            .into_iter()
+            .chain(lanes.iter().map(|id| ("a lane", *id)))
+            .chain(phases.iter().map(|id| ("a phase", *id)))
+        {
+            assert_eq!((own(d, id, "ObjType"), objtype(d, id)), (Some(4.0), Some(4.0)), "{orientation}: {what} {id}");
+        }
+        // What the Placement tab says of them: neither, so no route goes round a lane; the frame is placeable.
+        let lane = behavior(&mut s, lanes[0]);
+        assert_eq!((lane["placement"].as_str(), lane["obstacle"].as_bool()), (Some("none"), Some(false)), "{lane}");
+        assert_eq!(lane["why_not"], "its placement behavior is Do not lay out and route around");
+        let frame = behavior(&mut s, frame);
+        assert_eq!((frame["placement"].as_str(), frame["obj_type"].as_f64()), (Some("route_around"), Some(1.0)), "{frame}");
+        assert_eq!(check_session(&s), Ok(()));
+    }
+}
+
+#[test]
+fn the_cross_functional_template_opens_with_lanes_and_lists_that_hold_4_and_a_frame_that_holds_1() {
+    // The template builds its structure with `swimlane.create`'s own code and is read back from the bytes of a template file, so what it holds is what a file holds.
+    let mut s = Session::new();
+    run(&mut s, "file.new", json!({"template": "cross_functional_flowchart"}));
+    let found = run(&mut s, "swimlane.info", json!({}));
+    let structure = &found["structures"][0];
+    let one = |v: &Json| u32::try_from(v.as_u64().unwrap()).unwrap();
+    let d = doc(&s);
+    assert_eq!(own(d, one(&structure["frame"]), "ObjType"), Some(1.0), "the frame");
+    for id in [one(&structure["lane_list"]), one(&structure["phase_list"])] {
+        assert_eq!(own(d, id, "ObjType"), Some(4.0), "a list: {id}");
+    }
+    let parts: Vec<u32> =
+        structure["lanes"].as_array().unwrap().iter().chain(structure["phases"].as_array().unwrap()).map(|p| one(&p["id"])).collect();
+    assert_eq!(parts.len(), 6, "three lanes and three phases");
+    for id in parts {
+        assert_eq!(own(d, id, "ObjType"), Some(4.0), "a lane or a phase: {id}");
+    }
+}
+
+#[test]
+fn a_swimlane_and_a_separator_dropped_on_a_page_with_lanes_make_lanes_and_phases_that_hold_4() {
+    let (mut s, made) = crate::swimlane::made("horizontal");
+    let (_, _, _, lanes, phases) = parts_of(&made);
+    let lane = id_of(&run(&mut s, "shape.drop", json!({"master": "xfunc.swimlane", "stencil": "cross-functional", "page": 1, "x": 3.0, "y": 7.0})));
+    let phase = id_of(&run(&mut s, "shape.drop", json!({"master": "xfunc.separator", "stencil": "cross-functional", "page": 1, "x": 3.0, "y": 7.0})));
+    assert!(!lanes.contains(&lane) && !phases.contains(&phase), "the drops made a lane and a phase of their own");
+    let d = doc(&s);
+    assert_eq!((own(d, lane, "ObjType"), own(d, phase, "ObjType")), (Some(4.0), Some(4.0)), "the lane an insert made and the phase a split made");
+    // The lists a split made when there were none hold 4 too: a structure with no phases is given its list.
+    let mut t = blank_session();
+    let r = run(&mut t, "swimlane.create", json!({"x": 1.0, "y": 8.0, "length": 6.0, "thickness": 1.5, "lanes": 2, "phases": 0}));
+    assert_eq!(r["phases"], json!([]));
+    run(&mut t, "shape.drop", json!({"master": "xfunc.separator", "stencil": "cross-functional", "page": 1, "x": 3.0, "y": 7.0}));
+    let found = run(&mut t, "swimlane.info", json!({}));
+    let list = u32::try_from(found["structures"][0]["phase_list"].as_u64().expect("the split made the list of phases")).unwrap();
+    assert_eq!(own(doc(&t), list, "ObjType"), Some(4.0));
+    for p in found["structures"][0]["phases"].as_array().unwrap() {
+        assert_eq!(own(doc(&t), u32::try_from(p["id"].as_u64().unwrap()).unwrap(), "ObjType"), Some(4.0));
+    }
+}
+
+#[test]
+fn the_swimlane_and_separator_masters_hold_objtype_4_and_a_drop_reads_it_from_its_master() {
+    // A Swimlane dropped from the stencil (on a page with no lanes, where it is the shape it is drawn as) reads 4 from its master, with no local cell.
+    let spec = stencil::builtin_stencil("cross-functional").unwrap();
+    let masters: Vec<&str> = spec.masters().iter().map(|m| m.id).collect();
+    assert_eq!(masters, ["xfunc.swimlane", "xfunc.separator"]);
+    for master in masters {
+        let mut s = blank_session();
+        let id = id_of(&run(&mut s, "shape.drop", json!({"master": master, "stencil": "cross-functional", "page": 1, "x": 4.0, "y": 4.0})));
+        assert_eq!((objtype(doc(&s), id), own(doc(&s), id, "ObjType")), (Some(4.0), None), "{master}");
+        assert_eq!(behavior(&mut s, id)["placement"], "none", "{master}");
+        // The cell is the master's own in the document, and every drop shares it.
+        let d = doc(&s);
+        let held = d.masters.iter().find(|m| m.name.as_deref() == Some(if master == "xfunc.swimlane" { "Swimlane" } else { "Separator" })).unwrap();
+        let shape = held.shapes.get(0).unwrap();
+        assert_eq!(shape.sheet.cell("ObjType").and_then(|c| c.value.as_ref()?.number()), Some(4.0), "{master}");
+    }
+}
+
+#[test]
+fn a_glue_to_a_lane_writes_nothing_on_it_and_a_lane_is_no_obstacle_for_another_connector() {
+    // A connector glued to a lane's edge leaves the lane at 4 (no write), and the lane is still no obstacle; the boxes in the lanes are.
+    let (mut s, made) = crate::swimlane::made("horizontal");
+    let (_, _, _, lanes, _) = parts_of(&made);
+    let (a, b) = (text_box(&mut s, 2.0, 7.0), text_box(&mut s, 5.0, 5.8));
+    let before = doc(&s).clone();
+    run(&mut s, "connector.add", json!({"from": {"id": a}, "to": {"id": b}}));
+    run(&mut s, "connector.add", json!({"from": {"id": a}, "to": {"id": lanes[1]}}));
+    let d = doc(&s);
+    assert_eq!(own(d, lanes[1], "ObjType"), Some(4.0), "neither stays neither: the glue writes nothing");
+    let (was, now) = (before.find_shape(Owner::Page(1), lanes[1]).unwrap(), d.find_shape(Owner::Page(1), lanes[1]).unwrap());
+    assert!(Arc::ptr_eq(&before.shape(&was).unwrap().sheet, &d.shape(&now).unwrap().sheet), "the lane's sheet was not written");
+    assert_eq!(
+        behavior(&mut s, lanes[1])["obstacle"],
+        false,
+        "a lane that reads 0 and is made placeable by the glue would bend every later route out of it"
+    );
+    // The boxes a connector joined are obstacles, and the lanes round them are not.
+    assert_eq!((behavior(&mut s, a)["obstacle"].as_bool(), behavior(&mut s, b)["obstacle"].as_bool()), (Some(true), Some(true)));
+    assert_eq!(behavior(&mut s, lanes[0])["obstacle"], false);
+}
+
+/// Takes the `ObjType` cell off the shapes `ids` of page 1, as a drawing an earlier build made does not hold it.
+fn strip_objtype(s: &mut Session, ids: &[u32]) {
+    s.edit("an earlier build", |d| {
+        let page = Arc::make_mut(d.pages.get_mut(0).expect("page 1"));
+        for at in 0..page.shapes.len() {
+            let shape = page.shapes.get_mut(at).expect("a shape");
+            if ids.contains(&shape.id) {
+                Arc::make_mut(&mut Arc::make_mut(shape).sheet).cells.remove(&diacraft_doc::CellName::new("ObjType"));
+            }
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_structure_an_earlier_build_made_keeps_what_it_holds_in_each_format_and_a_lane_made_after_it_holds_4() {
+    // An older file holds lanes, phases and lists with no `ObjType`. A save changes none of them, in any format; only the shapes DiaCraft makes now hold 4.
+    for ext in FORMATS {
+        let (mut s, made) = crate::swimlane::made("horizontal");
+        let (frame, lane_list, phase_list, lanes, phases) = parts_of(&made);
+        let old: Vec<u32> = [frame, lane_list, phase_list].into_iter().chain(lanes.iter().copied()).chain(phases.iter().copied()).collect();
+        strip_objtype(&mut s, &old);
+        // A lane made now, beside the older ones.
+        let inserted = id_of(&run(&mut s, "swimlane.insert", json!({"lane": lanes[0], "where": "after"})));
+        assert_eq!(own(doc(&s), inserted, "ObjType"), Some(4.0));
+        let dir = Dir::new();
+        let path = dir.path(&format!("older.{ext}"));
+        run(&mut s, "file.save_as", json!({ "path": path }));
+        let mut back = reopened(&path);
+        for id in &old {
+            assert_eq!(objtype(doc(&back), *id), None, "{ext}: shape {id} holds none after the save and the open");
+        }
+        assert_eq!(objtype(doc(&back), inserted), Some(4.0), "{ext}: the lane made now");
+        // Edited elsewhere and saved in the file's own format: the older shapes still hold none.
+        text_box(&mut back, 2.0, 1.0);
+        run(&mut back, "file.save", json!({}));
+        let again = reopened(&path);
+        for id in &old {
+            assert_eq!(objtype(doc(&again), *id), None, "{ext}: shape {id} still holds none after a save in the file's own format");
+        }
+        assert_eq!(objtype(doc(&again), inserted), Some(4.0), "{ext}: the lane made now still holds 4");
+    }
+}
+
+#[test]
+fn a_swimlane_master_an_older_drawing_holds_is_found_again_and_keeps_what_it_holds() {
+    // The masters are found again by their identity (a drop copies one in only when the document has none), so a drawing saved before this holds its own master with no `ObjType`, and a drop
+    // of it reads none: only a master DiaCraft puts into a document now holds 4.
     let mut s = blank_session();
-    let a = drop_shape(&mut s, "rectangle", 3.0, 4.0);
-    assert_eq!((objtype(doc(&s), a), own(doc(&s), a, "ObjType")), (Some(1.0), None));
-    assert_eq!(behavior(&mut s, a)["placement"], "route_around");
+    let drop = |s: &mut Session| {
+        id_of(&run(s, "shape.drop", json!({"master": "xfunc.swimlane", "stencil": "cross-functional", "page": 1, "x": 4.0, "y": 4.0})))
+    };
+    let first = drop(&mut s);
+    assert_eq!(objtype(doc(&s), first), Some(4.0));
+    s.edit("an earlier build", |d| {
+        for at in 0..d.masters.len() {
+            let master = Arc::make_mut(d.masters.get_mut(at).expect("a master"));
+            let shape = Arc::make_mut(master.shapes.get_mut(0).expect("the master's shape"));
+            Arc::make_mut(&mut shape.sheet).cells.remove(&diacraft_doc::CellName::new("ObjType"));
+        }
+        Ok(())
+    })
+    .unwrap();
+    let second = drop(&mut s);
+    assert_eq!(doc(&s).masters.len(), 1, "the master the document holds was found again, not made anew");
+    assert_eq!((objtype(doc(&s), first), objtype(doc(&s), second)), (None, None), "the drop reads what the master holds");
+    for ext in ["diacraft", "vsdx"] {
+        let dir = Dir::new();
+        let path = dir.path(&format!("master.{ext}"));
+        run(&mut s, "file.save_as", json!({ "path": path }));
+        let back = reopened(&path);
+        assert_eq!((objtype(doc(&back), first), objtype(doc(&back), second)), (None, None), "{ext}");
+    }
 }
 
 // ---- Q2: gluing ---------------------------------------------------------------------------------------------------------------------------
@@ -153,7 +336,8 @@ fn gluing_writes_objtype_1_on_a_shape_that_reads_0() {
     for id in [a, b] {
         assert_eq!((objtype(d, id), own(d, id, "ObjType")), (Some(1.0), Some(1.0)), "shape {id}: local, and 1");
     }
-    assert_eq!(own(d, c, "ObjType"), None, "the connector is no shape that is placed");
+    // The connector is no shape that is placed: it holds the routable 2 it is made with, not a 1 the glue writes.
+    assert_eq!(own(d, c, "ObjType"), Some(2.0), "the connector is no shape that is placed");
     assert_eq!(s.history().unwrap().undo_len(), steps + 1, "in the same undo step as the glue");
     run(&mut s, "edit.undo", json!({}));
     for id in [a, b] {
@@ -498,6 +682,31 @@ fn an_object_type_that_a_glue_wrote_and_one_a_master_holds_come_back_in_each_for
         let d = doc(&back);
         assert_eq!((objtype(d, a), objtype(d, b)), (Some(1.0), Some(1.0)), "{ext}: what the glue wrote");
         assert_eq!(objtype(d, r), Some(1.0), "{ext}: what the master holds");
+    }
+}
+
+#[test]
+fn the_cross_functional_parts_and_a_dropped_master_come_back_with_their_object_types_in_each_format() {
+    for ext in FORMATS {
+        let (mut s, made) = crate::swimlane::made("horizontal");
+        let (frame, lane_list, phase_list, lanes, phases) = parts_of(&made);
+        let dir = Dir::new();
+        let path = dir.path(&format!("structure.{ext}"));
+        run(&mut s, "file.save_as", json!({ "path": path }));
+        let back = reopened(&path);
+        let d = doc(&back);
+        assert_eq!(objtype(d, frame), Some(1.0), "{ext}: the frame");
+        for id in [lane_list, phase_list].into_iter().chain(lanes).chain(phases) {
+            assert_eq!(objtype(d, id), Some(4.0), "{ext}: shape {id}");
+        }
+        // A Swimlane dropped on a page with no lane is the master's shape: it reads 4 from the master, after a save and an open too.
+        let mut t = blank_session();
+        let dropped =
+            id_of(&run(&mut t, "shape.drop", json!({"master": "xfunc.swimlane", "stencil": "cross-functional", "page": 1, "x": 4.0, "y": 4.0})));
+        let path = dir.path(&format!("master.{ext}"));
+        run(&mut t, "file.save_as", json!({ "path": path }));
+        let back = reopened(&path);
+        assert_eq!(objtype(doc(&back), dropped), Some(4.0), "{ext}: what the master holds");
     }
 }
 

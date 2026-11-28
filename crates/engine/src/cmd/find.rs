@@ -26,7 +26,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             None,
             "what: text, what to find, up to 1,024 characters, with the special characters ^t a tab, ^l a manual line break, ^- an optional hyphen, ^? any one character and ^^ a caret; \
              scope: selection, page or all, default page (selection looks in `ids` and the shapes inside them, all in every page in order); \
-             page: whole number, optional, the id of the page for the scope selection or page (default: the first page holding all of `ids`, else the first page); \
+             page: whole number, optional, the id of the page for the scope selection or page (default: the first page holding all of `ids`, else the first page that is not a background); \
              ids: array of whole numbers, the shapes selected, for the scope selection; \
              in: array of text, shape_data, shape_name or user_cell, where to look, default [\"text\"]; \
              match_case: true or false, default false; \

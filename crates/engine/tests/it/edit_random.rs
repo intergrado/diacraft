@@ -1,11 +1,12 @@
 //! Random drawing: a few hundred editing commands in a row, with ids that are not there, junk between them and undo and redo, and after
-//! each one the drawing is still consistent: every `Connect` row names shapes that exist, every glued end is on its connection point, every
-//! route runs from the begin to the end in horizontal and vertical legs. At the end undo takes back every step to the blank page.
+//! each one the drawing is still consistent: every `Connect` row names shapes that exist, every glued end is on its connection point (or, glued to the
+//! whole of a shape that has none, on its box), every route runs from the begin to the end in horizontal and vertical legs. At the end undo takes back
+//! every step to the blank page.
 //!
 //! The generator is a fixed-seed xorshift, so a failure repeats.
 
 use diacraft_doc::{CellAddr, Document, Owner, Resolver, SectionKey, SheetRef};
-use diacraft_engine::draw::{Pose, connection_points};
+use diacraft_engine::draw::{Pose, connection_points, shape_corners};
 use diacraft_engine::{EngineError, Session};
 use serde_json::{Value, json};
 
@@ -96,8 +97,24 @@ fn clipboard_command(r: &mut Rng, live: &[u32]) -> (&'static str, Value) {
 /// A shape operation on shapes that may not be there, in groups, glued to connectors or not areas at all.
 fn shape_ops_command(r: &mut Rng, live: &[u32]) -> (&'static str, Value) {
     let ids = if r.below(3) == 0 { json!([r.id(live), r.id(live), r.id(live)]) } else { json!([r.id(live), r.id(live)]) };
-    let id = ["shape.union", "shape.combine", "shape.fragment", "shape.intersect", "shape.subtract"][r.below(5) as usize];
-    (id, json!({"ids": ids}))
+    let id = [
+        "shape.union",
+        "shape.combine",
+        "shape.fragment",
+        "shape.intersect",
+        "shape.subtract",
+        "shape.join",
+        "shape.trim",
+        "shape.offset",
+        "shape.fit_curve",
+    ][r.below(9) as usize];
+    // Offset takes a distance and Fit Curve a tolerance and the flags (a tolerance of half an inch makes a rectangle's lines two splines).
+    let params = match id {
+        "shape.offset" => json!({"ids": ids, "distance": 0.25}),
+        "shape.fit_curve" => json!({"ids": ids, "tolerance": 0.5, "flags": r.below(8)}),
+        _ => json!({"ids": ids}),
+    };
+    (id, params)
 }
 
 fn command(r: &mut Rng, live: &[u32], arrange: bool, clipboard: bool, shape_ops: bool) -> (&'static str, Value) {
@@ -175,14 +192,26 @@ fn consistent(doc: &Document) -> Result<(), String> {
         if !exists(c.from_sheet) || !exists(c.to_sheet) {
             return Err(format!("a Connect row names a shape that is not there: {c:?}"));
         }
-        // The glued end is on its connection point.
-        let index = c.to_part.and_then(|p| p.checked_sub(100)).ok_or("a Connect row with no ToPart")?;
-        let point =
-            connection_points(doc, 1, c.to_sheet).into_iter().find(|p| p.index == index).ok_or("a Connect row names a point that is not there")?;
+        let part = c.to_part.ok_or("a Connect row with no ToPart")?;
         let sheet = SheetRef::Shape(doc.find_shape(Owner::Page(1), c.from_sheet).ok_or("gone")?);
         let (x_cell, y_cell) = if c.from_cell.as_deref() == Some("BeginX") { ("BeginX", "BeginY") } else { ("EndX", "EndY") };
         // The end cells are in the frame of the connector's parent: a group's, for a connector in one.
         let (x, y) = to_page(doc, &res, &sheet, (number(&res, &sheet, x_cell), number(&res, &sheet, y_cell)));
+        // Glued to the whole of a shape (a shape with no connection point): the end is on the shape's box.
+        if part == 3 {
+            let corners = shape_corners(doc, 1, c.to_sheet).ok_or("a whole-shape glue to a shape with no box")?;
+            if !crate::connect_whole::on_box(corners, (x, y)) {
+                return Err(format!(
+                    "{x_cell} of {} is ({x}, {y}), which is not on the box {corners:?} of shape {} it is glued to the whole of",
+                    c.from_sheet, c.to_sheet
+                ));
+            }
+            continue;
+        }
+        // The glued end is on its connection point.
+        let index = part.checked_sub(100).ok_or("a Connect row with no ToPart")?;
+        let point =
+            connection_points(doc, 1, c.to_sheet).into_iter().find(|p| p.index == index).ok_or("a Connect row names a point that is not there")?;
         if !near(x, point.x) || !near(y, point.y) {
             return Err(format!("{x_cell} of {} is ({x}, {y}) and its point is ({}, {})", c.from_sheet, point.x, point.y));
         }
@@ -370,13 +399,37 @@ fn the_same_with_the_shape_operations_among_them() {
     // and pastes: no command hits a bug, a refused one changes nothing, every glued end stays on its connection point, and undo takes every step (an operation
     // is one) back to the blank page.
     let mut ran: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-    for seed in [0x0123_4567_89AB_CDEF, 0xFEDC_BA98_7654_3210, 0x9E37_79B9_7F4A_7C15, 0xB5AD_4ECE_DA1C_E2A9, 0x1F83_D9AB_FB41_BD6B] {
+    // More seeds: a connector is glued to the whole of a shape that has no connection point so more of the random connectors are made, the random drawings are
+    // others, and the five seeds that reached Intersect twice before reached it once.
+    // (The first seed of the walk was 0x0123_4567_89AB_CDEF, and with Offset and Fit Curve among the draws it leaves only two Connect rows at its most, under the six the
+    // sequence asks for to be of any use: its walk is no longer the walk it was, since each new command moves every draw after it. The seed that took its place holds ten.)
+    let seeds = [
+        0x1234_5678_9ABC_DEF0,
+        0xFEDC_BA98_7654_3210,
+        0x9E37_79B9_7F4A_7C15,
+        0xB5AD_4ECE_DA1C_E2A9,
+        0x1F83_D9AB_FB41_BD6B,
+        0x6A09_E667_F3BC_C908,
+        0xBB67_AE85_84CA_A73B,
+        0x3C6E_F372_FE94_F82B,
+    ];
+    for seed in seeds {
         for (kind, n) in run_sequence_with(seed, 1_200, true, true, false, true) {
             *ran.entry(kind).or_default() += n;
         }
     }
     // Each operation really made or changed shapes, over the seeds, whatever else it was refused for.
-    for kind in ["shape.union", "shape.combine", "shape.fragment", "shape.intersect", "shape.subtract"] {
+    for kind in [
+        "shape.union",
+        "shape.combine",
+        "shape.fragment",
+        "shape.intersect",
+        "shape.subtract",
+        "shape.join",
+        "shape.trim",
+        "shape.offset",
+        "shape.fit_curve",
+    ] {
         assert!(ran.get(kind).copied().unwrap_or(0) >= 2, "{kind} ran {:?} times: {ran:?}", ran.get(kind));
     }
 }

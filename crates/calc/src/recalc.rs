@@ -57,7 +57,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_doc::{
-    Cell, CellAddr, Document, FormulaSlot, MAX_SHAPE_DEPTH, Owner, RowKey, SectionKey, ShapeList, ShapeRef, Sheet, SheetRef, ValueKind, cell_info,
+    Cell, CellAddr, Document, FormulaSlot, MAX_SHAPE_DEPTH, Master, Owner, RowKey, SectionKey, ShapeList, ShapeRef, Sheet, SheetRef, ValueKind,
+    cell_info,
 };
 use diacraft_formula::Expr;
 
@@ -482,6 +483,8 @@ pub fn recalc_all_using(doc: &Document, budget: &Budget, options: EvalOptions, c
 /// `RecalcReport::real_salt`. The salt is worked out on the budget the walk left and puts the counters back: **it changes no figure of the
 /// score**, and a file whose budget ran out is not salted past that point (`RealSalt::not_checked`).
 pub fn recalc_all_salted(doc: &Document, budget: &Budget, options: EvalOptions, calc: &mut dyn Calculator, salt: Option<SaltPolicy>) -> RecalcReport {
+    // The comparison with a file's saved values writes nothing, so it takes the reading in which a `SETF` is 0 whatever it names (`setf.rs`).
+    let options = EvalOptions { setf: crate::eval::SetfMode::Inert, ..options };
     let mut ctx = EvalCtx::new(options, *budget);
     let mut report = RecalcReport::default();
     {
@@ -584,6 +587,12 @@ pub(crate) fn walk_page(doc: &Document, page: u32, f: &mut dyn FnMut(&SheetRef, 
         f(&SheetRef::Page(found.id), &found.sheet);
         walk_part(Owner::Page(found.id), &found.shapes, true, &mut |sheet, data, _| f(sheet, data));
     }
+}
+
+/// Calls `f` with the page sheet of one master and every shape of its part, and with nothing else.
+pub(crate) fn walk_master(master: &Master, f: &mut dyn FnMut(&SheetRef, &Sheet)) {
+    f(&SheetRef::Master(master.id), &master.sheet);
+    walk_part(Owner::Master(master.id), &master.shapes, true, &mut |sheet, data, _| f(sheet, data));
 }
 
 /// The shapes of one part, a group before its members, down to `MAX_SHAPE_DEPTH`.
@@ -1126,7 +1135,7 @@ fn expand(ev: &mut Evaluator<'_, '_>, node: &Node, is_root: bool, out: &mut Vec<
                 return true;
             }
             let env = Env::new(res.on.clone(), res.rebind.clone());
-            for r in &facts.refs {
+            for r in facts.named() {
                 if !ev.steps(1) {
                     return false;
                 }

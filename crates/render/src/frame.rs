@@ -29,14 +29,14 @@ use crate::geometry::{self, ShapeGeometry};
 use crate::gradient::{self, GradFill};
 use crate::layers::{LayerColour, LayerTable, Verdict, members_of};
 use crate::limits::{
-    Cancel, DRAWN_PIXELS_PER_WORK, Limits, MAX_BLUR_PIXELS_PER_FRAME, MAX_BLUR_SPREAD_PX, MAX_BLURS_PER_FRAME, MAX_STROKE_PX, WORK_PER_DASH,
-    WORK_PER_DRAWN_SHAPE, WORK_PER_END_ROW, WORK_PER_MARK, WORK_PER_SHAPE,
+    Cancel, DRAWN_PIXELS_PER_WORK, Limits, MAX_BLUR_PIXELS_PER_FRAME, MAX_BLUR_SPREAD_PX, MAX_BLURS_PER_FRAME, MAX_STROKE_PX, RECT_GRADIENT_BANDS,
+    WORK_PER_DASH, WORK_PER_DRAWN_SHAPE, WORK_PER_END_FILL, WORK_PER_END_ROW, WORK_PER_MARK, WORK_PER_SHAPE,
 };
 use crate::read::{Cx, sheet_of};
 use crate::share::Tally;
 use crate::skips::SkipKind;
 use crate::style::{FillLook, GradientSpec, LineLook, Looks, SHADOW_BLUR_DEVIATIONS, ShadowKind, ShadowLook};
-use crate::target::{Paint, Refused, Target};
+use crate::target::{Paint, Refused, ShapeLabel, Target};
 use crate::text::Caches;
 
 /// The deepest group the walk enters: `diacraft_doc::MAX_SHAPE_DEPTH`, the limit the document itself holds shapes to.
@@ -124,11 +124,15 @@ impl WorkMeter {
 }
 
 /// A step of the walk.
-enum Work {
+enum Work<'a> {
     /// Visit a shape: place it, and queue its members and its own drawing in order. `flips` are those of the groups above it.
     Enter { at: ShapeRef, parent: Affine, flips: Flips, depth: usize },
     /// Draw a shape's own geometry and text. `flips` are those of the groups above it, not its own.
     Draw { at: ShapeRef, affine: Affine, flips: Flips, depth: usize, verdict: Verdict },
+    /// The shape whose drawing and members' follow begins, for a target that writes what a shape says of itself ([`Target::wants_labels`]). Queued before them and closed by [`Work::Close`] after them.
+    Open { label: ShapeLabel<'a> },
+    /// The shape of the last [`Work::Open`] ends.
+    Close,
 }
 
 pub(crate) struct Frame<'f, 'a, 'c, T: Target> {
@@ -446,7 +450,7 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
             Some(r) => r.start.min(top.len())..r.end.min(top.len()),
             None => 0..top.len(),
         };
-        let mut stack: Vec<Work> = Vec::new();
+        let mut stack: Vec<Work<'a>> = Vec::new();
         // The walk holds a step for each shape it has yet to visit, so the shapes it will visit are bounded by the frame's count before
         // they are queued (a page may hold a million, and a group of a million members costs 90 ms to list: the Task 4 review).
         let room = self.limits.max_shapes.saturating_sub(self.drawn);
@@ -486,6 +490,9 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
                     }
                     self.contain(&at, |frame| frame.draw_shape(&ctx, &at, affine, flips, depth, &verdict));
                 }
+                // A group of the target's own, which the budget does not stop: the walk that does stop leaves it open and the target closes it with the rest (`Target::rewind`).
+                Work::Open { label } => self.canvas.begin_shape(&label),
+                Work::Close => self.canvas.end_shape(),
             }
         }
     }
@@ -527,7 +534,7 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
     }
 
     /// Places a shape and queues what is drawn for it, in order.
-    fn enter(&mut self, ctx: &mut PageCtx, stack: &mut Vec<Work>, at: ShapeRef, parent: Affine, flips: Flips, depth: usize) {
+    fn enter(&mut self, ctx: &mut PageCtx, stack: &mut Vec<Work<'a>>, at: ShapeRef, parent: Affine, flips: Flips, depth: usize) {
         let cx = self.cx;
         let Some(shape) = cx.res.shape(&at) else {
             return;
@@ -579,8 +586,17 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
         if !members.is_empty() && !members_ok {
             cx.note_n(SkipKind::TooDeep, members.len(), || format!("members of shape {id}"));
         }
+        // A shape that is drawn is a group of the target's, for one that says what a shape says of itself: its alt text, and its name (`Target::wants_labels`).
+        let label = (verdict.drawn && self.canvas.wants_labels()).then(|| {
+            let alt = diacraft_doc::alt_text::read(&cx.res, &sheet);
+            let name = shape.name.as_deref().filter(|n| !n.is_empty()).or_else(|| shape.name_u.as_deref().filter(|n| !n.is_empty())).unwrap_or("");
+            ShapeLabel { title: alt.title.text, description: alt.description.text, name }
+        });
         // The stack pops the last pushed first: push what draws last first.
         let queued = stack.len();
+        if label.is_some() {
+            stack.push(Work::Close);
+        }
         let draw_in_front = mode >= 1.5;
         let draw_behind = (0.5..1.5).contains(&mode);
         if draw_in_front {
@@ -594,6 +610,9 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
         }
         if draw_behind {
             stack.push(own());
+        }
+        if let Some(label) = label {
+            stack.push(Work::Open { label });
         }
         self.pushed = self.pushed.saturating_add(stack.len().saturating_sub(queued));
     }
@@ -654,7 +673,7 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
         let cx = self.cx;
         let layer = sc.layer.as_ref();
         let fill = Looks::fill(cx, &sc.sheet, layer, who);
-        let line = Looks::line(cx, &sc.sheet, layer);
+        let line = Looks::line(cx, &sc.sheet, layer, who);
         let rounding = cx.num(&sc.sheet, "Rounding").max(0.0);
         // Fill ring and stroke path of the shape, in its own frame, corners rounded.
         let rounded = |p: &BezPath| if rounding > 0.0 { corners::round(p, rounding) } else { p.clone() };
@@ -675,7 +694,7 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
         self.draw_fill(&fill, &paths.fill, sc.to_paper, who);
         self.draw_picture(sc, geom, who);
         if let Some(line) = &line {
-            self.draw_line(line, &paths.stroke, (sc.to_paper, sc.page.scale), who);
+            self.draw_line(line, &paths.stroke, (sc.to_paper, sc.page.scale), &fill, who);
         }
     }
 
@@ -691,18 +710,54 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
                 return;
             }
         };
+        self.paint_fill(fill, local, &paper, to_paper, who);
+    }
+
+    /// Paints `fill` in `paper` (paper inches), which is `local` (the same path in the frame `to_paper` takes to paper inches): the colour, the gradient over `local`'s box, or the pattern.
+    /// A shape's own fill and the inside of a hollow line end are painted by this one function, so that the end follows what the fill does.
+    fn paint_fill(&mut self, fill: &FillLook, local: &BezPath, paper: &BezPath, to_paper: Affine, who: &dyn Fn() -> String) {
         match fill {
             FillLook::None => {}
-            FillLook::Solid(color) => self.canvas.fill(&paper, &Paint::Solid(*color), true),
-            FillLook::Gradient(spec) => self.draw_gradient(spec, local, &paper, to_paper, who),
+            FillLook::Solid(color) => self.canvas.fill(paper, &Paint::Solid(*color), true),
+            FillLook::Gradient(spec) => self.draw_gradient(spec, local, paper, to_paper, who),
             FillLook::Pattern { number, fore, back } => {
                 // The lines of a hatch are work, counted before they are made.
-                let marks = crate::pattern::marks(&*self.canvas, *number, &paper);
+                let marks = crate::pattern::marks(&*self.canvas, *number, paper);
                 if self.charge(marks.saturating_mul(WORK_PER_MARK), who) {
-                    crate::pattern::draw(&mut *self.canvas, *number, *fore, *back, &paper);
+                    crate::pattern::draw(&mut *self.canvas, *number, *fore, *back, paper);
                 }
             }
         }
+    }
+
+    /// The inside of one closed part of a hollow line end (`region`, paper inches), painted with the shape's own fill before the outline is stroked (the owner's ruling of
+    /// 2026-11-26, which supersedes). Its colour and transparency, its pattern and its gradient are the shape's, painted by [`Frame::paint_fill`] as the shape's own fill is. **A gradient is
+    /// measured over the mark's own box, in the shape's frame** (`to_paper` takes it to paper inches): the rule of a shape's own fill (the gradient turns with the shape unless
+    /// `RotateGradientWithShape` says it does not), with the mark's closed part for the shape's path. A shape with no fill, and a fill that paints nothing, leave the inside as it was.
+    /// The work is counted before it is done: [`WORK_PER_END_FILL`], and a rectangular gradient's bands.
+    fn draw_end_fill(&mut self, fill: &FillLook, region: &BezPath, to_paper: Affine, margin_px: f64, who: &dyn Fn() -> String) {
+        if matches!(fill, FillLook::None) || matches!(fill, FillLook::Solid(color) if color.a == 0) {
+            return;
+        }
+        match self.canvas.check(region, margin_px) {
+            Ok(true) => {}
+            // Wholly outside what the target shows: nothing to paint.
+            Ok(false) => return,
+            Err(Refused::OutOfRange) => {
+                self.cx.note(SkipKind::OutOfRange, || format!("{}: the inside of a line end", who()));
+                return;
+            }
+        }
+        let bands = match fill {
+            FillLook::Gradient(spec) if spec.dir >= 8 && spec.stops.len() > 1 => RECT_GRADIENT_BANDS as u64,
+            _ => 0,
+        };
+        if !self.charge(WORK_PER_END_FILL.saturating_add(bands), who) {
+            return;
+        }
+        // The closed part in the shape's own frame, for a gradient that turns with the shape. A frame that cannot be turned back (a shape of no size) measures it as it stands.
+        let local = if to_paper.determinant().abs() > 1.0e-18 { to_paper.inverse() * region.clone() } else { region.clone() };
+        self.paint_fill(fill, &local, region, to_paper, who);
     }
 
     fn draw_gradient(&mut self, spec: &GradientSpec, local: &BezPath, paper: &BezPath, to_paper: Affine, who: &dyn Fn() -> String) {
@@ -727,8 +782,8 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
     }
 
     /// The stroke of a shape's outline, `weight` wide on paper. `place` is the shape's frame to paper inches and the page's scale (paper inches to a drawing inch: what a scaled custom end
-    /// follows).
-    fn draw_line(&mut self, line: &LineLook, local: &BezPath, place: (Affine, f64), who: &dyn Fn() -> String) {
+    /// follows). `fill` is the shape's own fill, which the inside of a hollow line end takes.
+    fn draw_line(&mut self, line: &LineLook, local: &BezPath, place: (Affine, f64), fill: &FillLook, who: &dyn Fn() -> String) {
         let (to_paper, page_scale) = place;
         if local.is_empty() || line.color.a == 0 && line.gradient.is_none() {
             return;
@@ -751,9 +806,6 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
                 return;
             }
         };
-        if line.compound != 0 {
-            self.cx.note(SkipKind::CompoundApproximate, || format!("{}: compound line {}", who(), line.compound));
-        }
         // Line ends: the shaft is shortened under each mark, and the marks are drawn once, solid, whatever the pattern.
         // A path that was cut to the view has its ends somewhere else, so it has no line ends.
         let wants_ends = (line.begin_arrow != 0 || line.end_arrow != 0) && !clipped;
@@ -761,9 +813,18 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
         let shaft = ends.as_ref().map_or(&paper, |e| &e.shaft);
         let length = if line.pattern > 1 { path_length(shaft) } else { 0.0 };
         let plan = dash::plan(widths, line.pattern, line.cap, length, ppi);
-        // The dashes are work, counted before the stroke makes them.
-        if !self.charge(plan.dashes.saturating_mul(WORK_PER_DASH), who) {
+        // A compound line is a stroke for each band, along the path offset to the band's side. The dashes of each band and the offset of the path are work, counted
+        // before they are done.
+        let bands = dash::bands(line.compound, widths.drawn);
+        let strokes = u64::try_from(bands.len().max(1)).unwrap_or(1);
+        let work = plan.dashes.saturating_mul(WORK_PER_DASH).saturating_mul(strokes).saturating_add(dash::offset_work(shaft, bands.len()));
+        if !self.charge(work, who) {
             return;
+        }
+        // How bands behave with a dash pattern or a line end is where no source says: the bands take the stroke's dashes and the end is drawn once at the line's full size, our rule, and
+        // the frame says so.
+        if !bands.is_empty() && (plan.dashes > 0 || ends.is_some()) {
+            self.cx.note(SkipKind::CompoundApproximate, || format!("{}: compound line {} with a dash pattern or a line end", who(), line.compound));
         }
         if plan.solid_for_count {
             self.cx.note(SkipKind::DashesTooMany, || format!("{}: pattern {} on a path {length:.1} inches long", who(), line.pattern));
@@ -780,7 +841,7 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
             None => Paint::Solid(line.color),
         };
         if !shaft.is_empty() {
-            self.canvas.stroke(shaft, &plan.stroke, &paint);
+            self.stroke_shaft(shaft, &plan, &bands, &paint);
         }
         if let Some(ends) = &ends {
             if !ends.fill.is_empty() {
@@ -789,9 +850,31 @@ impl<'f, 'a, 'c, T: Target> Frame<'f, 'a, 'c, T> {
             if !ends.fill_even_odd.is_empty() {
                 self.canvas.fill(&ends.fill_even_odd, &paint, true);
             }
+            // The inside of a hollow mark takes the shape's fill, under its outline; the fill is whole whatever the line's pattern (nothing of a mark is dashed).
+            for region in &ends.hollow {
+                self.draw_end_fill(fill, region, to_paper, widths.drawn * ppi, who);
+            }
             if !ends.strokes.is_empty() {
                 let mark = kurbo::Stroke::new(widths.drawn).with_caps(kurbo::Cap::Round).with_join(kurbo::Join::Round);
                 self.canvas.stroke(&ends.strokes, &mark, &paint);
+            }
+        }
+    }
+
+    /// The shaft of a line: one stroke, or for a compound line a stroke for each band along the shaft offset to the band's side, as wide as the band and with the stroke's dashes and cap.
+    fn stroke_shaft(&mut self, shaft: &BezPath, plan: &dash::StrokePlan, bands: &[dash::Band], paint: &Paint) {
+        if bands.is_empty() {
+            self.canvas.stroke(shaft, &plan.stroke, paint);
+            return;
+        }
+        // The offset is as true as a tenth of a pixel.
+        let tolerance = 0.1 / self.px_per_inch.max(1.0e-9);
+        for band in bands {
+            let path = dash::offset_path(shaft, band.offset, tolerance);
+            if !path.is_empty() {
+                let mut stroke = plan.stroke.clone();
+                stroke.width = band.width;
+                self.canvas.stroke(&path, &stroke, paint);
             }
         }
     }

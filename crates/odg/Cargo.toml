@@ -16,6 +16,8 @@ workspace = true
 [dependencies]
 diacraft-container = { workspace = true }
 diacraft-doc = { workspace = true }
+# The script type of a letter (`diacraft_fonts::script::script_of` and `slot_of_script`), which says which of a run's three languages its letters are in.
+diacraft-fonts = { workspace = true }
 diacraft-formula = { workspace = true }
 # The ShapeSheet XML codec (layer 2): DiaCraft's cells in a drawing are carried by the code that carries them in the other format.
 diacraft-sheetxml = { workspace = true }

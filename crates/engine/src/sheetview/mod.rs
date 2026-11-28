@@ -29,7 +29,8 @@ pub use outline::{Counts, Options, Outline, SectionInfo, Slot, ViewError, line_a
 pub use target::{ONE_SHEET, Place, Target};
 pub use text::CellValue;
 
-pub(crate) use cell::{Ctx, class_word, respell, view};
+pub use cell::READ_UNSAVED_STEPS;
+pub(crate) use cell::{Ctx, class_word, read_eval_ctx, respell, view};
 pub(crate) use eval::fault_of;
 pub(crate) use lines::row_key_json;
 pub(crate) use outline::{label_of, name_of};

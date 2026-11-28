@@ -19,19 +19,19 @@ use crate::shapeops::{
 };
 use crate::{blank_session, run, snapshot};
 
-fn id_of(result: &Json) -> u32 {
+pub(crate) fn id_of(result: &Json) -> u32 {
     u32::try_from(result["id"].as_u64().unwrap()).unwrap()
 }
 
 /// An instance of the Rectangle master with the box (`x0`, `y0`) to (`x1`, `y1`).
-fn instance(s: &mut Session, (x0, y0, x1, y1): (f64, f64, f64, f64)) -> u32 {
+pub(crate) fn instance(s: &mut Session, (x0, y0, x1, y1): (f64, f64, f64, f64)) -> u32 {
     let id = id_of(&run(s, "shape.drop", json!({"master": "rectangle", "page": 1, "x": (x0 + x1) / 2.0, "y": (y0 + y1) / 2.0})));
     run(s, "shape.size", json!({"ids": [id], "width": x1 - x0, "height": y1 - y0}));
     id
 }
 
 /// Changes the shape with this `ID` on page 1 (anywhere in the tree).
-fn edit_shape(s: &mut Session, id: u32, f: impl FnOnce(&mut Shape)) {
+pub(crate) fn edit_shape(s: &mut Session, id: u32, f: impl FnOnce(&mut Shape)) {
     s.edit("edit a shape", |doc| {
         let found = doc.find_shape(Owner::Page(1), id).expect("the shape");
         let page = Arc::make_mut(doc.pages.get_mut(0).expect("a page"));
@@ -50,7 +50,7 @@ fn formatting(s: &mut Session, id: u32) -> Json {
     run(s, "shape.formatting", json!({"ids": [id]}))["shapes"][0].clone()
 }
 
-fn text_of(d: &Document, id: u32) -> Option<String> {
+pub(crate) fn text_of(d: &Document, id: u32) -> Option<String> {
     d.shape(&at(d, id))
         .unwrap()
         .text
@@ -216,7 +216,7 @@ fn a_connector_glued_to_an_original_keeps_its_end_unglued_and_undo_brings_everyt
     assert!(has_id(doc(&s), produced) && !has_id(doc(&s), a));
 }
 
-fn has_id(d: &Document, id: u32) -> bool {
+pub(crate) fn has_id(d: &Document, id: u32) -> bool {
     d.find_shape(Owner::Page(1), id).is_some()
 }
 
@@ -1140,17 +1140,17 @@ fn a_connector_glued_to_the_refitted_first_shape_ends_where_its_connection_point
 
 // ---- the file -------------------------------------------------------------------------------------------------------------------
 
-struct Dir(PathBuf);
+pub(crate) struct Dir(PathBuf);
 
 impl Dir {
-    fn new() -> Dir {
+    pub(crate) fn new() -> Dir {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!("diacraft-engine-shapeops-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).unwrap();
         Dir(dir)
     }
 
-    fn path(&self, name: &str) -> String {
+    pub(crate) fn path(&self, name: &str) -> String {
         self.0.join(name).to_str().unwrap().to_owned()
     }
 }
@@ -1163,9 +1163,9 @@ impl Drop for Dir {
 }
 
 /// A cell as (where, formula, value, unit).
-type CellFacts = (String, Option<String>, Option<String>, Option<String>);
+pub(crate) type CellFacts = (String, Option<String>, Option<String>, Option<String>);
 
-fn cells_of(d: &Document, id: u32) -> Vec<CellFacts> {
+pub(crate) fn cells_of(d: &Document, id: u32) -> Vec<CellFacts> {
     let shape = d.shape(&at(d, id)).unwrap();
     let mut out = Vec::new();
     let show = |c: &Cell| (c.formula.text().map(str::to_owned), c.value.as_ref().map(|v| v.text().to_owned()), c.unit.as_deref().map(str::to_owned));

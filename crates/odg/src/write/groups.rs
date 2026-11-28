@@ -358,7 +358,13 @@ mod tests {
         for (name, v) in [("PinX", 1.0), ("PinY", 1.0), ("Width", 2.0), ("Height", 2.0), ("LocPinX", local_pin), ("LocPinY", local_pin)] {
             sheet.cells.insert(CellName::new(name), number(v));
         }
-        NewShape { shape: Arc::new(shape), after: crate::write::compare::Anchor::First, parent: None, outer: Affine::IDENTITY }
+        NewShape {
+            shape: Arc::new(shape),
+            after: crate::write::compare::Anchor::First,
+            parent: None,
+            outer: Affine::IDENTITY,
+            at: diacraft_doc::ShapeRef::top(diacraft_doc::Owner::Page(0), 0),
+        }
     }
 
     /// What `check_frame` says of a group by what its members take up: the words when there is nothing, or a member is not numbers (the pass that finds the span never

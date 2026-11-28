@@ -30,6 +30,9 @@ pub(super) struct Tree {
     pub root: El,
     pub prolog: Vec<u8>,
     pub epilog: Vec<u8>,
+    /// Whether a part with no prolog of its own is written with the standard XML declaration. False for a solution part: the solution parts of the files the VSDX application writes
+    /// have none, and it logs an invalid parameter for one that starts with a declaration.
+    declare: bool,
 }
 
 impl Tree {
@@ -41,18 +44,58 @@ impl Tree {
             Some((start, end)) => (bytes.get(..start).unwrap_or_default().to_vec(), bytes.get(end..).unwrap_or_default().to_vec()),
             None => (Vec::new(), Vec::new()),
         };
-        Ok(Tree { root, prolog, epilog })
+        Ok(Tree { root, prolog, epilog, declare: true })
     }
 
     /// A tree for a part that is new: a standard declaration and a root.
     pub(super) fn new(root: El) -> Tree {
-        Tree { root, prolog: Vec::new(), epilog: Vec::new() }
+        Tree { root, prolog: Vec::new(), epilog: Vec::new(), declare: true }
+    }
+
+    /// A tree for a part that is new and has **no XML declaration**: DiaCraft's solution part.
+    pub(super) fn bare(root: El) -> Tree {
+        Tree { root, prolog: Vec::new(), epilog: Vec::new(), declare: false }
+    }
+
+    /// Makes the part be written with no XML declaration: the one it was read with is dropped, with the line end after it, and a part that had none is not given one. What else
+    /// stands before the root (a byte order mark, comments) is the file's own and stays.
+    pub(super) fn drop_declaration(&mut self) {
+        self.prolog = without_declaration(&self.prolog);
+        self.declare = false;
     }
 
     /// The part as bytes.
     pub(super) fn bytes(&self, name: &str) -> Result<Vec<u8>, WriteError> {
-        xml::to_bytes(&self.root, &self.prolog, &self.epilog, true).map_err(|error| WriteError::Xml { part: name.to_owned(), error })
+        xml::to_bytes(&self.root, &self.prolog, &self.epilog, self.declare).map_err(|error| WriteError::Xml { part: name.to_owned(), error })
     }
+}
+
+/// Where the XML declaration of a part is, with the line end after it: the range of bytes to cut to leave the part with none, or `None` for a part with no declaration. The declaration
+/// starts the part, after a byte order mark if there is one: `<?xml` and a white space, up to the first `?>`. One that never closes is none (nothing is cut that the end of cannot be found).
+/// The scan stops at the first `?>`, so it is one pass over the part at the most.
+pub(super) fn declaration_span(bytes: &[u8]) -> Option<std::ops::Range<usize>> {
+    let bom = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) { 3 } else { 0 };
+    let rest = bytes.get(bom..)?;
+    if !(rest.starts_with(b"<?xml") && rest.get(5).is_some_and(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'))) {
+        return None;
+    }
+    let close = rest.windows(2).position(|w| w == b"?>")?;
+    let end = bom.saturating_add(close).saturating_add(2);
+    let line_end = match bytes.get(end..) {
+        Some(after) if after.starts_with(b"\r\n") => 2,
+        Some(after) if after.starts_with(b"\n") || after.starts_with(b"\r") => 1,
+        _ => 0,
+    };
+    Some(bom..end.saturating_add(line_end))
+}
+
+/// The bytes of a part, or the bytes before its root, without the XML declaration and the line end after it (a byte order mark and anything else, a comment, stay): what is left when
+/// [`declaration_span`] is cut. A part with no declaration is returned as it is.
+pub(super) fn without_declaration(bytes: &[u8]) -> Vec<u8> {
+    let Some(span) = declaration_span(bytes) else { return bytes.to_vec() };
+    let mut out = bytes.get(..span.start).unwrap_or_default().to_vec();
+    out.extend_from_slice(bytes.get(span.end..).unwrap_or_default());
+    out
 }
 
 /// The folder of a part name, with its trailing slash: `/visio/pages/pages.xml` is `/visio/pages/`.
@@ -228,4 +271,105 @@ impl RelsTree {
 /// The name of the relationships part of `source` (`/` for the package).
 pub(super) fn rels_name(source: &str) -> String {
     rels_part_name(source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+
+    #[test]
+    fn the_declaration_goes_with_the_line_end_after_it() {
+        assert_eq!(without_declaration(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n"), b"");
+        assert_eq!(without_declaration(b"<?xml version='1.0'?>\n"), b"");
+        assert_eq!(without_declaration(b"<?xml version=\"1.0\"?>\r"), b"");
+        assert_eq!(without_declaration(b"<?xml version=\"1.0\"?>"), b"");
+        assert_eq!(without_declaration(b"<?xml\tversion=\"1.0\"?>\r\n\r\n"), b"\r\n", "one line end goes, and no more");
+    }
+
+    #[test]
+    fn what_else_stands_before_the_root_stays() {
+        assert_eq!(without_declaration(b"<?xml version=\"1.0\"?>\r\n<!-- mine -->"), b"<!-- mine -->");
+        assert_eq!(without_declaration(b"<?xml version=\"1.0\"?><!--a--><?target data?>"), b"<!--a--><?target data?>");
+        let with_mark = [BOM, b"<?xml version=\"1.0\"?>\r\n<!-- mine -->"].concat();
+        assert_eq!(without_declaration(&with_mark), [BOM, b"<!-- mine -->"].concat(), "the byte order mark is the file's own");
+        assert_eq!(without_declaration(BOM), BOM);
+    }
+
+    #[test]
+    fn a_prolog_with_no_declaration_is_as_it_was() {
+        let none: [&[u8]; 7] =
+            [b"", b"\r\n", b"<!-- c -->", b"<?xml-stylesheet href=\"a.xsl\"?>", b"<?xmlfoo bar?>", b"<?target ?>\r\n<?xml version=\"1.0\"?>", BOM];
+        for prolog in none {
+            assert_eq!(without_declaration(prolog), prolog, "{}", String::from_utf8_lossy(prolog));
+        }
+    }
+
+    #[test]
+    fn a_declaration_that_never_closes_is_left_as_it_is() {
+        // A part like this does not parse, so none is patched; the helper does not cut what it cannot find the end of.
+        let open: [&[u8]; 4] = [b"<?xml version=\"1.0\"", b"<?xml ", b"<?xml", b"<?xml version=\"1.0\"?"];
+        for prolog in open {
+            assert_eq!(without_declaration(prolog), prolog, "{}", String::from_utf8_lossy(prolog));
+        }
+    }
+
+    #[test]
+    fn the_span_is_the_declaration_and_the_line_end_after_it() {
+        // `<?xml version="1.0"?>` is 21 bytes.
+        assert_eq!(declaration_span(b"<?xml version=\"1.0\"?>\r\n<a/>"), Some(0..23));
+        assert_eq!(declaration_span(b"<?xml version=\"1.0\"?>\n<a/>"), Some(0..22));
+        assert_eq!(declaration_span(b"<?xml version=\"1.0\"?><a/>"), Some(0..21));
+        assert_eq!(declaration_span(&[BOM, b"<?xml version=\"1.0\"?>\r\n<a/>"].concat()), Some(3..26));
+        for none in [&b"<a/>"[..], b"", b"<?xml", b"<?xml version=\"1.0\"", b"<?xml-stylesheet a?><a/>", b"\r\n<?xml version=\"1.0\"?><a/>", BOM] {
+            assert_eq!(declaration_span(none), None, "{}", String::from_utf8_lossy(none));
+        }
+    }
+
+    #[test]
+    fn the_span_lies_in_the_bytes_and_cutting_it_leaves_the_rest() {
+        // Every prefix of a part, so that each place the declaration or the line end after it can end is met.
+        let whole = [BOM, b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<a/>"].concat();
+        for end in 0..=whole.len() {
+            let bytes = &whole[..end];
+            match declaration_span(bytes) {
+                Some(span) => {
+                    assert!(span.start <= span.end && span.end <= bytes.len(), "{end}: {span:?}");
+                    assert_eq!(without_declaration(bytes), [&bytes[..span.start], &bytes[span.end..]].concat(), "{end}");
+                }
+                None => assert_eq!(without_declaration(bytes), bytes, "{end}"),
+            }
+        }
+    }
+
+    #[test]
+    fn it_never_makes_a_prolog_longer_and_is_the_same_again() {
+        // Every prefix of a prolog, so that each cut point of the declaration and of the line end after it is met.
+        let whole = [BOM, b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<!-- c -->\r\n"].concat();
+        for end in 0..=whole.len() {
+            let prolog = &whole[..end];
+            let once = without_declaration(prolog);
+            assert!(once.len() <= prolog.len());
+            assert_eq!(without_declaration(&once), once, "{end}");
+        }
+    }
+
+    #[test]
+    fn a_tree_made_bare_or_with_its_declaration_dropped_is_written_with_none() {
+        let root = || element("SolutionXML", vec![("Name".to_owned(), "DiaCraft".to_owned())], Vec::new());
+        let standard = Tree::new(root()).bytes("p").unwrap();
+        assert!(standard.starts_with(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n"));
+        assert_eq!(Tree::bare(root()).bytes("p").unwrap(), b"<SolutionXML Name=\"DiaCraft\"/>");
+        // Parsed with a declaration, or with none: dropping it writes none either way.
+        for text in ["<?xml version=\"1.0\"?>\r\n<SolutionXML Name=\"DiaCraft\"/>", "<SolutionXML Name=\"DiaCraft\"/>"] {
+            let mut tree = Tree::parse("p", text.as_bytes()).unwrap();
+            tree.drop_declaration();
+            assert_eq!(tree.bytes("p").unwrap(), b"<SolutionXML Name=\"DiaCraft\"/>", "{text}");
+        }
+        // What follows the root stays too.
+        let mut tree = Tree::parse("p", b"<?xml version=\"1.0\"?>\n<SolutionXML Name=\"DiaCraft\"/>\n<!-- after -->").unwrap();
+        tree.drop_declaration();
+        assert_eq!(tree.bytes("p").unwrap(), b"<SolutionXML Name=\"DiaCraft\"/>\n<!-- after -->");
+    }
 }

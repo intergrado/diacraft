@@ -186,20 +186,25 @@ fn a_master_is_counted_by_its_sections_and_rows_and_refused_before_anything_is_b
     let counted = survey(&cx, master_named(&doc, "Filled Diamond").unwrap()).unwrap();
     // One shape and one section of the five rows of the diamond, closed.
     assert_eq!((counted.shapes, counted.rows, counted.flags, counted.master), (1, 5, 2, 1));
+    // A reading that keeps answers charges its cache when it ends (`Drop`), so each is let go of before the context is lent again.
+    drop(cx);
     // Not a line end: no 2 in the flags.
     for flags in [0, 1, 65, 4100] {
         let doc = doc_with(flags, master_shape(H, H, (H, H / 2.0), &diamond_points()));
         let cx = Cx::new(&doc, &mut ctx);
         assert_eq!(survey(&cx, master_named(&doc, "Filled Diamond").unwrap()), Err(Refusal::NotAnEnd), "flags {flags}");
+        drop(cx);
     }
     // No section at all, past the sections, past the rows.
     let none = doc_with(2, ShapeBuilder::new(5).cell("Width", "0.1").cell("Height", "0.1"));
     let cx = Cx::new(&none, &mut ctx);
     assert_eq!(survey(&cx, master_named(&none, "Filled Diamond").unwrap()), Err(Refusal::NoGeometry));
+    drop(cx);
     let long: Vec<(f64, f64)> = (0..MAX_END_ROWS + 1).map(|i| (i as f64 * 1.0e-3, (i % 2) as f64 * 1.0e-3)).collect();
     let past = doc_with(2, master_shape(H, H, (H, H / 2.0), &long));
     let cx = Cx::new(&past, &mut ctx);
     assert_eq!(survey(&cx, master_named(&past, "Filled Diamond").unwrap()), Err(Refusal::PastCaps));
+    drop(cx);
     let edge: Vec<(f64, f64)> = (0..MAX_END_ROWS - 1).map(|i| (i as f64 * 1.0e-3, (i % 2) as f64 * 1.0e-3)).collect();
     let at_cap = doc_with(2, master_shape(H, H, (H, H / 2.0), &edge));
     let cx = Cx::new(&at_cap, &mut ctx);

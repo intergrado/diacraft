@@ -309,7 +309,8 @@ fn text_look(style: &StyleSpec, side: Side, (width, height): (f64, f64), band: f
 /// resizing, the lock or the heading). `margin` is in drawing units.
 pub(crate) fn user_rows(style: &StyleSpec, side: Side, margin: f64, resize: u8, locked: bool) -> Section {
     let mut user = Section::new("User", None);
-    let text = |t: &str| Cell::with_formula(&format!("\"{t}\""), Some(Value::from_text(t)));
+    // A text a cell holds says `STR`.
+    let text = |t: &str| Cell::with_formula(&format!("\"{t}\""), Some(Value::from_text(t))).with_unit("STR");
     user.rows.push(user_row("msvStructureType", text("Container")));
     user.rows.push(user_row(STYLE_ROW, text(style.id)));
     user.rows.push(user_row(HEADING_ROW, plain(f64::from(side.number()))));
@@ -328,27 +329,24 @@ pub(crate) const LOCK_ROW: &str = "DiaCraftContainerLock";
 
 /// Adds rows to the `User` section of a shape (the section a container has), or makes the rows of the same name new (the swimlane roles).
 pub(crate) fn put_user_rows(shape: &mut Shape, rows: Vec<(&str, Cell)>) {
-    let sheet = Arc::make_mut(&mut shape.sheet);
-    let place = match sheet.sections.iter().position(|s| s.name.as_str() == "User") {
+    let mut counted = shape.counted_sheet();
+    let place = match counted.sheet.sections.iter().position(|s| s.name.as_str() == "User") {
         Some(place) => place,
-        None => {
-            sheet.sections.push(Arc::new(Section::new("User", None)));
-            sheet.sections.len() - 1
-        }
+        None => counted.push_section(Arc::new(Section::new("User", None))),
     };
-    let Some(slot) = sheet.sections.get_mut(place) else { return };
+    let Some(slot) = counted.sheet.sections.get_mut(place) else { return };
     let section = Arc::make_mut(slot);
     for (name, value) in rows {
-        section.rows.retain(|r| r.name.as_deref() != Some(name));
-        section.rows.push(user_row(name, value));
+        section.retain_rows(|r| r.name.as_deref() != Some(name));
+        section.append_row(user_row(name, value));
     }
 }
 
 /// Takes rows out of the `User` section of a shape.
 pub(crate) fn drop_user_rows(shape: &mut Shape, names: &[&str]) {
-    let sheet = Arc::make_mut(&mut shape.sheet);
-    if let Some(slot) = sheet.sections.iter_mut().find(|s| s.name.as_str() == "User") {
-        Arc::make_mut(slot).rows.retain(|r| !r.name.as_deref().is_some_and(|n| names.contains(&n)));
+    let counted = shape.counted_sheet();
+    if let Some(slot) = counted.sheet.sections.iter_mut().find(|s| s.name.as_str() == "User") {
+        Arc::make_mut(slot).retain_rows(|r| !r.name.as_deref().is_some_and(|n| names.contains(&n)));
     }
 }
 

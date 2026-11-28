@@ -31,6 +31,9 @@ pub(crate) const MOST_ITEM_BYTES: usize = 512 * 1024;
 /// subset of them), and the fixed names (the sixteen of and the text's, the names', the master link's and the eleven cells' fingerprints).
 pub(crate) const MOST_ATTRIBUTES: usize = 2 * diacraft_doc::MAX_SECTIONS_PER_SHEET + 32;
 
+/// The most glue a segment has: one for each end.
+const MOST_GLUE: usize = 2;
+
 /// A vocabulary that reads elements in no namespace and no other: the fragments are written bare.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Bare;
@@ -38,6 +41,71 @@ pub(crate) struct Bare;
 impl Vocabulary for Bare {
     fn reads(self, uri: Option<&str>) -> bool {
         matches!(uri, None | Some(""))
+    }
+}
+
+/// One glued end of a segment the file holds as a polyline or a path: the `Connect` row of the end, which that element cannot say, as DiaCraft's data carries it. The row is
+/// always the form the engine makes for an end glued to a connection point (`from_cell` `BeginX` or `EndX`, `to_cell` `Connections.X<n>`), with the parts its two cells have. **No build writes it
+/// any more** (a segment glued at an end is a `draw:connector`, whose glue is the element's own); the reader takes it from a file an earlier build wrote.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Glue {
+    /// The end: the begin, or the end.
+    pub begin: bool,
+    /// The `ID` of the shape the end is glued to.
+    pub to_sheet: u32,
+    /// The part of the glued shape's cell, and of the end's own.
+    pub to_part: Option<u32>,
+    pub from_part: Option<u32>,
+    /// The glued shape's cell the end is glued to (`Connections.X2`).
+    pub to_cell: String,
+}
+
+impl Glue {
+    /// The `Connect` row of the end of the shape `from` that this says.
+    pub(crate) fn connect(&self, from: u32) -> diacraft_doc::Connect {
+        diacraft_doc::Connect {
+            from_sheet: from,
+            from_cell: Some(Arc::from(if self.begin { "BeginX" } else { "EndX" })),
+            from_part: self.from_part,
+            to_sheet: self.to_sheet,
+            to_cell: Some(Arc::from(self.to_cell.as_str())),
+            to_part: self.to_part,
+            raw: diacraft_doc::RawAttrs::new(),
+            ext: Default::default(),
+        }
+    }
+
+    fn token(&self) -> String {
+        let part = |p: Option<u32>| p.map_or_else(|| "_".to_owned(), |p| p.to_string());
+        format!(
+            "{}{}:{}:{}:{}",
+            if self.begin { 'b' } else { 'e' },
+            self.to_sheet,
+            part(self.to_part),
+            part(self.from_part),
+            names::escape(&self.to_cell)
+        )
+    }
+
+    fn parse(token: &str) -> Option<Glue> {
+        let (begin, rest) = match token.split_at_checked(1)? {
+            ("b", rest) => (true, rest),
+            ("e", rest) => (false, rest),
+            _ => return None,
+        };
+        let mut parts = rest.split(':');
+        let (to_sheet, to_part, from_part, to_cell) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+        if parts.next().is_some() {
+            return None;
+        }
+        let part = |p: &str| if p == "_" { Some(None) } else { canonical_u32(p).map(Some) };
+        Some(Glue {
+            begin,
+            to_sheet: canonical_u32(to_sheet)?,
+            to_part: part(to_part)?,
+            from_part: part(from_part)?,
+            to_cell: names::unescape(to_cell).filter(|c| !c.is_empty())?,
+        })
     }
 }
 
@@ -61,6 +129,8 @@ pub(crate) struct Tier2 {
     pub vsdx: Option<Arc<diacraft_doc::Shape>>,
     /// The foreign data of the shape beyond its picture (`shell::foreign_shell`).
     pub foreign: Option<diacraft_doc::ForeignData>,
+    /// The glue of the ends of a segment the file holds as a polyline or a path: at most one for each end.
+    pub connects: Vec<Glue>,
     /// What the reader rebuilt and the model does not have.
     pub gone: Vec<Gone>,
     /// The fingerprints of the outputs of the items above (tier 3), by the local name of the attribute (`fp-text`, `fp-s-Geometry-0`), each as the file has
@@ -91,6 +161,7 @@ impl Tier2 {
             && self.text.is_none()
             && self.vsdx.is_none()
             && self.foreign.is_none()
+            && self.connects.is_empty()
             && self.gone.is_empty()
     }
 }
@@ -200,6 +271,9 @@ pub(crate) fn encode(t: &Tier2) -> Result<Option<Vec<(String, String)>>, &'stati
         let holder = diacraft_doc::Shape { foreign: Some(Arc::new(foreign.clone())), ..diacraft_doc::Shape::default() };
         let Some(text) = shell_fragment(&holder) else { return Ok(None) };
         put(names::FOREIGN.to_owned(), text)?;
+    }
+    if !t.connects.is_empty() {
+        put(names::CONNECTS.to_owned(), t.connects.iter().map(Glue::token).collect::<Vec<_>>().join(" "))?;
     }
     if !t.gone.is_empty() {
         put(names::GONE.to_owned(), t.gone.iter().map(Gone::token).collect::<Vec<_>>().join(" "))?;
@@ -351,6 +425,18 @@ pub(crate) fn decode(r: &mut Reader<'_>, pairs: &[(String, String)]) -> Result<T
                     match shell.foreign {
                         Some(foreign) => t.foreign = Some(Arc::unwrap_or_clone(foreign)),
                         None => r.warn("diacraft_tier2_unreadable", || "a shape's DiaCraft foreign data holds none, and is left out".to_owned()),
+                    }
+                }
+            }
+            // The glue of an end the element cannot say: at most one for each end, and a token that reads as none is left out with a warning.
+            names::CONNECTS => {
+                for token in value.split_ascii_whitespace().take(MOST_GLUE) {
+                    r.take_items(1)?;
+                    match Glue::parse(token) {
+                        Some(glue) if !t.connects.iter().any(|g| g.begin == glue.begin) => t.connects.push(glue),
+                        _ => r.warn("diacraft_tier2_unreadable", || {
+                            "a token of a shape's DiaCraft glue names none, or a second end, and is left out".to_owned()
+                        }),
                     }
                 }
             }
@@ -665,5 +751,61 @@ mod tests {
         assert_eq!(took, most as u64, "an item for each token read");
         let few = vec![(names::GONE.to_owned(), "c.A c.B".to_owned())];
         assert_eq!(decode_free(&limits, u64::MAX, &few).map(|(t, took)| (t.gone.len(), took)).ok(), Some((2, 2)));
+    }
+
+    fn glue(begin: bool, to_sheet: u32) -> Glue {
+        Glue { begin, to_sheet, to_part: Some(101), from_part: Some(if begin { 9 } else { 12 }), to_cell: "Connections.X2".to_owned() }
+    }
+
+    /// The glue of a segment is carried as a token for each end, which reads back as the same row of the page (no build writes it for a polyline now; the reader still takes it).
+    #[test]
+    fn the_glue_of_a_polyline_round_trips_as_one_token_for_each_end() {
+        let t = Tier2 { connects: vec![glue(true, 5), glue(false, 6)], ..Tier2::default() };
+        let attrs = encode(&t).unwrap().unwrap();
+        let (_, text) = attrs.iter().find(|(name, _)| name == names::CONNECTS).expect("the attribute");
+        assert_eq!(text, "b5:101:9:Connections_2EX2 e6:101:12:Connections_2EX2");
+        let (back, _) = decode_free(&Limits::default(), 1_000, &attrs).unwrap();
+        assert_eq!(back.connects, t.connects);
+        assert!(!back.holds_nothing_but_id(), "glue is a thing a style carries");
+        // The row it reads as is the engine's own form.
+        let row = glue(true, 5).connect(9);
+        assert_eq!((row.from_sheet, row.to_sheet, row.from_cell.as_deref(), row.to_cell.as_deref()), (9, 5, Some("BeginX"), Some("Connections.X2")));
+    }
+
+    /// A token that reads as no glue is left out with a warning, a second token for an end is too, and no more than two are read.
+    #[test]
+    fn a_token_of_glue_that_names_nothing_is_left_out() {
+        let read = |text: &str| {
+            let pairs = vec![(names::CONNECTS.to_owned(), text.to_owned())];
+            decode_free(&Limits::default(), 1_000, &pairs).unwrap().0.connects
+        };
+        assert_eq!(
+            read("b5:101:9:Connections_2EX2"),
+            vec![Glue { begin: true, to_sheet: 5, to_part: Some(101), from_part: Some(9), to_cell: "Connections.X2".to_owned() }]
+        );
+        assert_eq!(read("b5:_:_:A").first().map(|g| (g.to_part, g.from_part)), Some((None, None)), "no part is `_`");
+        for bad in [
+            "",
+            "x5:1:1:A",
+            "b:1:1:A",
+            "b05:1:1:A",
+            "b5:1:1:",
+            "b5:1:1:A:B",
+            "b5:1:A",
+            "b5:01:1:A",
+            "b5:1:1:_",
+            "b-1:1:1:A",
+            "b4294967296:1:1:A",
+            "b5 :1:1:A",
+        ] {
+            assert!(read(bad).is_empty(), "{bad:?} names no glue");
+        }
+        let many = read("b1:1:1:A b2:1:1:A e3:1:1:A e4:1:1:A b5:1:1:A");
+        assert_eq!(
+            many.iter().map(|g| (g.begin, g.to_sheet)).collect::<Vec<_>>(),
+            [(true, 1)],
+            "two tokens are read, and the second of the begin is left out"
+        );
+        assert_eq!(read(&"b1:1:1:A ".repeat(100_000)).len(), 1);
     }
 }

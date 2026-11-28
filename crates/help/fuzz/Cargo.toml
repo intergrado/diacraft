@@ -1,0 +1,49 @@
+[package]
+name = "diacraft-help-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly: neither is in the workspace's Cargo.lock, which the `fuzz check` step of the gate starts each crate from, so a release of either
+# could turn the gate red with no change here. `arbitrary` is libfuzzer-sys's own dependency, named so that it is pinned too. Move both together, in
+# every fuzz crate (a test in xtask checks that they agree).
+libfuzzer-sys = "=0.4.13"
+arbitrary = "=1.5.0"
+diacraft-help = { path = ".." }
+
+# A workspace of its own: cargo-fuzz needs nightly and sanitizer flags, so this crate stays out of DiaCraft's workspace and its lockfile
+# (`xtask/src/stats.rs` skips a nested `fuzz` folder).
+[workspace]
+
+[[bin]]
+name = "help_markdown"
+path = "fuzz_targets/help_markdown.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "help_catalog"
+path = "fuzz_targets/help_catalog.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "help_query"
+path = "fuzz_targets/help_query.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "help_tables"
+path = "fuzz_targets/help_tables.rs"
+test = false
+doc = false
+bench = false

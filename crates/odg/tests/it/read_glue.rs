@@ -621,8 +621,9 @@ fn odg_shapes_what_an_object_holds_is_kept_whole_and_it_reads_no_text() {
     assert!(group.text.is_none());
     let caption = nth(&doc, 0, 2);
     assert!(caption.text.is_none());
-    assert_eq!(odf(caption).kept.len(), 2);
-    assert_eq!(report.kept("title"), 1);
+    // The paragraph is kept as written, and the title is a row of the User section.
+    assert_eq!(odf(caption).kept.len(), 1);
+    assert_eq!(report.kept("title"), 0);
     // A group's own text node is kept as written; its member is a member.
     assert_eq!(group.children.len(), 1);
 }

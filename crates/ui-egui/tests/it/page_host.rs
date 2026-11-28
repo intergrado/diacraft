@@ -309,8 +309,8 @@ fn the_handler_takes_a_keydown_that_is_a_chord_of_a_command_and_not_the_clipboar
     assert!(!linux.takes("v", "KeyV", true, false, false, false), "Ctrl+V is the browser's paste event");
     assert!(!linux.takes("e", "KeyE", true, false, false, false), "a key no command has is not taken");
     assert!(!linux.takes("n", "KeyN", false, false, false, false), "N alone is a letter");
-    // egui lets an extra Alt stand (`matches_logically`), so the window runs New for Ctrl+Alt+N too, and the page takes the press the window runs a command for.
-    assert!(linux.takes("n", "KeyN", true, false, false, true), "Ctrl+Alt+N: the window runs New for it");
+    // An extra Alt does not stand (egui's `matches_logically` let it, and AltGr is Ctrl and Alt): the window runs New for Ctrl+N alone, and the page takes the press the window runs a command for.
+    assert!(!linux.takes("n", "KeyN", true, false, false, true), "Ctrl+Alt+N: the window runs no New for it");
     assert!(!linux.takes("n", "KeyN", true, true, false, false), "the Windows key is not ours");
     assert!(!linux.takes("t", "KeyT", true, false, false, false), "Ctrl+T has no command");
     assert!(!linux.takes("Dead", "KeyN", false, false, false, false));

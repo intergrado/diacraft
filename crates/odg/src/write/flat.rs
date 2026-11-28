@@ -159,6 +159,9 @@ fn element_text(root: &RawElement, work: &mut WriteWork, limits: &Limits) -> Res
     Ok(out)
 }
 
+/// What the words of a refusal call the one part a flat document is.
+const THE_DOCUMENT: &str = "the document";
+
 /// What the last pass writes: the generator, the root's media type and DiaCraft's extension.
 #[derive(Default)]
 struct Housekeeping<'a> {
@@ -279,6 +282,8 @@ pub(super) fn write(doc: &Document, original: &OriginalPackage<'_>, options: &Wr
         }
         let (converted, notes) = super::convert::flatten(&mut opened, limits, work)?;
         drop(opened);
+        // The document the parts were put together as: each prefix of the root's declarations once, which a flat document is.
+        super::unique::check_part(THE_DOCUMENT, &converted, limits, work)?;
         // The package's index is the flat document's: the elements are the same, in the same order. It goes with the bytes made.
         let index = original.index.clone().with_fingerprint(flat_fingerprint(&converted));
         let mut done = write_flat(doc, &OriginalPackage { bytes: &converted, index: &index }, options, work)?;
@@ -323,6 +328,10 @@ fn write_flat(doc: &Document, original: &OriginalPackage<'_>, options: &WriteOpt
     work.take_markup_layers(&report.native);
     work.baseline_read = report.work;
     let diff = compare::compare_with(doc, &baseline, original.index, &report.index, true, limits, work)?;
+    // **A group's own data has no place in a flat file**: a package keeps it in the document file's `group` entries, which a flat drawing has none of, and the comparison above
+    // leaves a group's data to them (`compare::classify`), so a change of it was no edit and was dropped without a word. Refused in words, edited or not, with nothing written.
+    let elements = crate::ext::docfile::Elements { st: &diff.structure, held: original.index, fresh: &report.index };
+    crate::ext::docfile::refuse_flat_group_data(doc, &baseline, &elements, work)?;
     // The shapes read as copies of another (their style carries a DiaCraft id an earlier shape carries): said on every save, edited or not.
     let copies = super::duplicate_notes(&report.index);
     // DiaCraft's extension is a model field of its own: it is written when the model has changed it from the document's.
@@ -336,6 +345,7 @@ fn write_flat(doc: &Document, original: &OriginalPackage<'_>, options: &WriteOpt
                 if let Some(variant) = media {
                     check_media(&made, variant)?;
                 }
+                super::unique::check_part(THE_DOCUMENT, &made, limits, work)?;
                 let index = if original.index.fingerprint().is_some() {
                     original.index.clone().with_fingerprint(flat_fingerprint(&made))
                 } else {
@@ -442,11 +452,14 @@ fn edited(
     super::check_made_texts(&bytes, true, &outs, limits, work)?;
     super::check_read_back(&bytes, &outs, limits, work)?;
     super::check_tier2(&bytes, &outs, limits, work)?;
+    super::check_glue(&bytes, &outs, limits, work)?;
     super::check_made_kids(&bytes, true, &outs, limits, work)?;
     super::check_made_markers(&bytes, true, &outs, limits, work)?;
     if extension_changed {
         check_extension(&bytes, doc.diacraft.as_deref(), limits, work)?;
     }
+    // Last, so that a refusal of the checks above says what is wrong with the document first: no start tag of the document made names an attribute twice.
+    super::unique::check_part(THE_DOCUMENT, &bytes, limits, work)?;
     Ok(Written { bytes, index, notes, edited: true, work: work.clone() })
 }
 

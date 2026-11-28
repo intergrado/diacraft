@@ -124,8 +124,8 @@ fn new_shapes_cost_steps_that_follow_their_number() {
     assert_eq!(one * 4, two, "each added shape costs the same: {taken:?}");
     assert_eq!(
         one,
-        150 * 82,
-        "a rectangle is 82 steps: its visit, its cells, the sizes its pin is told from, the rows of its sections and their cells, the audit of what it holds (its master's cells are kept by the link and are not audited), and the look at its master for the text and the picture it shows"
+        150 * 92,
+        "a rectangle is 92 steps: its visit, its cells, the sizes its pin is told from, the rows of its sections and their cells, the audit of what it holds (its master's cells are kept by the link and are not audited), the look at its master for the text and the picture it shows, and a look at each of the ten style cells it holds for a formula its master or a style sheet gives it"
     );
     // Many shapes in the file that are not new add a step or two each, and the new ones cost what they cost.
     let (mut s, dir) = opened(1500);
@@ -570,9 +570,66 @@ fn the_ids_of_the_file_are_not_carried_and_every_other_attribute_is() {
     }
 }
 
-/// The plain flattening is cheap enough to say a time: 3,000 new rectangles in a drawing of 20,000 take a fraction of the second the save's read of
-/// the file takes (here, a few seconds on a loaded machine bounds it, and the counted tests above say it is linear).
+/// `n` rectangles that are new to the file, made in one edit: the shapes `shape.drop` makes (one is dropped, and the others are copies of it with an `ID` and a pin of their own). The
+/// 3,000 drops this stands for take about a minute in a drawing of 20,000 shapes, because each drop reads the page's list once (`draw::container::arrive`: "a page with no container
+/// costs one read of its list"), which is 3,000 reads of 20,000 to 23,000 shapes; the flattening is not what takes the time, and these tests are of the flattening.
+fn add_rectangles(s: &mut Session, n: usize) {
+    drop_rectangles(s, 1);
+    s.edit("Test edit", |doc: &mut Document| {
+        let page = Arc::make_mut(doc.pages.get_mut(0).unwrap());
+        let first = Arc::clone(page.shapes.iter().next_back().unwrap());
+        for k in 1..n {
+            let mut shape = Shape::clone(&first);
+            shape.id = first.id + u32::try_from(k).unwrap();
+            let sheet = Arc::make_mut(&mut shape.sheet);
+            for (name, value) in [("PinX", 1.0 + (k % 10) as f64), ("PinY", 1.0 + (k / 10 % 8) as f64)] {
+                sheet.cells.insert(CellName::new(name), Cell::constant(Value::from_text(&value.to_string())).with_unit("IN"));
+            }
+            page.shapes.push(Arc::new(shape));
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+
+/// The plain flattening of thousands of new shapes is cheap, **counted** in steps and not in seconds (a time depends on what else the machine does): 3,000 new rectangles in a drawing
+/// of 20,000 cost two steps for each shape of the file, 92 for each new one (`new_shapes_cost_steps_that_follow_their_number`) and one for their master, which is 316,001 of the 6,000,000 the cap allows. The
+/// shapes the helper makes cost what the dropped ones cost, and the twin of this test, which times the flattening of 3,000 dropped shapes, is `#[ignore]`d.
 #[test]
+fn a_flattening_of_thousands_of_new_shapes_costs_steps_linear_in_the_shapes() {
+    // A shape the helper makes is a shape `shape.drop` makes, to the step.
+    let (mut made, dir_made) = opened(2);
+    add_rectangles(&mut made, 20);
+    let (mut dropped, dir_dropped) = opened(2);
+    drop_rectangles(&mut dropped, 20);
+    let (flat_made, steps_made) = flat_of(&made, &Flattened::default());
+    let (flat_dropped, steps_dropped) = flat_of(&dropped, &Flattened::default());
+    assert_eq!((flat_made.unwrap().flattened, flat_dropped.unwrap().flattened), (20, 20));
+    assert_eq!(steps_made, steps_dropped, "a made rectangle costs what a dropped one costs");
+    assert_eq!(
+        steps_made,
+        2 * 2 + 20 * 92 + 1,
+        "two steps for each of the two shapes of the file, 92 for each new one, and one for the master they were dropped from"
+    );
+    // The scale of the test: 3,000 new in 20,000, and the steps are the sum of the two kinds.
+    let (mut s, dir) = opened(20_000);
+    add_rectangles(&mut s, 3_000);
+    let (flat, steps) = flat_of(&s, &Flattened::default());
+    let flat = flat.unwrap();
+    assert_eq!((flat.visited, flat.flattened, flat.made.len()), (23_000, 3_000, 3_000));
+    assert_eq!(steps, 2 * 20_000 + 92 * 3_000 + 1, "linear in the shapes: two for each of the file's, 92 for each new one, and one for their master");
+    assert_eq!(flat.steps, steps, "the steps the flattening says it took are the ones counted");
+    assert!(steps * 10 < MAX_STEPS, "{steps} steps are a small part of the cap of {MAX_STEPS}");
+    for d in [dir_made, dir_dropped, dir] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+/// The time the flattening of 3,000 dropped rectangles in a drawing of 20,000 takes, the twin of the counted test above (`#[ignore]`: the 3,000 `shape.drop` commands that make the
+/// shapes take about a minute, and a time is for a person to read on a quiet machine): a fraction of the second the save's read of the file takes, and a few seconds bounds it.
+/// `cargo test -p diacraft-engine --lib odgfile::tests::a_flattening_of_thousands_of_new_shapes_takes_seconds_at_most -- --ignored`.
+#[test]
+#[ignore = "timed: 3,000 shape.drop commands in a drawing of 20,000 shapes take about a minute"]
 fn a_flattening_of_thousands_of_new_shapes_takes_seconds_at_most() {
     let (mut s, dir) = opened(20_000);
     drop_rectangles(&mut s, 3_000);
@@ -581,6 +638,26 @@ fn a_flattening_of_thousands_of_new_shapes_takes_seconds_at_most() {
     assert_eq!(flat.flattened, 3_000);
     assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// **Why the 3,000 drops take a minute** (`#[ignore]`: timed): a drop reads the page's list once, for the containers it might fall into (`draw::container::arrive`: "a page with no container
+/// costs one read of its list", one step for each shape of the page), so the time of a drop follows the shapes already on the page, and 3,000 drops into a page of 20,000 are 3,000 walks
+/// of 20,000 to 23,000 shapes. On beast (2026-11-26), 200 drops cost about 1 ms each into a page of 2,000 shapes and about 17 ms each into one of 20,000.
+/// `cargo test -p diacraft-engine --lib odgfile::tests::a_drop_costs_a_read_of_the_pages_list -- --ignored --nocapture`.
+#[test]
+#[ignore = "timed: 200 drops into a page of 2,000 shapes and into one of 20,000"]
+fn a_drop_costs_a_read_of_the_pages_list_so_it_follows_the_shapes_on_the_page() {
+    let per_drop = |existing: usize| {
+        let (mut s, dir) = opened(existing);
+        let started = std::time::Instant::now();
+        drop_rectangles(&mut s, 200);
+        let took = started.elapsed() / 200;
+        let _ = std::fs::remove_dir_all(dir);
+        took
+    };
+    let (small, large) = (per_drop(2_000), per_drop(20_000));
+    eprintln!("a drop into a page of 2,000 shapes: {small:?}, into one of 20,000: {large:?}");
+    assert!(large > small * 3, "a drop follows the shapes on the page: {small:?} then {large:?}");
 }
 
 /// The session clones its state for every command, and the file it holds with it: what an `.odg` keeps beside the bytes (the index of 350,000 shapes, the shapes
@@ -601,13 +678,17 @@ fn what_a_session_keeps_of_an_odg_is_shared_by_a_clone_of_the_file() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// Every shape of the page written, as a command that touches the whole drawing does: the shapes and their sheets are new.
+/// Every shape of the page written, as a command that touches the whole drawing does: the shapes and their sheets are new. Each call writes a value the shapes do not hold (one more
+/// than the first shape's), so that it is a change however often it is made: an edit that leaves the drawing as it was is no edit and no step of the history.
 fn edit_every_shape(s: &mut Session) {
     s.edit("Test edit", |doc: &mut Document| {
         let page = Arc::make_mut(doc.pages.get_mut(0).unwrap());
+        let held =
+            page.shapes.get(0).and_then(|first| first.sheet.cell("PinX")).and_then(|cell| cell.value.as_ref()).and_then(Value::number).unwrap_or(0.0);
+        let next = Value::from_text(&(held.floor() + 1.0).to_string());
         for at in 0..page.shapes.len() {
             let shape = Arc::make_mut(page.shapes.get_mut(at).unwrap());
-            Arc::make_mut(&mut shape.sheet).cells.insert(CellName::new("PinX"), Cell::constant(Value::from_text("1")).with_unit("IN"));
+            Arc::make_mut(&mut shape.sheet).cells.insert(CellName::new("PinX"), Cell::constant(next.clone()).with_unit("IN"));
         }
         Ok(())
     })
@@ -821,9 +902,10 @@ fn a_shape_flattened_by_an_earlier_save_is_given_again_until_what_it_was_made_fr
     s.execute("file.save", &json!({})).unwrap();
     let (flattened, reused, steps) = after_save(&s);
     assert_eq!((flattened, reused), (0, 6), "nothing is flattened again: the five and the connector are given again");
-    // A step for the visit of each shape, one for each `Connect` row, one for the look at the colours of each of the two shapes of the file (the copies given again
-    // are not looked at) and one for the way the connector is drawn.
-    assert_eq!(steps, shapes + 2 + 2 + 1, "{steps}: a copy given again costs the visit of it and nothing of what it cost to make");
+    // A step for the visit of each shape, one for the look at the colours of each of the two shapes of the file (the copies given again are not looked at) and one for the way
+    // the connector is drawn. (The flattening looked at each `Connect` row too, for a connector of the file glued to a shape the file lacks, which the writer refused; the writer writes
+    // that glue so there is no such look.)
+    assert_eq!(steps, shapes + 2 + 1, "{steps}: a copy given again costs the visit of it and nothing of what it cost to make");
     // One shape written: that shape is flattened again and the others are given again.
     s.execute("shape.move", &json!({ "ids": [a], "dx": 0.5, "dy": 0.0 })).unwrap();
     let (flattened, reused, _) = after_save(&s);
@@ -2422,4 +2504,29 @@ fn a_rounding_only_the_master_holds_is_kept_by_the_link_and_one_the_shape_holds_
     assert_eq!(rounding(910), Some(0.0), "the shape's own rounding of 0 wins over the master's, and is carried");
     assert!(rounding(920).is_some_and(|r| (r - 0.3).abs() < 1e-9), "the shape's own rounding is carried");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The copy a save makes of a shape the file does not hold carries the value a cell works out to where the cell holds a formula and no saved value, as the
+/// picture reads it: the writer reads the outline from the values, and `X` of `Width` and no value was a corner at 0. The formula is carried as it was.
+#[test]
+fn a_new_shape_whose_geometry_cells_hold_formulas_and_no_values_is_flattened_with_what_they_work_out_to() {
+    use diacraft_doc::{CellAddr, RowKey};
+    use diacraft_testkit::build::{DocBuilder, PageBuilder, ShapeBuilder};
+    let mut shape = ShapeBuilder::new(1).cell("PinX", "1").cell("PinY", "1").cell("Width", "2").cell("Height", "3");
+    for (i, (kind, x, y)) in [("MoveTo", "0", "0"), ("LineTo", "Width", "0"), ("LineTo", "Width", "Height")].into_iter().enumerate() {
+        let key = RowKey::Ix(i as u32);
+        shape = shape.row_type("Geometry", Some(0), key.clone(), kind);
+        shape = shape.set(CellAddr::in_row("Geometry", Some(0), key.clone(), "X"), Cell::with_formula(x, None));
+        shape = shape.set(CellAddr::in_row("Geometry", Some(0), key, "Y"), Cell::with_formula(y, None));
+    }
+    let doc = DocBuilder::new().page(1, PageBuilder::new().shape(shape)).build();
+    let flat = flatten_model(&doc, &Flattened::default(), u64::MAX).unwrap();
+    let copy = flat.doc.as_ref().expect("a shape the model writer finds no data of the file's on is new to it: flattened");
+    let shape = copy.pages.get(0).unwrap().shapes.iter().next().unwrap().clone();
+    let section = shape.sheet.sections.iter().find(|s| s.name.as_str() == "Geometry").expect("the outline is carried");
+    let cell = |ix: u32, name: &str| section.rows.iter().find(|r| r.ix == Some(ix)).and_then(|r| r.cells.get(name)).cloned().unwrap();
+    let (x, y) = (cell(2, "X"), cell(2, "Y"));
+    assert_eq!(x.value.as_ref().map(Value::text), Some("2"), "X of Width: {x:?}");
+    assert_eq!(y.value.as_ref().map(Value::text), Some("3"), "Y of Height: {y:?}");
+    assert_eq!((x.formula.text(), y.formula.text()), (Some("Width"), Some("Height")), "the formulas are carried as they were");
 }

@@ -13,6 +13,11 @@
 //! (ligatures, joined and right-to-left scripts, a made-up bold or slant, a letter the face lacks) is outlines, and counted as
 //! `TextAsOutlines`. [`TextMode::AsOutlines`] writes every letter as outlines, for a file that must look the same on any machine.
 //!
+//! **Alt text.** The file says what the SVG standard says it with. A shape that is drawn is a `<g>` whose first child is a `<title>` holding the shape's alt text title
+//! and next a `<desc>` holding its description, written as they are and escaped, and holding the shape's drawing and its members' (a group's `<g>` holds its members'). A shape with no alt text at all
+//! has its name as the `<title>` and no `<desc>`, and one with no name writes no group. The root `<svg>` has the page's title as its `<title>` when the page has one (else the export's title option),
+//! and the page's description as its `<desc>`. A title or description of white space only is never written. An export of the same page with no alt text and no names is the file it was.
+//!
 //! **Not in the file:** the grid, rulers, guides and selection, and shapes of a layer that is hidden.
 //!
 //! **Hostile input.** A drawing is as hostile as the file it came from. The walk bounds the shapes, rows, glyphs and time (the export's
@@ -27,7 +32,7 @@ mod target;
 mod text;
 
 use diacraft_color::Rgba;
-use diacraft_doc::Document;
+use diacraft_doc::{Document, SheetRef};
 use diacraft_render::Renderer;
 use diacraft_render::export::{PageLayout, draw_page};
 
@@ -62,6 +67,9 @@ pub fn export_page(renderer: &mut Renderer, doc: &Document, page: u32, options: 
     let mut target = SvgTarget::new(layout.to_px, (layout.width, layout.height), options.text);
     let (width, height) = layout.whole();
     let skipped = draw_page(renderer, doc, page, options.paper, &mut target)?;
-    let svg = target.finish(options.title.as_deref())?;
+    // The page's alt text is the file's own title and description; a page with no title leaves the `<title>` to the option.
+    let alt = diacraft_doc::alt_text::read_in(doc, &SheetRef::Page(page));
+    let title = if alt.title.has_text() { Some(alt.title.text) } else { options.title.as_deref() };
+    let svg = target.finish(title, Some(alt.description.text))?;
     Ok(Exported { bytes: svg.into_bytes(), width, height, skipped })
 }

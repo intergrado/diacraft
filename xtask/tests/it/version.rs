@@ -170,3 +170,33 @@ fn said_versions(text: &str) -> Vec<String> {
         })
         .collect()
 }
+
+/// A download that older releases never had is linked only by the pages made for the release it first came with or a later one: the `.rpm` first came with 0.2.4, and a page made for 0.2.3
+/// must not link a file of that release that does not exist. A pre-release of 0.2.4 builds the same files as the release, so it has them; every other download is in every release.
+#[test]
+fn a_download_that_came_with_a_later_release_is_not_in_the_releases_before_it() {
+    use xtask::version::{DOWNLOAD_SINCE, release_has};
+    assert_eq!(DOWNLOAD_SINCE, [("linux-x86_64-rpm", "0.2.4"), ("linux-arm64-rpm", "0.2.4")]);
+    for id in ["linux-x86_64-rpm", "linux-arm64-rpm"] {
+        for (version, has) in [
+            ("0.2.3", false),
+            ("0.2.2", false),
+            ("0.1.9", false),
+            ("0.2.4-rc.1", true),
+            ("0.2.4", true),
+            ("0.2.10", true),
+            ("0.3.0", true),
+            ("1.0.0-rc.1", true),
+            ("0.2", false),
+            ("x.y.z", false),
+            ("", false),
+        ] {
+            assert_eq!(release_has(version, id), has, "{id} in {version}");
+        }
+    }
+    for id in ["linux-x86_64-deb", "linux-arm64-appimage", "windows-x86_64-msi", "macos-arm64-dmg", "not-a-download"] {
+        for version in ["0.2.0", "0.2.3", "0.2.4", "x"] {
+            assert!(release_has(version, id), "{id} in {version}: only the downloads of DOWNLOAD_SINCE are held back");
+        }
+    }
+}

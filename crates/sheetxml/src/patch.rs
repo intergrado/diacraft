@@ -28,14 +28,27 @@
 //! The functions know which elements the reader modelled from the same rules it uses (`ns.rs`: an element is in a namespace the vocabulary
 //! reads; `read.rs`: a `Cell` with a name, once; and so on), so the item `k` of the model is the `k`th modelled element of the tree.
 //!
+//! **Two things an edit that numbers rows again, or adds an item before an unknown node, needs from the patcher**:
+//!
+//! * **An item numbered again finds its own element** ([`Identity`], [`match_items_with`]). A row is told by its `IX` and a Geometry section by its own, and the commands that insert and
+//!   delete rows and sections number the ones after them again, so the item with the number 2 now is not the item that held it, and matching by the number would give the element of the old
+//!   row 2 the content of the new one: its unknown attribute, element and comment would be given to another row, or refused. The patcher keeps the match by number where the two items
+//!   are the same *but for what an edit writes* (the number and the cells), and where they are not it looks for the unused item of the other model that is: the one whose unknown
+//!   attributes and unknown nodes are these (what the held data of the model says is no part of the tree, and is not compared). It is bounded in the comparisons it makes ([`MOVED_COMPARES_PER_ITEM`]) and
+//!   falls back to the number when the bound is spent.
+//! * **The unknown nodes of an item are the same nodes wherever the count before them says they stand** ([`same_unknown_nodes`]). The count is how many typed children stood before the node
+//!   when the file was read; an insert before the node leaves it as it was, while the tree holds the node attached to the item before it (the trailer, [`patch_list`]) and the file read back
+//!   counts again. The baseline of the second save of a session is the file read back, and the drawing the edited model, so the two counts differ although the nodes do not, and a patcher
+//!   that compared the counts refused every save after the first (`a change to the unknown elements of a shape`). The patcher never reads the count: it keeps the nodes where the tree has them.
+//!
 //! [`patch_list`], [`Items`] and [`match_items`] are not about sheets: a format patches its own lists (pages, masters, shapes) with them, and
 //! gives its own error type, which only has to be made from a [`PatchError`].
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::Hash;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use diacraft_container::xml::{El, Node};
-use diacraft_doc::{Cell, Cells, Row, Section, SectionKey, Sheet};
+use diacraft_doc::{Cell, Cells, Passthrough, Row, Section, SectionKey, Sheet};
 
 use crate::build::{
     cell_attrs, cell_children, cell_el, prefix_cell, prefix_row, prefix_section, row_attrs, row_el, section_attrs, section_el, sheet_is_empty,
@@ -171,6 +184,95 @@ pub fn match_items<T, K: Hash + Eq>(base: &[&T], now: &[&T], key: &dyn Fn(&T) ->
     (matched, used)
 }
 
+/// How many comparisons of the items of two models [`match_items_with`] may make for each item, over the pairs the key put together and the unmatched items it pairs again.
+pub const MOVED_COMPARES_PER_ITEM: usize = 64;
+
+/// What tells the item that an edit numbered again from the one that took its number: [`match_items_with`] gives each item the element that held *the same item*.
+pub struct Identity<'a, T> {
+    /// Whether two items are the same for what the patch keeps: what the file holds of each that the model has no field for (its unknown attributes and unknown nodes), which
+    /// an edit does not write. The key, the cells and what they hold are what an edit writes and are not compared; nor is the held data, which the main part does not carry.
+    pub same: &'a dyn Fn(&T, &T) -> bool,
+    /// A number that two items that are `same` share, to find the candidates for an item without a comparison with every unmatched item of the other model.
+    pub fingerprint: &'a dyn Fn(&T) -> u64,
+}
+
+/// [`match_items`], and then each pair the key put together that is not the same item ([`Identity::same`]) is undone, and the items left over, of `now` and of `base`, are paired again
+/// by identity, the lowest unused item of `base` first. A pair made by the very allocation is never undone, and a pair of items that are the same stays as the key made it (the content
+/// of the element is made right by the patch, and the trailers stay with the item the key says), so **only an item whose key moved onto a different item is matched again**. An item
+/// that finds no partner is made anew and the element that found none is taken out, with what it held that the model no longer holds: a row that took the number of a row that was
+/// deleted is not an edit of the deleted row. The comparisons are bounded by [`MOVED_COMPARES_PER_ITEM`] times the items, after which the key's pairs stand (and a change to the unknown
+/// nodes of such a pair is refused by the patch, as it always was).
+pub fn match_items_with<T, K: Hash + Eq>(
+    base: &[&T],
+    now: &[&T],
+    key: &dyn Fn(&T) -> Option<K>,
+    identity: Option<&Identity<'_, T>>,
+) -> (Vec<Option<usize>>, Vec<bool>) {
+    let (mut matched, mut used) = match_items(base, now, key);
+    let Some(identity) = identity else { return (matched, used) };
+    let mut budget = MOVED_COMPARES_PER_ITEM.saturating_mul(base.len().saturating_add(now.len()).max(1));
+    let mut undone = false;
+    for (j, slot) in matched.iter_mut().enumerate() {
+        let (Some(i), Some(item)) = (*slot, now.get(j)) else { continue };
+        let Some(old) = base.get(i) else { continue };
+        if std::ptr::eq(*old, *item) {
+            continue;
+        }
+        let Some(left) = budget.checked_sub(1) else { break };
+        budget = left;
+        if !(identity.same)(old, item) {
+            *slot = None;
+            if let Some(u) = used.get_mut(i) {
+                *u = false;
+            }
+            undone = true;
+        }
+    }
+    if !undone {
+        return (matched, used);
+    }
+    let mut free: HashMap<u64, VecDeque<usize>> = HashMap::new();
+    for (i, old) in base.iter().enumerate() {
+        if !used.get(i).copied().unwrap_or(true) {
+            free.entry((identity.fingerprint)(old)).or_default().push_back(i);
+        }
+    }
+    for (j, item) in now.iter().enumerate() {
+        if matched.get(j).copied().flatten().is_some() {
+            continue;
+        }
+        let Some(queue) = free.get_mut(&(identity.fingerprint)(item)) else { continue };
+        let mut found = None;
+        for (at, &i) in queue.iter().enumerate() {
+            let Some(left) = budget.checked_sub(1) else { break };
+            budget = left;
+            if base.get(i).is_some_and(|old| (identity.same)(old, item)) {
+                found = Some(at);
+                break;
+            }
+        }
+        if let Some(at) = found
+            && let Some(i) = queue.remove(at)
+        {
+            if let Some(m) = matched.get_mut(j) {
+                *m = Some(i);
+            }
+            if let Some(u) = used.get_mut(i) {
+                *u = true;
+            }
+        }
+    }
+    (matched, used)
+}
+
+/// Whether two lists of unknown nodes hold the same nodes in the same order, **wherever each says it stood**. The place a node says is the count of typed children before it when the
+/// file was read ([`diacraft_doc::Placed::after`]); the patcher keeps every node where the tree has it, attached to the item before it, and never reads the count, so a difference of the
+/// count alone is no change to write (and no change to refuse).
+#[must_use]
+pub fn same_unknown_nodes(a: &Passthrough, b: &Passthrough) -> bool {
+    a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.node == y.node)
+}
+
 /// What [`patch_list`] calls to bring the element of an item that is in both models, and differs, from the baseline item to the new one.
 pub type PatchFn<'a, V, T, E> = dyn FnMut(&mut El, &Scope<V>, &T, &T) -> Result<(), E> + 'a;
 
@@ -191,6 +293,22 @@ pub fn patch_list<V: Vocabulary, T: PartialEq, K: Hash + Eq, E: From<PatchError>
     parent: &mut El,
     sc: &Scope<V>,
     kind: &Items<'_, V, T, K>,
+    base: &[&T],
+    now: &[&T],
+    patch: &mut PatchFn<'_, V, T, E>,
+    make: &mut dyn FnMut(&T) -> Result<El, E>,
+) -> Result<(), E> {
+    patch_list_with(parent, sc, kind, None, base, now, patch, make)
+}
+
+/// [`patch_list`] for items that an edit may number again: each item is matched to its element by [`match_items_with`] and `identity`, so that the element of a row whose number
+/// moved goes on holding that row. With `None` it is [`patch_list`].
+#[allow(clippy::too_many_arguments)]
+pub fn patch_list_with<V: Vocabulary, T: PartialEq, K: Hash + Eq, E: From<PatchError>>(
+    parent: &mut El,
+    sc: &Scope<V>,
+    kind: &Items<'_, V, T, K>,
+    identity: Option<&Identity<'_, T>>,
     base: &[&T],
     now: &[&T],
     patch: &mut PatchFn<'_, V, T, E>,
@@ -227,7 +345,7 @@ pub fn patch_list<V: Vocabulary, T: PartialEq, K: Hash + Eq, E: From<PatchError>
     }
 
     let n = base.len();
-    let (matched, used) = match_items(base, now, kind.key);
+    let (matched, used) = match_items_with(base, now, kind.key, identity);
 
     // The chain of an item: the trailer after it, and the trailers after the items taken out right behind it. The start's chain is the same
     // for the nodes before the first item.
@@ -454,7 +572,7 @@ pub fn patch_sheet_children_prefixed<V: Vocabulary, E: From<PatchError>>(
 }
 
 fn patch_sheet<V: Vocabulary>(el: &mut El, sc: &Scope<V>, base: &Sheet, now: &Sheet, prefix: &str) -> Result<(), PatchError> {
-    unsupported_unless(base.passthrough == now.passthrough, "a change to the unknown elements of a sheet")?;
+    unsupported_unless(same_unknown_nodes(&base.passthrough, &now.passthrough), "a change to the unknown elements of a sheet")?;
     patch_cells(el, sc, &base.cells, &now.cells, prefix)?;
     if base.sections.is_empty() && now.sections.is_empty() {
         return Ok(());
@@ -467,7 +585,8 @@ fn patch_sheet<V: Vocabulary>(el: &mut El, sc: &Scope<V>, base: &Sheet, now: &Sh
         first_at: &|lead: &[Node]| after_last(lead, &["Cell"]),
         is_it: &|e: &El, s: &Section| e.attr("N") == Some(s.name.as_str()),
     };
-    patch_list(el, sc, &kind, &b, &n, &mut |e, esc, b, n| patch_section(e, esc, b, n, prefix), &mut |s| {
+    let identity = Identity { same: &same_section, fingerprint: &section_fingerprint };
+    patch_list_with(el, sc, &kind, Some(&identity), &b, &n, &mut |e, esc, b, n| patch_section(e, esc, b, n, prefix), &mut |s| {
         let mut made = section_el(s);
         prefix_section(&mut made, prefix);
         Ok(made)
@@ -476,7 +595,13 @@ fn patch_sheet<V: Vocabulary>(el: &mut El, sc: &Scope<V>, base: &Sheet, now: &Sh
 
 fn patch_section<V: Vocabulary>(el: &mut El, sc: &Scope<V>, base: &Section, now: &Section, prefix: &str) -> Result<(), PatchError> {
     sync_attrs(el, &section_attrs(base), &section_attrs(now));
-    unsupported_unless(base.passthrough == now.passthrough, "a change to the unknown elements of a section")?;
+    // **A section a save writes has no `IX` but `Geometry`'s** (no `Connection` section of the oracle files has one). The model keeps the attribute a file wrote on another section, as
+    // it keeps every attribute it has no field for, so a visit gives it back; but a section an edit reaches is written anew, and the edit takes it off. A section no edit reaches is not patched,
+    // and keeps what the file has.
+    if now.name.as_str() != "Geometry" {
+        remove_attr(el, "IX");
+    }
+    unsupported_unless(same_unknown_nodes(&base.passthrough, &now.passthrough), "a change to the unknown elements of a section")?;
     patch_cells(el, sc, &base.cells, &now.cells, prefix)?;
     if base.rows.is_empty() && now.rows.is_empty() {
         return Ok(());
@@ -490,16 +615,56 @@ fn patch_section<V: Vocabulary>(el: &mut El, sc: &Scope<V>, base: &Section, now:
         first_at: &at_end,
         is_it: &|_: &El, _: &Row| true,
     };
-    patch_list(el, sc, &kind, &b, &n, &mut |e, esc, b, n| patch_row(e, esc, b, n, prefix), &mut |r| {
+    let identity = Identity { same: &same_row, fingerprint: &row_fingerprint };
+    patch_list_with(el, sc, &kind, Some(&identity), &b, &n, &mut |e, esc, b, n| patch_row(e, esc, b, n, prefix), &mut |r| {
         let mut made = row_el(r);
         prefix_row(&mut made, prefix);
         Ok(made)
     })
 }
 
+/// Whether two rows hold the same of what the file has and the model has no field for: the unknown attributes and the unknown nodes (wherever each says it stood). **This is what
+/// makes a row the row an element holds**: its number, its cells and their values are what an edit writes, and the patch brings the element to them; the unknown content is what the patch
+/// keeps, so a row that took the number of another is paired with the element that holds its own unknown content, and a row that holds none with one that holds none.
+fn same_row(a: &Row, b: &Row) -> bool {
+    a.raw == b.raw && same_unknown_nodes(&a.passthrough, &b.passthrough)
+}
+
+/// What two rows that are [`same_row`] share, for finding the candidates.
+fn row_fingerprint(r: &Row) -> u64 {
+    let mut h = DefaultHasher::new();
+    unknown_fingerprint(&r.raw, &r.passthrough, &mut h);
+    h.finish()
+}
+
+/// Whether two sections hold the same of what the file has and the model has no field for (see [`same_row`]): the same name, and the same unknown attributes and nodes. The rows
+/// are told by themselves.
+fn same_section(a: &Section, b: &Section) -> bool {
+    a.name == b.name && a.raw == b.raw && same_unknown_nodes(&a.passthrough, &b.passthrough)
+}
+
+/// What two sections that are [`same_section`] share.
+fn section_fingerprint(s: &Section) -> u64 {
+    let mut h = DefaultHasher::new();
+    s.name.as_str().hash(&mut h);
+    unknown_fingerprint(&s.raw, &s.passthrough, &mut h);
+    h.finish()
+}
+
+/// Hashes what an item holds that the file has no field for: that it holds any, and what each node says.
+fn unknown_fingerprint(raw: &diacraft_doc::RawAttrs, passthrough: &Passthrough, h: &mut DefaultHasher) {
+    if !raw.is_empty() {
+        format!("{raw:?}").hash(h);
+    }
+    passthrough.len().hash(h);
+    for placed in passthrough.iter() {
+        format!("{:?}", placed.node).hash(h);
+    }
+}
+
 fn patch_row<V: Vocabulary>(el: &mut El, sc: &Scope<V>, base: &Row, now: &Row, prefix: &str) -> Result<(), PatchError> {
     sync_attrs(el, &row_attrs(base), &row_attrs(now));
-    unsupported_unless(base.passthrough == now.passthrough, "a change to the unknown elements of a row")?;
+    unsupported_unless(same_unknown_nodes(&base.passthrough, &now.passthrough), "a change to the unknown elements of a row")?;
     patch_cells(el, sc, &base.cells, &now.cells, prefix)
 }
 

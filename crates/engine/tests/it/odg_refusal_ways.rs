@@ -56,11 +56,11 @@ fn each_refusal_of_an_odg_save_says_to_undo_the_change_and_the_undo_saves() {
     }
 }
 
-/// **A shape put back by an undo, with a connector of the file glued to it, is refused with the way out that works** (the review, parked item 3):
-/// deleting both ends of a connector and saving, then undoing the delete, leaves a connector glued to shapes the file no longer holds. The refusal used to say to
-/// undo the change, which goes round (the undo is the change). It names a redo, which gives the drawing the file has, and the redo saves.
+/// **A shape put back by an undo, with a connector of the file glued to it, is saved with its glue** (it was refused with a redo as the way out, since the undo is the
+/// change and undoing again goes round): deleting both ends of a connector and saving, then undoing the delete, leaves a connector glued to shapes the file no longer holds. The
+/// save writes the shapes and the glue, the file reads back with the connector glued to both, and the redo and the undo after it save as the drawing the session holds.
 #[test]
-fn a_shape_an_undo_put_back_is_refused_with_a_redo_as_the_way_out_and_the_redo_saves() {
+fn a_shape_an_undo_put_back_is_saved_with_the_glue_of_the_connector_of_the_file() {
     let dir = Dir::new();
     let ided = |text: String, id: &str| text.replacen("<draw:custom-shape ", &format!("<draw:custom-shape xml:id=\"{id}\" draw:id=\"{id}\" "), 1);
     let shapes = [
@@ -74,18 +74,19 @@ fn a_shape_an_undo_put_back_is_refused_with_a_redo_as_the_way_out_and_the_redo_s
     run(&mut s, "shape.delete", json!({ "ids": [a, b] }));
     assert_eq!(crate::odg_file::save(&mut s)["edited"], true);
     run(&mut s, "edit.undo", json!({}));
-    let said = refused(&mut s);
-    assert!(said.contains("put back by an undo"), "{said}");
-    assert!(said.contains("Redo the change you took back (edit.redo) to save") && !said.contains("Undo the change (edit.undo)"), "{said}");
-    assert!(said.chars().count() <= 601, "{said}");
-    // The way out works: the redo is the drawing the file holds.
+    assert_eq!(crate::odg_file::save(&mut s)["edited"], true, "the shapes and the glue come back");
+    assert_reopens_as_saved(&dir, &mut s, "a.odg", 0);
+    let glued = |s: &Session| s.document().unwrap().pages.get(0).unwrap().connects.len();
+    assert_eq!(glued(&s), 2, "the connector is glued at both ends");
+    // The redo is the drawing with the shapes gone, and the undo after it the drawing with them: each saves as the session holds it.
     run(&mut s, "edit.redo", json!({}));
-    assert_eq!(crate::odg_file::save(&mut s)["edited"], false);
-    // The other way out the words name: the shapes deleted again.
+    assert_eq!(crate::odg_file::save(&mut s)["edited"], true);
+    assert_eq!(glued(&s), 0);
+    assert_reopens_as_saved(&dir, &mut s, "a.odg", 0);
     run(&mut s, "edit.undo", json!({}));
-    assert!(s.execute("file.save", &json!({})).is_err());
-    run(&mut s, "shape.delete", json!({ "ids": [a, b] }));
-    assert_eq!(crate::odg_file::save(&mut s)["edited"], false);
+    assert_eq!(crate::odg_file::save(&mut s)["edited"], true);
+    assert_eq!(glued(&s), 2);
+    assert_reopens_as_saved(&dir, &mut s, "a.odg", 0);
 }
 
 /// **Nothing warns at the time it is made any more** (warned of a curved connector while the save refused it; writes it as cubics): a

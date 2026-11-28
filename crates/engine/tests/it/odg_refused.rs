@@ -169,11 +169,12 @@ fn a_refused_command_is_undone_and_the_drawing_saves_again() {
     assert_eq!(saved["edited"], false);
 }
 
-/// Found by the random walks (`odg_random.rs`): a connector the file holds, glued to a shape the file does not hold. An undo put a shape back after a save that
-/// deleted it, with the glue of a connector of the file. The writer writes the glue of the connectors it makes and refuses a glue made anew between shapes of
-/// the file, and passed this one by: the save was made and the file lacked a glue the drawing had. The engine refuses it in words.
+/// Found by the random walks (`odg_random.rs`): a connector the file holds, glued to a shape the file does not hold. An undo put a shape back after a save that deleted it, with
+/// the glue of a connector of the file. The writer wrote the glue of the connectors it makes and refused a glue made anew between shapes of the file, and passed this one by:
+/// the save was made and the file lacked a glue the drawing had. The save wrote nothing then, in words; **it writes the shape and the glue**, and the file
+/// reads back with the connector glued to the shape again.
 #[test]
-fn a_connector_of_the_file_glued_to_a_shape_the_file_does_not_hold_is_refused_in_words_and_not_saved_without_its_glue() {
+fn a_connector_of_the_file_glued_to_a_shape_the_file_does_not_hold_is_saved_with_its_glue() {
     let dir = Dir::new();
     let mut s = open_drawing(&dir, &four());
     let made = run(&mut s, "shape.drop", json!({ "master": "rectangle", "page": 0, "x": 4.0, "y": 2.0 }));
@@ -185,10 +186,8 @@ fn a_connector_of_the_file_glued_to_a_shape_the_file_does_not_hold_is_refused_in
     assert_eq!(run(&mut s, "file.save", json!({}))["edited"], true);
     // The delete is taken back: the shape is not in the file, and the connector that is has its glue to it again.
     run(&mut s, "edit.undo", json!({}));
-    let (file, held) = (dir.read("a.odg"), snapshot(&s));
-    let said = refused(&mut s);
-    assert!(said.contains("a connector of the file glued to a shape that is not in the file"), "{said}");
-    assert_eq!((dir.read("a.odg"), snapshot(&s)), (file, held), "nothing was written and the session is as it was");
+    assert_eq!(run(&mut s, "file.save", json!({}))["edited"], true, "the shape and the glue are written");
+    crate::odg_file::assert_reopens_as_saved(&dir, &mut s, "a.odg", 0);
     // Taking back the connector too leaves a shape and nothing glued: it saves, and reads back as it is.
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(run(&mut s, "file.save", json!({}))["edited"], true);

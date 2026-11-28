@@ -2,8 +2,8 @@
 
 Right-angle connector routing for DiaCraft: a route round boxes, kept off other connectors, found within a work budget. It is a layer-2 crate that uses
 the standard library alone and knows nothing of a document, so its names say nothing of DiaCraft and it can be carved into craft-libs for the other Craft apps'
-connectors. The engine decides which shapes are obstacles and what the cells say; this crate finds the route. The window's routing preview calls it, and nothing in the engine does yet (
-do).
+connectors. The engine decides which shapes are obstacles and what the cells say; this crate finds the route. The window's routing preview calls it, the engine's kept scene holds each page's obstacles and legs in its
+types, and nothing in the engine routes with it yet (will).
 
 ## What it does
 

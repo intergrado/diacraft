@@ -237,6 +237,9 @@ keys! {
     WhiteSpace = "whiteSpace" => Ty::Text,
     /// `overflow`: `visible`, `hidden`, `fill` or `width` (S-R22).
     Overflow = "overflow" => Ty::Text,
+    /// `textDirection`: the direction of the label's paragraphs (S-R40): `rtl` is right to left, and every other value (`ltr`, `auto`, `default`, `vertical-lr`, `vertical-rl`) leaves the label
+    /// as it is.
+    TextDirection = "textDirection" => Ty::Text,
     /// `startArrow`: the start mark's name (S-R29).
     StartArrow = "startArrow" => Ty::Text,
     /// `endArrow`: the end mark's name (S-R29).

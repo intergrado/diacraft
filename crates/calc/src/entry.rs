@@ -15,6 +15,8 @@
 //!   rules (a failing cell reads at its last good value), which may not be the order a commit works the cells out in.
 //! * **An action cell is never worked out** (`Action` and its kin): the text is parsed, and its errors are given, but no `SETF` runs and
 //!   no value is made ([`EvalResult::ActionCell`]).
+//! * **A `SETF` is worked out as a commit would, and writes nothing**: its value is 0, or the error a commit would give (a first argument that is neither
+//!   `GETREF(cell)` nor a string that names a cell, a cell found nowhere), and the write it asks for is dropped with the run (`setf.rs`).
 //! * A bare number is **fitted as calc fits a formula's result** (the stored number is kept and only the unit changes). The rule a command uses for
 //!   a literal typed in a cell (which reads the number in the unit the cell shows) is the command's, and the two agree in inches.
 //!
@@ -100,7 +102,7 @@ fn run(doc: &Document, ctx: &mut EvalCtx, sheet: &SheetRef, at: Option<&CellAddr
     }
     if live && let Some(facts) = ev.facts_of(&formula) {
         // The cells the text names are worked out first, deepest first and without recursion, as a cell's own formula's would be.
-        for r in &facts.refs {
+        for r in facts.named() {
             if ev.exhausted() {
                 break;
             }

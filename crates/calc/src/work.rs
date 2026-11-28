@@ -66,15 +66,23 @@ mod on {
         COMMITS.with(|c| c.set(c.get().saturating_add(1)));
         STEPS.with(|c| c.set(c.get().saturating_add(steps)));
     }
+
+    /// Steps taken outside a commit's own count: the listing of the sheets that name a page, made to find what a change to the pages reads, which a change that nothing reads makes with no
+    /// commit after it.
+    pub(crate) fn stepped(steps: u64) {
+        STEPS.with(|c| c.set(c.get().saturating_add(steps)));
+    }
 }
 
 #[cfg(feature = "test-support")]
-pub(crate) use on::{asked, cells_walk, committed};
+pub(crate) use on::{asked, cells_walk, committed, stepped};
 #[cfg(feature = "test-support")]
 pub use on::{cells_walked, commits, formulas_asked, reset, steps};
 
 #[cfg(not(feature = "test-support"))]
 pub(crate) fn committed(_: u64) {}
+#[cfg(not(feature = "test-support"))]
+pub(crate) fn stepped(_: u64) {}
 #[cfg(not(feature = "test-support"))]
 pub(crate) fn asked() {}
 #[cfg(not(feature = "test-support"))]

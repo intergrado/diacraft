@@ -31,6 +31,7 @@
 //! it counts is stored; nothing is truncated. What the model has no slot for is counted in the report (`kept`) and stays in the file's
 //! bytes, which the caller keeps.
 
+mod alt;
 pub(crate) mod cells;
 pub(crate) mod comments;
 mod connectors;
@@ -75,16 +76,16 @@ use crate::package::Package;
 use crate::report::{ReadReport, shown};
 use styles::Tab;
 
-#[cfg(kani)]
-pub(crate) use connectors::Boxed;
+pub(crate) use connectors::glue_formula;
 pub(crate) use connectors::glue_row_beside;
+pub(crate) use connectors::{Boxed, Place};
 /// For the Kani harnesses of the crate (`crate::kani_proofs`).
 #[cfg(kani)]
 pub(crate) use connectors::{glue_row, own_glue_row};
 pub(crate) use custom::reads_no_glue_points;
+pub(crate) use shapes::text_turn_beside_flips;
 pub(crate) use shapes::{Affine, FrameRead, frame_read, transform_map, turn_beside_mirrors};
-#[cfg(kani)]
-pub(crate) use shapes::{Kindof, glue_box, text_turn_beside_flips};
+pub(crate) use shapes::{Kindof, glue_box};
 
 /// The items a cell costs the document's total ([`Limits::max_items`]): what the VSDX reader charges for the same cell's markup (a `Cell`
 /// element and its `N`, `V` and `U` attributes, four XML items). At [`ITEM_BYTES`] an item that is 256 bytes: a cell's entry in its map
@@ -205,6 +206,16 @@ pub(crate) mod cost {
             + held(ARC + "DiaCraftRoute".len())
             + slot(size_of::<std::sync::Arc<Section>>()),
     );
+
+    /// A row of alt text (`User.visAltText` or `User.visAltDescription`, `alt.rs`) beside its two cells and its text (charged where they are made): the row behind its `Arc`, its
+    /// node of cells, its name and its place in the section's list of rows.
+    pub(crate) const ALT_ROW: usize =
+        priced(held(ARC + size_of::<Row>()) + held(NODE) + held(ARC + "visAltDescription".len()) + slot(size_of::<std::sync::Arc<Row>>()));
+
+    /// The `User` section a shape that had none is given for its alt text: the section behind its `Arc`, the list of its rows (room for four at the first) and its place in
+    /// the sheet's list of sections.
+    pub(crate) const ALT_SECTION: usize =
+        priced(held(ARC + size_of::<Section>()) + held(4 * size_of::<std::sync::Arc<Row>>()) + slot(size_of::<std::sync::Arc<Section>>()));
 
     /// A `Connect` row of a connector's glued end: its place in the page's list of connects, which grows by doubling, and its two cell names (`BeginX` or `EndX`,
     /// and `PinX` or `Connections.X<n>`, at most 24 bytes each). It was four items; counted, a glued connector's two ends kept 400 bytes in 4

@@ -122,11 +122,7 @@ fn target_page(s: &Session, p: &Value, shape: Option<u32>, cmd: &str) -> Result<
         return draw::page_holding(doc, None, &[id]).ok_or_else(|| bad(cmd, format!("no page holds shape {id}")));
     }
     let (pages, _, _) = org::summary(doc, SUMMARY_SHAPES, true);
-    pages
-        .first()
-        .map(|(id, _)| *id)
-        .or_else(|| doc.pages.iter().find(|p| !p.background).or_else(|| doc.pages.iter().next()).map(|p| p.id))
-        .ok_or_else(|| bad(cmd, "the document has no pages"))
+    pages.first().map(|(id, _)| *id).or_else(|| doc.first_foreground_page().map(|p| p.id)).ok_or_else(|| bad(cmd, "the document has no pages"))
 }
 
 /// A space in paper inches, more than 0 and within what the page may hold: in drawing units.

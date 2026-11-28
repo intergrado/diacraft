@@ -6,10 +6,18 @@
 //! Right one of -90, which is the engine's convention (a positive angle is leftward). **The first shape selected is the one the others align
 //! to**, which is the order the window keeps its selection in.
 
-use diacraft_engine::Result;
-use serde_json::json;
+use diacraft_engine::{EngineError, Result};
+use serde_json::{Value, json};
 
 use crate::app::DiacraftApp;
+
+/// The most shapes one `connector.reverse_ends` call takes (its `ids`, as the other commands that take many).
+const REVERSE_CALL: usize = 4_096;
+
+/// The calls of `connector.reverse_ends` a selection goes in: its shapes in order, [`REVERSE_CALL`] to a call, each naming the page.
+fn reverse_calls(ids: &[u32], page: u32) -> Vec<Value> {
+    ids.chunks(REVERSE_CALL).map(|chunk| json!({"ids": chunk, "page": page})).collect()
+}
 
 impl DiacraftApp {
     /// `arrange.rotate`: turns the selection by `by` degrees counterclockwise (`shape.rotate`).
@@ -22,6 +30,53 @@ impl DiacraftApp {
     pub(crate) fn arrange_flip(&mut self, axis: &str) -> Result<()> {
         let (page, ids) = self.selection_target("arrange.flip")?;
         self.arrange("shape.flip", &json!({"ids": ids, "axis": axis, "page": page}), page, &ids, true)
+    }
+
+    /// Whether `arrange.reverseEnds` can run: a drawing with the shapes selected, one of them a connector or a line. With no scene to ask it says yes and leaves the
+    /// command to refuse.
+    pub(crate) fn reverse_ends_enabled(&self) -> std::result::Result<(), String> {
+        if self.session().document().is_none() {
+            return Err("no document open".to_owned());
+        }
+        if self.ui.edit.selection().is_empty() {
+            return Err("nothing is selected".to_owned());
+        }
+        if self.selection_kinds().0 { Ok(()) } else { Err("select a connector or a line: Reverse Ends swaps its begin and end".to_owned()) }
+    }
+
+    /// `arrange.reverseEnds`: `connector.reverse_ends` of the connectors and lines among the shapes selected. The other shapes of the selection are not sent, so that
+    /// a box selected with its connectors is no refusal. **A selection of more shapes than one call takes** goes in calls of one batch, one undo step. What the engine left alone
+    /// (a protected end, a path it cannot reverse) is said in the status bar, in its words.
+    pub(crate) fn arrange_reverse_ends(&mut self) -> Result<()> {
+        let (page, _) = self.selection_target("arrange.reverseEnds")?;
+        let connectors = self.selected_connectors();
+        if connectors.is_empty() {
+            return Err(EngineError::BadParams {
+                cmd: "arrange.reverseEnds".to_owned(),
+                msg: "select a connector or a line: Reverse Ends swaps its begin and end".to_owned(),
+            });
+        }
+        // A label being typed is sent first, as for Change Shape.
+        self.commit_pending_text();
+        let before = self.session.revision();
+        let calls = reverse_calls(&connectors, page);
+        let answers: Vec<Value> = match calls.as_slice() {
+            [only] => vec![self.execute("connector.reverse_ends", only)?],
+            many => {
+                let steps: Vec<Value> = many.iter().map(|params| json!({"command": "connector.reverse_ends", "params": params})).collect();
+                let done = self.execute("command.batch", &json!({"commands": steps, "label": "Reverse ends"}))?;
+                done["results"].as_array().cloned().unwrap_or_default()
+            }
+        };
+        if self.session.revision() != before {
+            self.keep_preview(page, &connectors);
+        }
+        // The engine's own words, when it left something as it was.
+        let left_alone = |answer: &&Value| ["locked", "skipped", "geometry_kept"].iter().any(|key| answer.get(*key).is_some());
+        if let Some(says) = answers.iter().find(left_alone).and_then(|answer| answer["says"].as_str()) {
+            self.set_notice(says);
+        }
+        Ok(())
     }
 
     /// `arrange.order`: moves the selection in the drawing order, `front`, `back`, `forward` or `backward` (`shape.order`).
@@ -64,5 +119,24 @@ impl DiacraftApp {
             self.keep_preview(page, ids);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_selection_past_one_calls_ids_goes_in_calls_that_hold_every_shape_once_in_order() {
+        let ids: Vec<u32> = (0..10_000).collect();
+        let calls = reverse_calls(&ids, 7);
+        assert_eq!(calls.len(), 3);
+        let sizes: Vec<usize> = calls.iter().map(|c| c["ids"].as_array().map_or(0, Vec::len)).collect();
+        assert_eq!(sizes, [4_096, 4_096, 1_808]);
+        let again: Vec<u64> = calls.iter().flat_map(|c| c["ids"].as_array().cloned().unwrap_or_default()).filter_map(|v| v.as_u64()).collect();
+        assert_eq!(again, (0..10_000_u64).collect::<Vec<_>>());
+        assert!(calls.iter().all(|c| c["page"] == 7));
+        assert_eq!(reverse_calls(&ids[..1], 1).len(), 1, "one shape is one call");
+        assert!(reverse_calls(&[], 1).is_empty(), "no shape, no call");
     }
 }

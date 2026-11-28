@@ -89,7 +89,11 @@ impl DiacraftApp {
             let rect = ui.max_rect();
             bar::paint(ui, rect, &t, BarIn { text: &text, edit: edit.as_mut() })
         });
-        let words = edit.as_ref().and_then(|e| e.refusal.as_ref().map(|r| e.fault.as_ref().map_or_else(|| r.clone(), |f| f.words.clone())));
+        // The Edit Formula card says it itself, over the window: no second line under the bar.
+        let words = edit
+            .as_ref()
+            .filter(|e| !e.in_card)
+            .and_then(|e| e.refusal.as_ref().map(|r| e.fault.as_ref().map_or_else(|| r.clone(), |f| f.words.clone())));
         if let Some(tab) = self.ui.sheet.tabs.get_mut(active) {
             tab.edit = edit;
         }
@@ -120,8 +124,11 @@ impl DiacraftApp {
     /// A press in the bar's text: an edit of the selected cell's formula begins there, or the one open in the cell moves to the bar.
     fn sheet_bar_begin(&mut self) {
         if let Some(edit) = self.ui.sheet.tabs.get_mut(self.ui.sheet.active).and_then(|t| t.edit.as_mut()) {
-            edit.in_bar = true;
-            edit.fresh = true;
+            // The card has the text: a press in the bar does not take it away.
+            if !edit.in_card {
+                edit.in_bar = true;
+                edit.fresh = true;
+            }
         } else {
             self.sheet_try_begin(Begin::Text { in_bar: true });
         }
@@ -299,43 +306,6 @@ impl DiacraftApp {
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, format!("Status: {text}")));
         resp.on_hover_text(text);
         self.note("sheet.footer", footer, false);
-    }
-
-    /// The sheet's right-click menu (opened by a right click or Shift+F10): Formulas and Values, the View group's two toggles (the command `window.sheetView`). It closes on a press
-    /// elsewhere, on Escape and on an item.
-    fn sheet_menu(&mut self, ctx: &egui::Context, t: &Tokens) {
-        let Some(at) = self.ui.sheet.menu else { return };
-        let (formulas, values) = (self.ui.sheet.formulas, self.ui.sheet.values);
-        let mut chosen: Option<&'static str> = None;
-        let mut seen: Vec<(&'static str, Rect)> = Vec::new();
-        let area = egui::Area::new(egui::Id::unique("sheet_menu")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
-            Frame::popup(ui.style()).fill(t.panel_fill).show(ui, |ui| {
-                ui.set_min_width(140.0);
-                for (label, on, key) in [("Formulas", formulas, "formulas"), ("Values", values, "values")] {
-                    // A check box: the tick says which of the two views are on.
-                    let mut ticked = on;
-                    let item = ui.checkbox(&mut ticked, label);
-                    seen.push((label, item.rect));
-                    if item.clicked() {
-                        chosen = Some(key);
-                    }
-                }
-            });
-        });
-        for (label, rect) in seen {
-            self.note(format!("sheet.menu.{label}"), rect, true);
-        }
-        let close = chosen.is_some() || area.response.clicked_elsewhere();
-        if let Some(key) = chosen {
-            let on = if key == "formulas" { formulas } else { values };
-            if let Err(e) = self.execute("window.sheetView", &serde_json::json!({ key: !on })) {
-                self.set_notice(&e.to_string());
-            }
-        }
-        if close {
-            self.ui.sheet.menu = None;
-            ctx.request_repaint();
-        }
     }
 
     /// What the grid's presses asked for: a cell chosen (an open edit is committed first, and stays when the command refuses it), a double click that begins an edit, a right

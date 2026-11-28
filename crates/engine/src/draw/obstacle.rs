@@ -27,6 +27,8 @@ use std::collections::{HashMap, HashSet};
 
 use diacraft_doc::{CellAddr, CellEdit, CellWrite, Document, Owner, Shape, ShapeRef, ShapeType, SheetRef, Value, WriteOrigin, WriteOutcome};
 
+use diacraft_route::{Step, Work};
+
 use super::layers::{self, Layer};
 use super::read::Reader;
 use super::route::P;
@@ -34,7 +36,6 @@ use super::{MAX_COORD, Problem};
 
 /// How many levels of groups below a top-level group are looked into for obstacles: a group that holds 8 and not 1 gives its members, and theirs, down to this many levels.
 /// (Not [`super::MAX_GROUP_DEPTH`], which is how deep a person may nest groups.)
-#[allow(dead_code, reason = "read by the page's kept scene and by the router's caller, which are not built yet")]
 pub(crate) const MAX_MEMBER_DEPTH: usize = 8;
 
 /// `ObjType` flag 1: placeable, an obstacle and a node for layout.
@@ -177,7 +178,6 @@ impl ObstacleFacts {
     }
 
     /// Whether the shape is an obstacle when `glued` says whether a connector is glued to it.
-    #[allow(dead_code, reason = "read by the page's kept scene and by the router's caller, which are not built yet")]
     pub(crate) fn is_obstacle(&self, glued: bool) -> bool {
         self.check(glued).is_ok()
     }
@@ -246,20 +246,22 @@ pub(crate) fn read_candidate(reader: &Reader<'_>, at: &ShapeRef, layers: &Hidden
 
 /// Shape `at` as an obstacle when `glued` says a connector is glued to it: its facts, or `None` when it is none (for the shape alone: a group's
 /// members are [`obstacles_of`]'s).
-#[allow(dead_code, reason = "read by the page's kept scene and by the router's caller, which are not built yet")]
+#[allow(dead_code, reason = "read by the router's caller, which is not built yet")]
 pub(crate) fn read_obstacle(reader: &Reader<'_>, at: &ShapeRef, glued: bool) -> Option<ObstacleFacts> {
     let layers = HiddenLayers::of(reader.doc(), at.owner);
     read_candidate(reader, at, &layers).ok().filter(|facts| facts.is_obstacle(glued))
 }
 
-/// What [`obstacles_of`] found.
-#[allow(dead_code, reason = "read by the page's kept scene and by the router's caller, which are not built yet")]
+/// What [`obstacles_of`] and [`candidates_below`] found.
 #[derive(Debug, Default)]
 pub(crate) struct Found {
-    /// The obstacles, in document order.
+    /// The shapes, in document order.
     pub obstacles: Vec<ObstacleFacts>,
     /// The read stopped because `budget` was spent: there are shapes it did not look at.
     pub cut: bool,
+    /// The read stopped because the work it was given ([`candidates_below`]) was refused a step: there are shapes it did not look at, and **what it found is not what a read would find**. A cut
+    /// of `budget` is a rule of the page and this is not: the caller's work ran out.
+    pub refused: bool,
 }
 
 /// The obstacles of a top-level shape `top`: the shape itself, or, for a group that holds 8 and not 1, its members by the same rule down to [`MAX_MEMBER_DEPTH`] levels (a group of 9
@@ -268,8 +270,45 @@ pub(crate) struct Found {
 ///
 /// **What it holds.** The groups being read are an explicit stack of the group and the next member to look at, at most [`MAX_MEMBER_DEPTH`] of them whatever a group holds: a group of
 /// 200,000 members read with a budget of 50 makes 50 references to members, and not 200,000 first.
-#[allow(dead_code, reason = "read by the page's kept scene and by the router's caller, which are not built yet")]
+#[allow(dead_code, reason = "the oracle of the kept scene's tests and the router's caller, which is not built yet")]
 pub(crate) fn obstacles_of(reader: &Reader<'_>, top: &ShapeRef, layers: &HiddenLayers, glued: &dyn Fn(u32) -> bool, budget: &mut usize) -> Found {
+    walk(reader, top, None, layers, &|facts| facts.is_obstacle(glued(facts.id)), budget, None)
+}
+
+/// Every two-dimensional shape [`obstacles_of`] looks at, **whether or not it is an obstacle now**: the shapes of the same walk that have a box, in document order, each with the
+/// facts that decide it ([`ObstacleFacts::check`]). The kept scene holds these, so that a connector glued to a shape or a layer shown changes what is an obstacle with no read of the
+/// shape (`route_scene.rs`). The budget and the groups are [`obstacles_of`]'s; this is for a top-level shape the caller has read already.
+/// `facts` are [`read_candidate`]'s for `top`: the shape is not read again, and still takes one from `budget`. **Each member is charged to `work` before it is read** (one step, the shape's own
+/// look having been charged by the caller who read it), and a step that is refused stops the walk with [`Found::refused`]: a walk given one step reads one member, however many the group holds.
+pub(crate) fn candidates_below(
+    reader: &Reader<'_>,
+    top: &ShapeRef,
+    facts: ObstacleFacts,
+    layers: &HiddenLayers,
+    budget: &mut usize,
+    work: &mut Work,
+) -> Found {
+    walk(reader, top, Some(facts), layers, &|_| true, budget, Some(work))
+}
+
+/// What [`candidates_below`] keeps for the top-level shape `top`, read here with the rest (no facts given, no work charged): **every** two-dimensional shape of the walk, an obstacle or not, in
+/// document order. The oracle of the kept scene's tests holds the scene to it, and to the rule that the first such shape holds an `ID`, obstacle or not.
+#[cfg(test)]
+pub(crate) fn candidates_of(reader: &Reader<'_>, top: &ShapeRef, layers: &HiddenLayers, budget: &mut usize) -> Found {
+    walk(reader, top, None, layers, &|_| true, budget, None)
+}
+
+/// The walk of [`obstacles_of`] and [`candidates_below`]: the shapes it reaches that `keep` takes. `known` is the facts of `top` where the caller has them. With a `work`, every shape that is
+/// read (every one but a `top` that is `known`) is charged one step of it first, after the budget has said there is room for it, so that a refusal reads nothing more.
+fn walk(
+    reader: &Reader<'_>,
+    top: &ShapeRef,
+    mut known: Option<ObstacleFacts>,
+    layers: &HiddenLayers,
+    keep: &dyn Fn(&ObstacleFacts) -> bool,
+    budget: &mut usize,
+    mut work: Option<&mut Work>,
+) -> Found {
     let mut found = Found::default();
     let mut open: Vec<(ShapeRef, usize)> = Vec::new();
     let mut next = Some(top.clone());
@@ -279,14 +318,22 @@ pub(crate) fn obstacles_of(reader: &Reader<'_>, top: &ShapeRef, layers: &HiddenL
                 found.cut = true;
                 break;
             }
+            if known.is_none() && work.as_deref_mut().is_some_and(|work| !work.charge_for(Step::Visit, 1)) {
+                found.refused = true;
+                break;
+            }
             *budget -= 1;
-            if let Ok(facts) = read_candidate(reader, &at, layers) {
+            let read = match known.take() {
+                Some(facts) => Ok(facts),
+                None => read_candidate(reader, &at, layers),
+            };
+            if let Ok(facts) = read {
                 if facts.kind.members && !facts.kind.placeable {
                     // The members of a group at level 0 are level 1, and so on: those at level `MAX_MEMBER_DEPTH` are read, theirs are not.
                     if open.len() < MAX_MEMBER_DEPTH {
                         open.push((at, 0));
                     }
-                } else if facts.is_obstacle(glued(facts.id)) {
+                } else if keep(&facts) {
                     found.obstacles.push(facts);
                 }
             }
@@ -308,11 +355,10 @@ pub(crate) fn obstacles_of(reader: &Reader<'_>, top: &ShapeRef, layers: &HiddenL
 // How many references to members were made, for the test that holds the read of a huge group to its budget. Not kept outside tests.
 #[cfg(test)]
 thread_local! {
-    static MEMBER_REFS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static MEMBER_REFS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Member number `member` of the group at `group`, if it has one.
-#[allow(dead_code, reason = "read by the page's kept scene and by the router's caller, which are not built yet")]
 fn member_at(reader: &Reader<'_>, group: &ShapeRef, member: usize) -> Option<ShapeRef> {
     reader.doc().shape(group)?.children.get(member)?;
     let mut path = group.path.clone();
@@ -637,6 +683,46 @@ mod tests {
             shape.sheet = Arc::new(sheet);
             assert_eq!(layers.hides(&shape), layers::standing_of(&list, &by_ix).hidden, "{list:?}");
         }
+    }
+
+    /// With a work, each member is charged one step **before** it is read: the steps given are the members read, a step refused stops the walk, and the budget's cut and the work's refusal are
+    /// told apart.
+    #[test]
+    fn the_walk_of_the_members_charges_each_to_the_work_before_it_reads_it() {
+        let members: Vec<Shape> = (0..50).map(|i| boxed(100 + i, (f64::from(i), 0.0, 1.0, 1.0), &[("ObjType", 1.0)])).collect();
+        let doc = doc_of(vec![group(1, (0.0, 0.0, 60.0, 1.0), 8.0, members)]);
+        let reader = Reader::new(&doc);
+        let layers = HiddenLayers::default();
+        let top = read_candidate(&reader, &at(0), &layers).unwrap();
+        // Four steps for the members: four read, and the fifth refused before it is read.
+        let (mut budget, mut work) = (100, Work::new(4));
+        MEMBER_REFS.with(|c| c.set(0));
+        let found = candidates_below(&reader, &at(0), top, &layers, &mut budget, &mut work);
+        assert_eq!(
+            (found.obstacles.len(), found.refused, found.cut, budget, work.spent()),
+            (4, true, false, 95, 4),
+            "the group's look and four members' were taken from the budget"
+        );
+        assert!(MEMBER_REFS.with(std::cell::Cell::get) <= 6, "no reference to a member past the one that was refused");
+        // No step at all: no member read, and it is the work's refusal.
+        let (mut budget, mut work) = (100, Work::new(0));
+        let found = candidates_below(&reader, &at(0), top, &layers, &mut budget, &mut work);
+        assert_eq!((found.obstacles.len(), found.refused, found.cut, budget), (0, true, false, 99));
+        // A work that was spent already refuses the first member too.
+        let (mut budget, mut work) = (100, Work::new(1));
+        assert!(work.charge(1) && !work.charge(1));
+        assert!(candidates_below(&reader, &at(0), top, &layers, &mut budget, &mut work).refused);
+        // A budget that is spent first is a cut, and costs the steps of the members it let through.
+        let (mut budget, mut work) = (11, Work::new(1_000));
+        let found = candidates_below(&reader, &at(0), top, &layers, &mut budget, &mut work);
+        assert_eq!((found.obstacles.len(), found.cut, found.refused, budget, work.spent()), (10, true, false, 0, 10));
+        // Exactly the steps the members need: neither.
+        let (mut budget, mut work) = (51, Work::new(50));
+        let found = candidates_below(&reader, &at(0), top, &layers, &mut budget, &mut work);
+        assert_eq!((found.obstacles.len(), found.cut, found.refused, work.spent()), (50, false, false, 50));
+        // The same walk with no work to charge (`obstacles_of`) is never refused.
+        let mut budget = 11;
+        assert!(!obstacles_of(&reader, &at(0), &layers, &|_| true, &mut budget).refused);
     }
 
     #[test]

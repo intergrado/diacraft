@@ -7,7 +7,8 @@
 //! lower than the one before is not allowed), and a row of the shape's style or master that the new list does not reach is **deleted here** (`Del`:
 //! "a two-stop gradient keeps two rows and marks the other eight `Del`"), so a shape that follows the `Theme` style, which holds ten rows, keeps no stop it
 //! was not given. A gradient turned **on** makes sure the shape paints a fill at all: a `FillPattern` that is not 1 to 40 becomes 1 (ours:
-//! pattern 0 paints nothing whatever else is set, so a gradient on it would be a command that does nothing), and for a line `LinePattern` 1 to 23.
+//! pattern 0 paints nothing whatever else is set, so a gradient on it would be a command that does nothing), and for a line `LinePattern` 1 to 23. **Not for a member reached
+//! through a group that draws none**, and a fill gradient leaves a member filled with its own line colour (`formatting/mod.rs`).
 //! A gradient turned **on with no stops** keeps the ones the shape has, or, when it has none, is made of two: the colour the shape has now, and a lighter
 //! one (ours: no specification says what Gradient fill starts as).
 //!
@@ -24,9 +25,9 @@ use std::collections::BTreeMap;
 
 use diacraft_doc::{Cell, CellAddr, CellName, Document, RowKey, SheetRef};
 
-use super::look::{Reader, eval_ctx};
+use super::look::{Reader, eval_ctx, pattern_shown};
 use super::shape_cells::{MAX_STOP_ROWS, effective_stop_rows, row_addr, share, stop_rows};
-use super::{Edits, New, Rgb, holds_exactly, holds_row, targets};
+use super::{Edits, New, Rgb, fill_is_line, holds_exactly, holds_row, keeps_none, targets, targets_reached};
 use crate::draw::Problem;
 
 /// The most stops a gradient has.
@@ -210,16 +211,16 @@ pub fn format_gradient(doc: &mut Document, page: u32, ids: &[u32], target: Gradi
     {
         return Err(Problem::bad(format!("a gradient has from 2 to {MAX_GRADIENT_STOPS} stops, not {}", stops.len())));
     }
-    let shapes = targets(doc, page, ids)?;
+    let shapes = targets_reached(doc, page, ids)?;
     let mut edits = Edits::default();
     let mut formatted = 0_usize;
     {
         let mut ctx = eval_ctx();
         let reader = Reader::new(doc, &mut ctx);
-        for at in &shapes {
+        for shape in &shapes {
             edits.begin();
             let before = edits.planned();
-            plan_gradient(doc, &reader, &SheetRef::Shape(at.clone()), target, f, &mut edits);
+            plan_gradient(doc, &reader, &SheetRef::Shape(shape.at.clone()), target, f, shape.through_group, &mut edits);
             formatted = formatted.saturating_add(usize::from(edits.planned() > before));
         }
     }
@@ -230,8 +231,21 @@ pub fn format_gradient(doc: &mut Document, page: u32, ids: &[u32], target: Gradi
     Ok(formatted)
 }
 
-fn plan_gradient(doc: &Document, r: &Reader<'_, '_>, sheet: &SheetRef, target: GradientTarget, f: &GradientFormat, edits: &mut Edits) {
+/// What a gradient writes for one shape. **A shape reached through a group** (`through_group`) that is filled with its own line colour is left alone by a fill gradient, and one that draws no
+/// line or no fill is not made to.
+fn plan_gradient(
+    doc: &Document,
+    r: &Reader<'_, '_>,
+    sheet: &SheetRef,
+    target: GradientTarget,
+    f: &GradientFormat,
+    through_group: bool,
+    edits: &mut Edits,
+) {
     let direct = CellAddr::direct;
+    if target == GradientTarget::Fill && fill_is_line(r, sheet, through_group) {
+        return;
+    }
     let enabled = target.cell("GradientEnabled");
     let on = f.on.unwrap_or(true);
     if !on {
@@ -242,9 +256,9 @@ fn plan_gradient(doc: &Document, r: &Reader<'_, '_>, sheet: &SheetRef, target: G
         return;
     }
     edits.put(doc, sheet, direct(&enabled), &New::whole(1));
-    // A gradient on a pattern that paints nothing paints nothing.
+    // A gradient on a pattern that paints nothing paints nothing, unless the shape is a member of a group that was made to draw none of it.
     let pattern_cell = if target == GradientTarget::Fill { "FillPattern" } else { "LinePattern" };
-    if r.num(sheet, &direct(pattern_cell), 0.0) == 0.0 {
+    if r.num(sheet, &direct(pattern_cell), 0.0) == 0.0 && !keeps_none(r, sheet, through_group, pattern_cell) {
         edits.put(doc, sheet, direct(pattern_cell), &New::whole(1));
     }
     if let Some(dir) = f.dir {
@@ -618,9 +632,9 @@ fn legacy_gradient(r: &Reader<'_, '_>, sheet: &SheetRef, pattern: i64) -> Gradie
 pub(super) fn fx_look(r: &Reader<'_, '_>, sheet: &SheetRef, page: u32) -> super::look::FxLook {
     let direct = CellAddr::direct;
     let percent = |name: &str| rounded(r.num(sheet, &direct(name), 0.0) * 100.0, 2);
-    let pattern = r.num(sheet, &direct("FillPattern"), 0.0).round().clamp(0.0, 254.0) as u32;
+    let pattern = pattern_shown(r.num(sheet, &direct("FillPattern"), 0.0)).round().clamp(0.0, 254.0) as u32;
     let filled = pattern != 0;
-    let stroked = r.num(sheet, &direct("LinePattern"), 0.0).round() as i64 != 0;
+    let stroked = pattern_shown(r.num(sheet, &direct("LinePattern"), 0.0)).round() as i64 != 0;
     super::look::FxLook {
         fill_pattern: pattern,
         fill_transparency: if filled { percent("FillForegndTrans") } else { 0.0 },

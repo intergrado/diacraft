@@ -17,6 +17,9 @@ pub(crate) type Res<T> = Result<T, ParseError>;
 /// over this, so that its text reads back.
 pub(crate) const MAX_INDEX_BYTES: usize = 256;
 
+/// The longest name, in bytes: the scan for its end stops here, and a quoted name (`'Left-Door'`, an index in quotes) may be no longer.
+pub(crate) const MAX_NAME_BYTES: usize = 1024;
+
 /// A parsed expression and the depth of the tree it roots (a leaf is 1).
 pub(crate) struct Node {
     pub expr: Expr,

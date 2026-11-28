@@ -267,3 +267,27 @@ fn a_typo_of_a_template_name_is_answered_at_once_and_not_read_as_a_file() {
     }
     assert_eq!(window.state().ui_panics(), 0);
 }
+
+/// Issue 7 of the demo video: a drawing started from the Basic Network Diagram template, saved and opened again through the window has the stencils it had open: the
+/// Shapes window lists them and shows the first, and `window.stencil` finds `network` (it answered `no stencil network; the stencils are: Basic Shapes, ...`).
+#[test]
+fn a_drawing_saved_from_the_network_template_opens_again_with_its_stencils_and_window_stencil_finds_network() {
+    let dir = TempDir::new("network-reopened");
+    let file = dir.file("office-network.diacraft");
+    let mut made = diacraft_engine::Session::new();
+    made.execute("file.new", &json!({"template": "basic_network"})).unwrap();
+    made.execute("shape.drop", &json!({"master": "network.router", "page": 1, "x": 3.0, "y": 4.0})).unwrap();
+    made.execute("file.save_as", &json!({"path": file.to_str().unwrap()})).unwrap();
+    let mut w = edit_window_with(WIDE, |app| app.with_file_picker(picker(file.clone())));
+    assert!(w.state_mut().show_stencil("basic"), "the window shows Basic Shapes, as a new drawing does");
+    key(&mut w, Key::O, ctrl());
+    w.rest();
+    assert_eq!(w.state().window_title(), "office-network.diacraft - DiaCraft");
+    assert_eq!(w.state().session().stencils().open_builtins(), ["network", "computers", "basic"]);
+    assert_eq!(rows(&mut w), ["Network Devices", "Computers and Devices", BASIC], "the Shapes window lists the stencils the drawing had open");
+    assert_eq!(w.state_mut().current_stencil().as_deref(), Some("network"), "and shows the first of them");
+    crate::support::run_command(&mut w, "window.stencil", json!({"stencil": "computers"}));
+    crate::support::run_command(&mut w, "window.stencil", json!({"stencil": "network"}));
+    assert_eq!(w.state_mut().current_stencil().as_deref(), Some("network"));
+    assert_eq!(w.state().ui_panics(), 0);
+}

@@ -23,9 +23,11 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use diacraft_doc::{Row, Sheet, Text, TextPart};
+use diacraft_fonts::script::FontSlot;
 
 use super::lengths::length_text;
 use super::stylemap::{CellVal, Op, Val, is_colour};
+use crate::lang::{self, Letters};
 use crate::read::names::Ns;
 use crate::read::units::LenUnit;
 
@@ -36,7 +38,7 @@ pub(crate) const MOST_PARAGRAPHS: usize = 2_000_000;
 pub(crate) const WORDS_PARAGRAPHS: &str = "a text of more than 2,000,000 paragraphs (a retext of it is not written)";
 
 const WORDS_FIELD: &str = "a text with a tab stop marker or an element of another format the model keeps among its parts";
-const WORDS_RUN_CELL: &str = "a run's cell that has no attribute of a text style here (the specification maps Size, Style, DblUnderline, Strikethru, DoubleStrikethrough, Overline, Case, Pos, Color, Letterspace, FontScale and the three fonts)";
+const WORDS_RUN_CELL: &str = "a run's cell that has no attribute of a text style here (the specification maps Size, Style, DblUnderline, Strikethru, DoubleStrikethrough, Overline, Case, Pos, Color, Letterspace, FontScale, the three fonts and LangID)";
 const WORDS_PARAGRAPH_CELL: &str = "a paragraph's cell that has no attribute of a paragraph style here (the specification maps HorzAlign, Flags, IndLeft, IndRight, IndFirst, SpBefore, SpAfter, SpLine and a list's bullet)";
 const WORDS_FONT_PLACE: &str =
     "a run's font that is a number of the document's table of faces other than 0 (a file holds no such table: a font is a family)";
@@ -109,6 +111,13 @@ pub(crate) fn owned(id: &str) -> &'static [(Ns, &'static str)] {
         "Color" => &[(Ns::Fo, "color")],
         "Letterspace" => &[(Ns::Fo, "letter-spacing")],
         "FontScale" => &[(Ns::Style, "text-scale")],
+        "LangLatin" => &[(Ns::Fo, "language"), (Ns::Fo, "script"), (Ns::Fo, "country"), (Ns::Style, "rfc-language-tag")],
+        "LangAsian" => {
+            &[(Ns::Style, "language-asian"), (Ns::Style, "script-asian"), (Ns::Style, "country-asian"), (Ns::Style, "rfc-language-tag-asian")]
+        }
+        "LangComplex" => {
+            &[(Ns::Style, "language-complex"), (Ns::Style, "script-complex"), (Ns::Style, "country-complex"), (Ns::Style, "rfc-language-tag-complex")]
+        }
         "Font" => &[(Ns::Style, "font-name"), (Ns::Fo, "font-family")],
         "AsianFont" => &[(Ns::Style, "font-name-asian"), (Ns::Style, "font-family-asian")],
         "ComplexScriptFont" => &[(Ns::Style, "font-name-complex"), (Ns::Style, "font-family-complex")],
@@ -263,7 +272,8 @@ impl View {
 /// The rows of one section of a sheet by `IX`, and what each comes to once asked.
 pub(crate) struct Rows<'a> {
     rows: HashMap<u32, &'a Row>,
-    done: HashMap<u32, Option<Arc<Props>>>,
+    /// What each row comes to for each script type a run is in (a row with no `LangID` comes to the same for all three).
+    done: HashMap<(u32, u8), Option<Arc<Props>>>,
     paragraph: bool,
     /// The colour an index of the fixed palette or the document's table names, as `#rrggbb`.
     palette: &'a dyn Fn(i64) -> Option<String>,
@@ -297,17 +307,33 @@ impl<'a> Rows<'a> {
         Rows { rows, done: HashMap::new(), paragraph, palette }
     }
 
-    /// What row `ix` comes to: `None` for a row the sheet does not have or one with no cell, an error in words for a cell the writer cannot write.
+    /// What row `ix` comes to for text of the Latin type, which is what a row that no run reads comes to (a paragraph's, a style sheet's): `None` for a row the sheet does not have or one with no
+    /// cell, an error in words for a cell the writer cannot write.
     pub(crate) fn props(&mut self, ix: u32) -> Result<Option<Arc<Props>>, &'static str> {
-        if let Some(done) = self.done.get(&ix) {
+        self.props_in(ix, FontSlot::Latin)
+    }
+
+    /// What row `ix` comes to for a run whose letters are mostly of the script type `slot`: a run's language is written into the triplet of that type.
+    pub(crate) fn props_in(&mut self, ix: u32, slot: FontSlot) -> Result<Option<Arc<Props>>, &'static str> {
+        let at = (ix, slot_number(slot));
+        if let Some(done) = self.done.get(&at) {
             return Ok(done.clone());
         }
         let made = match self.rows.get(&ix) {
-            Some(row) => row_props(row, self.paragraph, self.palette)?,
+            Some(row) => row_props_in(row, self.paragraph, self.palette, Some(slot))?,
             None => None,
         };
-        self.done.insert(ix, made.clone());
+        self.done.insert(at, made.clone());
         Ok(made)
+    }
+}
+
+/// The number a script type is told apart by in a table.
+pub(crate) fn slot_number(slot: FontSlot) -> u8 {
+    match slot {
+        FontSlot::Latin => 0,
+        FontSlot::Asian => 1,
+        FontSlot::Complex => 2,
     }
 }
 
@@ -351,8 +377,19 @@ fn value(cell: &diacraft_doc::Cell) -> Result<CellVal, &'static str> {
     CellVal::of(cell).map_err(|_| WORDS_VALUE)
 }
 
-/// What the cells of one row come to (see the module documentation).
-fn row_props(row: &Row, paragraph: bool, palette: &dyn Fn(i64) -> Option<String>) -> Result<Option<Arc<Props>>, &'static str> {
+/// What the cells of one row come to for a row that no run reads, or for the faces and the checks that ask nothing of a run's language (see the module documentation).
+pub(crate) fn row_props(row: &Row, paragraph: bool, palette: &dyn Fn(i64) -> Option<String>) -> Result<Option<Arc<Props>>, &'static str> {
+    row_props_in(row, paragraph, palette, None)
+}
+
+/// What the cells of one row come to. `script` is the script type of the letters of the run that has the row, whose triplet its `LangID` is written into: with none, the
+/// language is checked to be one the file can say and writes nothing, as for a row that no run reads (the reader's comparison of what a style stated).
+pub(crate) fn row_props_in(
+    row: &Row,
+    paragraph: bool,
+    palette: &dyn Fn(i64) -> Option<String>,
+    script: Option<FontSlot>,
+) -> Result<Option<Arc<Props>>, &'static str> {
     let mut key = String::new();
     let mut parts: Vec<Part> = Vec::new();
     let mut bullet = false;
@@ -383,10 +420,13 @@ fn row_props(row: &Row, paragraph: bool, palette: &dyn Fn(i64) -> Option<String>
             let n = v.number;
             match *name {
                 "HorzAlign" => {
+                    // In a paragraph with `Flags` 1 the alignment is said by `start` and `end`, which follow the writing direction, so that a consumer of ODF puts the text where DiaCraft
+                    // draws it; in any other it is `left` and `right`.
+                    let rtl = get("Flags").and_then(|f| f.number) == Some(1.0);
                     let (align, last) = match n {
-                        Some(0.0) => ("left", false),
+                        Some(0.0) => (if rtl { "start" } else { "left" }, false),
                         Some(1.0) => ("center", false),
-                        Some(2.0) => ("right", false),
+                        Some(2.0) => (if rtl { "end" } else { "right" }, false),
                         Some(3.0) => ("justify", false),
                         Some(4.0) => ("justify", true),
                         _ => return Err(WORDS_VALUE),
@@ -395,7 +435,7 @@ fn row_props(row: &Row, paragraph: bool, palette: &dyn Fn(i64) -> Option<String>
                     if last {
                         ops.push(text(1, Ns::Fo, "text-align-last", "justify"));
                     }
-                    // The alignment is fed by `HorzAlign` and by `Flags` (`start` and `end` swap with the writing mode), so either cell writes it again.
+                    // The alignment is fed by `HorzAlign` and by `Flags` (`start` and `end` are said in a right-to-left paragraph), so either cell writes it again.
                     parts.push(part("HorzAlign", format!("{}#{}", sig_of(v), get("Flags").map(sig_of).unwrap_or_default()), ops));
                 }
                 "Flags" => match n {
@@ -522,6 +562,19 @@ fn row_props(row: &Row, paragraph: bool, palette: &dyn Fn(i64) -> Option<String>
                 }
                 parts.push(group);
             }
+            "LangID" => {
+                // A language the file cannot say (a number of the legacy XML, a text that is no tag) is a value its attribute cannot hold.
+                let said = lang::said(&v.text).ok_or(WORDS_VALUE)?;
+                if let Some(slot) = script {
+                    let ops = lang::pairs(&said, slot).into_iter().map(|(ns, local, value)| text(2, ns, local, &value)).collect();
+                    parts.push(part(lang::group_id(slot), sig_of(v), ops));
+                    // The same cells are another style for a run of another script type: they are said in another triplet.
+                    key.push_str(&format!("@{};", slot_number(slot)));
+                }
+            }
+            // A share of the size, -1: what a run holds when nothing gives it a size for complex scripts, which the root style of a new drawing states and a row copied from it holds. An
+            // OpenDocument style has no attribute for it and needs none at that value; another value is a change the file cannot say.
+            "ComplexScriptSize" if n == Some(-1.0) => {}
             _ => return Err(WORDS_RUN_CELL),
         }
     }
@@ -599,7 +652,10 @@ fn list_spec(cells: &[(&str, CellVal)]) -> Result<ListSpec, &'static str> {
             None => Some(v.text.clone()).filter(|f| !f.trim().is_empty() && f.trim() != "0"),
         },
     };
-    let size = number("BulletFontSize")?;
+    // `-1` is the cell's own default, "same size" (a share of the first character's size below 0, the cell's default, which the root of a drawing states): a list level that
+    // states no size, so none is written, and a row that holds it (a VSDX file's, or one a save to VSDX completed) is written as a row that holds none. Another
+    // share below 0 has no attribute of a list level here.
+    let size = number("BulletFontSize")?.filter(|s| *s != -1.0);
     if size.is_some_and(|s| s < 0.0) {
         return Err(WORDS_VALUE);
     }
@@ -681,11 +737,14 @@ pub(crate) fn views(
     let mut at = 0usize;
     let mut run_start = 0usize;
     let mut run_row = 0u32;
+    // The letters of the run in force, by script type: a run's language is written into the triplet of the type most of them belong to. A field's shown text is no part of
+    // them, as the reader counts the text a run holds itself.
+    let mut letters = Letters::default();
     let (rows_c, rows_p) = (characters, paragraphs);
     // `close` ends the run in force at `at` and the paragraph with it when `last`.
-    let mut closed: Vec<(usize, usize, u32)> = Vec::new();
+    let mut closed: Vec<(usize, usize, u32, Letters)> = Vec::new();
     let finish = |current: &mut View,
-                  closed: &mut Vec<(usize, usize, u32)>,
+                  closed: &mut Vec<(usize, usize, u32, Letters)>,
                   rows_c: &mut Rows<'_>,
                   rows_p: &mut Rows<'_>,
                   (pp, run_row): (u32, u32),
@@ -702,8 +761,8 @@ pub(crate) fn views(
             view.empty = rows_c.props(run_row)?;
         }
         let mut runs: Vec<Run> = Vec::new();
-        for (start, end, row) in closed.drain(..) {
-            let props = rows_c.props(row)?;
+        for (start, end, row, letters) in closed.drain(..) {
+            let props = rows_c.props_in(row, letters.slot())?;
             match runs.last_mut() {
                 Some(last) if key_of(&last.props) == key_of(&props) && last.end == start => last.end = end,
                 _ => runs.push(Run { start, end, props }),
@@ -729,32 +788,38 @@ pub(crate) fn views(
         }
         match part {
             TextPart::Chars(chars) | TextPart::Fld { text: chars, .. } => {
+                let own_letters = matches!(part, TextPart::Chars(_));
                 for (i, piece) in chars.split('\n').enumerate() {
                     if i > 0 {
                         if at > run_start {
-                            closed.push((run_start, at, run_row));
+                            closed.push((run_start, at, run_row, letters));
                         }
                         finish(&mut current, &mut closed, rows_c, rows_p, (pp, run_row), &mut out, steps)?;
                         at = 0;
                         run_start = 0;
+                        letters = Letters::default();
                     }
                     current.chars.push_str(piece);
                     at += piece.chars().count();
+                    if own_letters {
+                        letters.add(piece);
+                    }
                 }
             }
             TextPart::Cp(ix) => {
                 if at > run_start {
-                    closed.push((run_start, at, run_row));
+                    closed.push((run_start, at, run_row, letters));
                 }
                 run_start = at;
                 run_row = *ix;
+                letters = Letters::default();
             }
             TextPart::Pp(ix) => pp = *ix,
             _ => {}
         }
     }
     if at > run_start {
-        closed.push((run_start, at, run_row));
+        closed.push((run_start, at, run_row, letters));
     }
     finish(&mut current, &mut closed, rows_c, rows_p, (pp, run_row), &mut out, steps)?;
     Ok(out)
@@ -1089,6 +1154,17 @@ mod tests {
     }
 
     #[test]
+    fn a_complex_script_size_at_the_value_nothing_gives_is_no_attribute_and_another_is_refused() {
+        // The root style of a new drawing states -1 (a share of the size: the same), and the rows the engine makes hold what the root's row 0 holds.
+        assert_eq!(one(false, "ComplexScriptSize", number(-1.0)).unwrap(), Vec::<String>::new());
+        assert_eq!(one(false, "ComplexScriptSize", number(-0.5)), Err(WORDS_RUN_CELL));
+        assert_eq!(one(false, "ComplexScriptSize", number(0.2)), Err(WORDS_RUN_CELL));
+        // The other cell that has no attribute is refused at any value, as it was.
+        assert_eq!(one(false, "ColorTrans", number(0.0)), Err(WORDS_RUN_CELL));
+        assert_eq!(one(true, "TextPosAfterBullet", number(0.0)), Err(WORDS_PARAGRAPH_CELL));
+    }
+
+    #[test]
     fn a_paragraph_row_is_the_attributes_the_specification_gives_its_cells() {
         for (align, word) in [(0.0, "left"), (1.0, "center"), (2.0, "right"), (3.0, "justify")] {
             assert_eq!(one(true, "HorzAlign", number(align)).unwrap(), [format!("Fo.text-align={word}")], "{align}");
@@ -1163,6 +1239,9 @@ mod tests {
         assert_eq!(list_of(&[("Bullet", number(1.0)), ("BulletFontSize", number(0.0))]).unwrap().size, Some(0.0));
         assert_eq!(list_of(&[("Bullet", number(1.0)), ("BulletFontSize", number(0.125))]).unwrap().size, Some(0.125));
         assert_eq!(list_of(&[("Bullet", number(1.0)), ("BulletFontSize", number(-0.125))]), Err(WORDS_VALUE));
+        // `-1` is "same size" (the cell's default): a level that states no size.
+        assert_eq!(list_of(&[("Bullet", number(1.0)), ("BulletFontSize", number(-1.0))]).unwrap().size, None);
+        assert_eq!(list_of(&[("Bullet", number(1.0)), ("BulletFontSize", number(-1.5))]), Err(WORDS_VALUE));
         assert_eq!(list_of(&[("Bullet", number(1.0)), ("BulletFontSize", words("big"))]), Err(WORDS_VALUE));
         assert_eq!(list_of(&[("Bullet", number(1.0)), ("BulletFont", words("  "))]).unwrap().font, None);
         assert_eq!(list_of(&[("Bullet", number(1.0)), ("BulletFont", words("Symbol"))]).unwrap().font.as_deref(), Some("Symbol"));

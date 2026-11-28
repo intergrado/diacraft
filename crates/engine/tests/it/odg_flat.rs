@@ -425,11 +425,11 @@ fn odg_package_a_package_called_fodg_is_saved_as_an_odg_and_the_name_says_what_t
     assert_eq!(diacraft_odg::Form::of(&bytes), diacraft_odg::Form::Package, "an .odg that was saved is a package");
 }
 
-/// What the save of a flat drawing says when the engine refuses a change before the writer is asked (the flattening: a shape an undo put back, the copy of an object):
-/// the way out is the one of a flat file, in both forms of it, and **never the `.odg`'s** (the review: the way out chosen by the kind of file was not pinned
-/// where the refusal comes from the flattening, which the writer's own refusals do not reach). The same drawing as an `.odg` has the `.odg`'s words.
+/// A shape an undo put back, with a connector of the file glued to it, is saved in a flat file as in a package (the flattening used to refuse it, with the way out of a
+/// flat file or of an `.odg`, a redo): the shapes and the glue are written, and the file reads back as the session holds it. (The refusal of the flattening that is left, the copy
+/// of an object, says the way out of a flat file in the test after.)
 #[test]
-fn odg_package_a_refusal_before_the_writer_says_the_way_out_of_a_flat_file() {
+fn odg_package_a_shape_an_undo_put_back_is_saved_with_its_glue_in_both_forms() {
     let ided = |text: String, id: &str| text.replacen("<draw:custom-shape ", &format!("<draw:custom-shape xml:id=\"{id}\" draw:id=\"{id}\" "), 1);
     let shapes = [
         ided(rect("A", (2.0, 3.0, 4.0, 2.0), ""), "id1"),
@@ -438,23 +438,19 @@ fn odg_package_a_refusal_before_the_writer_says_the_way_out_of_a_flat_file() {
     ]
     .concat();
     let drawing = Drawing::new().page(&shapes);
-    for (name, bytes, flat) in [("plan.fodg", drawing.flat_bytes(), true), ("plan.odg", drawing.bytes(), false)] {
+    for (name, bytes) in [("plan.fodg", drawing.flat_bytes()), ("plan.odg", drawing.bytes())] {
         let dir = Dir::new();
         let (mut s, _) = opened(&dir, name, &bytes);
         let (a, b) = (crate::odg_build::id_of(s.document().unwrap(), 0, "A"), crate::odg_build::id_of(s.document().unwrap(), 0, "B"));
-        // A shape an undo put back, with a connector of the file glued to it: the way out is a redo.
         run(&mut s, "shape.delete", json!({ "ids": [a, b] }));
         assert_eq!(save(&mut s)["edited"], true, "{name}");
         run(&mut s, "edit.undo", json!({}));
-        let said = refused(&mut s);
-        assert!(said.contains("put back by an undo") && said.contains("Redo the change you took back (edit.redo) to save"), "{name}: {said}");
-        assert!(!said.contains("Undo the change (edit.undo)"), "{name}: {said}");
-        assert_eq!(said.contains("saved only as a flat file"), flat, "{name}: the way out of a flat file only for a flat file: {said}");
-        assert_eq!(said.contains("saved only as an .odg"), !flat, "{name}: {said}");
-        assert!(said.chars().count() <= 601, "{name}: {said}");
-        // The redo is the drawing the file holds, and saves.
+        assert_eq!(save(&mut s)["edited"], true, "{name}: the shapes and the glue come back");
+        crate::odg_file::assert_reopens_as_saved(&dir, &mut s, name, 0);
+        assert_eq!(s.document().unwrap().pages.get(0).unwrap().connects.len(), 2, "{name}: the connector is glued at both ends");
         run(&mut s, "edit.redo", json!({}));
-        assert_eq!(save(&mut s)["edited"], false, "{name}");
+        assert_eq!(save(&mut s)["edited"], true, "{name}");
+        crate::odg_file::assert_reopens_as_saved(&dir, &mut s, name, 0);
     }
 }
 

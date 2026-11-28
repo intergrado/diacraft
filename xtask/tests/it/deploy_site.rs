@@ -129,9 +129,19 @@ fn it_builds_the_two_sites_as_the_release_workflows_site_job_does_and_never_a_do
     }
     // It never builds, packages or uploads a download, and does nothing to a release.
     let text = live(BY_HAND).join("\n");
-    for banned in
-        ["package.sh", "make-deb", "make-appimage", "make-msi", "cargo build", "gh release", "gh api", "contents: write", "packaging/smoke.sh"]
-    {
+    for banned in [
+        "package.sh",
+        "make-deb",
+        "make-rpm",
+        "rpm-in-fedora",
+        "make-appimage",
+        "make-msi",
+        "cargo build",
+        "gh release",
+        "gh api",
+        "contents: write",
+        "packaging/smoke.sh",
+    ] {
         assert!(!text.contains(banned), "the website's workflow builds no download: `{banned}`");
     }
 }

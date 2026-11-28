@@ -21,6 +21,8 @@ mod on {
         static FINDS_VISITED: Cell<u64> = const { Cell::new(0) };
         static LIMIT_ITEMS: Cell<u64> = const { Cell::new(0) };
         static STAMP_ITEMS: Cell<u64> = const { Cell::new(0) };
+        static PLACES_READ: Cell<u64> = const { Cell::new(0) };
+        static FOLLOW_KEYS: Cell<u64> = const { Cell::new(0) };
     }
 
     /// Starts every count over.
@@ -33,6 +35,8 @@ mod on {
         FINDS_VISITED.with(|c| c.set(0));
         LIMIT_ITEMS.with(|c| c.set(0));
         STAMP_ITEMS.with(|c| c.set(0));
+        PLACES_READ.with(|c| c.set(0));
+        FOLLOW_KEYS.with(|c| c.set(0));
     }
 
     /// The lookups and walks resolvers built, over all resolvers (each is one bump of a [`ResolverStats`](crate::ResolverStats) count).
@@ -89,6 +93,28 @@ mod on {
         STAMP_ITEMS.with(Cell::get)
     }
 
+    /// The places of unknown nodes that `Passthrough::reposition` read: each call reads every node of the list it is given once, so the count is the nodes of
+    /// the lists times the calls, and a copy of thousands of rows into a section that holds a few nodes reads a few times those, not thousands of times.
+    #[must_use]
+    pub fn places_read() -> u64 {
+        PLACES_READ.with(Cell::get)
+    }
+
+    pub(crate) fn place_reads(nodes: usize) {
+        PLACES_READ.with(|c| c.set(c.get().saturating_add(nodes as u64)));
+    }
+
+    /// The keys of children that `Passthrough::children_followed` read: the old list and the new one, once each, for a list that holds an unknown node, and nothing for
+    /// one that holds none.
+    #[must_use]
+    pub fn follow_keys() -> u64 {
+        FOLLOW_KEYS.with(Cell::get)
+    }
+
+    pub(crate) fn follow_key_reads(keys: usize) {
+        FOLLOW_KEYS.with(|c| c.set(c.get().saturating_add(keys as u64)));
+    }
+
     pub(crate) fn limit_item() {
         LIMIT_ITEMS.with(|c| c.set(c.get().saturating_add(1)));
     }
@@ -123,9 +149,14 @@ mod on {
 }
 
 #[cfg(feature = "test-support")]
-pub(crate) use on::{find_visit, limit_item, resolver_built, row_table_built, rows_merge, section_examined, sections_merge, stamp_item};
+pub(crate) use on::{
+    find_visit, follow_key_reads, limit_item, place_reads, resolver_built, row_table_built, rows_merge, section_examined, sections_merge, stamp_item,
+};
 #[cfg(feature = "test-support")]
-pub use on::{finds_visited, limit_items, reset, resolver_builds, row_tables_built, rows_merged, sections_examined, sections_merged, stamp_items};
+pub use on::{
+    finds_visited, follow_keys, limit_items, places_read, reset, resolver_builds, row_tables_built, rows_merged, sections_examined, sections_merged,
+    stamp_items,
+};
 
 #[cfg(not(feature = "test-support"))]
 pub(crate) fn find_visit() {}
@@ -143,3 +174,7 @@ pub(crate) fn sections_merge(_sections: usize) {}
 pub(crate) fn limit_item() {}
 #[cfg(not(feature = "test-support"))]
 pub(crate) fn stamp_item() {}
+#[cfg(not(feature = "test-support"))]
+pub(crate) fn place_reads(_nodes: usize) {}
+#[cfg(not(feature = "test-support"))]
+pub(crate) fn follow_key_reads(_keys: usize) {}

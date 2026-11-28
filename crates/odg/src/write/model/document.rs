@@ -640,6 +640,31 @@ pub(super) fn put(
         }
     }
     out.styles = out.styles.saturating_add(sheets_written.left);
+    // The dashes of DiaCraft's own name that the style sheets name get their definitions, where the definitions the model holds, as they were read, have none of that name: a
+    // style sheet whose line pattern was edited names a dash the file it was read from did not define, and another program draws what the definition says.
+    if !sheets_written.dashes.is_empty()
+        && let Some(styles) = child_mut(root, "styles")
+    {
+        let defined: HashSet<String> = styles
+            .children
+            .iter()
+            .filter_map(|n| match n {
+                Node::El(el) if local(&el.name) == "stroke-dash" => el.attrs.iter().find(|(k, _)| local(k) == "name").map(|(_, v)| v.clone()),
+                _ => None,
+            })
+            .collect();
+        work.charge_steps(styles.children.len())?;
+        for key in &sheets_written.dashes {
+            if defined.contains(&key.name()) {
+                continue;
+            }
+            work.charge_steps(1)?;
+            if let Some(attributes) = key.attributes() {
+                let attrs = attributes.into_iter().map(|(name, value)| (format!("draw:{name}"), value)).collect();
+                styles.children.push(Node::El(El { name: "draw:stroke-dash".to_owned(), attrs, children: Vec::new() }));
+            }
+        }
+    }
     if part == "styles.xml" {
         if let Some(masters) = child_mut(root, "master-styles") {
             if !held.layers.is_empty() {

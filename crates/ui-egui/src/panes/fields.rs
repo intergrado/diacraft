@@ -106,6 +106,24 @@ pub(crate) fn label_column(ui: &mut Ui, t: &Tokens, label: &str, enabled: bool) 
     });
 }
 
+/// How a box of a pane looks when it is not the one-line number box the panes mostly have (`DiacraftApp::pane_box`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BoxLook<'a> {
+    /// `Some(rows)`: a box of several lines, `rows` tall, in which Enter is a line break (the value is sent when the box lets go of the focus). `None`: one line, ended by Enter.
+    pub rows: Option<usize>,
+    /// Ghost text shown while the box is empty.
+    pub hint: Option<&'a str>,
+    /// The most characters the box takes, typed or pasted.
+    pub limit: usize,
+    /// The caller draws the label above the box and the box takes the width of the pane.
+    pub stacked: bool,
+}
+
+impl BoxLook<'static> {
+    /// The common box: one line, no ghost text, the pane's usual limit, its label in front.
+    pub(crate) const LINE: BoxLook<'static> = BoxLook { rows: None, hint: None, limit: MAX_CHARS, stacked: false };
+}
+
 /// What a field shows and whether it works.
 pub struct Field<'a> {
     /// The label in front of it, and its name in `ui.elements` (`pane.size.x`).
@@ -135,6 +153,12 @@ impl DiacraftApp {
 
     /// [`DiacraftApp::pane_field`] with a tip for the box (the prompt of a Shape Data field): the text shown while the pointer rests on it.
     pub(crate) fn pane_field_tip(&mut self, ui: &mut Ui, t: &Tokens, field: Field<'_>, tip: Option<&str>) {
+        self.pane_box(ui, t, field, tip, BoxLook::LINE);
+    }
+
+    /// [`DiacraftApp::pane_field_tip`] for a box that is not the common one-line number box: several lines, ghost text, its own limit, its label above (`look`). **Everything else is
+    /// the same machinery**: the value is sent when the box lets go of the focus, by [`DiacraftApp::flush_edits`], to the shapes the box showed.
+    pub(crate) fn pane_box(&mut self, ui: &mut Ui, t: &Tokens, field: Field<'_>, tip: Option<&str>, look: BoxLook<'_>) {
         let Field { label, name, shown, enabled, why_not, target } = field;
         let shown_text = shown.unwrap_or_default();
         let id = Id::unique(("pane_field", name));
@@ -144,21 +168,30 @@ impl DiacraftApp {
         // A box nothing was typed in follows the drawing.
         let mut buffer = held.unwrap_or_else(|| shown_text.clone());
         ui.horizontal(|ui| {
-            label_column(ui, t, label, enabled);
-            let width = (ui.available_width() - 6.0).clamp(60.0, 170.0);
-            let out = ui.add_enabled(
-                enabled,
-                egui::TextEdit::singleline(&mut buffer)
-                    .id(id)
-                    .desired_width(width)
-                    // A box that cannot be changed takes no keys, even while it still holds the focus from a frame in which it could (egui's `add_enabled` greys
-                    // a box and leaves its keys on: a value typed in the frame the selection stopped being the page on view's reached the shapes it showed).
-                    .interactive(enabled)
-                    .char_limit(MAX_CHARS)
-                    .font(theme::font(size::LABEL))
-                    .text_color(t.text),
-            );
-            out.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, enabled, label));
+            if !look.stacked {
+                label_column(ui, t, label, enabled);
+            }
+            let width = if look.stacked { ui.available_width() } else { (ui.available_width() - 6.0).clamp(60.0, 170.0) };
+            let edit = match look.rows {
+                Some(rows) => egui::TextEdit::multiline(&mut buffer).desired_rows(rows),
+                None => egui::TextEdit::singleline(&mut buffer),
+            };
+            let edit = edit
+                .id(id)
+                .desired_width(width)
+                // A box that cannot be changed takes no keys, even while it still holds the focus from a frame in which it could (egui's `add_enabled` greys
+                // a box and leaves its keys on: a value typed in the frame the selection stopped being the page on view's reached the shapes it showed).
+                .interactive(enabled)
+                .char_limit(look.limit)
+                .font(theme::font(size::LABEL))
+                .text_color(t.text);
+            let edit = match look.hint {
+                Some(hint) => edit.hint_text(egui::RichText::new(hint).font(theme::font(size::LABEL)).color(t.text_dim)),
+                None => edit,
+            };
+            let out = ui.add_enabled(enabled, edit);
+            let role = if look.rows.is_some() { egui::Role::MultilineTextInput } else { egui::Role::TextInput };
+            out.widget_info(|| egui::WidgetInfo::labeled(role, enabled, label));
             self.note(name.to_owned(), out.rect, enabled);
             if self.ui.panes.fields.now.len() < 256 {
                 self.ui.panes.fields.now.push((name.to_owned(), buffer.clone()));
@@ -287,6 +320,7 @@ impl DiacraftApp {
             name if name.starts_with("pane.size.") => self.send_size_typed(typed),
             name if name.starts_with("pane.format.") => self.send_format_typed(typed),
             name if name.starts_with("pane.data.") => self.send_data_typed(typed),
+            name if name.starts_with("pane.alttext.") => self.send_alt_typed(typed),
             _ => {}
         }
     }

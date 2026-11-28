@@ -126,14 +126,14 @@ fn the_budget_is_64_mib() {
     assert_eq!(JOURNAL_MAX_BYTES, 64 * 1024 * 1024);
 }
 
-/// The case behind the budget: a legal batch of 256 `page.rename` calls with 255-character names is
+/// The case behind the budget: a legal batch of 256 `comment.author` calls with 255-character names is
 /// about 275 KB of JSON, so 11,000 of them would be about 3 GB. Run through real commands, the journal
-/// stays under its budget.
+/// stays under its budget. (The review measured it with `page.rename`, whose names a command now holds to 31 characters.)
 #[test]
 fn legal_batches_with_long_names_cannot_grow_the_journal_past_its_budget() {
     let mut s = blank_session();
     let name = "\u{1f600}".repeat(255);
-    let steps: Vec<Value> = (0..256).map(|_| json!({"command": "page.rename", "params": {"id": 1, "name": name}})).collect();
+    let steps: Vec<Value> = (0..256).map(|_| json!({"command": "comment.author", "params": {"name": name}})).collect();
     let batch = json!({ "commands": steps });
     assert!(batch.to_string().len() > 270_000, "the batch is the size the review measured");
 

@@ -44,6 +44,7 @@ use diacraft_sheetxml::sheet_delta;
 use super::body::{self, Sc};
 use super::names::{self, Gone};
 use crate::error::{LimitKind, OdgError};
+use crate::index::{PageShapes, ShapeIndex};
 use crate::package::Package;
 use crate::read::Reader;
 use crate::write::{Structure, WriteError, WriteWork};
@@ -1208,6 +1209,16 @@ fn group_native(sheet: &Sheet, keyed: bool, model_path: bool) -> Sheet {
 /// the reader reads the same cells back from it, so they are the markup's and need no entry).
 fn group_native_of(shape: &diacraft_doc::Shape, keyed: bool, model_path: bool) -> Sheet {
     let mut native = group_native(&shape.sheet, keyed, model_path);
+    // **On the model path** a group with no key of its own has no entry to carry its title and description (an entry is found by the group's name): the model writer writes them as `svg:title` and
+    // `svg:desc` from the rows, and the reader makes the rows again, so they are the markup's (the gate's GATEBAE6-GROUP-ALTTEXT: read them as rows of the group,
+    // which made every unnamed group that had one a group given data). **Not on a save into a file**: the splice leaves a group's elements as they are, so a title changed there would be left out
+    // of the file and not refused (the entry's refusal says it in words).
+    if model_path
+        && !keyed
+        && let Some(section) = alt_text_section(&shape.sheet)
+    {
+        native.sections.push(section);
+    }
     if model_path {
         for name in crate::write::groups::style_cells(shape) {
             if let Some(cell) = shape.sheet.cells.get(name) {
@@ -1216,6 +1227,17 @@ fn group_native_of(shape: &diacraft_doc::Shape, keyed: bool, model_path: bool) -
         }
     }
     native
+}
+
+/// The `User` section of `sheet` when it holds nothing but the group's title and description, each as the row the files hold (`alt_text::standard_text`) and with a text, in the order the
+/// reader makes them: the section `svg:title` and `svg:desc` give, which is no data of the group.
+fn alt_text_section(sheet: &Sheet) -> Option<Arc<diacraft_doc::Section>> {
+    use diacraft_doc::alt_text::{DESCRIPTION_ROW, SECTION, TITLE_ROW, standard_row, standard_text};
+    let section = sheet.sections.iter().find(|s| s.name.as_str() == SECTION)?;
+    let text_of = |name: &str| section.rows.iter().find(|r| r.name.as_deref() == Some(name)).and_then(|r| standard_text(r)).filter(|t| !t.is_empty());
+    let mut said = diacraft_doc::Section::new(SECTION, None);
+    said.rows = [TITLE_ROW, DESCRIPTION_ROW].into_iter().filter_map(|name| text_of(name).map(|t| Arc::new(standard_row(name, t)))).collect();
+    (!said.rows.is_empty() && **section == said).then(|| Arc::clone(section))
 }
 
 /// The steps a walk of the model for the document file may still take: charged **before** the work is done, and held to what the save's step cap has left, so that a
@@ -1495,6 +1517,74 @@ pub(crate) fn is_group_entry(entry: &El) -> bool {
     entry.name.ends_with(":group")
 }
 
+/// Whether two lists of nodes (the children of two elements of an entry) say the same, **a number of a cell's value (`V`) being the same when it differs by rounding alone**
+/// ([`rounds_to`]). The entry of a group holds the cached values that the box of its members makes (the four side-middle `Connection` rows, `Width*0.5` and its kin), and a
+/// move writes the members again: the file read again has a box a few units in the last place from the one the session kept, so the entry of the model is never the entry of
+/// the file read again to the bit, and that difference is no data a person gave the group. **`derived`** is for the entry that is left out of the file when the
+/// markup gives it: the cached value of a cell that holds a formula, the same formula in both, is not judged at all, since the reader makes it again from the markup it reads (a
+/// resize of the group changes it by more than rounding, and the file read again holds the new box's); a cell with no formula, a place the markup gives, is still judged by
+/// rounding. **Nothing else is judged by rounding**: a name, a formula, a unit, a text, a number of another attribute and the shape of the tree must be equal. The walk is
+/// iterative, takes a step for each node looked at, and gives `false` when the room runs out (the caller's own check then says it in words).
+fn same_nodes(a: &[Node], b: &[Node], derived: bool, steps: &mut Steps) -> bool {
+    let mut pairs: Vec<(&[Node], &[Node])> = vec![(a, b)];
+    while let Some((a, b)) = pairs.pop() {
+        if a.len() != b.len() {
+            return false;
+        }
+        for (x, y) in a.iter().zip(b) {
+            if !steps.take(1) {
+                return false;
+            }
+            match (x, y) {
+                (Node::El(x), Node::El(y)) => {
+                    if x.name != y.name || !same_attrs(x, y, derived) {
+                        return false;
+                    }
+                    pairs.push((&x.children, &y.children));
+                }
+                (x, y) if x == y => {}
+                _ => return false,
+            }
+        }
+    }
+    true
+}
+
+/// Whether the attributes of two elements of one name are the same: each equal, but the `V` of a `Cell`, which is the same number within the rounding of a save.
+fn same_attrs(x: &El, y: &El, derived: bool) -> bool {
+    let cell = x.name.rsplit(':').next() == Some("Cell");
+    // A cell of a formula, when the cached values are not judged: the formula is the cell, and the value follows the cells it names.
+    let follows = derived && cell && x.attr("F").is_some() && x.attr("F") == y.attr("F");
+    x.attrs.len() == y.attrs.len()
+        && x.attrs.iter().zip(&y.attrs).all(|((ka, va), (kb, vb))| ka == kb && (va == vb || (cell && ka == "V" && (follows || rounds_to(va, vb)))))
+}
+
+/// Whether the two texts are numbers, finite, that a save holds to be one length: within [`crate::write::lengths::same`] (a trillionth of an inch, and of the size of the
+/// number), the rounding of the lengths it writes.
+fn rounds_to(a: &str, b: &str) -> bool {
+    matches!((a.parse::<f64>(), b.parse::<f64>()), (Ok(p), Ok(q)) if p.is_finite() && q.is_finite() && crate::write::lengths::same(p, q))
+}
+
+/// Whether the file holds `entry` already: an entry of the same attributes whose children are the same, up to rounding ([`same_nodes`]).
+fn holds(held: &[&El], entry: &El, steps: &mut Steps) -> bool {
+    held.iter().any(|h| h.attrs == entry.attrs && (h.children == entry.children || same_nodes(&h.children, &entry.children, false, steps)))
+}
+
+/// Whether the entries `small` made for the model and for the baseline are the same: each exactly, but the entry of a group, which is the same when its numbers differ by
+/// rounding alone ([`same_nodes`]).
+fn same_entries(now: Option<Vec<El>>, was: Option<Vec<El>>, steps: &mut Steps) -> bool {
+    match (now, was) {
+        (None, None) => true,
+        (Some(now), Some(was)) => {
+            now.len() == was.len()
+                && now.iter().zip(&was).all(|(a, b)| {
+                    a == b || (is_group_entry(a) && a.name == b.name && a.attrs == b.attrs && same_nodes(&a.children, &b.children, false, steps))
+                })
+        }
+        _ => false,
+    }
+}
+
 /// The number of each page of `doc` among the pages of its name, as the entries say it (`page-nth`, [`small`]).
 fn page_nths(doc: &Document) -> Vec<u32> {
     let mut seen: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
@@ -1508,8 +1598,31 @@ fn page_nths(doc: &Document) -> Vec<u32> {
         .collect()
 }
 
+/// Which page and which shape of the file, as it is now, each page and each shape of the model is. **The model's `ID`s are not the ones the file read again gives**: a
+/// shape put last, taken out or added since the file was read has its place in the file, and the reader numbers the shapes of the file by those places, so a group is the same group
+/// in the two models by the element it is in the file, and never by its `ID`. (A save compares the pages and the shapes by it: [`Structure::matched`], and the ordinals of the two
+/// indexes.) A group found by its `ID` in the file read again was another shape, or none, for any model whose shapes had moved in a save before: a drawing saved and saved again was refused
+/// for a group whose data was the markup's own.
+#[derive(Clone, Copy)]
+pub(crate) struct Elements<'a> {
+    /// What the model did to the pages: which page of the file each page of the model is ([`Structure::matched`]).
+    pub st: &'a Structure,
+    /// The index the caller holds: the element of each shape of the model, by the model's `ID`.
+    pub held: &'a ShapeIndex,
+    /// The index reading the file again gives: the element of each shape of `base`, by the `ID` the reader numbered it with.
+    pub fresh: &'a ShapeIndex,
+}
+
+impl<'a> Elements<'a> {
+    /// The page of the file that the page `at` of the model is: its place (in `base`, and in both indexes), and the entries of the two indexes for it. `None` for a page the file lacks.
+    fn page(&self, at: usize) -> Option<(usize, &'a PageShapes, &'a PageShapes)> {
+        let place = self.st.matched.get(at).copied().flatten()?;
+        Some((place, self.held.page(place)?, self.fresh.page(place)?))
+    }
+}
+
 /// The entries with no key of their own (`nth`) that `doc` makes for groups whose data is **what the file's markup gives them**: the drawing as it was read
-/// (`base`) has the group on the page of the same `ID`, under the same `ID`, the entry `base` makes for it carries what this one does (its attributes but the key, `page`, `page-nth`,
+/// (`base`) has the group on the page that is the model's, in the same element of the page ([`Elements`]), the entry `base` makes for it carries what this one does (its attributes but the key, `page`, `page-nth`,
 /// `name` and `nth`, and its children), and no entry of the file as it is (`old`) has the group's name, so none gave it data on the read. Such data is no data of DiaCraft's: the
 /// graphic style of a group's `draw:style-name` and the glue points of its own `draw:glue-point`s, which are no frame and no standard `Connection` row ([`group_native`]). The reader
 /// builds it again from the markup, so the group needs no entry, and [`tree`] leaves its entry out where it would refuse a new entry with no key: a save that rewrites the file for
@@ -1517,7 +1630,14 @@ fn page_nths(doc: &Document) -> Vec<u32> {
 ///
 /// **Only `group` entries are looked at**: the item of a group's VSDX data, paired with the group's `ID` as its entry is, holds what no markup
 /// says, and is never one of these, so a save never leaves it out.
-fn from_markup(doc: &Document, base: &Document, old: Option<&El>, steps: &mut Steps, gate: &mut Gate<'_>) -> Result<Vec<El>, WriteError> {
+fn from_markup(
+    doc: &Document,
+    base: &Document,
+    elements: &Elements<'_>,
+    old: Option<&El>,
+    steps: &mut Steps,
+    gate: &mut Gate<'_>,
+) -> Result<Vec<El>, WriteError> {
     const KEY: [&str; 4] = ["page", "page-nth", "name", "nth"];
     // The `group` entries of a page's groups: the items beside them are left alone.
     let entries_of = |page: &diacraft_doc::Page, nth: u32, steps: &mut Steps, gate: &mut Gate<'_>| -> Result<Vec<(u32, El)>, WriteError> {
@@ -1538,21 +1658,17 @@ fn from_markup(doc: &Document, base: &Document, old: Option<&El>, steps: &mut St
     });
     let data = |e: &El| -> Vec<(String, String)> { e.attrs.iter().filter(|(k, _)| !KEY.contains(&k.as_str())).cloned().collect() };
     let (nths, base_nths) = (page_nths(doc), page_nths(base));
-    let base_pages: std::collections::HashMap<u32, usize> = base.pages.iter().enumerate().map(|(at, page)| (page.id, at)).collect();
     for (at, page) in doc.pages.iter().enumerate() {
         if !steps.take(1) {
             return Ok(out);
         }
-        let Some((base_page, base_nth)) =
-            base_pages.get(&page.id).and_then(|&was| Some((base.pages.get(was)?, base_nths.get(was).copied().unwrap_or(1))))
-        else {
-            continue;
-        };
+        let Some((place, held, fresh)) = elements.page(at) else { continue };
+        let Some(base_page) = base.pages.get(place) else { continue };
         let made = entries_of(page, nths.get(at).copied().unwrap_or(1), steps, gate)?;
         if made.iter().all(|(_, entry)| entry.attr("nth").is_none()) {
             continue;
         }
-        let read = entries_of(base_page, base_nth, steps, gate)?;
+        let read = entries_of(base_page, base_nths.get(place).copied().unwrap_or(1), steps, gate)?;
         for (id, entry) in made {
             if entry.attr("nth").is_none() || entry.attr("name").is_some_and(|name| taken.contains(name)) {
                 continue;
@@ -1560,13 +1676,119 @@ fn from_markup(doc: &Document, base: &Document, old: Option<&El>, steps: &mut St
             if !steps.take(1 + read.len() as u64) {
                 return Ok(out);
             }
+            // A group the model added has no element in the file, and is no group of it.
+            let Some(element) = held.ordinal(id) else { continue };
             let carried = data(&entry);
-            if read.iter().any(|(was, r)| *was == id && r.children == entry.children && data(r) == carried) {
+            if read.iter().any(|(was, r)| {
+                fresh.ordinal(*was) == Some(element)
+                    && data(r) == carried
+                    && (r.children == entry.children || same_nodes(&r.children, &entry.children, true, steps))
+            }) {
                 out.push(entry);
             }
         }
     }
     Ok(out)
+}
+
+/// Whether the entry of a group says something a flat drawing cannot keep: a cell or a section the group holds beyond what the reader makes of its markup, or one it lacks that
+/// the markup gives. **The standard `Connection` section gone is not one**: the reader gives every `draw:g` the four standard rows, and a group made in DiaCraft holds none, so
+/// the entry of every such group says the section is gone and the flat file reads back with the four, as it always has; that is a difference of what a new group starts with, and no data a person gave.
+/// The attributes of the entry (`id`, the links to a master) are no data here: an `ID` is written as the group's `draw:id` when another shape names it, and a master link is the document's, whose
+/// change a flat save refuses in its own words.
+fn flat_cannot_keep(entry: &El) -> bool {
+    let connection = names::Gone::Section(diacraft_doc::SectionKey::new("Connection", None));
+    !entry.children.is_empty()
+        || entry.attr("gone").is_some_and(|tokens| tokens.split(' ').filter_map(names::Gone::parse).any(|gone| gone != connection))
+}
+
+/// The first group of `doc` whose entry holds data that the markup does not give it, which a flat drawing cannot keep: `None` when every group holds what its markup gives it
+/// (what the reader builds again from the file, as [`from_markup`] finds for a package) and no more. **The same entries a package writes** are made for the model and for the baseline, the entry of
+/// a group of the model is the baseline's when it holds what the baseline's does (the same attributes and the same sheet, its numbers up to rounding and a cell of a formula by its formula: a
+/// group moved or resized is the group the file has), and the group is looked for by the element it is in the file ([`Elements`]: the `ID` of a group of the model is not the one the file
+/// read again gives it once a shape was put elsewhere), so that a group the baseline lacks (a new one) holds data when its entry does. A walk that is
+/// asked for more steps than it has stops, and the caller's check says so in words.
+fn flat_group_data(
+    doc: &Document,
+    base: &Document,
+    elements: &Elements<'_>,
+    steps: &mut Steps,
+    gate: &mut Gate<'_>,
+) -> Result<Option<El>, WriteError> {
+    const KEY: [&str; 4] = ["page", "page-nth", "name", "nth"];
+    let data = |e: &El| -> Vec<(String, String)> { e.attrs.iter().filter(|(k, _)| !KEY.contains(&k.as_str())).cloned().collect() };
+    let (nths, base_nths) = (page_nths(doc), page_nths(base));
+    for (at, page) in doc.pages.iter().enumerate() {
+        if !steps.take(1) {
+            return Ok(None);
+        }
+        let mut made = group_entries_of(page, nths.get(at).copied().unwrap_or(1), steps, gate)?;
+        made.retain(|(_, entry)| is_group_entry(entry) && flat_cannot_keep(entry));
+        if made.is_empty() {
+            continue;
+        }
+        // The page of the file that this page is, with the two indexes' entries for it; a page the file lacks has no group of it.
+        let pair = elements.page(at);
+        let mut read = match pair.and_then(|(place, ..)| base.pages.get(place).map(|p| (p, base_nths.get(place).copied().unwrap_or(1)))) {
+            Some((base_page, base_nth)) => group_entries_of(base_page, base_nth, steps, gate)?,
+            None => Vec::new(),
+        };
+        read.retain(|(_, entry)| is_group_entry(entry));
+        // The baseline's entries by the element of their group, made once (a step each), so that each entry of the model is looked for among the few that share its element and the work
+        // follows the number of groups and not its square.
+        if !steps.take(read.len() as u64) {
+            return Ok(None);
+        }
+        let mut by_element: std::collections::HashMap<u32, Vec<&El>> = std::collections::HashMap::new();
+        if let Some((_, _, fresh)) = pair {
+            for (was, r) in &read {
+                if let Some(element) = fresh.ordinal(*was) {
+                    by_element.entry(element).or_default().push(r);
+                }
+            }
+        }
+        for (id, entry) in made {
+            let same_element =
+                pair.and_then(|(_, held, _)| held.ordinal(id)).and_then(|element| by_element.get(&element)).map_or(&[][..], Vec::as_slice);
+            if !steps.take(1 + same_element.len() as u64) {
+                return Ok(None);
+            }
+            let carried = data(&entry);
+            let markup = same_element
+                .iter()
+                .any(|r| data(r) == carried && (r.children == entry.children || same_nodes(&r.children, &entry.children, true, steps)));
+            if !markup {
+                return Ok(Some(entry));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Refuses in words the save of a flat drawing in which a group holds data of its own that the markup does not give it, and that a flat file has no place for: a package keeps a
+/// group's data in the document file's `group` entries, and a flat drawing has no document file (DiaCraft's own data is one element, and no more). The save wrote none of it and
+/// said no edit was made, so the change was lost without a word. The cost is counted in the save's steps, and only a drawing with a group pays it ([`flat_group_data`]).
+pub(crate) fn refuse_flat_group_data(doc: &Document, base: &Document, elements: &Elements<'_>, work: &mut WriteWork) -> Result<(), WriteError> {
+    // A drawing with no group has no entry to look at.
+    if doc.pages.iter().all(|page| page.shapes.iter().all(|s| s.children.is_empty())) {
+        return Ok(());
+    }
+    let mut steps = Steps::new(work.step_cap.saturating_sub(work.steps_used()));
+    // The entries are compared as two models are, which holds no memory of the save's room (`Gate::comparing`).
+    let found = flat_group_data(doc, base, elements, &mut steps, &mut Gate::comparing());
+    charge(work, &steps)?;
+    match found? {
+        None => Ok(()),
+        Some(entry) => {
+            let number = |attr: &str| entry.attr(attr).and_then(canonical_u32).unwrap_or(1);
+            Err(WriteError::FlatGroup {
+                page: entry.attr("page").unwrap_or_default().to_owned(),
+                page_nth: number("page-nth"),
+                name: entry.attr("name").unwrap_or_default().to_owned(),
+                nth: number("nth"),
+            })
+        }
+    }
 }
 
 /// What a save does about the file.
@@ -1597,9 +1819,9 @@ fn tree(old: Option<&El>, doc: &Document, native: &Native, markup: &[El], steps:
             if !steps.take(1 + held.len() as u64 + markup.len() as u64) {
                 return Err(WriteError::Unsupported(WORDS_STEPS));
             }
-            let same = |h: &El| h.attrs == entry.attrs && h.children == entry.children;
-            if !held.iter().any(|h| same(h)) {
-                if markup.iter().any(same) {
+            // An entry the file holds is the entry of the model when its numbers differ by rounding alone (a group moved since).
+            if !holds(&held, &entry, steps) {
+                if markup.iter().any(|m| m.attrs == entry.attrs && m.children == entry.children) {
                     continue;
                 }
                 // The refusal names the group, so that a person can find it and name it.
@@ -1698,7 +1920,7 @@ fn same(doc: &Document, base: &Document, native: &Native, after: &Native, drop_m
         && crate::write::newstyles::styles_same(doc, base)
         && themes(doc) == themes(base)
         && super::items::same(doc, base, drop_macros)
-        && small(doc, after, steps, &mut Gate::comparing()).ok() == small(base, native, steps, &mut Gate::comparing()).ok()
+        && same_entries(small(doc, after, steps, &mut Gate::comparing()).ok(), small(base, native, steps, &mut Gate::comparing()).ok(), steps)
 }
 
 /// Whether a style sheet of `doc` holds ODF data in a form of an earlier version that 1.4 refuses (`odf14`, the forms the save worked out before it wrote anything) or a font size of 0: the model
@@ -1723,18 +1945,18 @@ fn charge(work: &mut crate::write::WriteWork, steps: &Steps) -> Result<(), crate
 }
 
 /// The change a save makes to the file, or `None` when the model holds what the baseline held. `old` is the file as the package has it, `base` the model
-/// the package reads as, and `native` what its native markup alone gives. **The cost is counted**: the bytes of the file read, and of the file made, are
+/// the package reads as, `elements` which page and which shape of it each of the model's is, and `native` what its native markup alone gives. **The cost is counted**: the bytes of the file read, and of the file made, are
 /// charged to `work` (the save's own caps), and a file past [`MOST_BYTES`] is refused before it is parsed.
 pub(crate) fn plan(
     doc: &Document,
     base: &Document,
     native: &Native,
-    st: &Structure,
+    elements: &Elements<'_>,
     old: Option<&[u8]>,
     limits: &crate::Limits,
     work: &mut crate::write::WriteWork,
 ) -> Result<Option<Change>, crate::write::WriteError> {
-    let after = native.after(doc, st);
+    let after = native.after(doc, elements.st);
     let mut steps = Steps::new(work.step_cap.saturating_sub(work.steps_used()));
     // A style of an earlier ODF version's form is written in 1.4's on the model path, and its source's form rides here, whatever else the document file holds.
     let unchanged = same(doc, base, native, &after, work.drop_macros, &mut steps) && !(work.model_path && holds_older(doc, work));
@@ -1777,7 +1999,7 @@ pub(crate) fn plan(
     // The trees are made, and written, while the save holds the memory they take; it is given back when the bytes are made.
     let mut gate = Gate::new(work);
     // The entries with no key whose data is the markup's own, which the file leaves out, are found first.
-    let made = from_markup(doc, base, old_tree.as_ref(), &mut steps, &mut gate)
+    let made = from_markup(doc, base, elements, old_tree.as_ref(), &mut steps, &mut gate)
         .and_then(|markup| tree(old_tree.as_ref(), doc, &after, &markup, &mut steps, &mut gate))
         .and_then(|now| now.map(|root| written(root, limits, &check)).transpose());
     gate.release();
@@ -2122,7 +2344,29 @@ mod tests {
     }
 
     fn planned(doc: &Document, old: Option<&[u8]>, limits: &crate::Limits) -> Result<Option<Change>, crate::write::WriteError> {
-        plan(doc, &Document::empty(), &Native::default(), &Structure::identity(doc.pages.len()), old, limits, &mut crate::write::WriteWork::default())
+        let (st, none) = (Structure::identity(doc.pages.len()), ShapeIndex::default());
+        let elements = Elements { st: &st, held: &none, fresh: &none };
+        plan(doc, &Document::empty(), &Native::default(), &elements, old, limits, &mut crate::write::WriteWork::default())
+    }
+
+    /// The index of a model whose shapes are numbered as a file's own are: the element of each shape is its `ID` (a group before its members, which the tests give consecutive `ID`s).
+    fn numbered_as_read(doc: &Document) -> ShapeIndex {
+        let pages = doc
+            .pages
+            .iter()
+            .enumerate()
+            .map(|(at, page)| {
+                let mut ordinals = std::collections::HashMap::new();
+                let mut stack: Vec<&Arc<diacraft_doc::Shape>> = page.shapes.iter().collect();
+                while let Some(shape) = stack.pop() {
+                    ordinals.insert(shape.id, shape.id);
+                    stack.extend(shape.children.iter());
+                }
+                let high = ordinals.keys().copied().max().unwrap_or(0);
+                crate::index::PageShapes::from_parts(crate::index::PageSource::Page(at), ordinals, Vec::new(), high, high)
+            })
+            .collect();
+        ShapeIndex::from_pages(pages, crate::index::ReadCost::default())
     }
 
     fn refused_for(r: &Result<Option<Change>, crate::write::WriteError>, words: &str) -> bool {
@@ -2660,7 +2904,9 @@ mod tests {
             "the item, then the entry, each with the group's ID"
         );
         // The drawing as read is this one: the group's entry is the markup's own, and the item is not.
-        let markup = from_markup(&doc, &doc, None, &mut Steps::new(u64::MAX), &mut Gate::none()).unwrap();
+        let (st, index) = (Structure::identity(doc.pages.len()), numbered_as_read(&doc));
+        let elements = Elements { st: &st, held: &index, fresh: &index };
+        let markup = from_markup(&doc, &doc, &elements, None, &mut Steps::new(u64::MAX), &mut Gate::none()).unwrap();
         let names: Vec<&str> = markup.iter().map(|e| e.name.rsplit(':').next().unwrap_or_default()).collect();
         assert_eq!(names, ["group"], "only the group's entry is the markup's: {markup:?}");
         // The file: the item, and no entry for the group; nothing refused.
@@ -2676,6 +2922,50 @@ mod tests {
         let with_item: Vec<El> = made.into_iter().map(|(_, e)| e).collect();
         let written = tree(None, &doc, &native, &with_item, &mut Steps::new(u64::MAX), &mut Gate::none()).unwrap().expect("a file for the item");
         assert_eq!(written.elements().filter(|e| e.attr("of") == Some("group")).count(), 1, "the item is written");
+    }
+
+    /// An index of one page whose shapes are in the elements `pairs` say: `(ID, element)`.
+    fn index_of(pairs: &[(u32, u32)]) -> ShapeIndex {
+        let ordinals: std::collections::HashMap<u32, u32> = pairs.iter().copied().collect();
+        let high = pairs.iter().map(|(_, element)| *element).max().unwrap_or(0);
+        let page = crate::index::PageShapes::from_parts(crate::index::PageSource::Page(0), ordinals, Vec::new(), high, high);
+        ShapeIndex::from_pages(vec![page], crate::index::ReadCost::default())
+    }
+
+    /// The group of the model is the group of the file read again by the element it is in, and never by its `ID`. A shape put last since the file was read changes
+    /// the `ID`s the reader gives the shapes after it, so the group the model knows as 10 is the one the file read again numbers 3: its entry is the markup's own when it is the same,
+    /// and no entry of another element is the group's (a group the model added has no element at all).
+    #[test]
+    fn a_group_is_the_files_by_the_element_it_is_in_and_not_by_its_id() {
+        let page_of = |id: u32| {
+            let mut page = page_of_groups(&[None], Some("1"));
+            Arc::make_mut(page.shapes.get_mut(0).unwrap()).id = id;
+            page
+        };
+        let doc_of = |page: Page| {
+            let mut doc = Document::empty();
+            doc.pages = SharedVec::from_vec(vec![Arc::new(page)]);
+            doc
+        };
+        let (doc, base) = (doc_of(page_of(10)), doc_of(page_of(3)));
+        let st = Structure::identity(1);
+        let markup = |held: &ShapeIndex, fresh: &ShapeIndex| {
+            let elements = Elements { st: &st, held, fresh };
+            from_markup(&doc, &base, &elements, None, &mut Steps::new(u64::MAX), &mut Gate::none()).unwrap().len()
+        };
+        // The model's 10 and the file's 3 are the fifth element of the page: one group.
+        assert_eq!(markup(&index_of(&[(10, 5)]), &index_of(&[(3, 5)])), 1, "the same element is the same group, whatever its ID");
+        // The same `ID` in both, in other elements: not the same group.
+        assert_eq!(markup(&index_of(&[(10, 5)]), &index_of(&[(10, 6)])), 0, "the same ID in another element is another group");
+        // A group the model has and the file lacks.
+        assert_eq!(markup(&index_of(&[]), &index_of(&[(3, 5)])), 0, "a group with no element in the file is new");
+        assert_eq!(markup(&index_of(&[(10, 5)]), &index_of(&[])), 0, "and a group of the model the file reads no group of is another");
+        // A page of the model that the file lacks has no group of the file.
+        let none = Structure { matched: vec![None], ..Structure::default() };
+        let (held, fresh) = (index_of(&[(10, 5)]), index_of(&[(3, 5)]));
+        let elements = Elements { st: &none, held: &held, fresh: &fresh };
+        let made = from_markup(&doc, &base, &elements, None, &mut Steps::new(u64::MAX), &mut Gate::none()).unwrap();
+        assert!(made.is_empty(), "a page the file lacks holds no group of the file");
     }
 
     /// The survivors of the mutation run: what the walks of a sheet cost, exactly: a step for the sheet and each of its cells and sections, for each section
@@ -2861,5 +3151,112 @@ mod tests {
         // Nothing asked of nothing is no refusal.
         let mut none = Steps::new(0);
         assert!(none.take(0) && !none.over());
+    }
+
+    /// A `Cell` element of the entry's sheet, as the codec makes it: `N`, then `V`, and `F` and `U` when given.
+    fn cell_el(v: &str, f: Option<&str>) -> Node {
+        let mut attrs = vec![("N".to_owned(), "X".to_owned()), ("V".to_owned(), v.to_owned())];
+        if let Some(f) = f {
+            attrs.push(("F".to_owned(), f.to_owned()));
+        }
+        Node::El(el("Cell", attrs, Vec::new()))
+    }
+
+    /// A number of a cell's value that differs by rounding alone is the same; a number that is a person's change, and anything but a cell's `V`, is not.
+    #[test]
+    fn a_cells_value_is_the_same_within_the_rounding_of_a_save_and_nothing_else_is() {
+        let same = |a: &[Node], b: &[Node]| same_nodes(a, b, false, &mut Steps::new(u64::MAX));
+        let (a, b) = ("0.9842519685039369", "0.984251968503937");
+        assert!(same(&[cell_el(a, Some("Width*0.5"))], &[cell_el(b, Some("Width*0.5"))]), "the last places of a cached value");
+        assert!(same(&[cell_el("0", None)], &[cell_el("-0", None)]), "a zero is a zero");
+        assert!(!same(&[cell_el(a, None)], &[cell_el("0.9942519685039369", None)]), "a hundredth is a change");
+        assert!(!same(&[cell_el("1", None)], &[cell_el("1.000000001", None)]), "a billionth is a change: the rounding is a trillionth of the size");
+        assert!(!same(&[cell_el(a, Some("Width*0.5"))], &[cell_el(b, Some("Width*0.25"))]), "a formula is not a number");
+        assert!(
+            !same(&[cell_el("NaN", None)], &[cell_el("NaN ", None)]) && !same(&[cell_el("inf", None)], &[cell_el("infinity", None)]),
+            "no number that is not finite"
+        );
+        assert!(!same(&[cell_el(a, None)], &[cell_el(a, None), cell_el(a, None)]), "the shape of the tree is the same");
+        // The attributes and elements that are not a cell's value.
+        let named = |n: &str, v: &str| vec![Node::El(el(n, vec![("V".to_owned(), v.to_owned())], Vec::new()))];
+        assert!(!same(&named("Row", "1"), &named("Row", "1.0000000000001")), "a `V` of another element");
+        assert!(!same(&named("Cell", "1"), &named("Cell2", "1")), "a name");
+        let unit = |u: &str| vec![Node::El(el("Cell", vec![("U".to_owned(), u.to_owned())], Vec::new()))];
+        assert!(!same(&unit("1"), &unit("1.0000000000001")), "an attribute of a cell that is not its value");
+        assert!(!same(&[Node::Text("1".to_owned())], &[Node::Text("1.0000000000001".to_owned())]), "a text");
+    }
+
+    /// For an entry that is left out of the file (`derived`), the value of a cell of a formula is not judged, and nothing else is judged the less.
+    #[test]
+    fn the_value_of_a_cell_of_a_formula_is_not_judged_of_an_entry_the_markup_gives() {
+        let derived = |a: &[Node], b: &[Node]| same_nodes(a, b, true, &mut Steps::new(u64::MAX));
+        let plain = |a: &[Node], b: &[Node]| same_nodes(a, b, false, &mut Steps::new(u64::MAX));
+        let (was, now) = (cell_el("0.98", Some("Width*0.5")), cell_el("1.35", Some("Width*0.5")));
+        assert!(derived(std::slice::from_ref(&was), std::slice::from_ref(&now)), "a value the box makes, the formula the same");
+        assert!(!plain(std::slice::from_ref(&was), std::slice::from_ref(&now)), "an entry that is written is judged by rounding alone");
+        assert!(!derived(&[cell_el("0.98", None)], &[cell_el("1.35", None)]), "a place the markup gives is data");
+        assert!(!derived(&[cell_el("0.98", Some("Width*0.5"))], &[cell_el("0.98", Some("Width*0.25"))]), "another formula is another cell");
+        assert!(!derived(&[cell_el("0.98", Some("Width*0.5"))], &[cell_el("0.98", None)]), "a formula taken away is another cell");
+        assert!(!derived(&[cell_el("0.98", None)], &[cell_el("0.98", Some("Width*0.5"))]), "and one put in");
+        let unit = |u: &str| {
+            Node::El(el("Cell", vec![("V".to_owned(), "1".to_owned()), ("F".to_owned(), "W".to_owned()), ("U".to_owned(), u.to_owned())], Vec::new()))
+        };
+        assert!(!derived(&[unit("CM")], &[unit("IN")]), "the unit of a cell of a formula is judged");
+        let row = |v: &str| Node::El(el("Row", vec![("V".to_owned(), v.to_owned())], Vec::new()));
+        assert!(!derived(&[row("1")], &[row("2")]), "only a cell's value is not judged");
+    }
+
+    /// The walk takes a step for each node, says `false` when the room is not enough, and walks a tree a hundred thousand deep with no recursion.
+    #[test]
+    fn the_comparison_of_entries_is_charged_by_node_and_walks_a_deep_tree() {
+        let nest = |depth: usize, v: &str| -> Node {
+            let mut node = cell_el(v, None);
+            for _ in 0..depth {
+                node = Node::El(el("Section", Vec::new(), vec![node]));
+            }
+            node
+        };
+        let (a, b) = (nest(100_000, "1"), nest(100_000, "1.00000000000000001"));
+        let mut steps = Steps::new(u64::MAX);
+        assert!(same_nodes(std::slice::from_ref(&a), std::slice::from_ref(&b), false, &mut steps));
+        assert_eq!(steps.used(), 100_001, "a step for each node");
+        let mut short = Steps::new(1_000);
+        assert!(!same_nodes(std::slice::from_ref(&a), std::slice::from_ref(&b), false, &mut short) && short.over(), "the room runs out");
+        // (Dropped one level at a time: the nodes' own drop is recursive, and a tree this deep is no test of it.)
+        std::mem::forget(a);
+        std::mem::forget(b);
+    }
+
+    /// The entries of two lists are the same when each is, a group's within rounding and any other exactly.
+    #[test]
+    fn two_lists_of_entries_are_the_same_when_each_is_and_a_groups_within_rounding() {
+        let entry = |name: &str, v: &str| {
+            let mut e = el(name, vec![("page".to_owned(), "P".to_owned())], vec![cell_el(v, None)]);
+            e.attrs.push(("nth".to_owned(), "1".to_owned()));
+            e
+        };
+        let same = |a: Vec<El>, b: Vec<El>| same_entries(Some(a), Some(b), &mut Steps::new(u64::MAX));
+        assert!(same(vec![entry("group", "1")], vec![entry("group", "1.0000000000000002")]), "a group's entry within rounding");
+        assert!(!same(vec![entry("group", "1")], vec![entry("group", "1.5")]));
+        assert!(!same(vec![entry("page", "1")], vec![entry("page", "1.0000000000000002")]), "any other entry exactly");
+        assert!(!same(vec![entry("group", "1")], vec![entry("group", "1"), entry("group", "1")]), "the count");
+        assert!(same_entries(None, None, &mut Steps::new(0)) && !same_entries(None, Some(Vec::new()), &mut Steps::new(0)));
+    }
+
+    /// An entry the file holds is the model's when its attributes are equal and its children are the same within rounding; the walk is charged, and an entry of the file that
+    /// differs in an attribute (the number of the group among the groups of its name) costs no step.
+    #[test]
+    fn the_file_holds_an_entry_when_its_numbers_are_the_models_within_rounding() {
+        let entry = |nth: &str, v: &str| {
+            let attrs = vec![("page".to_owned(), "P".to_owned()), ("nth".to_owned(), nth.to_owned())];
+            el("group", attrs, vec![cell_el(v, Some("Width*0.5"))])
+        };
+        let (a, b, c) = (entry("1", "0.9842519685039369"), entry("1", "0.984251968503937"), entry("2", "0.984251968503937"));
+        let mut steps = Steps::new(u64::MAX);
+        assert!(holds(&[&b], &a, &mut steps) && steps.used() == 1, "rounding is the same entry, one step for its one node");
+        assert!(holds(&[&c, &b], &a, &mut steps) && steps.used() == 2, "another number among the groups is another entry, which costs nothing");
+        assert!(!holds(&[&c], &a, &mut steps) && steps.used() == 2);
+        assert!(!holds(&[&b], &entry("1", "1.5"), &mut steps), "a number that is a change is not the same entry");
+        assert!(!holds(&[], &a, &mut steps));
     }
 }

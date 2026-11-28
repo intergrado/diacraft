@@ -174,6 +174,44 @@ fn a_lock_keeps_a_new_theme_from_changing_the_number_it_names() {
     assert_eq!(held(d, 1, "FillForegnd").as_deref(), Some("#1f8ca8"));
 }
 
+/// `LockVariation` keeps a variant chosen for the page off the shape's variant cells,
+/// whatever its two theme locks say, as the colour lock holds `VariationColorIndex` and the effect lock `VariationStyleIndex`.
+#[test]
+fn a_variation_lock_keeps_the_variant_cells_of_a_shape_with_the_theme_locks_off() {
+    let dir = Dir::new();
+    let variants = [cell("VariationColorIndex", "1"), cell("VariationStyleIndex", "1")].concat();
+    // Shape 1 locks its variant only; shape 2 locks its colours only; shape 3 locks its effects only; shape 4 locks nothing; shape 5 locks both theme locks and not the variant.
+    let shapes = [
+        own_box(1, &(variants.clone() + &cell("LockVariation", "1"))),
+        own_box(2, &(variants.clone() + &cell("LockThemeColors", "1"))),
+        own_box(3, &(variants.clone() + &cell("LockThemeEffects", "1"))),
+        own_box(4, &variants),
+        own_box(5, &(variants.clone() + &cell("LockThemeColors", "1") + &cell("LockThemeEffects", "1") + &cell("LockVariation", "0"))),
+    ]
+    .concat();
+    let mut s = opened(&dir, &file(&shapes, &FIVE.map(|n| cell(n, "40")).concat()));
+    run(&mut s, "theme.variant", json!({"variant": 3}));
+    let d = s.document().unwrap();
+    let both = |id: u32| (held(d, id, "VariationColorIndex"), held(d, id, "VariationStyleIndex"));
+    let text = |a: &str, b: &str| (Some(a.to_owned()), Some(b.to_owned()));
+    assert_eq!(both(1), text("1", "1"), "LockVariation holds both variant cells");
+    assert_eq!(both(2), text("1", "3"), "the colour lock holds the colour variant alone");
+    assert_eq!(both(3), text("3", "1"), "the effect lock holds the style variant alone");
+    assert_eq!(both(4), text("3", "3"), "no lock: both follow the page");
+    assert_eq!(both(5), text("1", "1"), "both theme locks hold both, with LockVariation off");
+    // A new theme moves the variant too, and the lock holds it again: the variant of a theme applied is a variant chosen.
+    run(&mut s, "theme.apply", json!({"theme": "tidepool", "variant": 2}));
+    let d = s.document().unwrap();
+    let both = |id: u32| (held(d, id, "VariationColorIndex"), held(d, id, "VariationStyleIndex"));
+    assert_eq!(both(1), text("1", "1"), "still held after a theme");
+    assert_eq!(both(4), text("2", "2"));
+    // The cell holds its lock as any other flag is read: a number other than 0 is on.
+    let mut t = opened(&dir, &file(&own_box(1, &(variants + &cell("LockVariation", "10"))), &FIVE.map(|n| cell(n, "40")).concat()));
+    run(&mut t, "theme.variant", json!({"variant": 3}));
+    assert_eq!(held(t.document().unwrap(), 1, "VariationColorIndex").as_deref(), Some("1"), "10 is locked");
+    assert_eq!(check_session(&s), Ok(()));
+}
+
 #[test]
 fn a_scheme_cell_that_is_a_formula_or_65534_or_65535_or_not_a_number_is_left_alone() {
     let dir = Dir::new();

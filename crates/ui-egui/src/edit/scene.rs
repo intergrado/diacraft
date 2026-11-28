@@ -5,6 +5,11 @@
 //! inherits its geometry from a master is found where its instance is). Everything is in paper inches with y up, the unit of the
 //! window's view and of the editing commands: the page's drawing units are divided by `units_per_inch`.
 //!
+//! **A cell that holds a formula and no value saved anywhere on the way to it is read by what its formula works out to**, as the picture draws it (`diacraft_engine::draw::Worked`):
+//! a shape pinned at `=1+1` with no `V` is drawn at 2 inches, and is found there. The steps for that are the scene's own, one budget for all it reads and for the
+//! connection points it reads later ([`Scene::points`]), and the answers are kept in the reader the build makes, so the work is paid once for the revision the scene is built at and
+//! never again by a click, a rubber band or a frame of a drag; a page whose formulas run the steps out is read as saved from there on (no value, which reads 0), as it was before.
+//!
 //! A scene is built when the pointer first needs it after the document changed, and kept until the next edit (`edit/mod.rs`).
 //! The page's own top-level shapes are read, up to [`MAX_ITEMS`]; they are what a click and a rubber band meet, and a group is one thing to
 //! select. **The members of the groups are read too**, up to [`MAX_MEMBERS`] in all and [`MAX_GROUP_DEPTH`] levels down, and kept apart in
@@ -12,13 +17,15 @@
 //! carried up through the poses of the groups they are in. **A group whose `SelectMode` is 0 (group only) has no members here**, nor have the groups
 //! inside it (a shape cannot be selected under an ancestor with 0).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
-use diacraft_engine::doc::{CellAddr, Document, Owner, Resolved, Resolver, Shape, ShapeRef, ShapeType, SheetRef};
+use diacraft_engine::doc::{CellAddr, Document, Owner, Resolver, SectionKey, Shape, ShapeRef, ShapeType, SheetRef, Value};
 use diacraft_engine::draw::layers::{Standing, page_standing};
-use diacraft_engine::draw::{Pose, connection_points_within, units_per_inch};
+use diacraft_engine::draw::worked::{WORKED_STEPS, Worked, WorkedBudget};
+use diacraft_engine::draw::{Pose, connection_points_within, text_block_in_frame, units_per_inch};
 use diacraft_engine::snap::MAX_CONNECTION_ROWS;
+use diacraft_geom::SectionFlags;
 
 use super::geom::{self, Basis, P, bounds_of, box_inside, distance, inside_polygon, near_polyline};
 
@@ -31,8 +38,15 @@ pub const MAX_ITEMS: usize = 5_000;
 pub const MAX_MEMBERS: usize = 5_000;
 pub const MAX_GROUP_DEPTH: usize = 8;
 
-/// The most `Geometry` sections, rows of a section and points of a shape read for its outline.
+/// The most text blocks one item holds (a group holds those of its members), and the most members of groups the scene looks into **for their text blocks alone** (the members of a group set to
+/// group only are not read as items, and its labels are still met): a hostile group is met at the labels read and no further.
+pub const MAX_BLOCKS: usize = 256;
+const MAX_BLOCK_VISITS: usize = 20_000;
+
+/// The most `Geometry` sections, rows of a section and points of a shape read for its outline: [`MAX_SECTIONS`] that are shown, out of the first [`MAX_LOOKED_AT`] there are (a section that is
+/// hidden costs three cells to find out, so a shape of thousands of them is not read to the end).
 const MAX_SECTIONS: usize = 8;
+const MAX_LOOKED_AT: usize = 64;
 const MAX_ROWS: usize = 400;
 const MAX_POINTS: usize = 2_000;
 
@@ -82,8 +96,20 @@ pub struct Item {
     pub select_mode: u8,
     /// How far it is turned, in degrees counterclockwise.
     pub degrees: f64,
-    /// The paths of the shape's geometry: closed outlines and open lines, as points. Empty for a shape with none.
+    /// The paths of the shape's geometry that its sections show: closed outlines and open lines, as points. A section that is hidden (`NoShow`) is no part of it. Empty for a shape with none.
     pub outline: Vec<Vec<P>>,
+    /// For each path of [`Item::outline`], whether the page paints anything of it (the same length). **A path is painted** when its section has a line that is drawn, or a fill that
+    /// is: `NoLine` and `NoFill` of the section, and the shape's `LinePattern` and `FillPattern`, as the renderer reads them (`diacraft_geom::SectionFlags::paint`), and the shape itself
+    /// is not drawn when its `DisplayMode` is 0. A text box of a group (a rectangle with no line and no fill) has an outline for the pointer to meet and paints nothing.
+    pub painted: Vec<bool>,
+    /// Whether every one of the shape's `Geometry` sections is hidden (`NoShow`), and the shape is not a group and shows no text: nothing of it is seen, and a click passes over it
+    /// (a hit test ignores hidden geometry). A hidden marker of a group's member is such a shape. A group is picked by its box whatever its own geometry says, and **a shape that
+    /// shows text is picked in its frame, the text block, as a shape with no geometry is**: its text is there to be clicked.
+    pub hidden: bool,
+    /// The text blocks of the shape on the page, in inches, each as its four corners in the order of the block's own frame (`text_block_in_frame`): the shape's own when it shows text, and for
+    /// a group those of its members at every depth that show text, whether the members are read as items or not (a group set to group only is met at its labels too). At most
+    /// [`MAX_BLOCKS`]. **A click in a text block meets the shape wherever the block lies** ([`Item::hit_text`]): a label that sits under its shape is not part of the geometry.
+    pub text_blocks: Vec<[P; 4]>,
     /// For a connector: where it begins and ends.
     pub ends: Option<(P, P)>,
     /// For a connector: the (shape, connection point) each end is glued to, begin first.
@@ -99,11 +125,25 @@ thread_local! {
 }
 
 impl Item {
+    /// The paths of the outline that the page paints something of, as the renderer reads the sections ([`Item::painted`]): what a picture of the shape is drawn from. A shape that
+    /// paints nothing (a text box with no line and no fill) has none, and a picture that wants something to show draws its box.
+    pub fn painted_paths(&self) -> impl Iterator<Item = &Vec<P>> {
+        self.outline.iter().zip(&self.painted).filter(|(_, painted)| **painted).map(|(path, _)| path)
+    }
+
+    /// The smallest box that holds the paths the page paints ([`Item::painted_paths`]), or `None` when it paints none.
+    pub fn painted_bounds(&self) -> Option<(P, P)> {
+        bounds_of(self.painted_paths().flatten())
+    }
+
     /// Whether `p` is on the shape, with `tol` inches of reach round a line. A shape is hit inside its outline (or its box, when it has none
-    /// that encloses anything); a connector only along its path.
+    /// that encloses anything); a connector only along its path. **A shape whose geometry is all hidden is never hit** ([`Item::hidden`]).
     pub fn hit(&self, p: P, tol: f64) -> bool {
         #[cfg(test)]
         HIT_ASKS.with(|c| c.set(c.get() + 1));
+        if self.hidden {
+            return false;
+        }
         let (lo, hi) = self.bounds;
         if p.0 < lo.0 - tol || p.0 > hi.0 + tol || p.1 < lo.1 - tol || p.1 > hi.1 + tol {
             return false;
@@ -120,6 +160,17 @@ impl Item {
             return inside_polygon(&self.corners, p) || near_polyline(&self.corners, true, p, tol);
         }
         areas.iter().any(|path| inside_polygon(path, p) || near_polyline(path, true, p, tol))
+    }
+
+    /// Whether `p` is in a text block of the shape (or, for a group, of a member), with `tol` inches of reach round its edge. **A text block is met wherever it lies**: the name under a BPMN
+    /// event or a network device is outside the shape's frame, and a click on it is a click on the shape. [`Scene::hit`] asks this only where no shape's geometry is at the point.
+    pub fn hit_text(&self, p: P, tol: f64) -> bool {
+        self.text_blocks.iter().any(|block| inside_polygon(block, p) || near_polyline(block, true, p, tol))
+    }
+
+    /// Whether `p` meets the shape by its geometry ([`Item::hit`]) or by its text ([`Item::hit_text`]): what a press on one shape that is already known asks.
+    pub fn meets(&self, p: P, tol: f64) -> bool {
+        self.hit(p, tol) || self.hit_text(p, tol)
     }
 
     /// Whether the whole shape lies inside the box `lo` to `hi`.
@@ -180,14 +231,14 @@ pub struct Scene {
     /// What the page's layers make of the shapes that are on a layer that is hidden, locked or otherwise not as a plain shape's, by `ID` (`layers::page_standing`): a shape on a
     /// hidden or a locked layer is not selectable, so a click, a rubber band and Select All pass over it.
     standing: HashMap<u32, Standing>,
+    /// The steps the cells that hold a formula and no saved value may be worked out in, for this scene and the connection points it reads later.
+    worked: WorkedBudget,
 }
 
-fn value_of(found: &Resolved<'_>) -> f64 {
-    found.value.cell.and_then(|c| c.value.as_ref()).and_then(|v| v.number()).filter(|n| n.is_finite()).unwrap_or(0.0)
-}
-
-fn number(res: &Resolver<'_>, sheet: &SheetRef, name: &str) -> f64 {
-    res.resolve(sheet, &CellAddr::direct(name)).map_or(0.0, |found| value_of(&found))
+/// The number a cell holds as the pointer reads it: saved, or for a cell with a formula and no saved value what the formula works out to; 0 for a cell that holds none and for one
+/// that is not a finite number.
+fn number(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef, name: &str) -> f64 {
+    worked.number_at(res, sheet, &CellAddr::direct(name)).filter(|n| n.is_finite()).unwrap_or(0.0)
 }
 
 fn is_set(res: &Resolver<'_>, sheet: &SheetRef, name: &str) -> bool {
@@ -199,18 +250,82 @@ fn inches(p: P, per_inch: f64) -> P {
     (p.0 / per_inch, p.1 / per_inch)
 }
 
+/// How the page paints the shape whose geometry is read (`diacraft_render`'s `Looks` and `Frame::enter`): what its `LinePattern`, `FillPattern` and `DisplayMode` say, the same cells read the
+/// same way.
+#[derive(Clone, Copy)]
+struct Look {
+    /// `LinePattern` is not 0: the shape has a line (a missing cell reads 0).
+    line: bool,
+    /// `FillPattern` is 0: no path of the shape is filled, whatever its section says (`SectionFlags::paint`).
+    fill_none: bool,
+    /// `DisplayMode` is not 0 (a missing cell reads 2): the shape's own geometry is drawn, behind its members at 1 and in front of them at 2.
+    shown: bool,
+}
+
+/// One path of a shape's geometry, in the shape's own frame (drawing units), and whether the page paints anything of it.
+struct Run {
+    points: Vec<P>,
+    painted: bool,
+}
+
+/// What [`paths_of`] found.
+struct Geometry {
+    runs: Vec<Run>,
+    /// The shape has `Geometry` sections, and every one is hidden.
+    all_hidden: bool,
+}
+
+/// The number the cell `name` of the shape `sheet` holds **as the renderer reads a cell of its look**: saved, or worked out; and for a shape that finds no value anywhere on the way **the root style's**
+/// ("No Style" is the style every object has: `Resolver::root_standin`, the one rule the renderer and the formatting controls read by), and `default` for a cell the root style holds no
+/// value of either. A shape of a stencil file that links to no style, or a document whose styles hold no line pattern, is read as the picture draws it.
+fn look_number(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef, name: &str, default: f64) -> f64 {
+    let addr = CellAddr::direct(name);
+    let Some(found) = res.resolve(sheet, &addr) else { return default };
+    if found.holds_unsaved_formula() || found.value.cell.is_some() {
+        return worked.number_of(sheet, &addr, &found).filter(|n| n.is_finite()).unwrap_or(default);
+    }
+    let root = res.root_standin(sheet, &addr, &found);
+    root.and_then(|root| root.value.cell.and_then(|cell| cell.value.as_ref().and_then(Value::number))).filter(|n| n.is_finite()).unwrap_or(default)
+}
+
+/// Whether the flag cell `name` of the section `key` is set, as the renderer reads a flag: any number but 0.
+fn section_flag(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef, key: &SectionKey, name: &str) -> bool {
+    worked.number_at(res, sheet, &CellAddr::in_section("Geometry", key.ix, name)).is_some_and(|n| n != 0.0)
+}
+
 /// The geometry of a shape as paths of points in its own frame (drawing units). Moves start a path, lines continue it, an ellipse is a
 /// path of its own, an arc of an ellipse (angle 0) is walked, and every other kind of curve is followed by a straight piece to where it ends
 /// (a hit test needs no more).
-fn paths_of(res: &Resolver<'_>, sheet: &SheetRef, width: f64, height: f64) -> Vec<Vec<P>> {
-    let Some(keys) = res.effective_sections(sheet, "Geometry") else { return Vec::new() };
-    let mut paths: Vec<Vec<P>> = Vec::new();
+///
+/// **A section that is hidden (`NoShow`) is left out**, as the renderer leaves it (a marker a group's member shows only for some Shape Data is there, in every variant, and hidden), and the points
+/// of the others are all the budget is spent on. **A section's paths are painted** when [`SectionFlags::paint`] says the section has a stroke the shape draws (`LinePattern` not 0) or a fill (`FillPattern`
+/// not 0): the page's rule, so a tile and a picture of the page agree on what is there.
+fn paths_of(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef, size: (f64, f64), look: Look) -> Geometry {
+    let (width, height) = size;
+    let Some(keys) = res.effective_sections(sheet, "Geometry") else { return Geometry { runs: Vec::new(), all_hidden: false } };
+    let mut runs: Vec<Run> = Vec::new();
     let mut budget = MAX_POINTS;
-    for key in keys.iter().take(MAX_SECTIONS) {
+    let mut shown = 0;
+    for key in keys.iter().take(MAX_LOOKED_AT) {
+        if shown >= MAX_SECTIONS {
+            break;
+        }
+        if section_flag(res, worked, sheet, key, "NoShow") {
+            continue;
+        }
+        shown += 1;
+        let flags = SectionFlags {
+            no_fill: section_flag(res, worked, sheet, key, "NoFill"),
+            no_line: section_flag(res, worked, sheet, key, "NoLine"),
+            no_show: false,
+        };
+        let paint = flags.paint(look.fill_none);
+        let painted = look.shown && (paint.fill || paint.stroke && look.line);
         let Some(rows) = res.effective_rows(sheet, key) else { continue };
+        let mut paths: Vec<Vec<P>> = Vec::new();
         let mut current: Vec<P> = Vec::new();
         for row in rows.iter().take(MAX_ROWS) {
-            let cell = |name: &str| row.cells.iter().find(|(n, _)| n.as_str() == name).map_or(0.0, |(_, found)| value_of(found));
+            let cell = |name: &str| row_number(worked, sheet, key, row, name);
             let kind = row.row_type.as_deref().unwrap_or("");
             match kind {
                 "MoveTo" | "RelMoveTo" => {
@@ -240,21 +355,42 @@ fn paths_of(res: &Resolver<'_>, sheet: &SheetRef, width: f64, height: f64) -> Ve
             }
         }
         paths.push(current);
+        runs.extend(paths.into_iter().map(|points| Run { points, painted }));
     }
-    paths.retain(|path| !path.is_empty() && path.iter().all(|p| p.0.is_finite() && p.1.is_finite()));
-    paths.iter_mut().for_each(|path| path.truncate(MAX_POINTS));
-    paths
+    runs.retain(|run| !run.points.is_empty() && run.points.iter().all(|p| p.0.is_finite() && p.1.is_finite()));
+    runs.iter_mut().for_each(|run| run.points.truncate(MAX_POINTS));
+    // Hidden for certain only when every section was looked at.
+    Geometry { runs, all_hidden: !keys.is_empty() && keys.len() <= MAX_LOOKED_AT && shown == 0 }
 }
 
-/// An ellipse as a closed path: its centre, a point on its right and a point on its top, taken as axis-aligned.
+/// The number the cell `name` of a geometry row holds: saved, or worked out for a cell with a formula and no saved value (on the row of the section `key`); 0 for a cell the row
+/// does not hold and for one that is not a finite number.
+fn row_number(worked: &Worked<'_>, sheet: &SheetRef, key: &SectionKey, row: &diacraft_engine::doc::EffectiveRow<'_>, name: &str) -> f64 {
+    row.cells
+        .iter()
+        .find(|(n, _)| n.as_str() == name)
+        .and_then(|(n, found)| {
+            let addr = CellAddr { section: Some(key.clone()), row: Some(row.key.clone()), cell: n.clone() };
+            worked.number_of(sheet, &addr, found)
+        })
+        .filter(|n| n.is_finite())
+        .unwrap_or(0.0)
+}
+
+/// An ellipse as a closed path: its centre, a point on its right and a point on its top, taken as axis-aligned. **The first point is repeated at the end**, as the corners of a polygon
+/// are (a tile draws a path that comes back to where it began as an outline, and one that does not as a line with a gap in it).
 fn ellipse(x: f64, y: f64, a: f64, _b: f64, _c: f64, d: f64) -> Vec<P> {
     let (rx, ry) = ((a - x).abs(), (d - y).abs());
-    (0..ELLIPSE_SEGMENTS)
+    let mut points: Vec<P> = (0..ELLIPSE_SEGMENTS)
         .map(|i| {
             let angle = std::f64::consts::TAU * i as f64 / ELLIPSE_SEGMENTS as f64;
             (x + rx * angle.cos(), y + ry * angle.sin())
         })
-        .collect()
+        .collect();
+    if let Some(first) = points.first().copied() {
+        points.push(first);
+    }
+    points
 }
 
 /// Where a shape is among the shapes around it: the poses of the groups it is in (the innermost first), the group it is directly in, and the
@@ -267,11 +403,8 @@ struct Place<'a> {
 
 /// What a click on the group at `sheet` picks: its `SelectMode`, found by inheritance, 1 when no cell gives one. A number that
 /// is not 0 or 2 reads 1 (MS-VSDX treats 1 and 2 alike).
-fn select_mode_of(res: &Resolver<'_>, sheet: &SheetRef) -> u8 {
-    let held = res
-        .resolve(sheet, &CellAddr::direct("SelectMode"))
-        .and_then(|found| found.value.cell.and_then(|c| c.value.as_ref()).and_then(|v| v.number()))
-        .filter(|n| n.is_finite());
+fn select_mode_of(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef) -> u8 {
+    let held = worked.number_at(res, sheet, &CellAddr::direct("SelectMode")).filter(|n| n.is_finite());
     match held.map(|n| n.round() as i64) {
         Some(0) => 0,
         Some(2) => 2,
@@ -279,20 +412,48 @@ fn select_mode_of(res: &Resolver<'_>, sheet: &SheetRef) -> u8 {
     }
 }
 
-/// One shape as an item, and its own pose: `None` for a shape that is not drawn (deleted from its master, or a guide).
-fn read_item(res: &Resolver<'_>, page: u32, place: &Place<'_>, shape: &Shape, per_inch: f64) -> Option<(Item, Pose)> {
+/// Whether the shape shows any text: its own, or when it has none its master shape's (the renderer's rule: an own text with nothing in it shows nothing, and the master's plays no part).
+fn shows_text(res: &Resolver<'_>, at: &ShapeRef, shape: &Shape) -> bool {
+    let shows = |s: &Shape| !super::text::shape_text(s).is_empty();
+    if shape.text.is_some() {
+        return shows(shape);
+    }
+    match res.master_step(at) {
+        Ok(Some(step)) => res.shape(&step.shape).is_some_and(|master| shows(master)),
+        _ => false,
+    }
+}
+
+/// The pose of the shape at `sheet`.
+fn read_pose(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef) -> Pose {
+    let n = |name: &str| number(res, worked, sheet, name);
+    Pose { pin: (n("PinX"), n("PinY")), loc: (n("LocPinX"), n("LocPinY")), angle: n("Angle"), flip_x: n("FlipX") != 0.0, flip_y: n("FlipY") != 0.0 }
+}
+
+/// The text block of the shape `shape` at `at` on the page, in inches, when it shows text (the corners in the order of the block's own frame): the frame, with the flips of the groups
+/// the shape is in (`groups` are their poses), by the engine's own rule ([`text_block_in_frame`]) and carried through the shape's pose and the groups' as its outline is. `None` for a shape that
+/// shows no text, and for a block whose corners are not numbers.
+fn text_block_of(reading: &Reading<'_>, at: &ShapeRef, shape: &Shape, pose: &Pose, groups: &[Pose]) -> Option<[P; 4]> {
+    if !shows_text(reading.res, at, shape) {
+        return None;
+    }
+    let flips = groups.iter().fold((false, false), |(x, y), group| (x != group.flip_x, y != group.flip_y));
+    let corners = text_block_in_frame(reading.res, reading.worked, &SheetRef::Shape(at.clone()), pose, flips);
+    let on_page = corners.map(|corner| inches(groups.iter().fold(pose.up(corner), |q, group| group.up(q)), reading.per_inch));
+    on_page.iter().all(|p| p.0.is_finite() && p.1.is_finite()).then_some(on_page)
+}
+
+/// One shape as an item, and its own pose: `None` for a shape that is not drawn (deleted from its master, or a guide). The item holds the shape's own text block; a group's members' are added
+/// by whoever reads the members ([`read_members`], [`blocks_below`]).
+fn read_item(reading: &Reading<'_>, place: &Place<'_>, shape: &Shape) -> Option<(Item, Pose)> {
+    let (res, worked, page, per_inch) = (reading.res, reading.worked, reading.page, reading.per_inch);
     if shape.del || shape.kind == ShapeType::Guide {
         return None;
     }
-    let sheet = SheetRef::Shape(ShapeRef { owner: Owner::Page(page), path: place.path.clone() });
-    let n = |name: &str| number(res, &sheet, name);
-    let pose = Pose {
-        pin: (n("PinX"), n("PinY")),
-        loc: (n("LocPinX"), n("LocPinY")),
-        angle: n("Angle"),
-        flip_x: n("FlipX") != 0.0,
-        flip_y: n("FlipY") != 0.0,
-    };
+    let at = ShapeRef { owner: Owner::Page(page), path: place.path.clone() };
+    let sheet = SheetRef::Shape(at.clone());
+    let n = |name: &str| number(res, worked, &sheet, name);
+    let pose = read_pose(res, worked, &sheet);
     // A point of the parent's frame on the page: through the poses of the groups the shape is in.
     let lift = |p: P| place.groups.iter().fold(p, |q, group| group.up(q));
     let (width, height) = (n("Width"), n("Height"));
@@ -309,9 +470,20 @@ fn read_item(res: &Resolver<'_>, page: u32, place: &Place<'_>, shape: &Shape, pe
         Kind::Shape
     };
     let ends = one_d.then(|| (inches(lift((n("BeginX"), n("BeginY"))), per_inch), inches(lift((n("EndX"), n("EndY"))), per_inch)));
-    let mut outline: Vec<Vec<P>> = paths_of(res, &sheet, width, height).into_iter().map(|path| path.into_iter().map(up).collect()).collect();
+    let look = Look {
+        line: look_number(res, worked, &sheet, "LinePattern", 0.0) != 0.0,
+        fill_none: look_number(res, worked, &sheet, "FillPattern", 0.0) == 0.0,
+        shown: look_number(res, worked, &sheet, "DisplayMode", 2.0) >= 0.5,
+    };
+    let geometry = paths_of(res, worked, &sheet, (width, height), look);
+    let own_block = text_block_of(reading, &at, shape, &pose, place.groups);
+    let hidden = kind == Kind::Shape && geometry.all_hidden && own_block.is_none();
+    let (mut outline, mut painted): (Vec<Vec<P>>, Vec<bool>) =
+        geometry.runs.into_iter().map(|run| (run.points.into_iter().map(up).collect(), run.painted)).unzip();
+    // A connector that has no geometry shown is a straight line from its begin to its end.
     if let (Some((begin, end)), true) = (ends, outline.is_empty()) {
         outline.push(vec![begin, end]);
+        painted.push(true);
     }
     let all: Vec<P> = corners.iter().copied().chain(outline.iter().flatten().copied()).chain(ends.into_iter().flat_map(|(a, b)| [a, b])).collect();
     let bounds = bounds_of(&all)?;
@@ -322,11 +494,14 @@ fn read_item(res: &Resolver<'_>, page: u32, place: &Place<'_>, shape: &Shape, pe
         frame,
         turned: pose.is_turned_or_flipped(),
         in_turned_group: place.groups.iter().any(Pose::is_turned_or_flipped),
-        select_mode: if kind == Kind::Group { select_mode_of(res, &sheet) } else { 1 },
+        select_mode: if kind == Kind::Group { select_mode_of(res, worked, &sheet) } else { 1 },
         pin: inches(lift(pose.pin), per_inch),
         parent: place.parent,
         degrees: pose.angle.to_degrees(),
         outline,
+        painted,
+        hidden,
+        text_blocks: own_block.into_iter().collect(),
         ends,
         glue: [None, None],
         bounds,
@@ -334,69 +509,143 @@ fn read_item(res: &Resolver<'_>, page: u32, place: &Place<'_>, shape: &Shape, pe
     Some((item, pose))
 }
 
-/// What reading the members of a page's groups needs to know.
+/// What reading the shapes of a page needs to know.
 struct Reading<'a> {
     res: &'a Resolver<'a>,
+    worked: &'a Worked<'a>,
     page: u32,
     per_inch: f64,
     /// Whether the members of a group are read whatever its `SelectMode` says (a tile draws them all).
     all_members: bool,
+    /// How many more shapes may be looked into for their text blocks alone ([`MAX_BLOCK_VISITS`] to begin with, for all the page).
+    visits: Cell<usize>,
 }
 
-/// Reads the members of `group` (at `path`, with its own pose first among `groups`) and, below them, the members of the groups among them, into
-/// `out`. Stops at [`MAX_GROUP_DEPTH`] levels and when [`MAX_MEMBERS`] have been read.
-fn read_members(reading: &Reading<'_>, group: &Shape, path: &[u32], groups: &[Pose], out: &mut Vec<Item>) {
+/// Appends `more` to `blocks` up to [`MAX_BLOCKS`].
+fn add_blocks(blocks: &mut Vec<[P; 4]>, more: impl IntoIterator<Item = [P; 4]>) {
+    let room = MAX_BLOCKS.saturating_sub(blocks.len());
+    blocks.extend(more.into_iter().take(room));
+}
+
+/// The text blocks of the shapes below `group` (at `path`, with its own pose first among `groups`), at every depth, **without reading them as items**: the labels of a group whose members are
+/// not offered to the pointer (`SelectMode` 0, here or above) are met all the same. Stops at [`MAX_GROUP_DEPTH`] levels, at [`MAX_BLOCKS`] blocks and when the page's visits are spent.
+fn blocks_below(reading: &Reading<'_>, group: &Shape, path: &[u32], groups: &[Pose], out: &mut Vec<[P; 4]>) {
     if groups.len() > MAX_GROUP_DEPTH {
         return;
     }
     for (index, child) in group.children.iter().enumerate() {
-        if out.len() >= MAX_MEMBERS {
+        if out.len() >= MAX_BLOCKS || reading.visits.get() == 0 {
             return;
+        }
+        reading.visits.set(reading.visits.get().saturating_sub(1));
+        let Ok(at) = u32::try_from(index) else { continue };
+        if child.del || child.kind == ShapeType::Guide {
+            continue;
+        }
+        let mut child_path = path.to_vec();
+        child_path.push(at);
+        let child_ref = ShapeRef { owner: Owner::Page(reading.page), path: child_path.clone() };
+        let pose = read_pose(reading.res, reading.worked, &SheetRef::Shape(child_ref.clone()));
+        add_blocks(out, text_block_of(reading, &child_ref, child, &pose, groups));
+        if child.kind == ShapeType::Group {
+            let mut inner = vec![pose];
+            inner.extend_from_slice(groups);
+            blocks_below(reading, child, &child_path, &inner, out);
+        }
+    }
+}
+
+/// Reads the members of `group` (at `path`, with its own pose first among `groups`) and, below them, the members of the groups among them, into
+/// `out`. Stops at [`MAX_GROUP_DEPTH`] levels and when [`MAX_MEMBERS`] have been read. **Gives the text blocks of the members at every depth** (those of the groups that are not read
+/// are looked into by [`blocks_below`]); each member that is a group holds those below it.
+fn read_members(reading: &Reading<'_>, group: &Shape, path: &[u32], groups: &[Pose], out: &mut Vec<Item>) -> Vec<[P; 4]> {
+    let mut blocks = Vec::new();
+    if groups.len() > MAX_GROUP_DEPTH {
+        return blocks;
+    }
+    for (index, child) in group.children.iter().enumerate() {
+        if out.len() >= MAX_MEMBERS {
+            return blocks;
         }
         let Ok(at) = u32::try_from(index) else { continue };
         let mut child_path = path.to_vec();
         child_path.push(at);
         let place = Place { path: child_path.clone(), groups, parent: Some(group.id) };
-        let Some((item, pose)) = read_item(reading.res, reading.page, &place, child, reading.per_inch) else { continue };
+        let Some((item, pose)) = read_item(reading, &place, child) else { continue };
         // A group set to group only has no members to offer, and none of the groups inside it either (every ancestor counts).
-        let has_members = item.kind == Kind::Group && (item.select_mode != 0 || reading.all_members);
+        let is_group = item.kind == Kind::Group;
+        let has_members = is_group && (item.select_mode != 0 || reading.all_members);
+        add_blocks(&mut blocks, item.text_blocks.iter().copied());
+        let slot = out.len();
         out.push(item);
-        if has_members {
+        if is_group {
             let mut inner = vec![pose];
             inner.extend_from_slice(groups);
-            read_members(reading, child, &child_path, &inner, out);
+            let mut below = Vec::new();
+            if has_members {
+                below = read_members(reading, child, &child_path, &inner, out);
+            } else {
+                blocks_below(reading, child, &child_path, &inner, &mut below);
+            }
+            add_blocks(&mut blocks, below.iter().copied());
+            if let Some(member) = out.get_mut(slot) {
+                add_blocks(&mut member.text_blocks, below);
+            }
         }
     }
+    blocks
+}
+
+/// The first of the items `items` makes (front to back) that `takes` and whose geometry is at `p`, else the first that `takes` and has a text block at `p`.
+fn met_first<'a, I: Iterator<Item = &'a Item>>(items: impl Fn() -> I, p: P, tol: f64, takes: impl Fn(&Item) -> bool) -> Option<&'a Item> {
+    items().find(|item| takes(item) && item.hit(p, tol)).or_else(|| items().find(|item| takes(item) && item.hit_text(p, tol)))
 }
 
 impl Scene {
     /// The shapes of page `page` of `doc`, read at `revision`. `None` for a page the document does not have.
     pub fn build(doc: &Document, page: u32, revision: u64) -> Option<Scene> {
-        Scene::build_with(doc, page, revision, false)
+        Scene::build_within(doc, page, revision, WORKED_STEPS)
+    }
+
+    /// [`Scene::build`] with `steps` for the cells that hold a formula and no saved value to be worked out in, in all (a test gives few): when they run out the cells left are read
+    /// as saved, which is no value.
+    pub fn build_within(doc: &Document, page: u32, revision: u64, steps: u64) -> Option<Scene> {
+        Scene::build_with(doc, page, revision, false, steps)
     }
 
     /// [`Scene::build`] with **the members of every group read, whatever its `SelectMode` says**: a pointer is not offered a member of a group set to group only, but a
     /// tile that draws the group draws them (`stencils.rs`).
     pub fn build_all(doc: &Document, page: u32, revision: u64) -> Option<Scene> {
-        Scene::build_with(doc, page, revision, true)
+        Scene::build_with(doc, page, revision, true, WORKED_STEPS)
     }
 
-    fn build_with(doc: &Document, page: u32, revision: u64, all_members: bool) -> Option<Scene> {
+    fn build_with(doc: &Document, page: u32, revision: u64, all_members: bool, steps: u64) -> Option<Scene> {
         let part = doc.page(page)?;
         let per_inch = units_per_inch(doc, page);
         let res = Resolver::new(doc);
-        let reading = Reading { res: &res, page, per_inch, all_members };
+        // The cells with a formula and no saved value are worked out with steps of this scene's own: its build, and the connection points it reads later.
+        let budget = WorkedBudget::new(steps);
+        let _scope = budget.enter();
+        let worked = Worked::new(doc);
+        let reading = Reading { res: &res, worked: &worked, page, per_inch, all_members, visits: Cell::new(MAX_BLOCK_VISITS) };
         let mut items = Vec::new();
         let mut members = Vec::new();
         for (index, shape) in part.shapes.iter().enumerate().take(MAX_ITEMS) {
             let Ok(at) = u32::try_from(index) else { continue };
             let place = Place { path: vec![at], groups: &[], parent: None };
-            let Some((item, pose)) = read_item(&res, page, &place, shape, per_inch) else { continue };
-            let has_members = item.kind == Kind::Group && (item.select_mode != 0 || all_members);
-            items.push(item);
-            if has_members {
-                read_members(&reading, shape, &[at], &[pose], &mut members);
+            let Some((mut item, pose)) = read_item(&reading, &place, shape) else { continue };
+            if item.kind == Kind::Group {
+                // The labels of a group are its members' text blocks, at every depth, whether or not the members are offered to the pointer.
+                let has_members = item.select_mode != 0 || all_members;
+                let mut below = Vec::new();
+                if has_members {
+                    below = read_members(&reading, shape, &[at], &[pose], &mut members);
+                } else {
+                    blocks_below(&reading, shape, &[at], &[pose], &mut below);
+                }
+                add_blocks(&mut item.text_blocks, below);
             }
+            items.push(item);
         }
         let unread = part.shapes.len().saturating_sub(MAX_ITEMS);
         let mut index: HashMap<u32, usize> = items.iter().enumerate().rev().map(|(at, item)| (item.id, at)).collect();
@@ -418,7 +667,7 @@ impl Scene {
         }
         // A page whose layers are all plain costs nothing; a table of too many rows is read as having no standing (the engine's commands say so in words).
         let standing = page_standing(doc, page).unwrap_or_default();
-        Some(Scene { page, revision, per_inch, items, unread, members, index, points: RefCell::new(HashMap::new()), standing })
+        Some(Scene { page, revision, per_inch, items, unread, members, index, points: RefCell::new(HashMap::new()), standing, worked: budget })
     }
 
     /// The shape with this `ID`: a top-level one, or a member of a group.
@@ -464,38 +713,32 @@ impl Scene {
         self.items.iter().filter(|item| self.selectable(item.id)).map(|item| item.id).collect()
     }
 
-    /// The front-most member of group `group` at `p` (one level down), with `tol` inches of reach round a line.
+    /// The front-most member of group `group` at `p` (one level down), with `tol` inches of reach round a line: by its geometry, and where no member's geometry is there, by its text block.
     pub fn hit_child(&self, group: u32, p: P, tol: f64) -> Option<&Item> {
-        self.children_of(group).rev().find(|member| self.selectable(member.id) && member.hit(p, tol))
+        met_first(|| self.children_of(group).rev(), p, tol, |member| self.selectable(member.id))
     }
 
-    /// The front-most shape at `p`, with `tol` inches of reach round a line.
+    /// The front-most shape at `p`, with `tol` inches of reach round a line. **By its geometry first, and only where no shape's geometry is at `p` by its text block**: the topmost shape
+    /// whose geometry is there is met exactly as it always was, and a click that is on no geometry meets the topmost shape that has a text block there (the name that sits under a shape,
+    /// outside its frame). A shape's own text block, which the geometry of an ordinary shape covers, is never in the way of the shapes behind it.
     pub fn hit(&self, p: P, tol: f64) -> Option<&Item> {
-        self.items.iter().rev().find(|item| self.selectable(item.id) && item.hit(p, tol))
+        self.hit_where(p, tol, |_| true)
     }
 
-    /// The front-most shape that is not a connector at `p`: what a connector can be glued to (a layer whose Glue box is clear lets none glue to its shapes).
+    /// The front-most shape at `p` that `takes` and the layers allow a click to pick, by [`Scene::hit`]'s order: geometry first, then text blocks.
+    pub fn hit_where(&self, p: P, tol: f64, takes: impl Fn(&Item) -> bool) -> Option<&Item> {
+        met_first(|| self.items.iter().rev(), p, tol, |item| self.selectable(item.id) && takes(item))
+    }
+
+    /// The front-most shape that is not a connector at `p`: what a connector can be glued to (a layer whose Glue box is clear lets none glue to its shapes). Geometry first, then text
+    /// blocks, as [`Scene::hit`].
     pub fn hit_target(&self, p: P, tol: f64) -> Option<&Item> {
-        self.items
-            .iter()
-            .rev()
-            .find(|item| item.kind != Kind::Connector && !self.standing(item.id).no_glue && self.selectable(item.id) && item.hit(p, tol))
+        self.hit_where(p, tol, |item| item.kind != Kind::Connector && !self.standing(item.id).no_glue)
     }
 
     /// The `ID`s of the shapes wholly inside the box `lo` to `hi`, in the page's order.
     pub fn inside(&self, lo: P, hi: P) -> Vec<u32> {
         self.items.iter().filter(|item| self.selectable(item.id) && item.inside(lo, hi)).map(|item| item.id).collect()
-    }
-
-    /// The connectors glued to any of `ids`, and not themselves in `ids`, that can be picked: one on a locked layer or only on hidden ones is not (it is not edited,
-    /// and a delete that named it would be refused).
-    pub fn connectors_glued_to(&self, ids: &[u32]) -> Vec<u32> {
-        self.items
-            .iter()
-            .filter(|item| item.kind == Kind::Connector && !ids.contains(&item.id) && self.selectable(item.id))
-            .filter(|item| item.glue.iter().flatten().any(|(shape, _)| ids.contains(shape)))
-            .map(|item| item.id)
-            .collect()
     }
 
     /// The connection points of shape `id`, in inches, as the engine finds them. Read once per scene. **A `Connection` section of more than
@@ -506,6 +749,8 @@ impl Scene {
         if let Some(found) = self.points.borrow().get(&id) {
             return found.clone();
         }
+        // The steps the points' cells may be worked out in are the scene's: all the shapes' points of a revision together are no more than the scene was given.
+        let _scope = self.worked.enter();
         let read: Vec<Point> = connection_points_within(doc, self.page, id, MAX_CONNECTION_ROWS)
             .unwrap_or_default()
             .into_iter()
@@ -526,6 +771,9 @@ impl Scene {
             .map(|(_, point)| point)
     }
 }
+
+#[cfg(test)]
+mod hits;
 
 #[cfg(test)]
 mod tests {
@@ -627,8 +875,6 @@ mod tests {
         let (begin, end) = connector.ends.unwrap();
         let mid = ((begin.0 + end.0) / 2.0, (begin.1 + end.1) / 2.0);
         assert_eq!(scene.hit(mid, 0.05).map(|i| i.id), Some(connector.id), "the middle of the connector, between the shapes");
-        assert_eq!(scene.connectors_glued_to(&[ids[0]]), vec![connector.id]);
-        assert!(scene.connectors_glued_to(&[ids[2]]).is_empty());
         assert!(!connector.moves_by_itself(), "both ends are glued");
     }
 
@@ -654,6 +900,121 @@ mod tests {
         assert_eq!(scene.inside((1.0, 2.0), (3.5, 4.0)), vec![ids[0]]);
         assert!(scene.inside((1.0, 2.0), (2.4, 4.0)).is_empty(), "partly inside is not inside");
         assert_eq!(scene.inside((0.0, 0.0), (10.0, 8.0)), ids);
+    }
+
+    /// Sets the cell `cell` of the shape `id` to `formula`, through the engine's command.
+    fn set_cell(s: &mut diacraft_engine::Session, page: u32, id: u32, cell: &str, formula: &str) {
+        s.execute("sheet.set_cell", &json!({"id": id, "page": page, "cell": cell, "formula": formula})).unwrap();
+    }
+
+    /// What the page paints of a shape's paths is what the renderer reads of its cells (`SectionFlags::paint`): the section's `NoShow`, `NoLine` and `NoFill`, the shape's `LinePattern` and
+    /// `FillPattern`, and its `DisplayMode`. A path the page paints nothing of still has an outline for the pointer to meet; one that is hidden has none.
+    #[test]
+    fn what_the_page_paints_of_a_shape_is_what_its_sections_and_its_line_and_fill_say() {
+        let (mut s, ids) = session_with(&[("diamond", 4.0, 3.0)]);
+        let page = s.document().unwrap().pages.get(0).unwrap().id;
+        let id = ids[0];
+        // Each case sets cells on top of the last one: (the cells, whether the outline is painted, whether there is an outline at all).
+        type Case<'a> = (&'a [(&'a str, &'a str)], bool, bool);
+        let cases: [Case<'_>; 9] = [
+            (&[], true, true),
+            // No line, but a fill: the shape is filled, and that is painted.
+            (&[("LinePattern", "0")], true, true),
+            // A line and no fill.
+            (&[("LinePattern", "1"), ("FillPattern", "0")], true, true),
+            // No line and no fill: a text box. Nothing is painted, and the pointer still meets it.
+            (&[("LinePattern", "0")], false, true),
+            // The fill is back, and the section has no line: a fill is painted.
+            (&[("FillPattern", "1"), ("Geometry1.NoLine", "1")], true, true),
+            // The section has no line and no fill.
+            (&[("Geometry1.NoFill", "1")], false, true),
+            // The section is as it was, and the shape's own geometry is not drawn.
+            (&[("Geometry1.NoLine", "0"), ("Geometry1.NoFill", "0"), ("DisplayMode", "0")], false, true),
+            // The section is hidden: no outline, and a click passes over the shape.
+            (&[("DisplayMode", "2"), ("Geometry1.NoShow", "1")], false, false),
+            (&[("Geometry1.NoShow", "0")], true, true),
+        ];
+        for (cells, painted, has_outline) in cases {
+            for (cell, formula) in cells {
+                set_cell(&mut s, page, id, cell, formula);
+            }
+            let doc = s.document().unwrap();
+            let scene = Scene::build(doc, page, s.revision()).unwrap();
+            let item = scene.get(id).unwrap();
+            assert_eq!(item.outline.len(), usize::from(has_outline), "{cells:?}: the outline {:?}", item.outline);
+            assert_eq!(item.painted.len(), item.outline.len(), "{cells:?}");
+            assert_eq!(item.painted_paths().count(), usize::from(painted), "{cells:?}");
+            assert_eq!(item.painted_bounds().is_some(), painted, "{cells:?}");
+            assert_eq!(item.hidden, !has_outline, "{cells:?}: a shape whose only section is hidden");
+            // A hidden shape is passed over, and every other is met by its outline, painted or not.
+            assert_eq!(scene.hit((4.0, 3.0), 0.02).map(|i| i.id), has_outline.then_some(id), "{cells:?}");
+        }
+    }
+
+    /// A shape that holds no `LinePattern` or `FillPattern` finds the root style's, as the renderer reads it ("No Style" is the style every object has): a box of a stencil file that links to
+    /// no style is drawn, or not, as the drawing's root style says.
+    #[test]
+    fn a_shape_that_holds_no_line_or_fill_pattern_reads_the_root_styles_as_the_page_does() {
+        use diacraft_doc::RowKey;
+        use diacraft_testkit::build::{DocBuilder, PageBuilder, ShapeBuilder};
+        let doc_with = |line: &str, fill: &str| {
+            let mut shape = ShapeBuilder::new(1)
+                .cell("PinX", "1")
+                .cell("PinY", "1")
+                .cell("Width", "1")
+                .cell("Height", "1")
+                .cell("LocPinX", "0.5")
+                .cell("LocPinY", "0.5");
+            for (at, (kind, x, y)) in
+                [("MoveTo", 0.0, 0.0), ("LineTo", 1.0, 0.0), ("LineTo", 1.0, 1.0), ("LineTo", 0.0, 1.0), ("LineTo", 0.0, 0.0)].into_iter().enumerate()
+            {
+                let key = RowKey::Ix(u32::try_from(at).unwrap());
+                shape = shape
+                    .row_type("Geometry", Some(0), key.clone(), kind)
+                    .row_cell("Geometry", Some(0), key.clone(), "X", &x.to_string())
+                    .row_cell("Geometry", Some(0), key, "Y", &y.to_string());
+            }
+            DocBuilder::new().root(|r| r.cell("LinePattern", line).cell("FillPattern", fill)).page(1, PageBuilder::new().shape(shape)).build()
+        };
+        for (line, fill, painted) in [("1", "0", true), ("0", "1", true), ("0", "0", false)] {
+            let doc = doc_with(line, fill);
+            let scene = Scene::build(&doc, 1, 0).unwrap();
+            let item = scene.get(1).unwrap();
+            assert_eq!(item.outline.len(), 1, "line {line}, fill {fill}");
+            assert_eq!(item.painted, [painted], "line {line}, fill {fill}: the root style's pattern is the shape's");
+        }
+    }
+
+    /// A section that is hidden is no part of the outline, and the budget of points is not spent on it: the markers of a BPMN gateway are all there and hidden at the default Shape Data, and the
+    /// pointer meets the diamond and not a marker that cannot be seen.
+    #[test]
+    fn the_hidden_markers_of_a_group_are_no_outline_and_the_pointer_passes_over_them() {
+        let (s, ids) = session_with(&[("bpmn.gateway", 4.0, 3.0)]);
+        let doc = s.document().unwrap();
+        let page = doc.pages.get(0).unwrap().id;
+        let scene = Scene::build_all(doc, page, s.revision()).unwrap();
+        let members: Vec<&Item> = scene.children_of(ids[0]).collect();
+        let hidden: Vec<&&Item> = members.iter().filter(|m| m.hidden).collect();
+        assert!(!hidden.is_empty(), "the gateway's markers are hidden at the default Shape Data: {members:?}");
+        for marker in hidden {
+            assert!(marker.outline.is_empty() && marker.painted_paths().next().is_none(), "{marker:?}");
+            assert!(!marker.hit(marker.centre(), 0.05), "a marker nobody can see is not met");
+        }
+        let shown: Vec<&&Item> = members.iter().filter(|m| m.painted_paths().next().is_some()).collect();
+        assert_eq!(shown.len(), 1, "the diamond is all the gateway paints: {shown:?}");
+        assert_eq!(shown[0].outline[0].len(), 5, "its four corners and the first again");
+    }
+
+    /// An ellipse comes back to where it began, so that a tile draws it as an outline and not as a line with a gap in it.
+    #[test]
+    fn an_ellipse_is_a_closed_path() {
+        let (s, ids) = session_with(&[("ellipse", 3.0, 3.0)]);
+        let doc = s.document().unwrap();
+        let scene = Scene::build(doc, doc.pages.get(0).unwrap().id, s.revision()).unwrap();
+        let outline = &scene.get(ids[0]).unwrap().outline;
+        assert_eq!(outline.len(), 1);
+        assert_eq!(outline[0].first(), outline[0].last());
+        assert_eq!(outline[0].len(), ELLIPSE_SEGMENTS + 1);
     }
 
     /// What reading a crowded page costs, once per edit and not per frame: 500 rectangles and 300 connectors. Counted, not timed (a hit test held

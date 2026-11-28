@@ -443,13 +443,26 @@ fn the_ungroup_of_a_group_that_very_many_connectors_are_glued_to_costs_in_propor
     // And a step count for each connector, not only a ratio (sixteen measured).
     assert!(small <= 20 * 5_000 && large <= 20 * 20_000, "{small} steps for 5,000 connectors and {large} for 20,000");
     assert!(ratio < 5.0, "{small} steps and {large}: a ratio of {ratio:.2}");
-    // The delete of a shape with connectors glued to it still goes through `settle`, which looks each connector up from the top of the page for its
-    // route (not changed here): counted, not held to a ratio.
+    // The delete of a shape that leaves the connectors glued to it (`connectors: false`) still goes through `settle`, which looks each connector up from the top of the
+    // page for its route (not changed here): counted, not held to a ratio. By default the delete takes the connectors along and takes at most 4,096 of them, so that a
+    // hub of 5,000 is refused in words (`draw/shapes.rs`).
     for n in [5_000, 10_000] {
         let mut s = session_with_connectors_glued_to_a_group(n);
+        let refused = s.execute("shape.delete", &json!({"ids": [1]})).unwrap_err().to_string();
+        assert!(refused.contains("connectors: false"), "{refused}");
         let (commits, steps) = counted("deleting a group with connectors glued to it", || {
-            run(&mut s, "shape.delete", json!({"ids": [1]}));
+            run(&mut s, "shape.delete", json!({"ids": [1], "connectors": false}));
         });
         eprintln!("deleting a group with {n} connectors glued to it: {commits} commits of {steps} steps");
     }
+    // The most the default takes along, 4,096: the connectors go with the group in one commit, and the page holds nothing; `counted` is the hang guard.
+    let mut s = session_with_connectors_glued_to_a_group(4_096);
+    let mut answer = Value::Null;
+    let (commits, steps) = counted("deleting a group with 4,096 connectors glued to it, which go with it", || {
+        answer = run(&mut s, "shape.delete", json!({"ids": [1]}));
+    });
+    eprintln!("deleting a group with 4,096 connectors glued to it, taken along: {commits} commits of {steps} steps");
+    assert_eq!(answer["connectors_deleted"].as_array().map(Vec::len), Some(4_096), "every connector goes");
+    assert_eq!(answer["deleted"], 1 + 4_096, "the group (its members go with it, uncounted) and the connectors");
+    assert!(doc(&s).page(1).unwrap().shapes.is_empty() && doc(&s).page(1).unwrap().connects.is_empty());
 }

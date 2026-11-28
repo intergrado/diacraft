@@ -15,8 +15,10 @@
 //! Choices no specification settles are marked `Assumed` in the code and listed in the task's report.
 
 pub mod autoconnect;
+mod bidi_text;
 mod block;
 mod callout;
+mod conn_edges;
 mod draw;
 pub mod geom;
 mod gesture;
@@ -42,6 +44,8 @@ use crate::canvas::page_drawing::PageSettings;
 use crate::canvas::view::View;
 
 pub use self::block::ShownBlock;
+pub(crate) use self::conn_edges::min_gap_range;
+pub use self::conn_edges::{MAX_WINDOW_EDGES, MAX_WINDOW_SHAPES, PointsView};
 pub(crate) use self::draw::tool_of_command;
 pub use self::paint::MAX_POINTS_MARKED;
 pub use self::text::{plain_text, shape_text};
@@ -198,6 +202,10 @@ pub struct EditState {
     reads_done: u64,
     /// Where the tile being dragged would land, and what it was worked out for, so that a frame with the pointer still asks nothing.
     tile_landing: Option<tiles::TileLanding>,
+    /// Where the ghost of the tile being dragged was drawn in the last frame, on the screen.
+    tile_ghost: Option<egui::Rect>,
+    /// What dropping the master of the tile being dragged would make, worked out once for the drag (`tiles.rs`, U49).
+    tile_shape: Option<tiles::TileShapeKept>,
     /// The `snap` of the answer of the last command a drag sent with it: what it snapped to and the shapes it held to guides (`held`).
     last_snap: Option<Value>,
     /// The document's Snap & Glue settings, with the drawing's generation and the revision they were read at: what the Dynamic Grid box shows

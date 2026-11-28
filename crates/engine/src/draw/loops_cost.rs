@@ -58,7 +58,7 @@ fn page_of(seed: Seed, themed: bool) -> (Session, Vec<u32>) {
             shape.id = 100 + k;
             shapes.push(Arc::new(shape));
         }
-        page.shapes = ShapeList::from_vec(shapes);
+        page.edit_shapes(|list| *list = ShapeList::from_vec(shapes));
         Ok(())
     })
     .unwrap();
@@ -180,6 +180,28 @@ fn a_reset_of_connectors_tells_what_changed_with_one_walk_of_the_page() {
     // `draw/hand.rs::reset_connectors`, which compared each connector before and after by a search of both drawings for it.
     let (mut s, all) = page_of(Seed::Connector, false);
     let chosen = spread(&all, MAX_IDS);
+    // Each connector chosen is as a hand edit left it (`ConFixedCode` 3), so that the reset changes every one of them: a connector that is as the reset would make it is no change, and
+    // is not counted in the answer (the copies of the seed are routes the router wrote and the jump pass left as they were, which a reset writes again as they are).
+    let hand_edited: std::collections::HashSet<u32> = chosen.iter().copied().collect();
+    s.edit("hand edits", |doc| {
+        let page = Arc::make_mut(doc.pages.get_mut(0).unwrap());
+        let shapes: Vec<Arc<Shape>> = page
+            .shapes
+            .iter()
+            .map(|shape| {
+                if !hand_edited.contains(&shape.id) {
+                    return Arc::clone(shape);
+                }
+                let mut shape = (**shape).clone();
+                let held = diacraft_doc::Cell::constant(diacraft_doc::Value::from_text("3"));
+                Arc::make_mut(&mut shape.sheet).cells.insert(diacraft_doc::CellName::new("ConFixedCode"), held);
+                Arc::new(shape)
+            })
+            .collect();
+        page.edit_shapes(|list| *list = ShapeList::from_vec(shapes));
+        Ok(())
+    })
+    .unwrap();
     let (answer, finds, walked) = counted(&mut s, "connector.reset", json!({"ids": chosen}));
     assert_eq!(answer["reset"], MAX_IDS, "{answer}");
     assert_one_walk_each("connector.reset", finds, walked, WALKS);

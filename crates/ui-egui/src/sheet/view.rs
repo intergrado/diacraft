@@ -246,6 +246,16 @@ impl View {
         self.lines.get(&n)
     }
 
+    /// The type of the row at place `at` of the section of rows `info` (a Geometry row's: `LineTo`, `Ellipse`), read from the sheet itself. **`info` is a section of the base outline**: the row's
+    /// line is found by the base numbering, so a fold or Show Sections changes nothing. One line is read and not held (a selection asks it once).
+    pub fn row_type_of(&self, doc: &Document, info: &SectionInfo, at: usize) -> Option<String> {
+        let sheet = self.sheet.as_ref()?;
+        let overhead = 1 + info.flags.len() as u64 + u64::from(info.key.is_some());
+        let line = info.first_line.checked_add(overhead)?.checked_add(u64::try_from(at).ok()?)?;
+        let (read, _) = read_lines(&Resolver::new(doc), sheet, &self.base, line, 1);
+        read.lines.into_iter().next().and_then(|l| l.row).and_then(|r| r.row_type)
+    }
+
     /// The engine line a selection is on, in the outline as it is shown, if the section is shown and holds it.
     pub fn engine_line_of(&self, sel: &Sel) -> Option<u64> {
         let outline = self.outline();

@@ -20,6 +20,7 @@ mod layout_block;
 mod notes;
 mod paragraphs;
 mod real_fonts;
+mod rtl;
 mod rules;
 mod runs;
 mod tabs;

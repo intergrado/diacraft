@@ -117,6 +117,118 @@ pub(super) fn head(source: &str) -> Result<Head, String> {
     })
 }
 
+/// The start of the address of a video on YouTube, as a page links it: `https://youtu.be/` and the video's id.
+pub(super) const VIDEO_ADDRESS: &str = "https://youtu.be/";
+
+/// What a page says of a video it links, as the parser reads it (character references resolved, white space collapsed): what the structured data of the video is made from (`seo.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Video {
+    /// The address the link goes to: [`VIDEO_ADDRESS`] and the id.
+    pub(super) address: String,
+    /// The id YouTube gives the video: eleven letters, digits, `-` or `_`.
+    pub(super) id: String,
+    /// The path of the picture the link holds, on the pages' own site (`/assets/hashed/...`).
+    pub(super) thumbnail: String,
+    /// The words of the element the link is labelled by (`aria-labelledby`): the video's title.
+    pub(super) name: String,
+    /// The words of the element the link is described by (`aria-describedby`).
+    pub(super) description: String,
+    /// The `datetime` of the link's `<time>` that is a date (`YYYY-MM-DD`): the day the video was published.
+    pub(super) upload_date: String,
+    /// The `datetime` of the link's `<time>` that is a duration (`PT6M53S`): the video's length.
+    pub(super) duration: String,
+}
+
+/// Whether `id` is the id of a video on YouTube: eleven letters, digits, `-` or `_`.
+fn video_id(id: &str) -> bool {
+    id.len() == 11 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// The words of `node`: its text and its descendants', with the white space between them made one space.
+fn words(node: Node<'_, '_>) -> String {
+    let text: String = node.descendants().filter_map(|n| n.text().filter(|_| n.is_text())).collect();
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The words of the element whose id the attribute `attr` of `link` names (`aria-labelledby`, `aria-describedby`): one id, an element that has it, and words in it.
+fn named_words(doc: &Document<'_>, link: Node<'_, '_>, attr: &str) -> Result<String, String> {
+    let id =
+        link.attribute(attr).map(str::trim).filter(|id| !id.is_empty()).ok_or_else(|| at(link, &format!("the link to a video has no {attr}")))?;
+    if id.contains(char::is_whitespace) {
+        return Err(at(link, &format!("the {attr} of the link to a video names one id, and `{id}` is more")));
+    }
+    let node = doc
+        .descendants()
+        .find(|n| n.is_element() && n.attribute("id") == Some(id))
+        .ok_or_else(|| at(link, &format!("the {attr} of the link to a video names no element with the id `{id}`")))?;
+    let text = words(node);
+    if text.is_empty() {
+        return Err(at(node, &format!("the element the link to a video names by {attr} has no words")));
+    }
+    Ok(text)
+}
+
+/// The videos a page links: each `<a data-video="">` is one, and says what the structured data of the video holds. The link goes to the video ([`VIDEO_ADDRESS`] and its id), holds
+/// one picture whose `src` is a path of the site (the video's picture), and holds two `<time>` elements, one whose `datetime` is a date (the day it was published) and one whose `datetime` is a
+/// duration (its length); its `aria-labelledby` names the element that holds the video's title and its `aria-describedby` the element that describes it. Anything else marked `data-video` is an
+/// error, and so is a link that does not say all of this: the data would say what the page does not.
+pub(super) fn videos(source: &str) -> Result<Vec<Video>, String> {
+    let doc = document(source)?;
+    let mut found = Vec::new();
+    for link in doc.descendants().filter(|n| n.is_element() && n.has_attribute("data-video")) {
+        if !link.has_tag_name("a") {
+            return Err(at(link, "data-video marks the link to a video, an <a> element"));
+        }
+        let address = link.attribute("href").unwrap_or("");
+        let id = address.strip_prefix(VIDEO_ADDRESS).filter(|id| video_id(id)).ok_or_else(|| {
+            at(
+                link,
+                &format!(
+                    "the link marked data-video goes to `{address}`, which is not the address of a video on YouTube ({VIDEO_ADDRESS} and its id)"
+                ),
+            )
+        })?;
+        let mut pictures = link.descendants().filter(|n| n.has_tag_name("img"));
+        let (Some(picture), None) = (pictures.next(), pictures.next()) else {
+            return Err(at(link, "the link to a video holds one picture, the video's"));
+        };
+        let thumbnail = picture.attribute("src").unwrap_or("");
+        if !thumbnail.starts_with('/') || thumbnail.starts_with("//") {
+            return Err(at(picture, &format!("the picture of a video is a path of the site, and `{thumbnail}` is not")));
+        }
+        let (mut dates, mut durations) = (Vec::new(), Vec::new());
+        for time in link.descendants().filter(|n| n.has_tag_name("time")) {
+            let value = time.attribute("datetime").unwrap_or("");
+            if super::seo::valid_date(value) {
+                dates.push(value);
+            } else if super::seo::valid_duration(value) {
+                durations.push(value);
+            } else {
+                return Err(at(
+                    time,
+                    &format!("the datetime `{value}` of a time in the link to a video is neither a date nor a duration (YYYY-MM-DD, or PT6M53S)"),
+                ));
+            }
+        }
+        let [upload_date] = dates[..] else {
+            return Err(at(link, "the link to a video holds one time that is a date, the day the video was published"));
+        };
+        let [duration] = durations[..] else {
+            return Err(at(link, "the link to a video holds one time that is a duration, the video's length"));
+        };
+        found.push(Video {
+            address: address.to_owned(),
+            id: id.to_owned(),
+            thumbnail: thumbnail.to_owned(),
+            name: named_words(&doc, link, "aria-labelledby")?,
+            description: named_words(&doc, link, "aria-describedby")?,
+            upload_date: upload_date.to_owned(),
+            duration: duration.to_owned(),
+        });
+    }
+    Ok(found)
+}
+
 /// The `type` of a script that holds data and no program: what a browser does not run, and what a content security policy does not see.
 pub(super) const JSON_LD: &str = "application/ld+json";
 

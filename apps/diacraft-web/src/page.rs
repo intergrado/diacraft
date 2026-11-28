@@ -41,6 +41,22 @@ pub fn new_app_in_browser(
     new_app_with_files(files).with_asset_host(assets).with_page_host(page)
 }
 
+/// `app` with the person's settings opened in `host`, which in the browser is the page's `localStorage` (`prefs::StorageHost`): the window saves what changes. The system's
+/// language, as the browser's languages say it, is the first editing language of a profile that has none. What is wrong with the settings (a text that is broken, too big or from a newer build,
+/// a storage that is full or forbidden) is logged and is the status bar's notice, once. The page makes this one in the browser, and the tests make theirs with a host of their own.
+pub fn with_prefs_in_browser(app: DiacraftApp, host: std::sync::Arc<dyn diacraft_ui_egui::prefs_host::PrefsHost>) -> DiacraftApp {
+    use diacraft_ui_egui::prefs_host::{LocaleSource, Profile, WindowPrefs};
+    let (profile, report) = Profile::<WindowPrefs>::open_host(host, LocaleSource::System);
+    for note in &report.notes {
+        log::warn!("diacraft-web: settings: {note}");
+    }
+    let app = app.with_prefs(profile);
+    match report.sentence() {
+        Some(sentence) => app.with_notice(sentence),
+        None => app,
+    }
+}
+
 /// The lines shown when the page has no canvas to draw on.
 pub fn missing_canvas() -> Vec<String> {
     vec![

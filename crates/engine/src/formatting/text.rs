@@ -37,7 +37,9 @@
 //! **A split writes the rows** (see `runs.rs` for the two cases of numbering): every row the text names is a local row of the shape
 //! afterwards, in text order when nothing a master or a style holds could be mistaken for it. A row that stays where it is, is not in the range
 //! and is local already is left as it is; a row in the range that stays is changed in place; every other row (new, moved, or one a style supplies)
-//! is written whole, as a copy of the cells its run's row resolves to with the change.
+//! is written whole, as a copy of the cells its run's row resolves to with the change. **A row so written past the first holds every cell of
+//! ** (`diacraft_doc::root_text::row_cells`): a cell the copy lacks is given the value the renderer assumes, since a reader of
+//! the file takes nothing for a row of `IX` 1 or more from the styles.
 //!
 //! Our rule: a face is looked up in the font table by its name, exactly and then in any case, and the table's spelling is what `Font`
 //! holds; a face not in it is added with its name alone (`NameU` is the only attribute MS-VSDX requires). `AsianFont` and
@@ -62,7 +64,7 @@ use super::quick::plan_scheme;
 use super::runs::{Alloc, Kind, MAX_NAMED_ROWS, number_rows_in_text_order, paragraph_bounds, plan as split, rows_named, too_many_rows};
 use super::shape_cells::{Paint, parse_paint};
 use super::{Edits, MAX_FACE_NAMES, New, Rgb, holds_row, targets};
-use crate::draw::{Problem, require_shape, shape_mut};
+use crate::draw::{Problem, require_shape, shape_mut, shown_parts};
 use crate::theme::{ThemePick, follow_page_theme_refs, pick_colour, selection_of};
 
 /// The most a size may be, in points.
@@ -216,7 +218,7 @@ pub fn format_text(doc: &mut Document, page: u32, ids: &[u32], range: Option<(us
             formatted = formatted.saturating_add(usize::from(real));
             if real && themed {
                 let mut scheme = Edits::default();
-                plan_scheme(doc, &reader.res, &SheetRef::Shape(at.clone()), &mut scheme);
+                plan_scheme(doc, &reader, &SheetRef::Shape(at.clone()), &mut scheme);
                 edits.append(scheme);
             }
         }
@@ -342,7 +344,8 @@ impl Work<'_, '_, '_> {
         texts: &mut Vec<(ShapeRef, Vec<TextPart>)>,
     ) -> Result<bool, Problem> {
         let sheet = SheetRef::Shape(at.clone());
-        let own: &[TextPart] = self.doc.shape(at).and_then(|s| s.text.as_ref()).map_or(&[], |t| t.parts.as_slice());
+        // A range counts the characters the shape shows: its own text, or its master's when it holds none; a range that splits runs then writes the shape's own text, made of those parts.
+        let own: &[TextPart] = shown_parts(self.doc, at);
         let total = total_chars(own);
         // A range is of the characters there are. A text with none has nothing to split: it is formatted whole.
         if let Some((start, end)) = range {
@@ -472,6 +475,11 @@ impl Work<'_, '_, '_> {
             fill_touched(self.reader, sheet, kind, source, &names, &mut cells);
             if changing {
                 real |= self.change_cells(sheet, kind, source, &mut cells)?;
+            }
+            // A row past the first is whole: what the copy does not hold (a root that states nothing, a row an `.odg` gave) is the value the renderer assumes, and a reader of
+            // the file takes nothing for such a row from the styles, nor from a master's row of another run's `IX`. Row 0 leans on the styles.
+            if new >= 1 {
+                diacraft_doc::root_text::complete_row_cells(section, &mut cells);
             }
             mine.set_row(sheet, section, new, cells);
         }

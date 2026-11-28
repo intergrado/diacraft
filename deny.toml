@@ -81,7 +81,10 @@ allow-git = [
     # `rfd` (the native file dialogs) comes from the one-bit fork, at one immutable revision pinned in the `patch.crates-io` table of Cargo.toml (MIT): the Save dialog's chosen format sets the
     # extension of the name it returns, which rfd 0.18.0 does not do. The entry goes when the next rfd release holds the three changes and the patch line is deleted.
     "https://github.com/one-bit/rfd",
-    "https://github.com/storytold/egui",
+    # The egui family (`egui`, `egui-winit`, `eframe` and seven more) comes from the one-bit fork, at one immutable revision pinned in the `patch.crates-io` table of
+    # Cargo.toml (MIT OR Apache-2.0): storytold/egui at `310f43c5` plus the fork's E22, the text of a press with Ctrl and the left Alt key held on Windows. Nothing in the lock comes
+    # from storytold/egui meanwhile, so its entry is gone: the entry returns, and this one goes, when the patch lines move back to storytold/egui after it merges the change.
+    "https://github.com/one-bit/egui",
     "https://github.com/storytold/winit",
 ]
 

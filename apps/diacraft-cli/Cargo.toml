@@ -15,6 +15,11 @@ name = "diacraft-cli"
 path = "src/main.rs"
 
 [dependencies]
+anstream = { workspace = true }
+anstyle = { workspace = true }
+clap = { workspace = true }
+clap_complete = { workspace = true }
+clap_mangen = { workspace = true }
 craft-atomic = { workspace = true }
 diacraft-calc = { workspace = true }
 diacraft-color = { workspace = true }
@@ -32,6 +37,8 @@ diacraft-svg = { workspace = true }
 diacraft-vsdx = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
+terminal_size = { workspace = true }
+unicode-width = { workspace = true }
 
 # The build script (`build.rs`, the desktop app's `build_info.rs`) says which git release and which year the build is, for `app.version`. The year of
 # `SOURCE_DATE_EPOCH` is read in UTC by jiff: all date conversion goes through it (AGENTS.md).
@@ -45,3 +52,7 @@ mimalloc = { workspace = true }
 [dev-dependencies]
 diacraft-testkit = { workspace = true }
 proptest = { workspace = true }
+
+# The tests of the colours and the width run the program in a pseudo-terminal (Unix only).
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { workspace = true }

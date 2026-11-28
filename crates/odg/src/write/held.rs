@@ -139,8 +139,16 @@ pub(crate) fn graphic_ops_of(sheet: &diacraft_doc::Sheet, values: &[Held], ops: 
     let mut held: Vec<Op> = Vec::new();
     // The attributes a held value says whole: the cells' ops of any of them go, whether the value holds that attribute or not.
     let mut whole: Vec<(Ns, &'static str)> = Vec::new();
+    // Whether the line's stroke is held as `dash` (its stamp holds), and whether the style that held it named a dash of its own as well.
+    let (mut stroke_held, mut dash_held) = (false, false);
+    // A pattern that was set after the read (the stroke's stamp is stale) is the person's, and the dash the style named beside the stroke is not the line's any more: the cells write the new
+    // pattern's dash, for any line. (A dash is held with no stamp of its own, and would be written over it.)
+    let pattern_set = values.iter().any(|e| value_of(e) == Some(Value::DashStroke) && e.stamp != Value::DashStroke.stamp(sheet));
     for entry in values {
         let Some(value) = value_of(entry) else { continue };
+        if pattern_set && value == Value::Dash {
+            continue;
+        }
         // The stamp is the cells' now against the cells' when the reader held the value: equal while nothing it stands beside was edited. A value with no stamp (a foreign dash, a join
         // held beside no cell) is written as held on every save.
         if entry.stamp != value.stamp(sheet) {
@@ -149,12 +157,21 @@ pub(crate) fn graphic_ops_of(sheet: &diacraft_doc::Sheet, values: &[Held], ops: 
         if matches!(value, Value::DashStroke | Value::Shadow) {
             said.extend(value.cells());
         }
+        stroke_held |= value == Value::DashStroke;
+        dash_held |= value == Value::Dash;
         whole.extend(says_whole(value));
         for (name, text) in entry.attrs.iter() {
             if let Some((ns, local)) = attribute(name) {
                 held.push(Op { prop: GRAPHIC, ns, local, val: Val::Text(text.to_owned()) });
             }
         }
+    }
+    // **A line held as `draw:stroke="dash"` whose style named no dash of its own takes its dash from the style's parent, and the dash is the file's to name** (the owner's ruling
+    // "Keep the file's form"): the pattern the cells say beside it is a stand-in (2 for a dash whose lengths are none of the table's, or the table's row for lengths another make wrote) and
+    // names a dash of DiaCraft's own in the style's place, over the parent's or over none. The style says `dash` and no name, as it was read. (A style that named a dash of DiaCraft's own
+    // holds no such value: the reader regenerates that one from the cells, `read::held::from_style`. A pattern the person set after the read makes the stamp stale, and its dash is written.)
+    if stroke_held && !dash_held {
+        ops.retain(|o| !(o.prop == GRAPHIC && o.ns == Ns::Draw && o.local == "stroke-dash"));
     }
     if held.is_empty() {
         return;

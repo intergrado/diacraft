@@ -390,10 +390,22 @@ mod guard_of_an_edit {
         })
     }
 
+    thread_local! {
+        /// How many times a group of three writes has run on this thread: the letter it writes.
+        static ROUND: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Three writes of 50,000 characters or more, each of a letter the group before it did not write, so that the group is a change however often it runs: a group that leaves the
+    /// drawing as it was is taken back whole and ends no redo step, which is not what this group is here to show.
     fn three_writes_in_a_group(s: &mut Session, _: &serde_json::Value) -> Result<serde_json::Value> {
+        let letter = ROUND.with(|round| {
+            let n = round.get();
+            round.set(n.wrapping_add(1));
+            char::from(b'a' + n % 26).to_string()
+        });
         s.grouped("Three writes", |s| {
             for k in 0..3 {
-                write(s, 0, &"g".repeat(50_000 + k))?;
+                write(s, 0, &letter.repeat(50_000 + k))?;
             }
             Ok(json!({}))
         })
@@ -530,6 +542,51 @@ mod guard_of_an_edit {
         let fails = spec("test.group_fails", a_group_that_fails);
         s.run_spec(&fails, &json!({})).unwrap();
         assert_eq!(s.model_held_exact(), Some(held), "the group that failed is put back with the document");
+    }
+
+    /// A group that writes a cell and writes its old text back.
+    fn there_and_back_in_a_group(s: &mut Session, _: &serde_json::Value) -> Result<serde_json::Value> {
+        s.grouped("There and back", |s| {
+            write(s, 1, &"t".repeat(50_000))?;
+            write(s, 1, "first")?;
+            Ok(json!({}))
+        })
+    }
+
+    /// A group whose edits leave the drawing as it was is taken back whole: the drawing is the very document it was, no step is recorded and the redo steps stay, the
+    /// revision is the one it was, and the count is the one the group began with, exactly (no undo step was let go of, so nothing is in doubt), also with a history that has let go of its
+    /// oldest steps already (a limit of 8 steps, and 12 edits).
+    #[test]
+    fn a_group_that_leaves_the_drawing_as_it_was_is_taken_back_with_the_count_it_began_with() {
+        let group = spec("test.there_and_back", there_and_back_in_a_group);
+        for steps in [1_usize, 12] {
+            let mut s = opened(unshared(10));
+            s.state.as_mut().unwrap().history = History::with_limit(8);
+            for k in 0..steps {
+                write(&mut s, 1, if k == steps - 1 { "first" } else { "other" }).unwrap();
+            }
+            write(&mut s, 2, "second").unwrap();
+            s.execute("edit.undo", &json!({})).unwrap();
+            let (document, undo, redo, revision, held) = (
+                Arc::clone(&s.state.as_ref().unwrap().doc),
+                s.history().unwrap().undo_len(),
+                s.history().unwrap().redo_len(),
+                s.revision(),
+                s.model_held(),
+            );
+            assert_eq!(redo, 1, "a step to redo, which a group that changes something ends");
+            s.run_spec(&group, &json!({})).unwrap();
+            let state = s.state.as_ref().unwrap();
+            assert!(Arc::ptr_eq(&state.doc, &document), "{steps}: the very document it was");
+            assert_eq!(
+                (s.history().unwrap().undo_len(), s.history().unwrap().redo_len(), s.revision()),
+                (undo, redo, revision),
+                "{steps}: no step, the redo step stays, no revision"
+            );
+            assert_eq!((s.model_held(), s.model_held_drifted()), (held, Some(false)), "{steps}: the count it began with, in no doubt");
+            held_as_whole(&s, "after a group taken back");
+            s.execute("edit.redo", &json!({})).unwrap();
+        }
     }
 
     #[test]

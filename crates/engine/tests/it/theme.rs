@@ -221,8 +221,9 @@ fn a_theme_recolours_a_shape_and_no_theme_gives_it_back() {
     assert_eq!(d.style(style).unwrap().name_u.as_deref(), Some(THEME_STYLE_NAME));
     let sel = theme::selection_of(d, 1).unwrap();
     assert_eq!(sel.numbers(), [1001, 1001, 1001, 1001, 1001, 0, 0]);
-    let links = d.shape(&d.find_shape(Owner::Page(1), id).unwrap()).unwrap().sheet.links;
-    assert_eq!((links.line, links.fill, links.text), (Some(style), Some(style), Some(style)));
+    // The instance follows the style through its master's shape, and holds no link of its own.
+    assert_eq!(crate::theme_master_links::follows(d, 1, id), (Some(style), Some(style), Some(style)));
+    assert_eq!(d.shape(&d.find_shape(Owner::Page(1), id).unwrap()).unwrap().sheet.links, diacraft_doc::Links::default());
     // What the shape draws: a pale tint of the first accent inside (40 percent of it, in linear light), the accent's shade round it, the dark colour for text.
     let accent = rgb(TIDEPOOL_1);
     let fill = tint(accent, 0.4);
@@ -498,8 +499,7 @@ fn a_themed_drawing_saves_the_part_and_opens_again_as_it_was() {
     assert_eq!(d.themes.get(0).unwrap().entries, theme::find("fernwood").unwrap().def.entries);
     assert_eq!(theme::selection_of(d, 1).unwrap().numbers(), [1002, 1002, 1002, 1002, 1002, 1, 1]);
     let style = theme::theme_style_id(d).expect("the Theme style is in the file");
-    let links = d.shape(&d.find_shape(Owner::Page(1), id).unwrap()).unwrap().sheet.links;
-    assert_eq!((links.line, links.fill, links.text), (Some(style), Some(style), Some(style)));
+    assert_eq!(crate::theme_master_links::follows(d, 1, id), (Some(style), Some(style), Some(style)), "through its master's shape");
     assert_eq!(look(&mut t, id), l);
     assert_eq!(px(&render(&t), 3.0, 4.0), drawn);
     assert_eq!(page_theme(&mut t, 1)["theme"], "fernwood");
@@ -532,12 +532,13 @@ fn a_theme_added_to_a_drawing_that_came_from_a_file_is_added_to_the_file_and_the
     for kept in ["/visio/windows.xml", "/docProps/custom.xml"] {
         assert!(saved.part(kept) == original.part(kept), "{kept} is the file's, byte for byte");
     }
-    // The shape's three links to the Theme style are in the page part, and nothing else of it changed.
+    // The instance follows the theme through its master: the three links to the Theme style are in the master's part, and the page part is the file's.
     let page = String::from_utf8(saved.part("/visio/pages/page1.xml").unwrap().to_vec()).unwrap();
     let was = String::from_utf8(original.part("/visio/pages/page1.xml").unwrap().to_vec()).unwrap();
+    assert_eq!(page, was, "the instance is as the file had it");
+    let master = String::from_utf8(saved.part(concat!("/vi", "sio", "/masters/master1.xml")).unwrap().to_vec()).unwrap();
     // (The Theme style is the first the drawing holds after the root: `ID` 1.)
-    assert!(page.contains("LineStyle=\"1\"") && page.contains("FillStyle=\"1\"") && page.contains("TextStyle=\"1\""), "{page}");
-    assert!(!was.contains("LineStyle="), "the shape followed no style before: {was}");
+    assert!(master.contains("LineStyle=\"1\"") && master.contains("FillStyle=\"1\"") && master.contains("TextStyle=\"1\""), "{master}");
     // The pages part gained the page's cells, and the document part the Theme style (and its relationship to the theme, in its own part).
     assert!(saved.part("/visio/pages/pages.xml") != original.part("/visio/pages/pages.xml"));
     assert!(saved.part("/visio/document.xml") != original.part("/visio/document.xml"));
@@ -694,6 +695,11 @@ fn links_of(s: &Session, id: u32) -> (Option<u32>, Option<u32>, Option<u32>) {
     (l.line, l.fill, l.text)
 }
 
+/// The style links shape `id` of page 1 follows: its own, else those of its master's shape (a theme links the masters' shapes, and an instance keeps no link of its own).
+fn follows_of(s: &Session, id: u32) -> (Option<u32>, Option<u32>, Option<u32>) {
+    crate::theme_master_links::follows(doc(s), 1, id)
+}
+
 #[test]
 fn a_shape_a_box_and_a_connector_put_on_a_themed_page_follow_its_theme_in_the_same_undo_step() {
     let (mut s, a) = session_with_rectangle();
@@ -702,7 +708,8 @@ fn a_shape_a_box_and_a_connector_put_on_a_themed_page_follow_its_theme_in_the_sa
     let steps = s.history().unwrap().undo_len();
     // A shape dropped from a built-in stencil: the theme's pale fill, and one undo step that takes shape and links away together.
     let b = drop_shape(&mut s, "ellipse", 7.0, 4.0);
-    assert_eq!(links_of(&s, b), (Some(style), Some(style), Some(style)));
+    assert_eq!(follows_of(&s, b), (Some(style), Some(style), Some(style)), "through its master");
+    assert_eq!(links_of(&s, b), (None, None, None), "an instance holds no link of its own");
     assert_eq!(look(&mut s, b)["fill"], hex(tint(rgb(TIDEPOOL_1), 0.4)));
     assert_eq!(s.history().unwrap().undo_len(), steps + 1);
     // A text box keeps the no fill and no line it is made with, and its text is the theme's.
@@ -722,7 +729,7 @@ fn a_shape_a_box_and_a_connector_put_on_a_themed_page_follow_its_theme_in_the_sa
     let auto = run(&mut s, "connector.autoconnect", json!({"from": a, "direction": "down", "master": "square"}));
     for key in ["id", "connector"] {
         let id = auto[key].as_u64().unwrap() as u32;
-        assert_eq!(links_of(&s, id), (Some(style), Some(style), Some(style)), "{key}");
+        assert_eq!(follows_of(&s, id), (Some(style), Some(style), Some(style)), "{key}");
     }
     // Applying the theme again finds every shape following it already.
     let r = run(&mut s, "theme.apply", json!({"theme": "tidepool"}));
@@ -754,10 +761,13 @@ fn a_drop_from_a_stencil_file_follows_the_theme_unless_the_master_links_a_style_
     // another ID: the instance has that style through its master, so the theme does not override it.
     let decision =
         run(&mut s, "shape.drop", json!({"master": "Decision", "stencil": "file-1", "page": 1, "x": 3, "y": 3}))["id"].as_u64().unwrap() as u32;
-    assert_eq!(links_of(&s, decision), (Some(style), Some(style), Some(style)));
+    assert_eq!(follows_of(&s, decision), (Some(style), Some(style), Some(style)), "through its master");
+    assert_eq!(links_of(&s, decision), (None, None, None));
     let process =
         run(&mut s, "shape.drop", json!({"master": "Process", "stencil": "file-1", "page": 1, "x": 6, "y": 3}))["id"].as_u64().unwrap() as u32;
     assert_eq!(links_of(&s, process), (None, None, None), "its style is its master's");
+    let (line, fill, text) = follows_of(&s, process);
+    assert!(line.is_some_and(|l| l != style) && fill == line && text == line, "the master's own style: {line:?}");
     // The page's other shapes and a later application agree: nothing is left to link.
     let r = run(&mut s, "theme.apply", json!({"theme": "fernwood"}));
     assert_eq!(r["shapes_linked"], 0, "{r}");
@@ -777,7 +787,8 @@ fn applying_a_theme_leaves_an_instance_alone_whose_master_shape_links_a_style() 
     let r = run(&mut s, "theme.apply", json!({"theme": "cinderglow"}));
     assert_eq!(r["shapes_linked"], 3, "the three families of the one shape whose master links no style: {r}");
     let style = theme::theme_style_id(doc(&s)).unwrap();
-    assert_eq!(links_of(&s, decision), (Some(style), Some(style), Some(style)));
+    assert_eq!(follows_of(&s, decision), (Some(style), Some(style), Some(style)), "through its master");
+    assert_eq!(links_of(&s, decision), (None, None, None));
     assert_eq!(links_of(&s, process), (None, None, None));
     assert_eq!(
         (look(&mut s, process)["fill"].clone(), look(&mut s, process)["line"].clone()),

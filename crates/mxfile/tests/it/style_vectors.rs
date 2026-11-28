@@ -885,10 +885,10 @@ mod style_strings {
         for name in &table {
             assert!(Key::from_name(name).is_some(), "{name} is a key the mapping spec reads");
         }
-        // Beyond the table: the effects the model task counts, and the stencil icons that M-KEEP keeps.
+        // Beyond the table: the effects the model task counts, the stencil icons that M-KEEP keeps, and the direction of a label's paragraphs (S-R40).
         let extra: Vec<&str> = names.iter().copied().filter(|n| !table.contains(n)).collect();
-        assert_eq!(extra, ["comic", "glass", "grIcon", "prIcon", "resIcon", "rough", "sketch"]);
-        assert_eq!(Key::ALL.len(), 89 + 7);
+        assert_eq!(extra, ["comic", "glass", "grIcon", "prIcon", "resIcon", "rough", "sketch", "textDirection"]);
+        assert_eq!(Key::ALL.len(), 89 + 8);
         for name in ["", "Html", "fillcolor", "fillColor ", "pointerEvents", "jettySize", "libavoidRouting", "childLayout", "fontSource"] {
             assert!(Key::from_name(name).is_none(), "{name:?}");
         }

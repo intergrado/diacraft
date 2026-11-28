@@ -56,8 +56,8 @@ fn the_log_lives_in_the_config_folder_under_diacraft_logs() {
     assert_eq!(linux, Some(PathBuf::from("/home/u/.config/diacraft/logs")));
     // A relative or empty XDG_CONFIG_HOME is not a place to write: the specification says to ignore it.
     for bad in ["", "relative/dir"] {
-        let linux = log_dir_with("freebsd", &env(&[("XDG_CONFIG_HOME", bad), ("HOME", "/home/u")]));
-        assert_eq!(linux, Some(PathBuf::from("/home/u/.config/diacraft/logs")), "{bad:?}");
+        let other = log_dir_with("other", &env(&[("XDG_CONFIG_HOME", bad), ("HOME", "/home/u")]));
+        assert_eq!(other, Some(PathBuf::from("/home/u/.config/diacraft/logs")), "{bad:?}");
     }
     let mac = log_dir_with("macos", &env(&[("HOME", "/Users/u")]));
     assert_eq!(mac, Some(PathBuf::from("/Users/u/Library/Application Support/diacraft/logs")));
@@ -72,6 +72,21 @@ fn no_prefs_means_no_log_file() {
     assert!(prefs_enabled_with(&env(&[])));
     assert!(!prefs_enabled_with(&env(&[("DIACRAFT_NO_PREFS", "1")])));
     assert!(!prefs_enabled_with(&env(&[("DIACRAFT_NO_PREFS", "")])), "set at all, whatever it holds");
+}
+
+/// The settings' folder is the log's. `DIACRAFT_CONFIG_DIR` (craft-settings' variable) moves both, and set but empty keeps a program away from both, as
+/// `DIACRAFT_NO_PREFS` does: an agent that isolates itself that way must not rotate away the logs of the person's own runs either.
+#[test]
+fn the_config_dir_variable_moves_the_log_and_empty_means_none() {
+    let moved = log_dir_with("linux", &env(&[("DIACRAFT_CONFIG_DIR", "/elsewhere"), ("HOME", "/home/u")]));
+    assert_eq!(moved, Some(PathBuf::from("/elsewhere/logs")));
+    let windows = log_dir_with("windows", &env(&[("DIACRAFT_CONFIG_DIR", "D:\\cfg"), ("APPDATA", "C:\\a")]));
+    assert_eq!(windows, Some(PathBuf::from("D:\\cfg").join("logs")));
+    // Empty is not a place: the platform's folder is what is left, and `prefs_enabled_with` says not to use it.
+    let empty = log_dir_with("linux", &env(&[("DIACRAFT_CONFIG_DIR", ""), ("HOME", "/home/u")]));
+    assert_eq!(empty, Some(PathBuf::from("/home/u/.config/diacraft/logs")));
+    assert!(!prefs_enabled_with(&env(&[("DIACRAFT_CONFIG_DIR", "")])), "isolated: no settings and no log file");
+    assert!(prefs_enabled_with(&env(&[("DIACRAFT_CONFIG_DIR", "/elsewhere")])), "a folder of its own is a place to write");
 }
 
 #[test]
@@ -294,4 +309,43 @@ fn a_folder_that_cannot_be_made_leaves_standard_error_the_only_sink() {
     assert!(error.contains("logs"), "{error}");
     // Logging goes on without a file, and does not panic.
     logger.log(&log::Record::builder().args(format_args!("still alive")).level(Level::Error).target("x").build());
+}
+
+#[test]
+fn the_logger_knows_its_file_for_the_message_of_a_start_that_failed() {
+    // `failure` tells the person where the log is: the logger says which file it made.
+    let dir = TempDir::new();
+    let logger = AppLogger::new(Filter::parse("info"), false);
+    assert_eq!(logger.file(), None, "no file yet");
+    let path = logger.attach_dir(dir.path()).unwrap();
+    assert_eq!(logger.file(), Some(path));
+    let blocker = dir.path().join("a-file");
+    std::fs::write(&blocker, "not a folder").unwrap();
+    let other = AppLogger::new(Filter::parse("info"), false);
+    other.attach_dir(&blocker.join("deeper")).unwrap_err();
+    assert_eq!(other.file(), None, "a folder that could not be made leaves no file to point to");
+    other.no_file();
+    assert_eq!(other.file(), None);
+}
+
+#[test]
+fn a_flush_leaves_the_lines_in_the_file_and_never_fails() {
+    // The start flushes the log before it tests a graphics adapter, so that the line that says which one is on the disk if the driver takes the machine down.
+    let dir = TempDir::new();
+    let logger = AppLogger::new(Filter::parse("info"), false);
+    log::Log::flush(&logger);
+    let path = logger.attach_dir(dir.path()).unwrap();
+    logger.log(
+        &log::Record::builder()
+            .args(format_args!("testing Intel(R) UHD Graphics (Dx12, IntegratedGpu) (try usual, test 1)"))
+            .level(Level::Info)
+            .target("x")
+            .build(),
+    );
+    log::Log::flush(&logger);
+    assert!(read(&path).contains("testing Intel(R) UHD Graphics (Dx12, IntegratedGpu) (try usual, test 1)"));
+    // With no file there is nothing to flush.
+    let none = AppLogger::new(Filter::parse("info"), false);
+    none.no_file();
+    log::Log::flush(&none);
 }

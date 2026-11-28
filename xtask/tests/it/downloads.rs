@@ -24,7 +24,7 @@ fn listed_files() -> Vec<String> {
 #[test]
 fn the_site_asks_for_the_files_the_release_workflow_lists_and_checks() {
     let assets = assets();
-    assert_eq!(assets.len(), 14, "six Linux files, four Windows files and four macOS files: {assets:?}");
+    assert_eq!(assets.len(), 16, "eight Linux files, four Windows files and four macOS files: {assets:?}");
     let workflow = read(".github/workflows/release.yml");
     let listed: BTreeSet<String> = listed_files().into_iter().collect();
     let named: BTreeSet<String> = assets.iter().map(|(_, name)| name.clone()).collect();
@@ -62,15 +62,17 @@ fn the_names_follow_one_pattern_system_cpu_and_kind() {
 }
 
 /// The names the launchers read, `diacraft-<version>-<system>-<cpu>[-portable].<extension>` with a version that starts with a digit, for one release of the example version 0.2.1:
-/// the fourteen files, written out, as the release workflow lists them. The git tag stays `v0.2.1`, and so does the folder of its release; no file name has the `v`.
+/// the sixteen files, written out, as the release workflow lists them. The git tag stays `v0.2.1`, and so does the folder of its release; no file name has the `v`.
 #[test]
-fn the_fourteen_files_of_a_release_are_named_as_the_launchers_read_them() {
+fn the_sixteen_files_of_a_release_are_named_as_the_launchers_read_them() {
     let wanted = [
         "diacraft-0.2.1-linux-x86_64.AppImage",
         "diacraft-0.2.1-linux-x86_64.deb",
+        "diacraft-0.2.1-linux-x86_64.rpm",
         "diacraft-0.2.1-linux-x86_64.tar.gz",
         "diacraft-0.2.1-linux-aarch64.AppImage",
         "diacraft-0.2.1-linux-aarch64.deb",
+        "diacraft-0.2.1-linux-aarch64.rpm",
         "diacraft-0.2.1-linux-aarch64.tar.gz",
         "diacraft-0.2.1-windows-x64.msi",
         "diacraft-0.2.1-windows-x64-portable.zip",
@@ -102,7 +104,7 @@ fn the_fourteen_files_of_a_release_are_named_as_the_launchers_read_them() {
         };
         assert!(cpus.contains(&cpu), "{name}: {system} has no CPU {cpu}");
         let extensions: &[&str] = match system {
-            "linux" => &["AppImage", "deb", "tar.gz"],
+            "linux" => &["AppImage", "deb", "rpm", "tar.gz"],
             "windows" => &["msi", "zip"],
             _ => &["dmg", "zip"],
         };
@@ -185,7 +187,7 @@ fn ids_of(fragment: &str) -> Vec<String> {
     download_links(fragment).iter().map(|(tag, _)| attribute(tag, "data-download").to_owned()).collect()
 }
 
-/// The owner's ruling (2026-11-25): every CPU row lists all its formats, and the main button repeats one of them. So each of the fourteen files of the release is in the CPU rows exactly
+/// The owner's ruling (2026-11-25): every CPU row lists all its formats, and the main button repeats one of them. So each of the sixteen files of the release is in the CPU rows exactly
 /// once, and the main button of each card links one of the files of its card's rows (the same link, with the same address).
 #[test]
 fn the_home_page_lists_each_download_once_in_the_cpu_rows_and_the_main_button_of_each_system_repeats_one_of_them() {
@@ -199,7 +201,7 @@ fn the_home_page_lists_each_download_once_in_the_cpu_rows_and_the_main_button_of
     assert_eq!(cards.len(), 3, "Linux, Windows and macOS");
     let in_rows: Vec<String> = cards.iter().flat_map(|card| ids_of(rows_of(card))).collect();
     let unique: BTreeSet<&str> = in_rows.iter().map(String::as_str).collect();
-    assert_eq!(in_rows.len(), 14, "fourteen files in the rows: {in_rows:?}");
+    assert_eq!(in_rows.len(), 16, "sixteen files in the rows: {in_rows:?}");
     assert_eq!(in_rows.len(), unique.len(), "a file is listed once in the CPU rows: {in_rows:?}");
     assert_eq!(
         unique,
@@ -207,7 +209,7 @@ fn the_home_page_lists_each_download_once_in_the_cpu_rows_and_the_main_button_of
         "every download is in a row, and every link of a row is a download"
     );
     // The page's links are those of the rows and the three main buttons, and no other.
-    assert_eq!(links.len(), 14 + 3, "the rows' fourteen and the three main buttons");
+    assert_eq!(links.len(), 16 + 3, "the rows' sixteen and the three main buttons");
     for card in &cards {
         let main = download_links(main_of(card));
         assert_eq!(main.len(), 1, "one main button in a card");
@@ -223,9 +225,15 @@ fn the_home_page_lists_each_download_once_in_the_cpu_rows_and_the_main_button_of
         let id = attribute(tag, "data-download");
         let name = &assets.iter().find(|(i, _)| i == id).unwrap().1;
         assert_eq!(attribute(tag, "data-asset"), name, "{id}: the page names the file site.json names (cargo xtask site --write)");
-        // With no script the link is the file of the release of the workspace's version: a click starts the download, and the file is one the release workflow lists.
+        // With no script the link is the file of the release of the workspace's version: a click starts the download, and the file is one the release workflow lists. A file
+        // that came with a later release (the `.rpm`, with 0.2.4) is no file of an earlier one, and a page made for that earlier release links the page of the release.
         let file = name.replace("{version}", &version);
-        assert_eq!(attribute(tag, "href"), format!("https://github.com/{repository}/releases/download/v{version}/{file}"), "{id}: {tag}");
+        let href = if xtask::version::release_has(&version, id) {
+            format!("https://github.com/{repository}/releases/download/v{version}/{file}")
+        } else {
+            format!("https://github.com/{repository}/releases/tag/v{version}")
+        };
+        assert_eq!(attribute(tag, "href"), href, "{id}: {tag}");
         assert!(tag.contains("data-repo=\"/releases/download\""), "{id}");
         assert!(in_the_release.contains(&file), "{id}: {file} is not one of the files the release workflow lists");
         // A reader hears what it is, and which CPU; a link that says only `.zip` has the whole sentence in its label.
@@ -328,7 +336,8 @@ fn the_script_upgrades_the_direct_links_only_to_a_newer_release_and_keeps_its_ch
     assert!(script.contains("https://api.github.com/repos/${path}/releases/latest"));
 }
 
-/// The owner's ruling (2026-11-25): every CPU row of every card lists all its formats, in one order for the whole card. The Linux rows are `.AppImage .deb .tar.gz`, the Windows rows `.msi .zip`
+/// The owner's ruling (2026-11-25): every CPU row of every card lists all its formats, in one order for the whole card. The Linux rows are `.AppImage .deb .rpm .tar.gz` (the `.rpm` beside the
+/// `.deb`, for Fedora, and the main button as it was), the Windows rows `.msi .zip`
 /// and the macOS rows `.dmg .zip`; the rows are one for each CPU, in the words of the labels.
 #[test]
 fn every_cpu_row_lists_all_its_formats_in_the_order_of_its_card() {
@@ -344,7 +353,7 @@ fn every_cpu_row_lists_all_its_formats_in_the_order_of_its_card() {
         Card {
             name: "Linux",
             cpus: [("Intel/AMD (x64)", "x86_64"), ("ARM64", "arm64")],
-            formats: &[("appimage", ".AppImage"), ("deb", ".deb"), ("targz", ".tar.gz")],
+            formats: &[("appimage", ".AppImage"), ("deb", ".deb"), ("rpm", ".rpm"), ("targz", ".tar.gz")],
         },
         Card { name: "Windows", cpus: [("Intel/AMD (x64)", "x86_64"), ("ARM64", "arm64")], formats: &[("msi", ".msi"), ("zip", ".zip")] },
         Card { name: "macOS", cpus: [("Apple silicon (ARM64)", "arm64"), ("Intel (x64)", "x86_64")], formats: &[("dmg", ".dmg"), ("zip", ".zip")] },
@@ -523,21 +532,24 @@ fn listed_bundles() -> Vec<String> {
 }
 
 /// The owner's ruling (2026-11-25): the release also holds the MCP bundles, one for each system and CPU the downloads are built for (`xtask::mcp::BUNDLES`: the registry's entry
-/// names those six and no other). The checksums job lists exactly those, beside the fourteen downloads, and counts all twenty; the site's buttons and the site's list of files stay the
-/// fourteen downloads (the bundles are no download of the site).
+/// names those six and no other). The checksums job lists exactly those, beside the sixteen downloads, and counts all twenty-two; the site's buttons and the site's list of files stay the
+/// sixteen downloads (the bundles are no download of the site).
 #[test]
-fn the_checksums_job_lists_the_six_bundles_beside_the_fourteen_downloads_and_counts_twenty() {
+fn the_checksums_job_lists_the_six_bundles_beside_the_sixteen_downloads_and_counts_twenty_two() {
     let wanted: BTreeSet<String> = xtask::mcp::BUNDLES.iter().map(xtask::mcp::bundle_pattern).collect();
     let listed: BTreeSet<String> = listed_bundles().into_iter().collect();
     assert_eq!(listed.len(), 6);
     assert_eq!(listed, wanted, "the bundles the workflow lists and the bundles of xtask/src/mcp.rs");
-    assert_eq!(listed_files().len(), 14, "the downloads: the bundles are not among them");
+    assert_eq!(listed_files().len(), 16, "the downloads: the bundles are not among them");
     assert!(listed_files().iter().all(|name| !name.contains("mcp")), "a bundle in the downloads' list is a button the site would have to show");
     assert!(assets().iter().all(|(_, name)| !name.contains("mcp")), "site.json names no bundle");
     let checksums = job("checksums");
-    assert!(checksums.contains("= 20 ]"), "the line count of SHA256SUMS.txt is twenty: the fourteen downloads and the six bundles");
-    assert!(checksums.contains("twenty files"), "{checksums}");
-    assert!(!checksums.contains("fourteen") && !checksums.contains("= 14 ]"), "no count of fourteen is left in the checksums job");
+    assert!(checksums.contains("= 22 ]"), "the line count of SHA256SUMS.txt is twenty-two: the sixteen downloads and the six bundles");
+    assert!(checksums.contains("twenty-two files"), "{checksums}");
+    assert!(
+        !checksums.contains("fourteen") && !checksums.contains("twenty files") && !checksums.contains("= 14 ]") && !checksums.contains("= 20 ]"),
+        "no count of fourteen or twenty is left in the checksums job"
+    );
 }
 
 /// Every build job makes the bundles of its own CPUs after its downloads, runs what is in each (`packaging/mcp-bundle-check.sh`), and uploads them with the downloads of that job.
@@ -570,6 +582,46 @@ fn each_build_job_makes_checks_and_uploads_the_bundles_of_its_cpu() {
     for (name, text) in [("linux", &linux), ("windows", &windows), ("macos", &mac)] {
         let make = text.find("packaging/mcp-bundle.sh").unwrap_or_else(|| panic!("{name} makes no bundle"));
         assert!(text[..make].contains("packaging/package.sh"), "{name}: the bundle is made after the download");
+    }
+}
+
+// ------------------------------------------------------------------------------------------------------------------------------ the .rpm
+
+/// The Linux job makes an `.rpm` for each CPU after the `.deb`, in a container of the latest Fedora (`packaging/linux/rpm-in-fedora.sh`: the rpmbuild, its macros and its checks are
+/// Fedora's own), installs it there with dnf, runs the programs and removes it, before anything is uploaded; and uploads it with the other Linux files of its CPU.
+#[test]
+fn the_linux_job_makes_installs_checks_and_uploads_an_rpm_for_each_cpu_in_a_fedora_container() {
+    let linux = job("linux");
+    // The image is Fedora's own, pinned by the digest of its index (one digest for both CPUs), named once for both jobs: a tag moves, and a release is made in the image it was tried in.
+    let image: Vec<&str> = linux.lines().filter_map(|l| l.trim().strip_prefix("FEDORA_IMAGE: ")).collect();
+    assert_eq!(image.len(), 1, "{image:?}");
+    let digest = image[0].strip_prefix("docker.io/library/fedora@sha256:").expect("the image is the official fedora image, by digest");
+    assert!(digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{digest}");
+    // The script has no tag of its own to fall back on: a run that lost the variable stops.
+    let script = read("packaging/linux/rpm-in-fedora.sh");
+    assert!(
+        script.contains("image=${FEDORA_IMAGE:-}") && !script.contains("${FEDORA_IMAGE:-docker"),
+        "rpm-in-fedora.sh takes the image from the variable and from nothing else"
+    );
+    let make =
+        linux.find("bash packaging/linux/rpm-in-fedora.sh make \"$VERSION\" dist \"target/$TARGET/release\"").expect("the job makes the package");
+    let check = linux
+        .find("bash packaging/linux/rpm-in-fedora.sh check \"dist/diacraft-$VERSION-linux-$FILE_ARCH.rpm\" $expected")
+        .expect("the job installs the package it made and checks what it did");
+    let deb = linux.find("packaging/linux/make-deb.sh").expect("the .deb is made");
+    let upload = linux.find("gh release upload").expect("the files are uploaded");
+    assert!(deb < make && make < check && check < upload, "the .rpm is made after the .deb, checked before it is uploaded");
+    assert!(linux[upload..].contains("\"dist/diacraft-$VERSION-linux-$FILE_ARCH.rpm\""), "the .rpm is uploaded with the other files of its CPU");
+    // The tag is expected only for a release: a run by hand on a branch makes up its own.
+    let step = &linux[linux.find("- name: Smoke test the .rpm").expect("the step")..];
+    assert!(step.contains("if [ \"$PUBLISH\" = true ]; then expected=$NAME; else expected=\"\"; fi"), "the check is given the tag of a release only");
+    // Each CPU's package is made on a runner of its own CPU (the container is of the runner's), so none is cross made.
+    assert!(linux.contains("runs-on: ${{ matrix.runner }}") && linux.contains("runner: ubuntu-22.04-arm"));
+    // The sums job expects both, and the notes name them.
+    let sums = job("checksums");
+    for cpu in ["x86_64", "aarch64"] {
+        assert!(sums.contains(&format!("\"diacraft-$VERSION-linux-{cpu}.rpm\"")), "the checksums job does not list the {cpu} .rpm");
+        assert!(job("draft").contains(&format!("diacraft-$VERSION-linux-{cpu}.rpm (Fedora)")), "the notes do not name the {cpu} .rpm");
     }
 }
 

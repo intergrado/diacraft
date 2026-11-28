@@ -8,7 +8,7 @@ use diacraft_doc::{Cell, CellAddr, Document, Owner, RowKey, SectionKey, Shape, S
 
 use super::counts;
 use super::quick::{QuickStyle, format_quick_style};
-use super::{Mixed, RangeLook, TextFormat, format_text, look_of_range, targets};
+use super::{Mixed, RangeLook, TextFormat, format_text, look_of_range, targets, targets_reached};
 use crate::draw::{NODES_WALKED, page_mut};
 use crate::theme::{Base, Choice, follow_work, reset_follow_work};
 
@@ -363,6 +363,32 @@ fn a_shape_named_that_is_not_on_the_page_is_refused_as_before_and_the_first_of_t
     page_mut(&mut doc, 1).unwrap().shapes.push(Arc::new(Shape::new(4)));
     let found = targets(&doc, 1, &[4, 4, 2]).unwrap();
     assert_eq!(found.iter().map(|at| at.path.clone()).collect::<Vec<_>>(), [vec![3], vec![1]]);
+}
+
+/// A page with a group, 1, of two members, 2 and 3, and a shape, 4, beside it.
+fn group_page() -> Document {
+    let mut group = Shape::new(1);
+    group.children = ShapeList::from_vec(vec![Arc::new(Shape::new(2)), Arc::new(Shape::new(3))]);
+    let mut doc = Document::new_blank();
+    page_mut(&mut doc, 1).unwrap().shapes = ShapeList::from_vec(vec![Arc::new(group), Arc::new(Shape::new(4))]);
+    doc
+}
+
+#[test]
+fn a_shape_is_reached_through_a_group_unless_it_is_named_itself() {
+    let doc = group_page();
+    let reached = |ids: &[u32]| -> Vec<(u32, bool)> {
+        targets_reached(&doc, 1, ids).unwrap().iter().map(|t| (doc.shape(&t.at).unwrap().id, t.through_group)).collect()
+    };
+    assert_eq!(reached(&[1]), [(2, true), (3, true)], "the members of a group named are reached through it");
+    assert_eq!(reached(&[4]), [(4, false)], "a shape of no members that is named is not");
+    assert_eq!(reached(&[3]), [(3, false)], "nor is a member that is named by itself");
+    // A member named as well as its group is a shape named, whichever comes first (and is formatted once).
+    assert_eq!(reached(&[1, 3]), [(2, true), (3, false)]);
+    assert_eq!(reached(&[3, 1]), [(3, false), (2, true)]);
+    // `targets` is the same shapes in the same order.
+    let plain: Vec<u32> = targets(&doc, 1, &[1, 3]).unwrap().iter().map(|at| doc.shape(at).unwrap().id).collect();
+    assert_eq!(plain, [2, 3]);
 }
 
 /// A page of `n` shapes that follow the `Theme` style of Tidepool, `n - 1` of them copies of the first.

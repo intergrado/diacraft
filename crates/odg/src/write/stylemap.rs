@@ -1,10 +1,11 @@
 //! The cells a restyle changes, and the attributes of a style they become:
 //! which cell feeds which attribute of the shape's automatic style, and what an edit of the cell writes there.
 //!
-//! **What is written.** The fill (`FillPattern` 0 and 1, `FillForegnd`, `FillForegndTrans`), the line (`LinePattern` 0 and 1, `LineWeight`,
-//! `LineColor`, `LineColorTrans`, `LineCap`), and the text block's vertical alignment and four margins. **What is refused, in words:** a pattern
-//! of 2 or more (a hatch is written as a solid fill with the pattern number as tier 2; a dash needs a `draw:stroke-dash` in `office:styles`),
-//! a gradient, a colour that is not `#rrggbb` (a palette index is written as its RGB, which needs the palette), a cell
+//! **What is written.** The fill (`FillPattern` 0 and 1, `FillForegnd`, `FillForegndTrans`), the line (`LinePattern` 0 to 23, `LineWeight`,
+//! `LineColor`, `LineColorTrans`, `LineCap`), and the text block's vertical alignment and four margins. A line pattern of 2 to 23 is `draw:stroke="dash"` and a
+//! `draw:stroke-dash` of DiaCraft's own that the save puts in `office:styles` ([`super::dash`]). **What is refused, in words:** a fill pattern
+//! of 2 or more (a hatch is written as a solid fill with the pattern number as tier 2), a line pattern past 23, a custom one (254) and a fraction (the table has no row for
+//! them), a gradient, a colour that is not `#rrggbb` (a palette index is written as its RGB, which needs the palette), a cell
 //! that holds a formula (the formula is tier 2), and every cell not named here: a shadow, a line end, a run's or a paragraph's cells. A
 //! change is never dropped.
 
@@ -87,6 +88,12 @@ pub(crate) struct StyleEdit {
 }
 
 impl StyleEdit {
+    /// Whether the line's cap is the flat one (`LineCap` 1), the form of a dash it draws is the flat form: the cap the edit says (the shape's own, or its line style's, set with `line` by
+    /// [`crate::write::own::decide_line_end`]). No cap known is the round one, which the reader and the renderer give a line that says none.
+    pub(crate) fn cap_is_flat(&self) -> bool {
+        self.line.iter().any(|(name, v)| *name == "LineCap" && *v == 1.0)
+    }
+
     /// The attributes that say the display form of the fill, which come after the cells' own and take the place of what they write for the same attributes.
     pub(crate) fn fx_ops(&self) -> Vec<Op> {
         match (self.fx, self.fx_off) {
@@ -132,8 +139,8 @@ pub(crate) const CELLS: [&str; 24] = [
 /// The line-end cells.
 pub(crate) const ARROW_CELLS: [&str; 4] = ["BeginArrow", "BeginArrowSize", "EndArrow", "EndArrowSize"];
 
-/// The cells a line end's attributes are worked out from: the four of the ends and the weight of the line.
-pub(crate) const LINE_END_CELLS: [&str; 5] = ["BeginArrow", "BeginArrowSize", "EndArrow", "EndArrowSize", "LineWeight"];
+/// The cells a line end's attributes and a dash's form are worked out from: the four of the ends, the weight of the line (a marker's width follows it) and its cap (a dash's form follows it).
+pub(crate) const LINE_END_CELLS: [&str; 6] = ["BeginArrow", "BeginArrowSize", "EndArrow", "EndArrowSize", "LineWeight", "LineCap"];
 
 /// The four margin cells.
 pub(crate) const MARGINS: [(&str, &str); 4] =
@@ -341,7 +348,16 @@ pub(crate) fn ops_for(cell: &'static str, new: Option<&CellVal>, edit: &StyleEdi
         ("LinePattern", Some(v)) => match v.number {
             Some(0.0) => vec![op(Ns::Draw, "stroke", Val::Text("none".into()))],
             Some(1.0) => vec![op(Ns::Draw, "stroke", Val::Text("solid".into()))],
-            _ => return Err("a dashed line (a dash needs its own draw:stroke-dash in office:styles)"),
+            // A pattern of the table is a dash of DiaCraft's own, in the form the line's cap draws; its definition is the save's to put in `office:styles`.
+            Some(n) => match super::dash::DashKey::of_pattern(n, edit.cap_is_flat()) {
+                Some(dash) => vec![op(Ns::Draw, "stroke", Val::Text("dash".into())), op(Ns::Draw, "stroke-dash", Val::Text(dash.name()))],
+                None => {
+                    return Err(
+                        "a line pattern that is not 0 to 23 (a pattern past the table, a custom one and a fraction have no dash: they are carried)",
+                    );
+                }
+            },
+            None => return Err("a line pattern that is not a number"),
         },
         ("LinePattern", None) => vec![op(Ns::Draw, "stroke", Val::Remove)],
         ("LineWeight", Some(v)) => vec![op(Ns::Svg, "stroke-width", length(v)?)],
@@ -461,6 +477,29 @@ mod tests {
     }
 
     #[test]
+    fn a_line_pattern_of_the_table_is_a_dash_in_the_form_the_cap_draws_and_no_other_number_is_one() {
+        let named = |n: &str, cap: Option<f64>| {
+            let edit = StyleEdit { line: cap.map(|c| vec![("LineCap", c)]).unwrap_or_default(), ..StyleEdit::default() };
+            ops_for("LinePattern", Some(&val(n)), &edit).map(|ops| ops.into_iter().find(|o| o.local == "stroke-dash").map(|o| o.val))
+        };
+        let dash = |name: &str| Ok(Some(Val::Text(name.to_owned())));
+        for n in 2..=23u32 {
+            assert_eq!(named(&n.to_string(), None), dash(&format!("DiaCraft_20_dash_20_{n}")), "no cap known is the round form");
+            assert_eq!(named(&n.to_string(), Some(0.0)), dash(&format!("DiaCraft_20_dash_20_{n}")), "round");
+            assert_eq!(named(&n.to_string(), Some(2.0)), dash(&format!("DiaCraft_20_dash_20_{n}")), "a projecting cap draws the round form too");
+            assert_eq!(named(&n.to_string(), Some(1.0)), dash(&format!("DiaCraft_20_dash_20_{n}_20_flat")), "flat");
+        }
+        // 0 and 1 are the line's own (no dash), and a number the table has no row for is refused in words, and so is a cell that holds no number.
+        assert_eq!(named("0", None), Ok(None));
+        assert_eq!(named("1", None), Ok(None));
+        for bad in ["24", "254", "2.5", "-1", "1e9"] {
+            assert!(named(bad, None).unwrap_err().contains("not 0 to 23"), "{bad}");
+        }
+        let words = CellVal { text: "x".to_owned(), number: None, unit: None };
+        assert!(ops_for("LinePattern", Some(&words), &StyleEdit::default()).unwrap_err().contains("not a number"));
+    }
+
+    #[test]
     fn every_style_cell_is_its_attributes_when_it_is_set_and_when_it_is_gone() {
         use Ns::{Draw, Svg};
         let edit = StyleEdit::default();
@@ -471,7 +510,11 @@ mod tests {
         };
         assert_eq!(got("LinePattern", Some("0")).unwrap(), [(Draw, "stroke", text("none"))]);
         assert_eq!(got("LinePattern", Some("1")).unwrap(), [(Draw, "stroke", text("solid"))]);
-        assert!(got("LinePattern", Some("2")).is_err());
+        assert_eq!(
+            got("LinePattern", Some("2")).unwrap(),
+            [(Draw, "stroke", text("dash")), (Draw, "stroke-dash", text("DiaCraft_20_dash_20_2"))],
+            "a pattern of the table is a dash of DiaCraft's own"
+        );
         assert_eq!(got("LinePattern", None).unwrap(), [(Draw, "stroke", Val::Remove)]);
         assert_eq!(got("LineWeight", Some("0.01")).unwrap(), [(Svg, "stroke-width", Val::Length(0.01))]);
         assert_eq!(got("LineWeight", None).unwrap(), [(Svg, "stroke-width", Val::Remove)]);
@@ -586,7 +629,12 @@ mod tests {
         assert_eq!(one("FillForegndTrans", "0.4").unwrap()[0], ("opacity", Val::Text("60%".into())), "no 60.00000000000001");
         assert_eq!(one("LineColorTrans", "0.25"), Ok(vec![("stroke-opacity", Val::Text("75%".into()))]));
         assert_eq!(one("LinePattern", "0"), Ok(vec![("stroke", Val::Text("none".into()))]));
-        assert!(one("LinePattern", "7").is_err(), "a dash needs a dash style");
+        assert_eq!(
+            one("LinePattern", "7"),
+            Ok(vec![("stroke", Val::Text("dash".into())), ("stroke-dash", Val::Text("DiaCraft_20_dash_20_7".into()))]),
+            "a pattern of the table is a dash of DiaCraft's own"
+        );
+        assert!(one("LinePattern", "24").is_err(), "a pattern past the table has no dash");
         assert_eq!(one("LineWeight", "0.0118"), Ok(vec![("stroke-width", Val::Length(0.0118))]));
         assert_eq!(
             one("LineCap", "2"),

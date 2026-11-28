@@ -143,13 +143,7 @@ fn target_pages(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<u32>, &'static
             let id = match named {
                 Some(id) if doc.page(id).is_some() => id,
                 Some(id) => return Err(bad(cmd, format!("there is no page {id}"))),
-                None => doc
-                    .pages
-                    .iter()
-                    .find(|page| !page.background)
-                    .or_else(|| doc.pages.iter().next())
-                    .map(|page| page.id)
-                    .ok_or_else(|| bad(cmd, "the document has no pages"))?,
+                None => doc.first_foreground_page().map(|page| page.id).ok_or_else(|| bad(cmd, "the document has no pages"))?,
             };
             Ok((vec![id], "page"))
         }
@@ -161,6 +155,12 @@ fn target_pages(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<u32>, &'static
         }
         Some(other) => Err(bad(cmd, format!("`scope` must be `page` or `all`, not `{}`", shown(other)))),
     }
+}
+
+/// The page the answer of a command that works on `pages` speaks of: the first of them that is not a background page, else the first of them (a file lists its background pages first, and a
+/// drawing's theme is the theme of the page a person works on).
+fn lead_page(doc: &diacraft_doc::Document, pages: &[u32]) -> Option<u32> {
+    pages.iter().copied().find(|id| doc.page(*id).is_some_and(|page| !page.background)).or_else(|| pages.first().copied())
 }
 
 /// A variant place: 0 to 3.
@@ -254,7 +254,7 @@ fn variant(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.edit_if("Theme variant", |doc| {
         let applied = theme::set_variants(doc, &pages, colours, styles).map_err(|e| e.into_engine(ID))?;
-        let first = pages.first().copied().unwrap_or(0);
+        let first = lead_page(doc, &pages).unwrap_or(0);
         let sel = theme::selection_of(doc, first).unwrap_or_default();
         let theme = selection_json(first, sel)["theme"].as_str().unwrap_or("custom").to_owned();
         let shown_variant = u8::try_from(sel.variation_colours).unwrap_or(0);
@@ -372,7 +372,7 @@ fn preview(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(map) = out.as_object_mut() {
         map.insert("preview".to_owned(), Value::Bool(true));
         if !ids.is_empty() {
-            let page = page_for(&made.document, pages.first().copied(), &ids, ID)?;
+            let page = page_for(&made.document, lead_page(&made.document, &pages), &ids, ID)?;
             map.insert("shapes".to_owned(), looks_json(&made.document, page, &ids)?);
         }
     }

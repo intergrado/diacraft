@@ -246,3 +246,57 @@ fn a_page_too_large_for_the_format_is_an_error_and_not_a_file() {
         assert!(!out.exists(), "{name}");
     }
 }
+
+/// A drawing that lists the background page `Frame` first and the page `Main` second, as a file lists them: 4 by 3 inch pages, each with a box.
+fn background_first() -> Vec<u8> {
+    let sheet = r#"<Cell N="PageWidth" V="4"/><Cell N="PageHeight" V="3"/><Cell N="PageScale" V="1"/><Cell N="DrawingScale" V="1"/>"#;
+    let boxed = |fill: &str| {
+        shape(
+            1,
+            &format!(
+                r##"<Cell N="PinX" V="1"/><Cell N="PinY" V="1"/><Cell N="Width" V="2"/><Cell N="Height" V="1"/><Cell N="LocPinX" V="0"/><Cell N="LocPinY" V="0"/>
+<Cell N="FillPattern" V="1"/><Cell N="FillForegnd" V="{fill}"/><Cell N="LinePattern" V="0"/>
+<Section N="Geometry" IX="0">
+<Row T="MoveTo" IX="1"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>
+<Row T="LineTo" IX="2"><Cell N="X" V="2"/><Cell N="Y" V="0"/></Row>
+<Row T="LineTo" IX="3"><Cell N="X" V="2"/><Cell N="Y" V="1"/></Row>
+<Row T="LineTo" IX="4"><Cell N="X" V="0"/><Cell N="Y" V="1"/></Row>
+<Row T="LineTo" IX="5"><Cell N="X" V="0"/><Cell N="Y" V="0"/></Row>
+</Section>"##
+            ),
+        )
+    };
+    VsdxBuilder::new()
+        .page(PageSpec::new(1, "Frame").attrs(r#" Background="1""#).sheet(sheet).shapes(&boxed("#0000FF")))
+        .page(PageSpec::new(2, "Main").attrs(r#" BackPage="1""#).sheet(sheet).shapes(&boxed("#FF0000")))
+        .build()
+}
+
+/// A page not asked for is the first page that is not a background: a file lists its background pages first, and a picture of the frame is not the picture of the drawing. `--page N` is the
+/// page's place in the drawing, as it was, so `--page 1` is the background page.
+#[test]
+fn an_export_with_no_page_draws_the_first_page_that_is_not_a_background_and_page_n_is_the_place_in_the_file() {
+    let dir = TempDir::new("export-default-page");
+    let drawing = dir.write("b.vsdx", &background_first());
+    let out = dir.path("p.svg");
+    let run = cli(&["export", s(&drawing), "--out", s(&out)], None);
+    assert!(run.status.success(), "{}", text(&run.stderr));
+    let lines = json_lines(&run.stdout);
+    assert_eq!(lines[0]["page"]["name"], "Main", "{}", lines[0]);
+    let file = std::fs::read_to_string(&out).unwrap();
+    assert!(file.contains("fill=\"#ff0000\""), "the red box of Main (drawn over the blue one of the Frame it names as its background)");
+    // The page named by its place: 1 is the background page the file lists first, and 2 the other.
+    for (place, name) in [("1", "Frame"), ("2", "Main")] {
+        let run = cli(&["export", s(&drawing), "--page", place, "--out", s(&out)], None);
+        assert!(run.status.success(), "{}", text(&run.stderr));
+        assert_eq!(json_lines(&run.stdout)[0]["page"]["name"], name, "--page {place}");
+        let file = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(file.contains("fill=\"#ff0000\""), place == "2", "--page {place}: the red box is Main's");
+        assert!(place == "2" || file.contains("fill=\"#0000ff\""), "--page 1: the blue box is the Frame's");
+    }
+    // `convert` to a picture is export's.
+    let picture = dir.path("c.svg");
+    let run = cli(&["convert", s(&drawing), "--out", s(&picture)], None);
+    assert!(run.status.success(), "{}", text(&run.stderr));
+    assert_eq!(json_lines(&run.stdout)[0]["page"]["name"], "Main");
+}

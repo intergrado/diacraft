@@ -2,9 +2,9 @@
 //! function.
 //!
 //! **Recalculation only.** Most of these do their real work when someone edits. This is the half M2 builds: `GUARD` and its kin
-//! give their argument, `SETATREF` reads its target and never evaluates its second argument, `DEPENDSON` is `FALSE`, and no function writes
-//! a cell or changes a formula (`SETF` is 0 outside an action cell). The edit half, a write through `BOUND` and `SETATREF`
-//! Is in `commit.rs`.
+//! give their argument, `SETATREF` reads its target and never evaluates its second argument, `DEPENDSON` is `FALSE`, and no function here writes
+//! a cell or changes a formula: the evaluator holds the document. `SETF` is the one call that asks for a write, and it only queues it (`setf.rs`: the
+//! commit makes it; the inert reading is `SetfMode::Inert`). The edit half, a write through `BOUND` and `SETATREF`, is in `commit.rs`.
 //!
 //! **The lists, containers and callouts** read a shape's `Relationships` cell by walking its formula, not by evaluating it: a
 //! `SUM` of `DEPENDSON` calls, each a code and the shapes after it by `Sheet.<id>!SheetRef()`, a lost one being `REF()`.
@@ -266,20 +266,6 @@ fn setatref(ev: &mut Evaluator<'_, '_>, site: &Site<'_>) -> Value {
     }
 }
 
-/// `SETF(target, value)` on recalculation: 0, writing nothing. A value that is a string
-/// holding a formula with a syntax error is `#VALUE!`.
-fn setf(ev: &mut Evaluator<'_, '_>, site: &Site<'_>) -> Value {
-    if let Some(value) = site.arg(1) {
-        match ev.eval(value, site.env) {
-            Value::Text(t) if !ev.work(t.len()) => return Value::Error(LOOP_ERROR),
-            Value::Text(t) if !t.trim().is_empty() && !diacraft_formula::parse(&t).is_parsed() => return Value::Error(CellError::Value),
-            e @ (Value::Error(_) | Value::Unsupported(_)) => return e,
-            _ => {}
-        }
-    }
-    Value::num(0.0)
-}
-
 /// `FORMULAEXISTS(cell)`: whether the cell has a formula on its chain; a value with no `F` has one, `No Formula` has not,
 /// and a cell that is not there has none.
 fn formulaexists(ev: &mut Evaluator<'_, '_>, site: &Site<'_>) -> Value {
@@ -462,7 +448,7 @@ pub(crate) static DEFS: &[FnDef] = &[
     lazy("SETATREF", 1, 3, setatref),
     eager("SETATREFEVAL", 1, 1, identity),
     eager("SETATREFEXPR", 0, 1, setatrefexpr),
-    lazy("SETF", 2, 4, setf),
+    lazy("SETF", 2, 4, crate::setf::setf),
     eager("SHEETREF", 0, 0, sheetref),
     lazy("USERUI", 3, 3, userui),
 ];

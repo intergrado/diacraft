@@ -35,14 +35,14 @@ fn copy_and_paste_of_an_odf_shape_keeps_its_odf_values() {
     let a = id_of(s.document().unwrap(), 0, "A");
     let (before, kept_before) = odf_of(s.document().unwrap(), a);
     assert!(before.iter().any(|(k, v)| k == "xml:id" && v == "id-A") && before.iter().any(|(k, _)| k == "ext:note"), "{before:?}");
-    assert_eq!(kept_before, 2, "the title and the foreign element");
+    assert_eq!(kept_before, 1, "the foreign element (the title is a row of the shape's sheet)");
     run(&mut s, "edit.copy", json!({ "ids": [a] }));
     run(&mut s, "edit.paste", json!({}));
     let doc = s.document().unwrap();
     let pasted = names_on_page(doc).into_iter().map(|(id, _)| id).find(|id| *id != a).expect("a pasted shape");
     let (raw, kept) = odf_of(doc, pasted);
     assert!(raw.iter().any(|(k, v)| k == "ext:note" && v == "kept"), "the attribute of another namespace goes with the copy: {raw:?}");
-    assert_eq!(kept, 2, "and so do the children");
+    assert_eq!(kept, 1, "and so do the children");
     assert!(!raw.iter().any(|(k, _)| k == "xml:id" || k == "draw:id"), "the ids name the original's element and no other: {raw:?}");
     assert_eq!(odf_of(doc, a), (before, kept_before), "the original is as it was");
     // The values the file held beside the cells go with the copy too: the name of the automatic style it named, and the held values with their stamps, which are
@@ -73,7 +73,7 @@ fn a_duplicate_of_an_odf_shape_holds_none_of_the_ids_of_the_original() {
     let copies: Vec<u32> = names_on_page(doc).into_iter().map(|(id, _)| id).filter(|id| *id != a).collect();
     assert_eq!(copies.len(), 1);
     let (raw, kept) = odf_of(doc, copies[0]);
-    assert!(raw.iter().any(|(k, _)| k == "ext:note") && kept == 2, "{raw:?} {kept}");
+    assert!(raw.iter().any(|(k, _)| k == "ext:note") && kept == 1, "{raw:?} {kept}");
     assert!(!raw.iter().any(|(k, _)| k == "xml:id" || k == "draw:id"), "{raw:?}");
 }
 

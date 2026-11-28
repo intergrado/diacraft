@@ -9,6 +9,8 @@ publish = false
 workspace = true
 
 [dependencies]
+# The help tree's check (`cargo xtask help check`) reads the topics with the code the program reads them with: standalone, no DiaCraft type.
+diacraft-help = { workspace = true }
 # The dates of the sitemap (`site/seo.rs`): all date handling goes through jiff (AGENTS.md).
 jiff = { workspace = true }
 roxmltree = "0.21.2"

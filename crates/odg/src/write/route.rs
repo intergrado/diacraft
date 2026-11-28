@@ -43,7 +43,7 @@ fn number(sheet: &Sheet, name: &str) -> Option<f64> {
 }
 
 /// The two control points of a cubic `NURBSTo` row's `E` cell, in the form the reader writes (`NURBS(1,3,1,1,x1,y1,0,1,x2,y2,0,1)`).
-fn control_points(row: &diacraft_doc::Row) -> Option<[f64; 4]> {
+pub(crate) fn control_points(row: &diacraft_doc::Row) -> Option<[f64; 4]> {
     let cell = row.cells.get("E")?;
     let text = cell.formula.text().or_else(|| cell.value.as_ref().map(diacraft_doc::Value::text))?;
     let inside = text.trim().strip_prefix("NURBS(")?.strip_suffix(')')?;
@@ -445,7 +445,7 @@ fn shifted_within(path: &str, by: f64, most_steps: usize) -> Option<String> {
 
 /// A point of the route in whole hundredths of a millimetre from the page's top left: `None` for one that is not a number or is past what a
 /// path can hold.
-fn hundredths(p: (f64, f64), height: f64) -> Option<(i64, i64)> {
+pub(crate) fn hundredths(p: (f64, f64), height: f64) -> Option<(i64, i64)> {
     let (x, y) = (p.0 * HUNDREDTHS_PER_INCH, (height - p.1) * HUNDREDTHS_PER_INCH);
     if !(x.is_finite() && y.is_finite()) || x.abs() > MOST_PATH_NUMBER || y.abs() > MOST_PATH_NUMBER {
         return None;

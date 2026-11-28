@@ -39,11 +39,14 @@ async fn run(canvas: HtmlCanvasElement) {
                 crate::web_files::install(&cc.egui_ctx);
                 // The keys a browser would act on are taken from now on, and the window is told when the browser offers a window of its own or goes to full screen.
                 let page_host = crate::web_page::WebPage::install(&cc.egui_ctx);
-                Ok(Box::new(page::new_app_in_browser(
+                let app = page::new_app_in_browser(
                     std::sync::Arc::new(crate::web_files::WebFiles),
                     std::sync::Arc::new(crate::web_assets::WebAssets),
                     std::sync::Arc::new(page_host),
-                )))
+                );
+                // The person's settings are the page's `localStorage`, within a budget of 1 MiB.
+                let storage = crate::prefs::StorageHost::new(crate::web_prefs::LocalStorage);
+                Ok(Box::new(page::with_prefs_in_browser(app, std::sync::Arc::new(storage))))
             }),
         )
         .await;

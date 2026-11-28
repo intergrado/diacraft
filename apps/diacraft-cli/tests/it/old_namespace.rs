@@ -87,9 +87,29 @@ fn the_trip_through_a_diacraft_file_of_a_file_of_the_old_namespace_says_what_it_
 fn a_vsdx_file_of_the_old_namespace_comes_back_the_same_content_and_names_the_old_namespace_nowhere() {
     let dir = TempDir::new("old-namespace-vsdx");
     let (line, out) = visit(&dir, &file(DRAWING_VSDX), "vsdx", "plain");
-    assert_eq!(line["content"]["same"], true, "{line}");
-    assert_eq!(line["content"]["count"], 0, "{line}");
-    assert_eq!(line["model"]["same"], true, "{line}");
+    // The file is one a build before the id moved wrote, with the root style that build made: DiaCraft's own, which the writer of a model completes with the text cells a reader would read as
+    // another value than the program assumes. So the content is the same but for those cells of the root, which the file lacked: the cell in the `Character` row 0 and in the
+    // `Paragraph` section (each added), and the one of the text block; and for the `UniqueID` of its two built-in masters, which a file of 0.2.3 holds as their `BaseID`'s text and a save gives the
+    // one a master has today (owner 2026-11-28; their `BaseID`s stay). The model differs in its styles and in those masters alone. Nothing else of the file is named.
+    assert_eq!(line["content"]["same"], false, "{line}");
+    let differences = line["content"]["differences"].as_array().expect("the differences are a list");
+    assert_eq!(differences.len(), 6, "{line}");
+    let (mut cells, mut masters) = (0, 0);
+    for difference in differences {
+        let (part, path) = (difference["part"].as_str().unwrap_or_default(), difference["path"].as_str().unwrap_or_default());
+        if part.ends_with("/masters/masters.xml") {
+            assert_eq!(difference["found"], "value", "a master's `UniqueID` changed: {line}");
+            assert!(path.starts_with("/Masters[0]/Master[") && path.ends_with("]/@UniqueID"), "nothing of a master but its `UniqueID`: {line}");
+            masters += 1;
+        } else {
+            assert_eq!(difference["found"], "element", "a cell or a section that the file lacked: {line}");
+            assert!(part.ends_with("/document.xml"), "{line}");
+            assert!(path.contains("/StyleSheets[2]/StyleSheet[0]/"), "in the root style, and nowhere else: {line}");
+            cells += 1;
+        }
+    }
+    assert_eq!((cells, masters), (4, 2), "{line}");
+    assert_eq!(line["model"]["differ"], serde_json::json!(["master 1", "master 2", "styles"]), "{line}");
     assert!(names_the_old_namespace(&out).is_empty());
     // Both ways round, and the old file against the current form of itself: nothing named.
     for (a, b) in [(file(DRAWING_VSDX), current(DRAWING_VSDX)), (current(DRAWING_VSDX), file(DRAWING_VSDX))] {

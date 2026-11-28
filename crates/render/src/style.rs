@@ -113,12 +113,38 @@ fn byte(n: f64, default: i64) -> i64 {
     if n.is_finite() && n.abs() < 1.0e9 { n.round() as i64 } else { default }
 }
 
+/// The number a pattern cell (`LinePattern`, `FillPattern`) holds, for the table of its own: a whole number, which a row of the table may be for, or a fraction, which no table has a row for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PatternNumber {
+    Whole(i64),
+    Fraction,
+}
+
+/// The pattern number of the cell number `n`: **a fraction is a fraction and is not rounded to the whole number beside it** (a fraction takes the rule of
+/// a number outside the list, which draws solid; it paints the foreground). A number that is not finite, or past a billion, reads `default`.
+fn pattern_number(n: f64, default: i64) -> PatternNumber {
+    if !(n.is_finite() && n.abs() < 1.0e9) {
+        PatternNumber::Whole(default)
+    } else if n.fract() != 0.0 {
+        PatternNumber::Fraction
+    } else {
+        PatternNumber::Whole(n as i64)
+    }
+}
+
+/// The number a fraction is read as, in a match on a pattern number: one no table has a row for (nor does a whole -1), so it is told with the numbers outside the tables.
+const NO_ROW: i64 = -1;
+
 pub(crate) struct Looks;
 
 impl Looks {
     /// The fill of the shape at `at`. `layer` is the colour override of a shape that is on exactly one layer with a colour.
     pub(crate) fn fill(cx: &Cx<'_, '_>, at: &SheetRef, layer: Option<&LayerColour>, who: &dyn Fn() -> String) -> FillLook {
-        let pattern = byte(cx.num_or(at, "FillPattern", 0.0), 1);
+        let raw = cx.num_or(at, "FillPattern", 0.0);
+        let pattern = match pattern_number(raw, 1) {
+            PatternNumber::Whole(n) => n,
+            PatternNumber::Fraction => NO_ROW,
+        };
         if pattern == 0 {
             return FillLook::None;
         }
@@ -147,17 +173,31 @@ impl Looks {
                 cx.note(SkipKind::CustomPattern, || format!("{}: fill pattern 254, a master as the pattern", who()));
                 FillLook::Solid(fore)
             }
-            // A number outside MS-VSDX's list paints the foreground.
-            _ => FillLook::Solid(fore),
+            // A number outside MS-VSDX's list, and a fraction, paint the foreground, and the frame says so.
+            _ => {
+                cx.note(SkipKind::PatternOutsideTable, || format!("{}: fill pattern {raw}", who()));
+                FillLook::Solid(fore)
+            }
         }
     }
 
-    /// The line of the shape at `at`, or `None` for a line that is not drawn (`LinePattern` 0).
-    pub(crate) fn line(cx: &Cx<'_, '_>, at: &SheetRef, layer: Option<&LayerColour>) -> Option<LineLook> {
-        let pattern = byte(cx.num_or(at, "LinePattern", 0.0), 1);
+    /// The line of the shape at `at`, or `None` for a line that is not drawn (`LinePattern` 0). **A number outside the table, a fraction among them, is a solid line** (pattern 1) and the
+    /// frame says so; 254, a master as the pattern, says its own (`frame.rs`).
+    pub(crate) fn line(cx: &Cx<'_, '_>, at: &SheetRef, layer: Option<&LayerColour>, who: &dyn Fn() -> String) -> Option<LineLook> {
+        let raw = cx.num_or(at, "LinePattern", 0.0);
+        let pattern = match pattern_number(raw, 1) {
+            PatternNumber::Whole(n) => n,
+            PatternNumber::Fraction => NO_ROW,
+        };
         if pattern == 0 {
             return None;
         }
+        let pattern = if matches!(pattern, 1..=23 | 254) {
+            pattern
+        } else {
+            cx.note(SkipKind::PatternOutsideTable, || format!("{}: line pattern {raw}", who()));
+            1
+        };
         let color = match layer {
             Some(l) => with_trans(l.color, l.trans),
             None => with_trans(cx.colour(at, "LineColor").unwrap_or(Rgba::BLACK), cx.num(at, "LineColorTrans")),

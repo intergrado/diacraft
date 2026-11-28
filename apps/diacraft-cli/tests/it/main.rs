@@ -10,16 +10,21 @@ mod check_before;
 mod convert;
 mod export;
 mod mcp;
+mod mcp_roots;
 mod odg_flat;
 mod odg_note;
 mod odg_render;
 mod odg_save;
 mod old_namespace;
 mod oracle;
+mod prefs;
+#[cfg(unix)]
+mod pty;
 mod roundtrip;
 mod roundtrip_diacraft;
 mod roundtrip_odg;
 mod run;
+mod ux;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -67,6 +72,11 @@ pub fn cli(args: &[&str], stdin: Option<&[u8]>) -> Output {
     let mut child = Command::new(BIN)
         .args(args)
         .env_remove("RUST_LOG")
+        // A test never reads or writes the person's settings: `run` and `mcp` open them unless this is set.
+        .env("DIACRAFT_NO_PREFS", "1")
+        // A person who forces colour in the shell they test from does not get it in what the tests read.
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("NO_COLOR")
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

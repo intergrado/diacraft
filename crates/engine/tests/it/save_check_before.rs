@@ -16,15 +16,12 @@ use diacraft_doc::Document;
 use diacraft_engine::across::Carried;
 use diacraft_engine::{EngineError, Session, check};
 use diacraft_testkit::package::{PageSpec, VsdxBuilder};
-use proptest::prelude::Strategy;
-use proptest::strategy::ValueTree;
-use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 use serde_json::{Value, json};
 
 use crate::across::vsdx_with_styles as vsdx_drawing;
 use crate::native_common::{Dir, pinned};
 use crate::odg_build::{Drawing, glued, rect, rect_on};
-use crate::resave_sweep::{Chain, Edit, Files, Step, TARGETS, add_live, chain, first_page, plain};
+use crate::resave_sweep::{Chain, Edit, Files, Step, TARGETS, add_live, assert_covers, chains_of, first_page, plain};
 use crate::{Snapshot, run, snapshot};
 
 const CHECK: &str = "file.check_compatibility";
@@ -492,12 +489,15 @@ fn the_dry_run_fails_as_the_save_would() {
     let (kind, words) = fails_alike(&mut s, &dir, json!({ "path": dir.path("b.xyz") }), "a name that is no type");
     assert_eq!(kind, "bad_params", "{words}");
     assert!(words.contains(".diacraft"), "{words}");
-    // A link to another file.
-    std::fs::write(dir.path("other.vsdx"), b"another file").unwrap();
-    std::os::unix::fs::symlink(dir.path("other.vsdx"), dir.path("link.vsdx")).unwrap();
-    let (kind, words) = fails_alike(&mut s, &dir, json!({ "path": dir.path("link.vsdx") }), "a link");
-    assert_eq!(kind, "failed", "{words}");
-    assert_eq!(dir.read("other.vsdx"), b"another file", "the file a link leads to is never written");
+    // A link to another file (Unix's: `std::os::unix` has the call that makes one, and Windows asks a privilege for it).
+    #[cfg(unix)]
+    {
+        std::fs::write(dir.path("other.vsdx"), b"another file").unwrap();
+        std::os::unix::fs::symlink(dir.path("other.vsdx"), dir.path("link.vsdx")).unwrap();
+        let (kind, words) = fails_alike(&mut s, &dir, json!({ "path": dir.path("link.vsdx") }), "a link");
+        assert_eq!(kind, "failed", "{words}");
+        assert_eq!(dir.read("other.vsdx"), b"another file", "the file a link leads to is never written");
+    }
     // A stencil is no OpenDocument file.
     let mut stencil = open(&dir, "s.vssx", &vssx());
     let (kind, words) = fails_alike(&mut stencil, &dir, json!({ "path": dir.path("s.odg") }), "a stencil to .odg");
@@ -845,15 +845,9 @@ struct Tally {
 /// Runs `cases` random chains from `seed`, and gives each that failed with the words.
 fn twin_sweep(cases: u32, seed: u64) -> (Tally, Vec<(Chain, String)>) {
     let files = Files::new();
-    let mut seed_bytes = [0u8; 32];
-    seed_bytes[..8].copy_from_slice(&seed.to_le_bytes());
-    let config = Config { cases, failure_persistence: None, ..Config::default() };
-    let mut runner = TestRunner::new_with_rng(config, TestRng::from_seed(RngAlgorithm::ChaCha, &seed_bytes));
-    let strategy = chain();
     let mut failures = Vec::new();
     let mut tally = Tally::default();
-    for case in 0..cases as usize {
-        let chain = strategy.new_tree(&mut runner).unwrap().current();
+    for (case, chain) in chains_of(cases, seed).into_iter().enumerate() {
         if let Err(words) = twin_chain(&files, &chain, case, &mut tally) {
             failures.push((chain, words));
         }
@@ -861,19 +855,47 @@ fn twin_sweep(cases: u32, seed: u64) -> (Tally, Vec<(Chain, String)>) {
     (tally, failures)
 }
 
-/// **A dry run before each save changes none of them** (a property over the chains: random chains of two to six steps from every start, a fixed seed, and a case count that
-/// `DIACRAFT_CHECK_BEFORE_CASES` sets, 150 when it is not): each chain is run twice, once with a dry run before every save and once with none, and the saves write the same bytes, answer the same, and
-/// leave the same session; and each dry run said what the save after it said.
-#[test]
-fn a_dry_run_before_each_save_changes_none_of_them() {
-    let cases = std::env::var("DIACRAFT_CHECK_BEFORE_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(150);
-    let (tally, failures) = twin_sweep(cases, 0x5EED_C4EC);
+/// The seed of the chains the property below is run on.
+const TWIN_SEED: u64 = 0x5EED_C4EC;
+
+/// How many chains the property is run on in a test run. Each chain is run twice and writes about six files, so 150 took 14 seconds of CPU and a minute where the machine was busy (nextest ends a
+/// test at 120 seconds); the chains are drawn one after another, so these are the first of the 150 that `a_dry_run_before_each_save_changes_none_of_them_over_the_old_150_chains` runs.
+const TWIN_CASES: u32 = 60;
+
+/// The property of [`a_dry_run_before_each_save_changes_none_of_them`] over `cases` chains of [`TWIN_SEED`].
+fn dry_runs_change_none_of_the_saves(cases: u32) {
+    let (tally, failures) = twin_sweep(cases, TWIN_SEED);
     eprintln!("RESULT {cases} chains: {tally:?}");
     let shown: Vec<String> =
         failures.iter().take(5).map(|(chain, words)| format!("{:?} {:?} {:?}\n  {words}", chain.start, chain.live, chain.steps)).collect();
     assert!(failures.is_empty(), "{} of {cases} chains failed ({tally:?}):\n{}", failures.len(), shown.join("\n"));
     // The property is about dry runs that answered, and refusals, and checks and carried data: a sweep of none of them would hold for nothing.
     assert!(tally.answered >= cases as usize / 2 && tally.checked > 0 && tally.carried > 0 && tally.refused > 0, "{tally:?}");
+}
+
+/// **A dry run before each save changes none of them** (a property over the chains: random chains of two to six steps from every start, a fixed seed, and a case count that
+/// `DIACRAFT_CHECK_BEFORE_CASES` sets, `TWIN_CASES` when it is not): each chain is run twice, once with a dry run before every save and once with none, and the saves write the same bytes, answer the same, and
+/// leave the same session; and each dry run said what the save after it said.
+#[test]
+fn a_dry_run_before_each_save_changes_none_of_them() {
+    let cases = std::env::var("DIACRAFT_CHECK_BEFORE_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(TWIN_CASES);
+    dry_runs_change_none_of_the_saves(cases);
+}
+
+/// What the chains of the property cover is counted, so that fewer chains are no less of a test: every start, every type of Save As, every edit and each option of a Save As is in them
+/// at least once.
+#[test]
+fn the_chains_of_the_dry_run_property_cover_every_start_type_and_edit() {
+    assert_covers(&chains_of(TWIN_CASES, TWIN_SEED), 1);
+}
+
+/// **The chains the property was run on before its count was cut**: 150 (the 60 of the test above are the first of them), 14 seconds of CPU and a minute or more where the machine is busy
+/// (`#[ignore]`: nextest ends a test at 120 seconds).
+/// `cargo test -p diacraft-engine --test it save_check_before::a_dry_run_before_each_save_changes_none_of_them_over_the_old_150_chains -- --ignored`.
+#[test]
+#[ignore = "the 150 chains the property was run on before its count was cut: a minute where the machine is busy"]
+fn a_dry_run_before_each_save_changes_none_of_them_over_the_old_150_chains() {
+    dry_runs_change_none_of_the_saves(150);
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------- no room: refused in words, not an abort

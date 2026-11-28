@@ -30,6 +30,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use diacraft_calc::spell_row;
 use diacraft_doc::{
     Cell, CellAddr, CellName, DISPLAY_ORDER, DisplaySection, Document, Keying, MAX_ROWS_PER_SECTION, Owner, Resolver, Row, RowKey, RowShape, Section,
     SectionKey, SectionKind, Sheet, SheetKind, SheetRef, Source, Value as Held, ValueKind, cell_info, display_section, ix_to_row_number, keying,
@@ -186,42 +187,7 @@ pub struct SectionDone {
 
 /// The sheet `at` names, to change: every `Arc` on the way is made unique first, so a copy of the document that shares them keeps what it had. `None` for a sheet that is not there.
 pub(super) fn sheet_mut<'a>(doc: &'a mut Document, at: &SheetRef) -> Option<&'a mut Sheet> {
-    match at {
-        SheetRef::Document => Some(Arc::make_mut(&mut doc.sheet)),
-        SheetRef::Style(id) => {
-            let found = doc.styles.iter().position(|s| s.id == *id)?;
-            let style = Arc::make_mut(doc.styles.get_mut(found)?);
-            Some(Arc::make_mut(&mut style.sheet))
-        }
-        SheetRef::Page(id) => {
-            let found = doc.pages.iter().position(|p| p.id == *id)?;
-            let page = Arc::make_mut(doc.pages.get_mut(found)?);
-            Some(Arc::make_mut(&mut page.sheet))
-        }
-        SheetRef::Master(id) => {
-            let found = doc.masters.iter().position(|m| m.id == *id)?;
-            let master = Arc::make_mut(doc.masters.get_mut(found)?);
-            Some(Arc::make_mut(&mut master.sheet))
-        }
-        SheetRef::Shape(at) => {
-            let list = match at.owner {
-                Owner::Page(id) => {
-                    let found = doc.pages.iter().position(|p| p.id == id)?;
-                    &mut Arc::make_mut(doc.pages.get_mut(found)?).shapes
-                }
-                Owner::Master(id) => {
-                    let found = doc.masters.iter().position(|m| m.id == id)?;
-                    &mut Arc::make_mut(doc.masters.get_mut(found)?).shapes
-                }
-            };
-            let (first, rest) = at.path.split_first()?;
-            let mut shape = Arc::make_mut(list.get_mut(usize::try_from(*first).ok()?)?);
-            for step in rest {
-                shape = Arc::make_mut(shape.children.get_mut(usize::try_from(*step).ok()?)?);
-            }
-            Some(Arc::make_mut(&mut shape.sheet))
-        }
-    }
+    doc.counted_mut(at).map(|counted| counted.sheet)
 }
 
 /// A sheet that others inherit from or read by number: a master's shape or page sheet, a style. Its rows keep their numbers.
@@ -346,8 +312,8 @@ fn id_of(entry: &'static DisplaySection, key: &SectionKey) -> SectionId {
     SectionId { name: name_of(Some(entry), key), label: label_of(Some(entry), key), ix: key.ix, key: Some(key.clone()) }
 }
 
-/// Why rows of the section cannot be added or deleted (the words of a refusal), for an entry whose rules allow none.
-fn rows_refusal(entry: &DisplaySection) -> String {
+/// Why rows of the section cannot be added or deleted (the words of a refusal), for an entry whose rules allow none. The window greys its Insert Row and Delete Row with these words.
+pub fn rows_refusal(entry: &DisplaySection) -> String {
     let label = entry.label;
     match entry.element {
         Some("Character" | "Paragraph" | "Tabs") => format!("{label} rows are made by the text: format the text instead (text.format)"),
@@ -358,8 +324,8 @@ fn rows_refusal(entry: &DisplaySection) -> String {
     }
 }
 
-/// Why the section cannot be inserted or deleted on a sheet of this kind; `None` when it can. `inserting` is false for a delete.
-fn section_refusal(entry: &DisplaySection, kind: SheetKind) -> Option<String> {
+/// Why the section cannot be inserted or deleted on a sheet of this kind; `None` when it can. The window greys its Delete Section with these words.
+pub fn section_refusal(entry: &DisplaySection, kind: SheetKind) -> Option<String> {
     if entry.rules.insertable && entry.rules.deletable && entry.rules.can_insert_on(kind) {
         return None;
     }
@@ -461,9 +427,19 @@ fn max_ix(geometry: bool) -> u32 {
 
 // ---- the row a call names -----------------------------------------------------------------------------------------------------------------
 
-/// The row `given` names among the rows of a section, which are `effective`: by its number in a numbered section (a whole number, or text of digits), by its name in any letter
-/// case in a named one. `what` is the key of the call that gave it, for the words.
-fn resolve_row(effective: &[RowShape], numbered: bool, geometry: bool, given: &RowRef, what: &str, spelled: &str) -> Result<RowKey, Problem> {
+/// The row `given` names among the rows of a section, which are `effective` and which `layers` hold: by its number in a numbered section (a whole number, or text of digits), by its
+/// name in a named one, **read as a formula reads a name**: the row that spells the name exactly first, and only when none does the row that spells it in
+/// another letter case that the evaluator would read, so that a delete or an insert never takes the twin of the row it was told (`diacraft_calc::spell_row`). A row that spells the
+/// name exactly and is deleted here is that row, and is not there: the name is not read as its twin. `what` is the key of the call that gave it, for the words.
+fn resolve_row(
+    effective: &[RowShape],
+    layers: &Layers<'_>,
+    numbered: bool,
+    geometry: bool,
+    given: &RowRef,
+    what: &str,
+    spelled: &str,
+) -> Result<RowKey, Problem> {
     if numbered {
         let number = match given {
             RowRef::Number(n) => *n,
@@ -483,11 +459,10 @@ fn resolve_row(effective: &[RowShape], numbered: bool, geometry: bool, given: &R
     match given {
         RowRef::Number(n) => Err(Problem::bad(format!("`{what}`: the rows of {spelled} are named: give a row's name, not {n}"))),
         RowRef::Text(text) => {
-            let folded = text.to_lowercase();
-            effective
-                .iter()
-                .find(|r| matches!(&r.key, RowKey::Name(n) if n.to_lowercase() == folded))
-                .map(|r| r.key.clone())
+            let held: Vec<&Arc<Section>> = layers.all().collect();
+            spell_row(&held, text)
+                .map(RowKey::Name)
+                .filter(|key| effective.iter().any(|r| &r.key == key))
                 .ok_or_else(|| Problem::bad(format!("the section has no row {text}")))
         }
     }
@@ -550,6 +525,8 @@ pub(super) fn default_cell(element: &str, name: &str) -> Option<Cell> {
     Some(match kind {
         ValueKind::Length => cell.with_unit("IN"),
         ValueKind::Angle => cell.with_unit("DEG"),
+        // A cell of a text kind (a prompt, a label) holds the empty text, and a text says `STR`.
+        ValueKind::Text => cell.with_unit("STR"),
         _ => cell,
     })
 }
@@ -716,7 +693,7 @@ fn local_place(
         At::Before(r) => (r, false),
     };
     let what = if after { "after" } else { "before" };
-    let key = resolve_row(effective, numbered, geometry, anchor, what, spelled)?;
+    let key = resolve_row(effective, layers, numbered, geometry, anchor, what, spelled)?;
     match local.iter().position(|row| row.key(element).as_ref() == Some(&key)) {
         Some(at) => Ok(if after { at + 1 } else { at }),
         None => Err(Problem::bad(format!("a row of {spelled} that {} gives comes before the sheet's own rows: add the row at the end", layers.from))),
@@ -732,10 +709,10 @@ struct Numbered {
 }
 
 fn number_for(request: &AddRow, ctx: &Insert<'_>) -> Result<Numbered, Problem> {
-    let Insert { effective, taken, geometry, spelled, renumber_ok, sheet, .. } = ctx;
+    let Insert { layers, effective, taken, geometry, spelled, renumber_ok, sheet } = ctx;
     let held = indexes(taken);
     let max = max_ix(*geometry);
-    let anchor_of = |given: &RowRef, what: &str| match resolve_row(effective, true, *geometry, given, what, spelled)? {
+    let anchor_of = |given: &RowRef, what: &str| match resolve_row(effective, layers, true, *geometry, given, what, spelled)? {
         RowKey::Ix(ix) => Ok(ix),
         RowKey::Name(_) => Err(Problem::bad(format!("`{what}`: not a numbered row"))),
     };
@@ -902,7 +879,7 @@ fn numbered_place(section: &Section, element: &str, n: u32) -> usize {
 }
 
 fn put_row(doc: &mut Document, sheet: &SheetRef, plan: &RowPlan) -> Result<(), Problem> {
-    let target = sheet_mut(doc, sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
+    let mut target = doc.counted_mut(sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
     let section = target.section_mut(&plan.key).map_err(document_error)?;
     if section.rows.len() >= MAX_ROWS_PER_SECTION {
         return Err(Problem::failed(format!("a section holds at most {MAX_ROWS_PER_SECTION} rows")));
@@ -916,7 +893,7 @@ fn put_row(doc: &mut Document, sheet: &SheetRef, plan: &RowPlan) -> Result<(), P
         (None, RowKey::Ix(n)) => numbered_place(section, &element, *n),
         (None, RowKey::Name(_)) => section.rows.len(),
     };
-    section.rows.insert(at, Arc::new(plan.row.clone()));
+    section.insert_row(at, Arc::new(plan.row.clone()));
     Ok(())
 }
 
@@ -934,6 +911,10 @@ fn rows_remap(sheet: &SheetRef, key: &SectionKey, moves: &[(u32, u32)], gone: Op
 /// Works out again the pages that read what changed, once each: the sheet's page and the pages a formula was written on, the pages that use a master, or every page for the
 /// document's sheet and a style's.
 fn settle_after(doc: &mut Document, before: &Document, place: &Place, also: &BTreeSet<u32>) -> Result<(), Problem> {
+    // The pages the call works out share one budget of the evaluator's steps.
+    let _shared = crate::calc_index::SharedSteps::enter(diacraft_calc::Budget::DEFAULT_STEPS);
+    // The sheets no page works out (the document's, a style's, a master's) first, with the formulas that read the rows that went or moved on them.
+    super::unpaged::work_out(doc, before)?;
     let mut pages: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
     match place {
         Place::Shape { owner: Owner::Page(page), id } => pages.entry(*page).or_default().push(*id),
@@ -951,6 +932,8 @@ fn settle_after(doc: &mut Document, before: &Document, place: &Place, also: &BTr
             }
         }
     }
+    // Every page of the document is worked out whole, the cells of one that name another included.
+    let _every = matches!(place, Place::Style(_) | Place::Document).then(crate::calc_index::EveryPage::enter);
     for page in also {
         pages.entry(*page).or_default();
     }
@@ -963,7 +946,8 @@ fn settle_after(doc: &mut Document, before: &Document, place: &Place, also: &BTr
 /// The cells of a row as the sheet shows them now.
 fn views(doc: &Document, sheet: &SheetRef, key: &SectionKey, row: &RowKey, names: &[String]) -> Vec<CellView> {
     let res = Resolver::new(doc);
-    let ctx = Ctx { res: &res, sheet };
+    let mut eval = crate::sheetview::read_eval_ctx();
+    let ctx = Ctx::new(&res, sheet, &mut eval);
     let mut counts = Counts::default();
     names
         .iter()
@@ -1023,7 +1007,7 @@ fn plan_delete(res: &Resolver<'_>, opened: &Opened, section: &str, row: &RowRef)
     let effective = res.effective_row_keys(&opened.sheet, &key).unwrap_or_default();
     let taken = taken_keys(&layers, &element);
     let numbered = is_numbered(&element, &taken);
-    let row_key = resolve_row(&effective, numbered, geometry, row, "row", &spelled)?;
+    let row_key = resolve_row(&effective, &layers, numbered, geometry, row, "row", &spelled)?;
     if geometry {
         // The row that would be first when this one is gone must still begin a path.
         let next_first = effective.iter().find(|r| r.key != row_key);
@@ -1035,9 +1019,13 @@ fn plan_delete(res: &Resolver<'_>, opened: &Opened, section: &str, row: &RowRef)
     }
     let given = layers.others.iter().any(|section| section.row(&row_key).is_some());
     let how = if given { How::Marked } else { How::Removed };
-    let closes = how == How::Removed && layers.others.is_empty() && !is_source(&opened.sheet);
-    let (shifts, follows) = match (&row_key, closes && numbered) {
-        (RowKey::Ix(gone), true) => (run_down(&indexes(&taken), *gone), true),
+    // A row that goes from a numbered section is `#REF!` to the formulas that name it, on any sheet; the numbers close up only where the sheet's own rows are the only ones (a master's
+    // and a style's keep theirs, and the formulas that name the row that went are written `REF()` all the same, or a row added after it would take its number and be read
+    // by them).
+    let removes = how == How::Removed && numbered;
+    let closes = removes && layers.others.is_empty() && !is_source(&opened.sheet);
+    let (shifts, follows) = match &row_key {
+        RowKey::Ix(gone) if removes => (if closes { run_down(&indexes(&taken), *gone) } else { Vec::new() }, true),
         _ => (Vec::new(), false),
     };
     Ok(DeletePlan { entry, key, row_key, how, shifts, follows })
@@ -1045,12 +1033,15 @@ fn plan_delete(res: &Resolver<'_>, opened: &Opened, section: &str, row: &RowRef)
 
 /// Takes the row out of the sheet's own section, or puts a deleted row (`Del`, its key and no cell) in its place; and closes the numbers up.
 fn take_row(doc: &mut Document, sheet: &SheetRef, plan: &DeletePlan) -> Result<(), Problem> {
-    let target = sheet_mut(doc, sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
+    let mut target = doc.counted_mut(sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
     let section = target.section_mut(&plan.key).map_err(document_error)?;
     let element = plan.key.name.as_str().to_owned();
     let is_it = |row: &Arc<Row>| row.key(&element).as_ref() == Some(&plan.row_key);
     match plan.how {
-        How::Removed => section.rows.retain(|row| !is_it(row)),
+        How::Removed => {
+            let gone: Vec<usize> = section.rows.iter().enumerate().filter(|(_, row)| is_it(row)).map(|(at, _)| at).collect();
+            section.remove_rows(&gone);
+        }
         How::Marked => {
             let mut tomb = Row { del: true, ..Row::default() };
             match &plan.row_key {
@@ -1063,11 +1054,20 @@ fn take_row(doc: &mut Document, sheet: &SheetRef, plan: &DeletePlan) -> Result<(
                     if let Some(slot) = section.rows.get_mut(at) {
                         *slot = tomb;
                     }
-                    // A second row with the key is shadowed by the first and gone with it.
-                    let mut seen = false;
-                    section.rows.retain(|row| !is_it(row) || !std::mem::replace(&mut seen, true) || row.del);
+                    // A second row with the key is shadowed by the first and gone with it (a deleted one stays).
+                    let gone: Vec<usize> = section
+                        .rows
+                        .iter()
+                        .enumerate()
+                        .filter(|(place, row)| *place > at && is_it(row) && !row.del)
+                        .map(|(place, _)| place)
+                        .collect();
+                    section.remove_rows(&gone);
                 }
-                None => section.rows.push(tomb),
+                None => {
+                    let end = section.rows.len();
+                    section.insert_row(end, tomb);
+                }
             }
         }
     }
@@ -1219,12 +1219,13 @@ fn plan_section(res: &Resolver<'_>, opened: &Opened, section: &str, variant: Opt
 }
 
 fn put_section(doc: &mut Document, sheet: &SheetRef, plan: &SectionPlan) -> Result<(), Problem> {
-    let target = sheet_mut(doc, sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
+    let mut target = doc.counted_mut(sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
     match plan {
         SectionPlan::Rows { key, rows, .. } => {
             let section = target.section_mut(key).map_err(document_error)?;
             for row in rows {
-                section.rows.push(Arc::new(row.clone()));
+                let end = section.rows.len();
+                section.insert_row(end, Arc::new(row.clone()));
             }
         }
         SectionPlan::Group { cells, .. } => {
@@ -1258,7 +1259,8 @@ pub fn add_section(doc: &mut Document, target: &Target, section: &str, variant: 
         }
         SectionPlan::Group { entry, cells } => {
             let ctx_res = Resolver::new(doc);
-            let ctx = Ctx { res: &ctx_res, sheet: &opened.sheet };
+            let mut eval = crate::sheetview::read_eval_ctx();
+            let ctx = Ctx::new(&ctx_res, &opened.sheet, &mut eval);
             let mut counts = Counts::default();
             let views: Vec<CellView> =
                 cells.iter().filter_map(|(name, _)| view(&ctx, &CellAddr::direct(name), name, None, None, &mut counts)).collect();
@@ -1322,8 +1324,10 @@ fn plan_delete_section(res: &Resolver<'_>, opened: &Opened, section: &str) -> Re
                 return Err(Problem::bad(format!("the sheet has no section {}", name_of(Some(entry), &key))));
             }
             let how = if layers.others.is_empty() { How::Removed } else { How::Marked };
-            let follows = how == How::Removed && !is_source(&opened.sheet);
-            let shifts = match (follows, key.ix, res.sheet(&opened.sheet)) {
+            // The formulas that name a section that goes read `#REF!` on any sheet (a master's and a style's too); the later Geometry sections are numbered again only on a
+            // sheet that is no source.
+            let follows = how == How::Removed;
+            let shifts = match (follows && !is_source(&opened.sheet), key.ix, res.sheet(&opened.sheet)) {
                 (true, Some(gone), Some(local)) if key.name.as_str() == "Geometry" => geometry_run(local, gone),
                 _ => Vec::new(),
             };
@@ -1334,16 +1338,16 @@ fn plan_delete_section(res: &Resolver<'_>, opened: &Opened, section: &str) -> Re
 
 /// Takes a section out of the sheet, or puts a deleted one (`Del`, its name and `IX`, nothing else) in its place; and numbers the later Geometry sections again.
 fn take_section(doc: &mut Document, sheet: &SheetRef, key: &SectionKey, how: How, shifts: &[(u32, u32)]) -> Result<(), Problem> {
-    let target = sheet_mut(doc, sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
+    let mut target = doc.counted_mut(sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
     match how {
-        How::Removed => target.sections.retain(|s| !(s.name == key.name && s.ix == key.ix)),
+        How::Removed => target.remove_sections(|s| s.name == key.name && s.ix == key.ix),
         How::Marked => {
             let section = target.section_mut(key).map_err(document_error)?;
             *section = Section { del: true, ..Section::new(key.name.as_str(), key.ix) };
         }
     }
     let moves: HashMap<u32, u32> = shifts.iter().copied().collect();
-    for held in target.sections.iter_mut() {
+    for held in target.sheet.sections.iter_mut() {
         if held.name == key.name
             && let Some(ix) = held.ix
             && let Some(to) = moves.get(&ix)
@@ -1360,9 +1364,9 @@ pub fn delete_section(doc: &mut Document, target: &Target, section: &str) -> Res
     let opened = open(doc, target)?;
     match plan_delete_section(&Resolver::new(&before), &opened, section)? {
         DeleteSectionPlan::Group { entry, own } => {
-            let sheet = sheet_mut(doc, &opened.sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
+            let mut counted = doc.counted_mut(&opened.sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
             for name in &own {
-                sheet.remove_cell(&CellAddr::direct(name.as_str()));
+                counted.remove_cell(&CellAddr::direct(name.as_str()));
             }
             settle_after(doc, &before, &opened.place, &BTreeSet::new())?;
             Ok(SectionDone {

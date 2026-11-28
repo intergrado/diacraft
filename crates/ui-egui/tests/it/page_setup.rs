@@ -217,9 +217,9 @@ fn a_drop_past_the_edge_grows_the_page_and_the_view_follows_a_drawing_that_was_c
 
 // ---- the Page Setup dialog -------------------------------------------------------------------------------------------------------------------
 
-/// The launcher opens the dialog with the six tabs in the order of the spec; the last has no commands and is drawn quiet.
+/// The launcher opens the dialog with the six tabs in the order of the spec; all six work (the last, Alt Text).
 #[test]
-fn the_dialog_has_the_six_tabs_of_the_spec_and_the_last_is_quiet() {
+fn the_dialog_has_the_six_tabs_of_the_spec_and_all_work() {
     let mut w = design_window();
     press(&mut w, "ribbon.Design.PageSetupDialog");
     assert_eq!(w.state().window_state()["pageSetup"], "Page Size", "the launcher opens Page Size");
@@ -228,8 +228,9 @@ fn the_dialog_has_the_six_tabs_of_the_spec_and_the_last_is_quiet() {
     let names: Vec<&str> = tabs.iter().map(|(n, ..)| n.strip_prefix("pagesetup.tab.").unwrap()).collect();
     assert_eq!(names, ["Print Setup", "Page Size", "Drawing Scale", "Page Properties", "Layout and Routing", "Alt Text"]);
     let enabled: Vec<bool> = tabs.iter().map(|(.., e)| *e).collect();
-    assert_eq!(enabled, [true, true, true, true, true, false]);
-    assert!(w.state_mut().execute("window.pageSetup", &json!({"tab": "Alt Text"})).is_err(), "a tab with nothing behind it cannot be opened");
+    assert_eq!(enabled, [true; 6], "every tab works: Alt Text has its boxes");
+    run_command(&mut w, "window.pageSetup", json!({"tab": "Alt Text"}));
+    assert_eq!(w.state().window_state()["pageSetup"], "Alt Text", "the command opens the last tab");
     assert!(w.state_mut().execute("window.pageSetup", &json!({"tab": "Nonsense"})).is_err());
     // The launcher of the Backgrounds group opens Page Properties.
     run_command(&mut w, "window.pageSetup", json!({"close": true}));
@@ -535,6 +536,29 @@ fn rename_in_the_tab_menu_edits_the_name_in_place() {
     key(&mut w, Key::Escape, Modifiers::NONE);
     assert_eq!(setup(&mut w)["name"], "Overview", "Escape keeps the name it had");
     assert!(w.state().element("page-tab.rename").is_none());
+}
+
+/// A page name has at most 31 characters: the box of a tab and the Name box of Page Setup take no more as it is typed, and what is typed past it is not sent.
+#[test]
+fn the_boxes_that_name_a_page_take_at_most_31_characters() {
+    let mut w = design_window();
+    right_click_on(&mut w, "page-tab.1");
+    click_on(&mut w, "page-menu.Rename");
+    w.rest();
+    type_text(&mut w, &"x".repeat(40));
+    key(&mut w, Key::Enter, Modifiers::NONE);
+    assert_eq!(setup(&mut w)["name"], "x".repeat(31), "the tab's box stops at 31");
+    // The Name box of Page Setup, on the page Insert makes.
+    right_click_on(&mut w, "page-tab.1");
+    click_on(&mut w, "page-menu.Insert");
+    w.rest();
+    let name = rect_of(&w, "pagesetup.name").center();
+    click(&mut w, name);
+    key(&mut w, Key::A, crate::saving::ctrl());
+    type_text(&mut w, &"y".repeat(40));
+    ok(&mut w);
+    assert_eq!(setup_of(&mut w, 2)["name"], "y".repeat(31), "the dialog's box stops at 31");
+    assert_eq!(w.state().session().document().unwrap().pages.len(), 2);
 }
 
 /// Insert makes a page like the one on view and opens Page Setup on its Page Properties.

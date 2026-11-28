@@ -353,7 +353,7 @@ fn taking_a_shape_out_reaches_the_cells_that_named_it_and_the_ends_glued_to_it_a
     let dir = Dir::new();
     let mut s = opened(&dir);
     let before = dump(s.document().unwrap());
-    run(&mut s, "shape.delete", json!({"ids": [13]}));
+    run(&mut s, "shape.delete", json!({"ids": [13], "connectors": false}));
     let after = dump(s.document().unwrap());
     let changed = differing(&before, &after);
     // Shape 13 and all its cells go; connector 15's begin, which was glued to it, holds the point it was at, and the pin, width and local pin

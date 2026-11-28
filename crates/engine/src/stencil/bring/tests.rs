@@ -255,13 +255,60 @@ fn the_built_in_masters_are_matched_by_the_same_rule() {
     let first = ensure_master(&mut doc, spec).unwrap();
     assert_eq!(ensure_master(&mut doc, spec).unwrap(), first);
     let unique = doc.master(first).unwrap().unique_id.clone().unwrap();
-    // A master of the document that holds the built-in UniqueID and another BaseID is another master: the copy takes a UniqueID of its own.
-    let mut other = Document::new_blank();
-    other.add_master(master(1, "Stranger", Some(&unique), Some(C))).unwrap();
-    let id = ensure_master(&mut other, spec).unwrap();
-    assert_ne!(id, 1);
-    assert_ne!(other.master(id).unwrap().unique_id, other.master(1).unwrap().unique_id);
-    assert_eq!(other.master(id).unwrap().raw.get("BaseID"), Some(&*unique), "and keeps its BaseID");
+    let base = spec.guid();
+    assert_eq!(doc.master(first).unwrap().raw.get("BaseID"), Some(base.as_str()));
+    assert_ne!(&*unique, base.as_str(), "the UniqueID a master is made with is not the BaseID's text");
+    // A master of the document that holds the built-in UniqueID, in the form of this build or in the form of 0.2.3 (the BaseID's text), and another BaseID is another master: the copy takes a UniqueID
+    // of its own, and keeps its BaseID.
+    for held in [&*unique, base.as_str()] {
+        let mut other = Document::new_blank();
+        other.add_master(master(1, "Stranger", Some(held), Some(C))).unwrap();
+        let id = ensure_master(&mut other, spec).unwrap();
+        assert_ne!(id, 1, "{held}");
+        assert_ne!(other.master(id).unwrap().unique_id, other.master(1).unwrap().unique_id);
+        assert_eq!(other.master(id).unwrap().raw.get("BaseID"), Some(base.as_str()), "and keeps its BaseID");
+    }
+}
+
+#[test]
+fn a_drawing_of_0_2_3_holds_the_built_in_masters_by_their_base_ids_and_a_new_master_is_told_apart_from_them() {
+    // A master as 0.2.3 wrote it: the UniqueID is the BaseID's text. It is found by its BaseID, kept as it is, and the masters added beside it differ from it and from each other in the first three groups.
+    let (rectangle, square, process) = (find_master("rectangle").unwrap(), find_master("square").unwrap(), find_master("process").unwrap());
+    let mut doc = Document::new_blank();
+    let rect_id = ensure_master(&mut doc, rectangle).unwrap();
+    let old = {
+        let m = Arc::make_mut(doc.masters.get_mut(0).unwrap());
+        m.unique_id = Some(Arc::from(rectangle.guid().as_str()));
+        m.unique_id.clone().unwrap()
+    };
+    assert_eq!(ensure_master(&mut doc, rectangle).unwrap(), rect_id, "found by its BaseID, with the UniqueID of the old form");
+    assert_eq!(doc.masters.len(), 1);
+    let (square_id, process_id) = (ensure_master(&mut doc, square).unwrap(), ensure_master(&mut doc, process).unwrap());
+    assert_eq!(doc.masters.len(), 3);
+    assert_eq!(doc.master(rect_id).unwrap().unique_id.as_deref(), Some(&*old), "the old master keeps the UniqueID it had");
+    let keys: std::collections::HashSet<String> = [rect_id, square_id, process_id]
+        .iter()
+        .map(|id| crate::stencil::unique::prefix_key(doc.master(*id).unwrap().unique_id.as_deref().unwrap()))
+        .collect();
+    assert_eq!(keys.len(), 3, "told apart in the first three groups: {keys:?}");
+    // A stencil whose master has the old form brings nothing into a drawing that holds the master in the new form, and the other way round.
+    let from_old = doc_with(vec![{
+        let mut m = master(1, "Rectangle", Some(&rectangle.guid()), Some(&rectangle.guid()));
+        m.id = 1;
+        m
+    }]);
+    let mut new_doc = Document::new_blank();
+    let new_id = ensure_master(&mut new_doc, rectangle).unwrap();
+    let brought = bring_master(&mut new_doc, &from_old, 0, Identity::within(&from_old, 0)).unwrap();
+    assert_eq!((brought.id, brought.added), (new_id, false), "an old-form stencil master is the drawing's new-form one");
+    let from_new = {
+        let mut one = Document::new_blank();
+        ensure_master(&mut one, rectangle).unwrap();
+        one
+    };
+    let mut old_doc = doc_with(vec![master(7, "Rectangle", Some(&rectangle.guid()), Some(&rectangle.guid()))]);
+    let brought = bring_master(&mut old_doc, &from_new, 0, Identity::within(&from_new, 0)).unwrap();
+    assert_eq!((brought.id, brought.added), (7, false), "a new-form stencil master is the drawing's old-form one");
 }
 
 #[test]

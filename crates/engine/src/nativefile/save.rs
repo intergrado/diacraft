@@ -70,7 +70,7 @@ pub(crate) const PREVIEW_MOST_SHAPES: usize = 5_000;
 /// Whether a save makes the picture of the first page: the drawing has a page, and it is not one a picture of 256 pixels would be noise of ([`PREVIEW_MOST_SHAPES`]). The page is the one
 /// the picture is of: the first that is not a background, else the first.
 fn preview_wanted(doc: &Document) -> bool {
-    let page = doc.pages.iter().find(|p| !p.background).or_else(|| doc.pages.iter().next());
+    let page = doc.first_foreground_page();
     page.is_some_and(|page| page.shapes.len() <= PREVIEW_MOST_SHAPES)
 }
 

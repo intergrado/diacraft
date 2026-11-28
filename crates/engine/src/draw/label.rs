@@ -65,14 +65,17 @@ fn paints_nothing(text: Option<&str>) -> bool {
     }
 }
 
-/// Places the label of connector `id`, whose route has just been written. Nothing happens for a connector of a file without text.
-pub(crate) fn place(doc: &mut Document, page: u32, id: u32, routed: &Routed, ours: bool) -> Result<(), Problem> {
+/// Places the label of connector `id`, whose route has just been written. Nothing happens for a connector of a file without text. → the cells it wrote, for the caller to work out what
+/// reads them.
+pub(crate) fn place(doc: &mut Document, page: u32, id: u32, routed: &Routed, ours: bool) -> Result<Vec<(SheetRef, CellAddr)>, Problem> {
     let writes = {
         let reader = Reader::new(doc);
-        let Some(at) = reader.find(page, id) else { return Ok(()) };
+        let Some(at) = reader.find(page, id) else { return Ok(Vec::new()) };
         writes_for(&reader, &at, routed, ours)
     };
-    write(doc, writes)
+    let cells = writes.iter().map(|(sheet, write)| (sheet.clone(), write.addr.clone())).collect();
+    write(doc, writes)?;
+    Ok(cells)
 }
 
 /// The cells the label of the connector at `at` is to be given for its route `routed`: none for a connector of a file without text, and none a cell holds

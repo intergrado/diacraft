@@ -9,6 +9,8 @@ use egui::{Align2, Color32, CornerRadius, FontId, Rect, Response, Role, Stroke, 
 use crate::icons::{self, Icon};
 use crate::theme::{self, Tokens, size};
 
+pub(crate) mod menu_scroll;
+
 /// The width of `text` in `font`, in points.
 pub fn text_width(ui: &Ui, text: &str, font: &FontId) -> f32 {
     let colour = ui.visuals().text_color();

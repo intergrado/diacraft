@@ -67,10 +67,11 @@ use diacraft_units::{Quantity, Unit, parse_unit};
 use crate::affected::Affected;
 use crate::cells::{CellEval, CellKind};
 use crate::changes::Changes;
-use crate::eval::{Budget, CellAddress, EvalCtx, EvalOptions, EvalStats, Evaluator, OperandMode};
+use crate::eval::{Budget, CellAddress, EvalCtx, EvalOptions, EvalStats, Evaluator, OperandMode, SetfMode};
 use crate::index::ReaderIndex;
 use crate::recalc::{for_each_formula_cell, walk_page, walk_sheets};
 use crate::rules::{COMMIT_ADDS_DIFFERING_INHERITED_CELLS, KEY_BYTES, MAX_SETATREF_CHAIN};
+use crate::setf::SetfEffect;
 use crate::store::{decode, encode, number_text};
 use crate::value::Value;
 
@@ -94,6 +95,36 @@ pub struct CommitReport {
     pub budget_exhausted: bool,
     pub memory_exhausted: bool,
     pub stats: EvalStats,
+    /// Formulas the `SETF` calls the commit reached wrote (`setf.rs`): each a cell write of origin `Setf`, whose cell and readers were worked out again.
+    pub setf_written: u64,
+    /// `SETF` calls whose target held their text already: nothing was written, which is how a call that its own write sets off again comes to rest.
+    pub setf_same: u64,
+    /// `SETF` calls dropped for the loop budget: past `MAX_SETF_WRITES` writes, past `MAX_SETF_ROUNDS` rounds, past `MAX_SETF_QUEUED` calls in one pass, or
+    /// reached by a commit whose budget ran out.
+    pub setf_dropped: u64,
+    /// `SETF` writes the model refused (a row marked deleted, a limit of a sheet).
+    pub setf_refused: u64,
+    /// The rounds of `SETF` writes the commit made: each worked out again the cells the one before wrote.
+    pub setf_rounds: u64,
+}
+
+impl CommitReport {
+    /// Adds what a later pass of the same commit did.
+    pub(crate) fn absorb(&mut self, next: &CommitReport) {
+        self.written = self.written.saturating_add(next.written);
+        self.added = self.added.saturating_add(next.added);
+        self.unchanged = self.unchanged.saturating_add(next.unchanged);
+        self.skipped = self.skipped.saturating_add(next.skipped);
+        self.refused = self.refused.saturating_add(next.refused);
+        self.budget_exhausted |= next.budget_exhausted;
+        self.memory_exhausted |= next.memory_exhausted;
+        self.stats.absorb(&next.stats);
+        self.setf_written = self.setf_written.saturating_add(next.setf_written);
+        self.setf_same = self.setf_same.saturating_add(next.setf_same);
+        self.setf_dropped = self.setf_dropped.saturating_add(next.setf_dropped);
+        self.setf_refused = self.setf_refused.saturating_add(next.setf_refused);
+        self.setf_rounds = self.setf_rounds.saturating_add(next.setf_rounds);
+    }
 }
 
 /// A write that is not yet made: the sheet, and what to write.
@@ -118,8 +149,9 @@ pub enum Scope {
     /// Every sheet of the document: the document's, the styles', the pages' and masters', and every shape's.
     Document,
     /// The sheet of the page with this `ID` and the shapes of its part, and nothing else. What an edit on that page can have changed, given
-    /// that the edit wrote no cell of a master, a style or another page (a formula reaches no other page). A
-    /// page that is not there gives an empty commit.
+    /// that the edit wrote no cell of a master, a style or another page. A frame function reaches no other page; a cell
+    /// that names a cell of another page (`Pages[..]`) is read as it is, and worked out by [`crate::commit_changed_across`], which goes after those
+    /// (`pages.rs`). A page that is not there gives an empty commit.
     Page(u32),
 }
 
@@ -140,7 +172,12 @@ pub fn commit(doc: &mut Document, budget: &Budget, options: EvalOptions) -> Comm
 /// [`commit`] for the sheets of `scope`: an editing command works out the page it edited and not the document. Formulas outside the scope
 /// are read as they are when a formula in it names them, and are not written.
 pub fn commit_in(doc: &mut Document, budget: &Budget, options: EvalOptions, scope: Scope) -> CommitReport {
-    commit_scope(doc, budget, options, scope, false, Inherited::All)
+    let (mut report, effects) = commit_scope(doc, budget, options.clone(), scope, false, Inherited::All);
+    // The `SETF` calls the working-out reached write when it has ended, and what they changed is worked out again (`setf.rs`).
+    crate::setf::settle(doc, budget, effects, &mut report, &mut |doc, left, _| {
+        commit_scope(doc, left, options.clone(), scope, false, Inherited::Unknown)
+    });
+    report
 }
 
 /// What a pass over a scope does with the cells an instance does not hold and inherits from its master.
@@ -163,7 +200,7 @@ fn commit_scope(
     scope: Scope,
     arcs_untouched: bool,
     inherited: Inherited<'_>,
-) -> CommitReport {
+) -> (CommitReport, Vec<SetfEffect>) {
     let options = EvalOptions { operands: OperandMode::Live, ..options };
     let mut report = CommitReport::default();
     let mut pending: Vec<Pending> = Vec::new();
@@ -182,7 +219,8 @@ fn commit_scope(
             }
             Inherited::Since(before) => {
                 // The document before is worked out with an evaluator of its own, whose work is charged to this one's budget as it is done.
-                let mut was_ctx = EvalCtx::new(options, *budget);
+                // It writes nothing, so a `SETF` there is 0 and queues nothing.
+                let mut was_ctx = EvalCtx::new(EvalOptions { setf: SetfMode::Inert, ..options }, *budget);
                 let mut was = Evaluator::new(before, &mut was_ctx);
                 work_sources(&mut ev, &mut was, snapshot, scope, &mut report, &mut pending);
                 if COMMIT_ADDS_DIFFERING_INHERITED_CELLS {
@@ -195,9 +233,10 @@ fn commit_scope(
     report.stats = ctx.stats;
     report.budget_exhausted = ctx.stats.budget_exhausted;
     report.memory_exhausted = ctx.stats.memory_exhausted;
+    report.setf_dropped = ctx.setf_dropped;
     crate::work::committed(report.stats.steps);
     apply(doc, pending, &mut report);
-    report
+    (report, std::mem::take(&mut ctx.setf))
 }
 
 /// [`commit_in`] for what an edit changed on page `page` ([`Changes`], from [`crate::changes_between`]): the cells it wrote and the cells that
@@ -222,6 +261,76 @@ pub fn commit_changed_with(
     page: u32,
     changes: &Changes,
 ) -> CommitReport {
+    let (mut report, effects) = changed_pass(index, doc, budget, options.clone(), page, changes);
+    // The `SETF` calls the working-out reached write when it has ended, and the cells they wrote and what reads them are worked out again (`setf.rs`).
+    crate::setf::settle(doc, budget, effects, &mut report, &mut |doc, left, written| written_pass(index, doc, left, &options, page, written));
+    report
+}
+
+/// The page a sheet is the sheet of, or of one of the shapes of: none for the document's, a master's and a style's.
+fn page_of(sheet: &SheetRef) -> Option<u32> {
+    match sheet {
+        SheetRef::Page(id) => Some(*id),
+        SheetRef::Shape(at) => match at.owner {
+            Owner::Page(page) => Some(page),
+            _ => None,
+        },
+        SheetRef::Document | SheetRef::Master(_) | SheetRef::Style(_) => None,
+    }
+}
+
+/// The pass that works out what the `SETF` calls of one round wrote: the cells of `page` and what reads them, as an edit's pass does; a cell of **another page** (a call that a cell of
+/// that page reached through `Pages[..]` made) in a pass of that page, so that its value and what reads it are worked out and not left as they were, with an index
+/// made for it; and the whole of `page` when a write is to a sheet no page holds (the document's, a master's, a style's) or to a page the document has not, as before. The
+/// reports are added, and the calls the passes queued go on to the next round.
+fn written_pass(
+    index: &mut ReaderIndex,
+    doc: &mut Document,
+    left: &Budget,
+    options: &EvalOptions,
+    page: u32,
+    written: Vec<(SheetRef, CellAddr)>,
+) -> (CommitReport, Vec<SetfEffect>) {
+    let mut here: Vec<(SheetRef, CellAddr)> = Vec::new();
+    let mut elsewhere: Vec<(u32, Vec<(SheetRef, CellAddr)>)> = Vec::new();
+    let mut whole_page = false;
+    for cell in written {
+        match page_of(&cell.0) {
+            Some(own) if own == page => here.push(cell),
+            Some(other) if doc.page(other).is_some() => match elsewhere.iter_mut().find(|(known, _)| *known == other) {
+                Some((_, cells)) => cells.push(cell),
+                None => elsewhere.push((other, vec![cell])),
+            },
+            _ => {
+                whole_page = true;
+                here.push(cell);
+            }
+        }
+    }
+    let next = Changes { whole_page, cells: here, ..Changes::default() };
+    let (mut report, mut effects) = changed_pass(index, doc, left, options.clone(), page, &next);
+    for (other, cells) in elsewhere {
+        let left = Budget { steps: left.steps.saturating_sub(report.stats.steps), bytes: left.bytes };
+        if left.steps == 0 {
+            report.budget_exhausted = true;
+            break;
+        }
+        let (more, queued) = changed_pass(&mut ReaderIndex::new(), doc, &left, options.clone(), other, &Changes { cells, ..Changes::default() });
+        report.absorb(&more);
+        effects.extend(queued);
+    }
+    (report, effects)
+}
+
+/// One pass of [`commit_changed_with`]: what [`commit_changed_with`] was before it made `SETF` writes, and the writes the cells it worked out asked for.
+fn changed_pass(
+    index: &mut ReaderIndex,
+    doc: &mut Document,
+    budget: &Budget,
+    options: EvalOptions,
+    page: u32,
+    changes: &Changes,
+) -> (CommitReport, Vec<SetfEffect>) {
     if changes.whole_page || doc.page(page).is_none() {
         let inherited = match changes.since.document() {
             Some(before) if changes.whole_page => Inherited::Since(before),
@@ -233,11 +342,14 @@ pub fn commit_changed_with(
     let mut report = CommitReport::default();
     let mut pending: Vec<Pending> = Vec::new();
     let mut ctx = EvalCtx::new(options, *budget);
+    // Whether any cell was found to work out: a commit that is `only_if_read` and found none is not counted.
+    let mut worked = false;
     if !changes.is_empty() {
         let snapshot: &Document = doc;
         let mut ev = Evaluator::new(snapshot, &mut ctx);
         let mut work = Affected::new(&mut ev, snapshot, page, changes, &mut *index);
         while let Some((sheet, addr)) = work.next() {
+            worked = true;
             if ev.ctx.stats.budget_exhausted {
                 break;
             }
@@ -262,9 +374,12 @@ pub fn commit_changed_with(
     report.stats = ctx.stats;
     report.budget_exhausted = ctx.stats.budget_exhausted;
     report.memory_exhausted = ctx.stats.memory_exhausted;
-    crate::work::committed(report.stats.steps);
+    report.setf_dropped = ctx.setf_dropped;
+    if worked || !changes.only_if_read {
+        crate::work::committed(report.stats.steps);
+    }
     apply(doc, pending, &mut report);
-    report
+    (report, std::mem::take(&mut ctx.setf))
 }
 
 /// Works out one cell the sheet holds and plans the write its result calls for. → whether a write was planned.
@@ -392,14 +507,13 @@ fn is_kind_unit(u: &str) -> bool {
     matches!(u, "DATE" | "CY" | "PNT" | "NURBS" | "POLYLINE" | "MULTIDIM" | "STR" | "BOOL")
 }
 
-/// The `U` to write with a result: its kind's unit, and for a free cell (`User`, `Prop`, `Scratch`) the unit of a length too, when the cell does
-/// not hold it. A cell with a unit of its own kind (`Width`) is not given one: the stored number does not depend on it.
-fn unit_to_write(encoded: Option<&str>, saved: Option<&Arc<str>>, typed: bool) -> Option<Arc<str>> {
-    let unit = encoded.filter(|u| is_kind_unit(u) || !typed)?;
-    match saved {
-        Some(s) if s.trim().eq_ignore_ascii_case(unit) => None,
-        _ => Some(Arc::from(unit)),
-    }
+/// The `U` to write with a result: its kind's unit, and for a free cell (`User`, `Prop`, `Scratch`) the unit of a length too. A cell with a unit of its own kind (`Width`) is not given one: the stored
+/// number does not depend on it.
+///
+/// **The unit is the written cell's own, whatever the cell it takes its formula from says** (a text in `V` with no `U` is no text to a program that reads the `U`): an
+/// instance's cell that holds a cached result beside `F="Inh"` says `STR`, `DATE` or `BOOL` itself, though its master's cell says it too. Writing a unit a cell holds already changes nothing.
+fn unit_to_write(encoded: Option<&str>, typed: bool) -> Option<Arc<str>> {
+    encoded.filter(|u| is_kind_unit(u) || !typed).map(Arc::from)
 }
 
 /// What a worked-out cell calls for.
@@ -433,7 +547,7 @@ fn plan_write(doc: &Document, outcome: &CellEval) -> Plan {
                     (Some(_), None) => Plan::Skip,
                 };
             }
-            let unit = unit_to_write(enc.u.as_deref(), outcome.saved_unit.as_ref(), outcome.typed);
+            let unit = unit_to_write(enc.u.as_deref(), outcome.typed);
             Plan::Write(CellEdit::Cached { value: DocValue::from_text(&enc.v), error: None, unit })
         }
     }
@@ -585,7 +699,7 @@ fn plan_write_inherited(ev: &mut Evaluator<'_, '_>, doc: &Document, outcome: &Ce
     {
         return Plan::Same;
     }
-    let unit = unit_to_write(enc.u.as_deref(), source.as_ref().and_then(|(_, u)| u.as_ref()), outcome.typed);
+    let unit = unit_to_write(enc.u.as_deref(), outcome.typed);
     Plan::Write(CellEdit::Cached { value: DocValue::from_text(&enc.v), error: None, unit })
 }
 

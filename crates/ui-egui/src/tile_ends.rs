@@ -7,8 +7,9 @@
 //! vertex and the body lying back along the line. A tile is not a page: the unit `S` is [`UNIT`] of the figure's longest side, whatever the
 //! line's weight, and it is made smaller when two marks would take more than [`MARKS_SHARE`] of a short line.
 //!
-//! * **Paint.** A *solid* mark is filled with the pen's ink, a *hollow* one is an outline with nothing inside it, an *open* one is strokes
-//!   The tile has the graphite treatment of both themes: the colours come from the stencil ink token and nothing else.
+//! * **Paint.** A *solid* mark is filled with the pen's ink, a *hollow* one is an outline whose closed part is painted with the tile's fill (`Tokens::stencil_fill`, transparent in both themes,
+//!   as the body of every tile is, the marks of a page taking the shape's fill), an *open* one is strokes. The tile has the graphite treatment of both themes: the
+//!   colours come from the stencil ink and fill tokens and nothing else.
 //! * **The line** stops short of a solid or a hollow mark so that nothing shows through or past its back, and runs on to the vertex of an open
 //!   one. It follows the pattern's table (marks and gaps, in line weights); **the marks are never dashed**.
 //! * **Where.** On every open path of the figure's lines, at its first vertex for the begin and its last for the end, turned along the
@@ -17,7 +18,7 @@
 //!   tile cannot show the master's own art. A number that is no mark (past 45, and not 254) draws nothing, as on a page.
 //! * **A line of pattern 0** is drawn solid: on a page it is no line, and a tile that shows nothing cannot be found.
 
-use egui::{Mesh, Painter, Pos2, Shape, Stroke};
+use egui::{Color32, Mesh, Painter, Pos2, Shape, Stroke};
 use serde_json::Value;
 
 use crate::edit::geom::{self, P};
@@ -391,7 +392,9 @@ fn ring(points: &[P]) -> &[P] {
 // ---- painting --------------------------------------------------------------------------------------------------------------------------
 
 /// The open part of a tile's figure: its lines as the pattern says, then the solid marks filled and the other marks stroked. `at` maps a point of the figure to the tile.
-pub(crate) fn paint(painter: &Painter, figure: &Figure, at: &dyn Fn(&P) -> Pos2, pen: Stroke) {
+/// **The closed part of a hollow mark is painted with `fill` before its outline** (the inside of a hollow mark takes the fill the drawing's shape has, and a tile's
+/// shape has the theme's tile fill, `Tokens::stencil_fill`, the same that the body of a box tile has: transparent in both themes, so the panel shows through).
+pub(crate) fn paint(painter: &Painter, figure: &Figure, at: &dyn Fn(&P) -> Pos2, pen: Stroke, fill: Color32) {
     for line in &figure.lines {
         let points: Vec<Pos2> = line.iter().map(at).collect();
         match dashes(figure.pattern) {
@@ -416,6 +419,17 @@ pub(crate) fn paint(painter: &Painter, figure: &Figure, at: &dyn Fn(&P) -> Pos2,
     }
     for mark in &figure.marks {
         let closed = mark.len() > 3 && mark.first() == mark.last();
+        if closed && fill.a() > 0 {
+            // Every closed mark is a star-shaped polygon from its first point (a head with a hollowed back is not convex, a disc is 16 sides), so a fan from it covers exactly the form.
+            let corners: Vec<Pos2> = ring(mark).iter().map(at).collect();
+            if let Some((first, rest)) = corners.split_first() {
+                for pair in rest.windows(2) {
+                    if let [a, b] = pair {
+                        painter.add(Shape::convex_polygon(vec![*first, *a, *b], fill, Stroke::NONE));
+                    }
+                }
+            }
+        }
         painter.add(if closed {
             Shape::closed_line(ring(mark).iter().map(at).collect(), pen)
         } else {
@@ -634,5 +648,50 @@ mod tests {
         let decor = decorate(&mut lines, Ends { begin: 4, end: 4, pattern: 1 });
         assert_eq!(decor.fills.len(), 2 * MAX_LINES, "a solid mark at each end of each of the first paths");
         assert_eq!(lines.len(), 1_000, "no path is lost");
+    }
+
+    /// Every shape a [`paint`] of a one-line figure ending in `number` made, with `fill` for the closed part of a hollow mark: the order they were added in.
+    fn painted(number: u8, fill: Color32) -> Vec<Shape> {
+        let figure = crate::stencils::tile_figure(
+            ((0.0, 0.0), (1.0, 0.2)),
+            &[vec![(0.0, 0.1), (1.0, 0.1)]],
+            Some(Ends { begin: 0, end: number, pattern: 1 }),
+            false,
+        )
+        .expect("a figure");
+        let at = |p: &P| egui::pos2(10.0 + (p.0 * 200.0) as f32, 100.0 - (p.1 * 200.0) as f32);
+        let pen = Stroke::new(1.0, crate::theme::Tokens::light().stencil_ink);
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter(), &figure, &at, pen, fill));
+        out.textures_delta.clear();
+        out.shapes.into_iter().map(|clipped| clipped.shape).collect()
+    }
+
+    /// How many shapes are a filled polygon of this colour.
+    fn fills_of(shapes: &[Shape], colour: Color32) -> usize {
+        shapes.iter().filter(|s| matches!(s, Shape::Path(p) if p.fill == colour)).count()
+    }
+
+    #[test]
+    fn the_closed_part_of_a_hollow_mark_takes_the_tiles_fill_under_its_outline_and_nothing_else_does() {
+        // A hollow mark's inside is painted with the tile's fill (`Tokens::stencil_fill`), which is transparent in both themes and so shows the panel; given a colour, it
+        // shows. A square (21) is four corners, a fan of two triangles; the disc and the diamond of 34 are a fan of 14 and one of 2.
+        let (green, clear) = (crate::theme::Tokens::light().accent, crate::theme::Tokens::light().stencil_fill);
+        assert!(green.a() > 0 && clear.a() == 0 && green != crate::theme::Tokens::light().stencil_ink, "the tokens the test relies on");
+        for (number, triangles) in [(21, 2), (20, 14), (16, 1), (22, 2), (34, 16), (40, 2)] {
+            let shapes = painted(number, green);
+            assert_eq!(fills_of(&shapes, green), triangles, "number {number}: the closed part is a fan of triangles");
+            // Under the outline: the first fill comes before the first closed outline (a path with no fill, closed), and each mark's own fan before its own outline.
+            let first_outline = shapes.iter().position(|s| matches!(s, Shape::Path(p) if p.fill == clear && p.closed)).expect("the outline");
+            let first_fill = shapes.iter().position(|s| matches!(s, Shape::Path(p) if p.fill == green)).expect("a fill");
+            assert!(first_fill < first_outline, "number {number}: the fill is painted before the outline");
+        }
+        // Solid marks are ink, open marks have no closed part: the fill colour is not used. Transparent: nothing is added.
+        for number in [4, 13, 10, 11, 3, 1, 12, 24, 43] {
+            assert_eq!(fills_of(&painted(number, green), green), 0, "number {number} has no hollow part");
+        }
+        for (number, fan) in [(21, 2), (34, 16), (4, 0), (3, 0)] {
+            assert_eq!(painted(number, clear).len() + fan, painted(number, green).len(), "number {number}: a transparent fill adds nothing");
+        }
     }
 }

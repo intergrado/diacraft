@@ -147,13 +147,11 @@ fn and_by_an_odg_written_from_the_model_and_a_save_into_an_odg_file() {
     assert_nothing_differs(&saved);
     let mut back = opened(&path);
     assert_eq!(facts(&mut back), want, ".odg from the model");
-    // A layout glues the connectors anew, which a save into an `.odg` does not write yet (a connection is a later task of the `.odg` writer): it is refused in words, nothing is written, and
-    // Save As `.diacraft` holds the chart as it is.
+    // A layout glues the connectors anew, which a save into an `.odg` writes: the file holds the chart as it is, and so does Save As `.diacraft`.
     run(&mut back, "orgchart.layout", json!({"layout": "hanging_left"}));
     let into = facts(&mut back);
-    let e = back.execute("file.save", &json!({})).unwrap_err().to_string();
-    assert!(e.contains("glued anew") && e.contains(".diacraft"), "{e}");
-    assert_eq!(facts(&mut opened(&path)), want, "the file is as it was");
+    run(&mut back, "file.save", json!({}));
+    assert_eq!(facts(&mut opened(&path)), into, "the chart saved into the .odg it came from");
     let native = dir.path("hung.diacraft");
     run(&mut back, "file.save_as", json!({ "path": native }));
     assert_eq!(facts(&mut opened(&native)), into, "Save As .diacraft");

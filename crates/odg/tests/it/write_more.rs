@@ -280,7 +280,7 @@ fn a_connector_whose_shape_was_deleted_loses_that_end_s_glue() {
     );
     let back = open_bytes(saved.bytes);
     assert!(back.doc.pages.get(0).unwrap().connects.is_empty());
-    // A glue made anew is not written by this task.
+    // A glue made anew is written: the free end glued to the whole of A names A and no glue point, and the file reads back with it.
     let mut o = open(&connector_drawing());
     let page = Arc::make_mut(o.doc.pages.get_mut(0).unwrap());
     page.connects.push(diacraft_doc::Connect {
@@ -292,26 +292,51 @@ fn a_connector_whose_shape_was_deleted_loses_that_end_s_glue() {
         to_part: Some(3),
         ..Default::default()
     });
-    assert!(matches!(real(&o.doc, &o.bytes, &o.index), Err(WriteError::Unsupported(_))));
+    let saved = real(&o.doc, &o.bytes, &o.index).unwrap();
+    let after = part(&saved.bytes, "content.xml");
+    assert!(after.contains(r#"draw:end-shape="a""#) && !after.contains("draw:end-glue-point"), "{after}");
+    let back = open_bytes(saved.bytes);
+    let ends: Vec<(u32, Option<&str>, u32, Option<u32>)> =
+        back.doc.pages.get(0).unwrap().connects.iter().map(|c| (c.from_sheet, c.from_cell.as_deref(), c.to_sheet, c.to_part)).collect();
+    assert!(ends.contains(&(2, Some("EndX"), 1, Some(3))), "{ends:?}");
 }
 
-/// A connector the file holds, glued to a shape the file does not hold (a new shape, or a shape an earlier save deleted and an undo put back): the writer writes the
-/// glue of the connectors it makes and not a glue made anew on one of the file's, and it passed this one by, so a save was made and the file lacked a glue the model
-/// has (the review). It is refused in words, whichever end is glued and whether the glue is made alone or beside a new shape's own.
+/// A connector the file holds, glued to a shape the file does not hold (a new shape, or a shape an earlier save deleted and an undo put back): the glue of the connectors the
+/// writer makes was written and a glue made anew on one of the file's was refused (the review: a save that let it pass left the file without a glue the model has).
+/// It is written the shape named as a new connector's target is. **An end the model glues to two places** (the file's shape and the new one, the begin kept
+/// and glued anew) is no glue the file can say, and is refused in words.
 #[test]
-fn a_connector_of_the_file_glued_to_a_new_shape_is_refused_in_words_and_a_new_connector_to_a_file_shape_is_not() {
-    for begin in [true, false] {
-        let mut o = open(&connector_drawing());
-        let id = o.index.next_id(0).unwrap();
-        crate::write_new::push_shape(&mut o.doc, crate::write_new::rectangle(id, "N", (12.0, 3.0, 4.0, 2.0)));
-        // The connector (shape 2) is glued to A at its begin by the file; its end is glued anew to the new shape, or its begin is.
-        crate::write_new::glue(&mut o.doc, 2, begin, id, 2);
-        let said = match real(&o.doc, &o.bytes, &o.index) {
-            Err(WriteError::Unsupported(words)) => words,
-            other => panic!("begin={begin}: a connector of the file glued to a new shape was not refused: {:?}", other.map(|w| w.edited)),
-        };
-        assert!(said.contains("a connector of the file glued to a new shape"), "{said}");
-    }
+fn a_connector_of_the_file_glued_to_a_new_shape_is_written_and_an_end_glued_to_two_places_is_refused() {
+    // The end of the connector (shape 2) is free in the file: glued anew to the new shape's point 2, it is written.
+    let mut o = open(&connector_drawing());
+    let id = o.index.next_id(0).unwrap();
+    crate::write_new::push_shape(&mut o.doc, crate::write_new::rectangle(id, "N", (12.0, 3.0, 4.0, 2.0)));
+    crate::write_new::glue(&mut o.doc, 2, false, id, 2);
+    let saved = real(&o.doc, &o.bytes, &o.index).unwrap_or_else(|e| panic!("a connector of the file glued to a new shape was refused: {e}"));
+    let after = part(&saved.bytes, "content.xml");
+    assert!(after.contains(r#"draw:end-shape="id1""#) && after.contains(r#"draw:end-glue-point="2""#), "{after}");
+    assert!(after.contains(r#"draw:name="N""#), "the new shape is written: {after}");
+    let back = open_bytes(saved.bytes);
+    let end = back
+        .doc
+        .pages
+        .get(0)
+        .unwrap()
+        .connects
+        .iter()
+        .find(|c| c.from_cell.as_deref() == Some("EndX"))
+        .map(|c| (c.from_sheet, c.to_sheet, c.to_part));
+    assert_eq!(end, Some((2, 3, Some(102))), "the file reads back with the end glued to the new shape's row 2");
+    // The begin is glued to A by the file, and the model glues it to the new shape too: two places for one end.
+    let mut o = open(&connector_drawing());
+    let id = o.index.next_id(0).unwrap();
+    crate::write_new::push_shape(&mut o.doc, crate::write_new::rectangle(id, "N", (12.0, 3.0, 4.0, 2.0)));
+    crate::write_new::glue(&mut o.doc, 2, true, id, 2);
+    let said = match real(&o.doc, &o.bytes, &o.index) {
+        Err(WriteError::Unsupported(words)) => words,
+        other => panic!("an end glued to two places was not refused: {:?}", other.map(|w| w.edited)),
+    };
+    assert!(said.contains("glued to two places"), "{said}");
     // The new shape alone, with nothing of the file's glued to it, is written; and a new connector between the new shape and a shape of the file is too.
     let mut o = open(&connector_drawing());
     let id = o.index.next_id(0).unwrap();

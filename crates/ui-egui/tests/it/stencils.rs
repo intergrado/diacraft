@@ -200,7 +200,7 @@ fn new_libraries_drop_their_nodes_and_data_flow_is_a_real_connector() {
     assert!(placed.sheet.cells.keys().any(|name| name.as_str() == "EndX"));
     assert_eq!(doc.master(placed.master.unwrap()).unwrap().name.as_deref(), Some("Data Flow"));
     let process = doc.masters.iter().find(|master| master.name.as_deref() == Some("Process")).unwrap();
-    assert!(process.unique_id.as_deref().unwrap().starts_with("{D1AC0006-"), "the exact Gane-Sarson tile selects the rounded node");
+    assert!(process.raw.get("BaseID").unwrap().starts_with("{D1AC0006-"), "the exact Gane-Sarson tile selects the rounded node");
     assert_eq!(w.state().ui_panics(), 0);
 }
 

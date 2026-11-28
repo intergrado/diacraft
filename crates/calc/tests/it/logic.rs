@@ -132,8 +132,9 @@ fn if_vectors() {
 }
 
 #[test]
-fn if_setf_writes_nothing_during_recalculation() {
-    // The branch's value is 0 and `Scratch.A1` stays what it was, whether or not the branch is taken.
+fn if_setf_writes_nothing_while_a_cell_is_evaluated() {
+    // The branch's value is 0 and `Scratch.A1` stays what it was, whether or not the branch is taken: the evaluator holds the document and never changes
+    // it. The commit that worked the cell out makes the write the call asked for (`setf_effects.rs`).
     for (a1, expected) in [("3", 3.0), ("7", 7.0)] {
         let formula = "IF(Scratch.A1>5,SETF(GetRef(Scratch.A1),5),0)";
         let setup = |s: ShapeBuilder| s.row_cell("Scratch", None, RowKey::Ix(0), "A", a1);

@@ -113,9 +113,18 @@ fn base() -> Document {
             ..Connect::default()
         });
     }
+    // Two faces with the attributes a VSDX file's faces hold, so that each says more than its name and is a font wherever it is lost.
     Arc::make_mut(&mut doc.fonts).extend([
-        FaceName { name_u: Arc::from("Arial"), raw: RawAttrs::new(), ext: Default::default() },
-        FaceName { name_u: Arc::from("Noto Sans"), raw: RawAttrs::new(), ext: Default::default() },
+        FaceName {
+            name_u: Arc::from("Arial"),
+            raw: RawAttrs::from_pairs([("UnicodeRanges", "1 2 3 4"), ("CharSets", "1 0")]),
+            ext: Default::default(),
+        },
+        FaceName {
+            name_u: Arc::from("Noto Sans"),
+            raw: RawAttrs::from_pairs([("UnicodeRanges", "5 6 7 8"), ("CharSets", "1 0")]),
+            ext: Default::default(),
+        },
     ]);
     doc.title = Arc::from("A title");
     {
@@ -382,6 +391,28 @@ fn a_route_the_file_writes_on_a_connector_is_the_route_the_drawing_draws_it_in()
     assert_eq!(said(&before, &damaged(&before, |doc| set_cell_anywhere(shape_mut(doc, 1), "ExtraCell", "5"))).0, vec![(Class::ShapeAttributes, 1)]);
 }
 
+/// **A cell a style gives through `THEMEVAL()` has no value of its own to differ from** (issue 10 of the demo video: a drawing made in DiaCraft, saved as an `.odg`, was told "6 line ends
+/// differ" and "13 items differ"): the engine's `Theme` style holds `THEMEVAL()` in the cells a theme gives (a line end's size, a connector's rounding) with the placeholder `Themed` as their value, and a
+/// file writes the value the cell draws with, as a number. The placeholder is no number, so what the file writes is the same content, as values; the same cells holding real values are judged as before.
+#[test]
+fn a_cell_a_style_gives_through_themeval_is_the_same_content_as_the_value_a_file_writes_for_it() {
+    let themed = damaged(&base(), |doc| {
+        let style = Arc::make_mut(doc.styles.get_mut(1).unwrap());
+        let cells = &mut Arc::make_mut(&mut style.sheet).cells;
+        for name in ["BeginArrowSize", "EndArrowSize", "Rounding"] {
+            cells.insert(CellName::new(name), Cell::with_formula("THEMEVAL()", Some(Value::from_text("Themed"))));
+        }
+    });
+    let written = damaged(&themed, |doc| {
+        set_cell_anywhere(shape_mut(doc, 1), "EndArrowSize", "2");
+        set_cell_anywhere(shape_mut(doc, 1), "Rounding", "0.0833");
+    });
+    assert_eq!(said(&themed, &written), (vec![], true), "the placeholder is no value to differ from");
+    // A cell that holds a real number is judged as before: the line end that is 2 in the drawing and 4 in the file is a difference.
+    let real = damaged(&base(), |doc| set_cell_anywhere(shape_mut(doc, 1), "EndArrowSize", "2"));
+    assert_eq!(said(&real, &damaged(&real, |doc| set_cell(shape_mut(doc, 1), "EndArrowSize", "4"))).0, vec![(Class::LineEnds, 1)]);
+}
+
 /// **What a shape is drawn with where no sheet gives a cell**: a line end whose size no sheet gives is drawn medium, 2 (the default), so a file that writes
 /// 2 on the shape, or a drawing that holds 2 read back from a file that holds none, is the same content, as values; and a cell of the text block that the file does not hold reads its default
 /// formula (`TxtPinX` reads `Width*0.5`), so a drawing's cell that holds that formula comes back as it. Before, every connector `connector.add` made was named for its line end and
@@ -551,6 +582,70 @@ fn a_macro_project_that_is_gone_is_told_and_one_left_out_by_choice_is_not() {
 fn a_font_face_that_is_dropped_is_a_font() {
     assert_eq!(classes(|doc| drop(Arc::make_mut(&mut doc.fonts).pop())), vec![(Class::Fonts, 1)]);
     assert_eq!(classes(|doc| Arc::make_mut(&mut doc.fonts).clear()), vec![(Class::Fonts, 2)]);
+}
+
+/// **A face that is its name and nothing more is looked for only where a cell names it**: the row a VSDX writer puts in the table of a new drawing, which nothing names, is in no
+/// `.odg` (which declares the faces its texts use), and the file that lacks it lost nothing. The same face named by a cell is a missing font: a `Font`, `AsianFont` or `ComplexScriptFont` cell
+/// of a shape's `Character` row (by its name in any case, or by its place in the table), of a member of a group, of a master's shape or of a style sheet, and a `BulletFont` cell of a
+/// `Paragraph` row. The theme marker and `0` name no face. A face that holds more than its name (a VSDX file's attributes, an `.odg` declaration's markup) is a missing font named or not.
+#[test]
+fn a_face_that_is_its_name_alone_is_looked_for_only_where_a_cell_names_it() {
+    let bare = |name: &str| FaceName { name_u: Arc::from(name), raw: RawAttrs::new(), ext: Default::default() };
+    let lost = |before: &Document| said(before, &damaged(before, |doc| drop(Arc::make_mut(&mut doc.fonts).pop()))).0;
+    let with = |face: FaceName, name_it: &dyn Fn(&mut Document)| {
+        let mut doc = base();
+        Arc::make_mut(&mut doc.fonts).push(face);
+        name_it(&mut doc);
+        doc
+    };
+    let character =
+        |cell: &'static str, value: &'static str| move |doc: &mut Document| set_row_cell(shape_mut(doc, 1), "Character", RowKey::Ix(0), cell, value);
+    // Named by nothing: no loss.
+    assert_eq!(lost(&with(bare("Mono"), &|_| {})), vec![], "a row nothing names");
+    // Named by a cell: a missing font.
+    let place = base().fonts.len().to_string();
+    type Naming = Box<dyn Fn(&mut Document)>;
+    let named: Vec<(&str, Naming)> = vec![
+        ("a Font cell, by the name", Box::new(character("Font", "Mono"))),
+        ("a Font cell, by the name in another case", Box::new(character("Font", "mono"))),
+        (
+            "a Font cell, by the place",
+            Box::new(move |doc: &mut Document| set_row_cell(shape_mut(doc, 1), "Character", RowKey::Ix(0), "Font", &place)),
+        ),
+        ("an AsianFont cell", Box::new(character("AsianFont", "Mono"))),
+        ("a ComplexScriptFont cell", Box::new(character("ComplexScriptFont", "Mono"))),
+        ("a BulletFont cell", Box::new(|doc: &mut Document| set_row_cell(shape_mut(doc, 1), "Paragraph", RowKey::Ix(0), "BulletFont", "Mono"))),
+        ("a member of a group", Box::new(|doc: &mut Document| set_row_cell(shape_mut(doc, 3), "Character", RowKey::Ix(0), "Font", "Mono"))),
+        (
+            "a master's shape",
+            Box::new(|doc: &mut Document| {
+                let master = Arc::make_mut(doc.masters.get_mut(0).unwrap());
+                let shape = Arc::make_mut(master.shapes.get_mut(0).unwrap());
+                set_row_cell(shape, "Character", RowKey::Ix(0), "Font", "Mono");
+            }),
+        ),
+        (
+            "a style sheet",
+            Box::new(|doc: &mut Document| {
+                let style = Arc::make_mut(doc.styles.get_mut(1).unwrap());
+                let key = diacraft_doc::SectionKey::new("Character", None);
+                let row = Arc::make_mut(&mut style.sheet).row_mut(&key, &RowKey::Ix(0)).unwrap();
+                row.cells.insert(CellName::new("Font"), Cell::constant(Value::from_text("Mono")));
+            }),
+        ),
+    ];
+    for (how, name_it) in &named {
+        assert_eq!(lost(&with(bare("Mono"), name_it.as_ref())), vec![(Class::Fonts, 1)], "named by {how}");
+    }
+    // The theme marker and the face `0` name none.
+    assert_eq!(lost(&with(bare("Mono"), &character("Font", "Themed"))), vec![], "the theme marker");
+    assert_eq!(lost(&with(bare("Mono"), &character("Font", "0"))), vec![], "the face 0");
+    // A face that holds more than its name: a missing font, named or not.
+    let attributes = FaceName { raw: RawAttrs::from_pairs([("UnicodeRanges", "1 2 3 4")]), ..bare("Mono") };
+    assert_eq!(lost(&with(attributes, &|_| {})), vec![(Class::Fonts, 1)], "a VSDX file's face with its attributes");
+    let mut declared = bare("Mono");
+    declared.ext.make_mut().odf.raw = RawAttrs::from_pairs([("style:name", "Mono"), ("svg:font-family", "Mono")]);
+    assert_eq!(lost(&with(declared, &|_| {})), vec![(Class::Fonts, 1)], "an .odg declaration");
 }
 
 #[test]
@@ -1025,6 +1120,190 @@ fn a_hundred_thousand_definitions_of_one_name_are_matched_in_linear_steps_or_ref
     assert_eq!(done, Err(meter::Stop), "{steps} steps");
     assert!(steps < 2 * compare::MAX_STEPS, "the walk stopped when the budget was gone: {steps} steps");
     assert!(matches!(compare(&before, &after, false), Outcome::Unchecked(_)), "and the save says it could not check it");
+}
+
+/// A table of `faces` faces with an `ID` each (`Face 1`, `ID` 1, and so on) and then `Mono`, a face that is its name alone, which the drawing read back lacks; `shapes` shapes whose `Font` cell
+/// names the last numbered face by its number; and, when `style_names_it`, a style sheet that names `Mono`. → the drawing and the drawing read back.
+fn faces_named_by_number(faces: usize, shapes: usize, style_names_it: bool) -> (Document, Document) {
+    let mut page = PageBuilder::new().name("P");
+    for id in 1..=shapes {
+        page = page.shape(ShapeBuilder::new(u32::try_from(id).unwrap()).row_cell("Character", None, RowKey::Ix(0), "Font", &faces.to_string()));
+    }
+    let mut doc = DocBuilder::new();
+    if style_names_it {
+        doc = doc.style(1, StyleBuilder::new().name("Named").row_cell("Character", None, RowKey::Ix(0), "Font", "Mono"));
+    }
+    let mut before = doc.page(1, page).build();
+    let fonts = Arc::make_mut(&mut before.fonts);
+    for id in 1..=faces {
+        fonts.push(FaceName {
+            name_u: Arc::from(format!("Face {id}")),
+            raw: RawAttrs::from_pairs([("ID", id.to_string())]),
+            ext: Default::default(),
+        });
+    }
+    fonts.push(FaceName { name_u: Arc::from("Mono"), raw: RawAttrs::new(), ext: Default::default() });
+    let after = damaged(&before, |doc| drop(Arc::make_mut(&mut doc.fonts).pop()));
+    (before, after)
+}
+
+/// **The security scan's finding: the faces the cells name are found in steps linear in the faces and the cells, each one paid for.** When a face that is its name alone is missing,
+/// the cells that name faces are read for it ([`compare::Compare::faces_named`]); a cell that names a face by a number found it by a walk of the table, unpaid, so 2,000 faces and 2,000 such
+/// cells were 4,000,000 faces looked at for a few thousand steps. Every face looked at is paid for now, and they are about one for each face and each cell. **Once every face looked for is
+/// named, no more cells are read**: a style sheet that names it (style sheets are read first) ends the reading before a shape is looked at. Red before the fix: 4,000,000 faces looked at.
+#[test]
+fn the_faces_cells_name_are_found_in_steps_linear_in_the_faces_and_the_cells() {
+    const FACES: usize = 2_000;
+    const SHAPES: usize = 2_000;
+    let (before, after) = faces_named_by_number(FACES, SHAPES, false);
+    cells::FACE_PROBES.with(|probes| probes.set(0));
+    let mut walk = compare::Compare::new(&before, &after, false, u64::MAX);
+    assert_eq!(walk.run(), Ok(()));
+    let probes = cells::FACE_PROBES.with(std::cell::Cell::get);
+    assert_eq!(walk.tally.count(Class::Fonts), 0, "no cell names the face the file lacks");
+    assert!(probes <= walk.steps(), "{probes} faces looked at, {} steps paid", walk.steps());
+    assert!(probes <= 2 * (FACES + SHAPES) as u64, "{probes} faces looked at for {FACES} faces and {SHAPES} cells");
+    // The face named by a style sheet: a missing font, and no shape's cell is read for it.
+    let (before, after) = faces_named_by_number(FACES, SHAPES, true);
+    cells::FACE_PROBES.with(|probes| probes.set(0));
+    let mut named = compare::Compare::new(&before, &after, false, u64::MAX);
+    assert_eq!(named.run(), Ok(()));
+    assert_eq!(named.tally.count(Class::Fonts), 1, "a style sheet names it");
+    assert_eq!(cells::FACE_PROBES.with(std::cell::Cell::get), 0, "no cell that names a face by its number was read");
+    assert!(
+        named.steps() + SHAPES as u64 <= walk.steps(),
+        "the shapes were not read for it: {} steps, and {} without the style sheet",
+        named.steps(),
+        walk.steps()
+    );
+}
+
+/// A drawing and the drawing read back from it, each with a table of `faces` faces with an `ID` each (`Face 1`, `ID` 1, and so on) and `shapes` shapes whose `Font` cell names a face by its number: the last
+/// face in the drawing and the first in the file read back, so that every cell's text differs and its face is looked for in both tables.
+fn font_cells_that_name_faces_by_number(faces: usize, shapes: usize) -> (Document, Document) {
+    let drawing = |named: usize| {
+        let mut page = PageBuilder::new().name("P");
+        for id in 1..=shapes {
+            page = page.shape(ShapeBuilder::new(u32::try_from(id).unwrap()).row_cell("Character", None, RowKey::Ix(0), "Font", &named.to_string()));
+        }
+        let mut doc = DocBuilder::new().page(1, page).build();
+        let table = Arc::make_mut(&mut doc.fonts);
+        for id in 1..=faces {
+            table.push(FaceName {
+                name_u: Arc::from(format!("Face {id}")),
+                raw: RawAttrs::from_pairs([("ID", id.to_string())]),
+                ext: Default::default(),
+            });
+        }
+        doc
+    };
+    (drawing(faces), drawing(1))
+}
+
+/// **The security scan's finding: the faces a `Font` cell names, compared as two cells' values, are found in steps that are paid for.** Each cell whose text differs from the file's
+/// looked its face up in both drawings by a walk of the whole table, and the walk was charged nothing but the cell's own step: 2,000 faces and 2,000 such cells were 2,000,000
+/// faces looked at for a few thousand steps. The tables of the faces by `ID` are made once for each drawing, **charged a step a face before they are made**, and a cell is a probe. Red before the
+/// fix: 2,000,000 faces looked at.
+#[test]
+fn the_faces_font_cells_name_are_compared_in_steps_linear_in_the_faces_and_the_cells_and_each_is_paid_for() {
+    const FACES: usize = 2_000;
+    const SHAPES: usize = 2_000;
+    let (before, after) = font_cells_that_name_faces_by_number(FACES, SHAPES);
+    cells::FACE_PROBES.with(|probes| probes.set(0));
+    let mut walk = compare::Compare::new(&before, &after, false, u64::MAX);
+    assert_eq!(walk.run(), Ok(()));
+    let probes = cells::FACE_PROBES.with(std::cell::Cell::get);
+    assert_eq!(walk.tally.count(Class::TextFormatting), SHAPES as u64, "every cell names another face, and each is told");
+    assert!(probes >= 2 * FACES as u64, "the two tables were made: {probes} faces looked at");
+    assert!(probes <= walk.steps(), "{probes} faces looked at, {} steps paid", walk.steps());
+    assert!(probes <= 2 * (FACES + SHAPES) as u64, "{probes} faces looked at for {FACES} faces and {SHAPES} cells");
+    // A drawing with no cell that differs reads no table: nothing is made, and nothing is paid for it.
+    cells::FACE_PROBES.with(|probes| probes.set(0));
+    let mut same = compare::Compare::new(&before, &before, false, u64::MAX);
+    assert_eq!(same.run(), Ok(()));
+    assert_eq!(cells::FACE_PROBES.with(std::cell::Cell::get), 0, "cells that are the same text name no face to look for");
+    // A budget the first table does not fit (a thousand steps for a table of two thousand faces) stops the walk before the table is made.
+    cells::FACE_PROBES.with(|probes| probes.set(0));
+    let mut stopped = compare::Compare::new(&before, &after, false, 1_000);
+    assert_eq!(stopped.run(), Err(super::meter::Stop), "past its budget the comparison ends");
+    assert_eq!(cells::FACE_PROBES.with(std::cell::Cell::get), 0, "a table past the budget was not made");
+    assert!(stopped.steps() >= FACES as u64, "the table was charged before it was made: {} steps", stopped.steps());
+}
+
+/// A drawing and the drawing read back from it, each with a table of `colours` colours past the fixed palette (`IX` 24 on) and `shapes` shapes whose `FillForegnd` names a colour by its index: the last
+/// colour in the drawing and the first in the file read back.
+fn colour_cells_that_name_colours_by_index(colours: usize, shapes: usize) -> (Document, Document) {
+    let drawing = |named: usize| {
+        let mut page = PageBuilder::new().name("P");
+        for id in 1..=shapes {
+            page = page.shape(ShapeBuilder::new(u32::try_from(id).unwrap()).cell("FillForegnd", &named.to_string()));
+        }
+        let mut doc = DocBuilder::new().page(1, page).build();
+        doc.colors = Arc::new(
+            (0..colours)
+                .map(|at| diacraft_doc::ColorEntry { ix: u32::try_from(24 + at).unwrap(), rgb: Arc::from(format!("#{:06x}", at + 1)) })
+                .collect(),
+        );
+        doc
+    };
+    (drawing(24 + colours - 1), drawing(24))
+}
+
+/// **The same pattern in the colours** (the neighbour of the faces): a `FillForegnd` that names a colour by its index past the fixed palette looked it up by a walk of the document's
+/// colour table (`Document::color`), for each cell and each drawing, charged nothing. The tables of the colours by `IX` are made once, charged a step a colour before they are made.
+/// Red before the fix: 4,000,000 colours looked at for 2,000 cells and 2,000 colours.
+#[test]
+fn the_colours_cells_name_by_index_are_compared_in_steps_linear_in_the_colours_and_the_cells_and_each_is_paid_for() {
+    const COLOURS: usize = 2_000;
+    const SHAPES: usize = 2_000;
+    let (before, after) = colour_cells_that_name_colours_by_index(COLOURS, SHAPES);
+    cells::COLOUR_PROBES.with(|probes| probes.set(0));
+    let mut walk = compare::Compare::new(&before, &after, false, u64::MAX);
+    assert_eq!(walk.run(), Ok(()));
+    let probes = cells::COLOUR_PROBES.with(std::cell::Cell::get);
+    assert_eq!(walk.tally.count(Class::StyleContent), SHAPES as u64, "every cell names another colour, and each is told");
+    assert!(probes >= 2 * COLOURS as u64, "the two tables were made: {probes} colours looked at");
+    assert!(probes <= walk.steps(), "{probes} colours looked at, {} steps paid", walk.steps());
+    assert!(probes <= 2 * (COLOURS + SHAPES) as u64, "{probes} colours looked at for {COLOURS} colours and {SHAPES} cells");
+    // A colour of the fixed palette (0 to 23) and a colour written out need no table.
+    let fixed = damaged(&before, |doc| {
+        for id in 1..=SHAPES as u32 {
+            set_cell(shape_mut(doc, id), "FillForegnd", "2");
+        }
+    });
+    let other = damaged(&before, |doc| {
+        for id in 1..=SHAPES as u32 {
+            set_cell(shape_mut(doc, id), "FillForegnd", "#00ff00");
+        }
+    });
+    cells::COLOUR_PROBES.with(|probes| probes.set(0));
+    let mut table_free = compare::Compare::new(&fixed, &other, false, u64::MAX);
+    assert_eq!(table_free.run(), Ok(()));
+    assert_eq!(cells::COLOUR_PROBES.with(std::cell::Cell::get), 0, "the palette and a written colour are looked up in no table");
+    // A budget the first table does not fit stops the walk before the table is made.
+    cells::COLOUR_PROBES.with(|probes| probes.set(0));
+    let mut stopped = compare::Compare::new(&before, &after, false, 1_000);
+    assert_eq!(stopped.run(), Err(super::meter::Stop), "past its budget the comparison ends");
+    assert_eq!(cells::COLOUR_PROBES.with(std::cell::Cell::get), 0, "a table past the budget was not made");
+    assert!(stopped.steps() >= COLOURS as u64, "the table was charged before it was made: {} steps", stopped.steps());
+}
+
+/// **The timed twin of the two counted tests above** (the counted tests are the check; this one measures the same walks on the largest tables a reader allows, and is run by hand with `--ignored`): 65,536
+/// faces (the most the `.odg` reader keeps) and 20,000 cells that name one by its number, then 4,096 colours (the most a colour table holds) and 20,000 cells that name one. Before the fix the faces alone
+/// were 2.6 billion faces looked at; now each table is made once.
+#[test]
+#[ignore = "timed: run by hand with --ignored"]
+fn the_largest_tables_the_readers_allow_are_compared_in_seconds() {
+    let started = std::time::Instant::now();
+    let (before, after) = font_cells_that_name_faces_by_number(65_536, 20_000);
+    let mut faces = compare::Compare::new(&before, &after, false, u64::MAX);
+    assert_eq!(faces.run(), Ok(()));
+    assert_eq!(faces.tally.count(Class::TextFormatting), 20_000);
+    let (before, after) = colour_cells_that_name_colours_by_index(4_096, 20_000);
+    let mut colours = compare::Compare::new(&before, &after, false, u64::MAX);
+    assert_eq!(colours.run(), Ok(()));
+    assert_eq!(colours.tally.count(Class::StyleContent), 20_000);
+    assert!(started.elapsed() < std::time::Duration::from_secs(30), "took {:?}", started.elapsed());
 }
 
 /// **Finding 1.** The nodes a shape kept, in another order than the file's, are matched one by one, and the product of the two lengths is charged before the matching is made, over all the shapes: two

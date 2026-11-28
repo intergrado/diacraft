@@ -152,6 +152,30 @@ impl DiacraftApp {
         failure
     }
 
+    /// The view of the page on view as the frame after this one draws it, and the drawing area it is drawn in (the last frame's: only a frame knows a new area).
+    /// **The answer of a window command and `ui.inspect` read this, and not what the last frame painted**: a request is answered before the frame
+    /// that draws what it changed, so the rectangle the last frame drew (`canvas_report`) is the page as it was before a `view.pan` or `view.zoom` that came in
+    /// the same pass. A view made by Fit follows the area, as `canvas` makes it each frame; a page with no view yet is fitted, as the frame makes it.
+    pub fn shown_view(&self) -> Option<(View, Rect)> {
+        let page = self.ui.page?;
+        let area = self.ui.canvas_rect?;
+        let size = self.session().document().and_then(|d| page_settings(d, page)).map_or(page_drawing::DEFAULT_PAGE_INCHES, |s| s.size);
+        let view = match self.ui.views.get(&page) {
+            Some(view) if !view.fitted => *view,
+            _ => View::fit_page(area, size),
+        };
+        Some((view, area))
+    }
+
+    /// Where the page on view is on the screen as the frame after this one draws it, in points: `[left, top, width, height]` (see [`DiacraftApp::shown_view`]).
+    pub fn shown_page_rect(&self) -> Option<[f32; 4]> {
+        let (view, area) = self.shown_view()?;
+        let page = self.ui.page?;
+        let size = self.session().document().and_then(|d| page_settings(d, page)).map_or(page_drawing::DEFAULT_PAGE_INCHES, |s| s.size);
+        let r = view.page_rect(area, size);
+        Some([r.min.x, r.min.y, r.width(), r.height()])
+    }
+
     /// The point of the current page, in inches, under the screen point `at`, as the last frame drew the view.
     pub fn page_point_at(&self, at: egui::Pos2) -> Option<(f64, f64)> {
         let area = self.ui.canvas_rect?;

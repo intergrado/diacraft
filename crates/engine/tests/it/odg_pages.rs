@@ -129,8 +129,13 @@ fn the_last_page_cannot_be_taken_away_and_a_name_two_pages_would_share_is_refuse
     // The engine's own rule: a drawing keeps a page.
     run(&mut s, "page.delete", json!({ "id": second }));
     assert!(s.execute("page.delete", &json!({ "id": first })).is_err(), "the engine keeps the only page");
-    // Two pages under one name: refused by the save, in words that say what to do.
-    run(&mut s, "page.add", json!({ "name": "page1" }));
+    // The commands refuse a name another page has: the second page called `page1` comes into the model as it may from another program, and the save refuses two pages under
+    // one name, in words that say what to do.
+    assert!(s.execute("page.add", &json!({ "name": "page1" })).is_err(), "the command refuses the name");
+    s.edit("a name another program gave", |d| {
+        d.add_page(Some("page1")).map(|_| ()).map_err(|e| diacraft_engine::EngineError::Internal { cmd: "test".into(), msg: e.to_string() })
+    })
+    .unwrap();
     let words = refused(&mut s);
     assert!(words.contains("under one name") && words.contains("rename"), "{words}");
     // Renamed, the save is made.

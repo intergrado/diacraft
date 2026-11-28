@@ -103,7 +103,7 @@ impl Thumb {
             }
             let remaining = n - i;
             let allowance = BOX_POINTS + left.saturating_sub(BOX_POINTS * remaining) / remaining;
-            let paths: Vec<&Vec<P>> = item.outline.iter().filter(|p| p.len() >= 2).take(PATHS_PER_SHAPE).collect();
+            let paths: Vec<&Vec<P>> = item.painted_paths().filter(|p| p.len() >= 2).take(PATHS_PER_SHAPE).collect();
             let wanted: usize = paths.iter().map(|p| p.len().min(PATH_POINTS)).sum();
             let shown: Vec<Vec<P>> = if paths.is_empty() {
                 vec![box_of(&item.corners)]
@@ -115,8 +115,8 @@ impl Thumb {
             };
             // Simplified: drawn with less than its whole outline, whatever cut it (the budget, the 32 points of a path, the 8 paths of a shape).
             let drawn: usize = shown.iter().map(Vec::len).sum();
-            let whole: usize = item.outline.iter().filter(|p| p.len() >= 2).map(Vec::len).sum();
-            if !item.outline.is_empty() && drawn < whole {
+            let whole: usize = item.painted_paths().filter(|p| p.len() >= 2).map(Vec::len).sum();
+            if whole > 0 && drawn < whole {
                 simplified += 1;
             }
             for line in shown {
@@ -444,6 +444,32 @@ mod tests {
 
     fn area() -> Rect {
         Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0))
+    }
+
+    /// The picture of the page draws what the shape paints: a diamond's four corners, and when the shape paints nothing (no line and no fill) its box.
+    #[test]
+    fn a_shape_is_drawn_in_the_thumbnail_by_what_it_paints_and_by_its_box_when_it_paints_nothing() {
+        let mut session = diacraft_engine::Session::new();
+        session.execute("file.new", &json!({})).unwrap();
+        let page = session.document().unwrap().pages.get(0).unwrap().id;
+        let id = u32::try_from(
+            session.execute("shape.drop", &json!({"master": "diamond", "page": page, "x": 4.0, "y": 3.0})).unwrap()["id"].as_u64().unwrap(),
+        )
+        .unwrap();
+        let thumb = |session: &diacraft_engine::Session| {
+            let scene = Scene::build(session.document().unwrap(), page, session.revision()).unwrap();
+            let item = scene.get(id).unwrap();
+            let lines: Vec<Vec<P>> = Thumb::build(&scene, 0).lines.into_iter().map(|l| l.points).collect();
+            (lines, box_of(&item.corners))
+        };
+        let (lines, boxed) = thumb(&session);
+        assert_eq!(lines.len(), 1);
+        assert_ne!(lines[0], boxed, "the diamond, not its box");
+        for cell in ["LinePattern", "FillPattern"] {
+            session.execute("sheet.set_cell", &json!({"id": id, "page": page, "cell": cell, "formula": "0"})).unwrap();
+        }
+        let (lines, boxed) = thumb(&session);
+        assert_eq!(lines, vec![boxed], "a shape that paints nothing is its box");
     }
 
     #[test]

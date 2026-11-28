@@ -30,6 +30,7 @@
 mod ast;
 mod currency;
 mod error;
+mod page_refs;
 mod parser;
 mod print;
 
@@ -39,6 +40,7 @@ use std::sync::Arc;
 pub use ast::{BinaryOp, Call, CellRef, Expr, ImplicitMeasure, Index, Number, PERCENT_FUNCTION, Qualifier, Segment, UnaryOp};
 pub use currency::{CURRENCIES, Currency, currency_by_code, currency_by_id};
 pub use error::{ParseError, ParseErrorKind};
+pub use page_refs::{PageIndexSpan, page_index_spans};
 
 /// The longest formula read, in bytes. The spec gives no limit; 1 MiB is far beyond what files hold
 /// and keeps the work and the tree of one cell bounded.
@@ -75,6 +77,11 @@ impl Formula {
     /// Whether the text parsed.
     pub fn is_parsed(&self) -> bool {
         self.ast.is_ok()
+    }
+
+    /// Whether a call of `name`, in any letter case, is anywhere in the formula ([`Expr::calls`]). `false` for a text that did not parse: there is no tree to find it in.
+    pub fn calls(&self, name: &str) -> bool {
+        self.ast.as_ref().is_ok_and(|e| e.calls(name))
     }
 }
 

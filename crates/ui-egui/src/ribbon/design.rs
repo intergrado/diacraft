@@ -208,7 +208,7 @@ impl DiacraftApp {
     }
 
     /// The connectors among the shapes selected on the page on view, for a command that styles them.
-    fn selected_connectors(&mut self) -> Vec<u32> {
+    pub(crate) fn selected_connectors(&mut self) -> Vec<u32> {
         let Some((page, ids)) = self.selection_here() else { return Vec::new() };
         let ids = &ids[..ids.len().min(MAX_SELECTED)];
         let Some(doc) = self.session.document() else { return Vec::new() };

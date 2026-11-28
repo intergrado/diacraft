@@ -26,7 +26,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
              y: number, optional, inches from the page's bottom edge to the picture's middle; \
              width: number, optional, more than 0, the picture's width in inches (default: its own at 96 pixels to the inch, made to fit within 80 percent of the page, and in proportion when only \
              one of width and height is given); height: number, optional, more than 0, the picture's height in inches; \
-             page: whole number, optional, the id of the page (default: the first page). \
+             page: whole number, optional, the id of the page (default: the first page that is not a background). \
              The picture is a Foreign shape holding the file's bytes as they are (the same bytes held once however many shapes show them), on the active layers, in front, and is one undo step. \
              The pictures of a drawing hold at most 512 MiB between them",
             has_document,
@@ -79,8 +79,8 @@ pub(super) fn specs() -> Vec<CommandSpec> {
              field: text, the field of the category (creation, current, last_edit or print of date_time, page_number of page, width of geometry and so on, and for shape_data and user_cell the name \
              of one of the shape's rows), and not given for custom; \
              formula: text, only for custom, the ShapeSheet formula whose result the field shows; \
-             format: text, optional, the picture that turns the value into text (default: a date and time {<211>}, a length esc(7), an angle esc(12), a shape data row's own, else none, a text as it is \
-             and a number in plain digits, and FIELDPICTURE(n) is the text a format code stands for); \
+             format: text, optional, the picture that turns the value into text (default: a text @, a number esc(0), a date and time {<211>}, a length esc(7), an angle esc(12), a shape data row's \
+             own when it holds a picture, never none since an empty picture shows nothing, and a blank one is none given, and FIELDPICTURE(n) is the text a format code stands for); \
              at: whole number, optional, the character of the shape's text the field goes before, from 0, not counting its fields (default: the end); \
              page: whole number, optional, the id of the page (default: the first page with the shape). \
              The field is a fld of the text and a row of the shape's Field section, shows what its formula gives through its format, and is one undo step",
@@ -93,7 +93,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             ["Insert", "Text"],
             None,
             "id: whole number, optional, a shape: the Shape Data and User-defined Cells categories list its rows; \
-             page: whole number, optional, the id of the page (default: the first page with the shape, else the first page)",
+             page: whole number, optional, the id of the page (default: the first page with the shape, else the first page that is not a background)",
             has_document,
             field_choices
         ),
@@ -341,7 +341,7 @@ fn field_choices(s: &mut Session, p: &Value) -> Result<Value> {
     let page = match (id, optional_whole(p, "page", ID)?) {
         (_, Some(page)) => page,
         (Some(id), None) => page_for(doc, None, &[id], ID)?,
-        (None, None) => doc.pages.iter().next().map(|pg| pg.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
+        (None, None) => doc.first_foreground_page().map(|pg| pg.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
     };
     let mut categories = Vec::with_capacity(fields::CATEGORIES.len());
     for category in &fields::CATEGORIES {
@@ -384,7 +384,10 @@ fn update_fields(s: &mut Session, p: &Value) -> Result<Value> {
             (Some(page), []) => Scope::Page(page),
             (None, _) => Scope::All,
         };
+        let was = doc.clone();
         let done = fields::refresh(doc, scope, &env, true).map_err(|e| e.into_engine(ID))?;
+        // A field that now shows a longer text widens a shape sized to it: the connectors glued to it follow.
+        draw::route_recalculated_pages(doc, &was).map_err(|e| e.into_engine(ID))?;
         Ok((done, done.updated > 0))
     })?;
     Ok(json!({"updated": done.updated, "examined": done.examined, "skipped": done.skipped}))
@@ -400,7 +403,8 @@ fn insert_text(s: &mut Session, p: &Value) -> Result<Value> {
     s.edit_if("Insert text", |doc| {
         let at = match at {
             Some(at) => at,
-            None => draw::text_view(doc, page, id).map_or(0, |v| v.chars.chars().count()),
+            // The end of the text the shape shows: its own, or its master's when it holds none.
+            None => draw::shown_text_view(doc, page, id).map_or(0, |v| v.chars.chars().count()),
         };
         let changed = draw::set_text_range(doc, page, id, at, at, text).map_err(|e| e.into_engine(ID))?;
         Ok(((), changed))
@@ -426,7 +430,7 @@ fn insert_picture(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.document().ok_or_else(|| failed(ID, "no document open"))?;
     let page = match optional_whole(p, "page", ID)? {
         Some(page) => page,
-        None => doc.pages.iter().next().map(|pg| pg.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
+        None => doc.first_foreground_page().map(|pg| pg.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
     };
     // The size is looked at before a byte is read: a file past the most a picture may be is refused by its length.
     let path = std::path::Path::new(path);

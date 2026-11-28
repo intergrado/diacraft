@@ -132,6 +132,9 @@ pub struct Para {
     pub align: Option<Align>,
     /// Its runs, in order.
     pub runs: Vec<Run>,
+    /// The direction of the paragraph (S-R40): the cell's `textDirection`, which [`Label::set_direction`] gives each paragraph of a label read. Left to right until it is set, as a
+    /// label read says nothing of it itself.
+    pub direction: crate::style::TextDirection,
 }
 
 /// The first link of a label, when it is one DiaCraft keeps (S-R25): the scheme is `http:`, `https:`, `mailto:` or a page link.
@@ -165,6 +168,13 @@ impl Label {
             }
         }
         out
+    }
+
+    /// Gives each paragraph of the label the direction of the cell's `textDirection` (S-R40): the model's `Paragraph` rows are `Flags` 1 for right to left (`Para::direction.flags()`).
+    pub fn set_direction(&mut self, direction: crate::style::TextDirection) {
+        for para in &mut self.paras {
+            para.direction = direction;
+        }
     }
 
     /// Whether the label holds no text at all: no paragraph, or only empty ones.

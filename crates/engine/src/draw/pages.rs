@@ -33,7 +33,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use diacraft_doc::{DocError, Document, Kept, MAX_NAME_CHARS, MAX_PAGES, Page, RawAttrs, check_page_name};
+use diacraft_doc::{DocError, Document, Kept, MAX_PAGE_NAME_CHARS, MAX_PAGES, Page, RawAttrs, check_given_page_name, check_page_name, page_name_key};
 
 use super::Problem;
 
@@ -105,9 +105,14 @@ pub fn delete_page(doc: &mut Document, id: u32) -> Result<Deleted, Problem> {
 /// The error of a failure of the document model, as a command says it: a name that cannot be is the caller's.
 fn from_doc(error: DocError) -> Problem {
     match error {
-        DocError::EmptyName | DocError::NameTooLong | DocError::ControlCharacter | DocError::NoSuchPage(_) | DocError::BadName(_) => {
-            Problem::bad(error.to_string())
-        }
+        DocError::EmptyName
+        | DocError::NameTooLong
+        | DocError::PageNameTooLong
+        | DocError::PageNameReserved
+        | DocError::PageNameTaken
+        | DocError::ControlCharacter
+        | DocError::NoSuchPage(_)
+        | DocError::BadName(_) => Problem::bad(error.to_string()),
         other => Problem::failed(other.to_string()),
     }
 }
@@ -121,17 +126,23 @@ pub struct Duplicated {
 }
 
 /// The name a copy of the page called `name` is given: `name-2`, or the first `name-N` after it that no page has. A name that fails the rule for names (an
-/// imported one may) is replaced by `Page`, and one too long to take the number is cut short to leave room for it.
+/// imported one may) is replaced by `Page`, and one too long to take the number is cut short to leave room for it, so that **the copy's name has at most 31 characters**, as a name a
+/// command gives a page has (the copy is named by a command, and the page it is a copy of keeps the name its file gave it, however long).
 fn copy_name(doc: &Document, name: &str) -> Option<String> {
-    let taken: HashSet<&str> = doc.pages.iter().map(|p| &*p.name).collect();
+    let taken = taken_names(doc);
     let base = if check_page_name(name).is_ok() { name } else { "Page" };
     // A page more than the drawing holds has a name that is free.
     (2..=MAX_PAGES as u64 + 2).find_map(|n| {
         let tail = format!("-{n}");
-        let room = MAX_NAME_CHARS.saturating_sub(tail.chars().count());
+        let room = MAX_PAGE_NAME_CHARS.saturating_sub(tail.chars().count());
         let candidate: String = base.chars().take(room).chain(tail.chars()).collect();
-        (!taken.contains(candidate.as_str())).then_some(candidate)
+        (!taken.contains(&page_name_key(&candidate))).then_some(candidate)
     })
+}
+
+/// The names the pages have, `Name` and `NameU`, as the keys names are compared by (without regard to case): a name given to a new page is none of these.
+fn taken_names(doc: &Document) -> HashSet<String> {
+    doc.pages.iter().flat_map(|p| std::iter::once(&p.name).chain(p.name_u.as_ref())).map(|n| page_name_key(n)).collect()
 }
 
 /// The next `ID` a page added has: one past the highest.
@@ -149,7 +160,7 @@ pub fn duplicate_page(doc: &mut Document, from: u32) -> Result<Duplicated, Probl
     let source = doc.pages.get(at).ok_or_else(|| Problem::failed("the page went away"))?;
     // A picture or an object of a file is copied with the shapes: a save gives the copy's part the rows its shapes name.
     let name = copy_name(doc, &source.name).ok_or_else(|| Problem::failed("no name was left for the copy"))?;
-    check_page_name(&name).map_err(from_doc)?;
+    check_given_page_name(&name).map_err(from_doc)?;
     let mut copy = Page::clone(source);
     copy.id = id;
     copy.name = Arc::from(name.as_str());
@@ -166,8 +177,8 @@ pub fn duplicate_page(doc: &mut Document, from: u32) -> Result<Duplicated, Probl
 
 /// The name a background page added without one is given: `VBackground-N` for the first number from 1 that no page has taken.
 fn background_name(doc: &Document) -> Option<String> {
-    let taken: HashSet<&str> = doc.pages.iter().map(|p| &*p.name).collect();
-    (1..=MAX_PAGES as u64 + 1).map(|n| format!("VBackground-{n}")).find(|name| !taken.contains(name.as_str()))
+    let taken = taken_names(doc);
+    (1..=MAX_PAGES as u64 + 1).map(|n| format!("VBackground-{n}")).find(|name| !taken.contains(&page_name_key(name)))
 }
 
 /// The place a background page is put at: before the first page that is not a background, or at the end.
@@ -274,6 +285,9 @@ pub fn move_page(doc: &mut Document, id: u32, to: usize, renumber: bool) -> Resu
     order.insert(to, page);
     let mut renamed = 0;
     if renumber {
+        // A renumbering gives no page the name of another: the pages it does not name keep theirs, and a name it would give that one of them has is refused.
+        let kept: HashSet<String> =
+            doc.pages.iter().filter(|p| p.background || default_number(&p.name).is_none()).map(|p| page_name_key(&p.name)).collect();
         for (place, page) in order.iter_mut().enumerate() {
             if default_number(&page.name).is_none() {
                 continue;
@@ -281,6 +295,11 @@ pub fn move_page(doc: &mut Document, id: u32, to: usize, renumber: bool) -> Resu
             let name = format!("Page-{}", place + 1);
             if *page.name != *name {
                 check_page_name(&name)?;
+                if kept.contains(&page_name_key(&name)) {
+                    return Err(Problem::bad(format!(
+                        "renumbering would give a page the name \"{name}\", which another page has: rename that page first"
+                    )));
+                }
                 Arc::make_mut(page).name = Arc::from(name);
                 renamed += 1;
             }

@@ -137,7 +137,7 @@ fn peer(script: Vec<Act>) -> Peer {
         while !flag.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((stream, _)) => {
-                    // An accepted socket keeps the listener's non-blocking mode on macOS and the BSDs (not on Linux): `serve` reads blocking.
+                    // An accepted socket keeps the listener's non-blocking mode on macOS (not on Linux): `serve` reads blocking.
                     stream.set_nonblocking(false).unwrap();
                     let acts = Arc::clone(&acts);
                     std::thread::spawn(move || serve(stream, &acts));

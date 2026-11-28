@@ -134,6 +134,51 @@ pub(crate) enum P {
     FontFamilyAsian,
     FontNameComplex,
     FontFamilyComplex,
+    // The languages: the three triplets of a run's three script types, the Latin one, the Asian one and the complex one, each a language, a script, a country and
+    // a full tag. A `LangID` is read from them (`props::language_of`), and they are held beside it with the attributes no cell reads.
+    Language,
+    Script,
+    Country,
+    RfcTag,
+    LanguageAsian,
+    ScriptAsian,
+    CountryAsian,
+    RfcTagAsian,
+    LanguageComplex,
+    ScriptComplex,
+    CountryComplex,
+    RfcTagComplex,
+}
+
+impl P {
+    /// The four properties of the triplet of a script type, as language, script, country and full tag.
+    pub(crate) fn triplet(slot: diacraft_fonts::script::FontSlot) -> [P; 4] {
+        use diacraft_fonts::script::FontSlot;
+        match slot {
+            FontSlot::Latin => [P::Language, P::Script, P::Country, P::RfcTag],
+            FontSlot::Asian => [P::LanguageAsian, P::ScriptAsian, P::CountryAsian, P::RfcTagAsian],
+            FontSlot::Complex => [P::LanguageComplex, P::ScriptComplex, P::CountryComplex, P::RfcTagComplex],
+        }
+    }
+
+    /// Whether the property is one of the twelve of the language triplets.
+    pub(crate) fn is_language(self) -> bool {
+        matches!(
+            self,
+            P::Language
+                | P::Script
+                | P::Country
+                | P::RfcTag
+                | P::LanguageAsian
+                | P::ScriptAsian
+                | P::CountryAsian
+                | P::RfcTagAsian
+                | P::LanguageComplex
+                | P::ScriptComplex
+                | P::CountryComplex
+                | P::RfcTagComplex
+        )
+    }
 }
 
 /// The properties of `style:graphic-properties` the model maps, by namespace and name.
@@ -205,6 +250,18 @@ const TEXT: &[(Ns, &str, P)] = &[
     (Ns::Style, "font-family-asian", P::FontFamilyAsian),
     (Ns::Style, "font-name-complex", P::FontNameComplex),
     (Ns::Style, "font-family-complex", P::FontFamilyComplex),
+    (Ns::Fo, "language", P::Language),
+    (Ns::Fo, "script", P::Script),
+    (Ns::Fo, "country", P::Country),
+    (Ns::Style, "rfc-language-tag", P::RfcTag),
+    (Ns::Style, "language-asian", P::LanguageAsian),
+    (Ns::Style, "script-asian", P::ScriptAsian),
+    (Ns::Style, "country-asian", P::CountryAsian),
+    (Ns::Style, "rfc-language-tag-asian", P::RfcTagAsian),
+    (Ns::Style, "language-complex", P::LanguageComplex),
+    (Ns::Style, "script-complex", P::ScriptComplex),
+    (Ns::Style, "country-complex", P::CountryComplex),
+    (Ns::Style, "rfc-language-tag-complex", P::RfcTagComplex),
 ];
 
 /// The attribute of `style:text-properties` the property `p` is, by namespace and local name, when the model maps it: what a held spelling names ([`super::held`]).
@@ -472,6 +529,11 @@ fn is_px(typed: &Typed) -> bool {
 /// the cell of a property it does not set has nothing to say of it. The keywords are those `props.rs` reads (`property_value` there counts the same ones).
 fn unread_value(p: P, prop: &Prop) -> bool {
     use super::typed::{LineHeight, Spacing};
+    // **The languages are read into a cell and held all the same**: a run's `LangID` is made of one of three triplets, so the
+    // other two have no cell, a tag the three cannot say rides beside them, and a file writes back as it was read while the cell is unchanged.
+    if p.is_language() {
+        return true;
+    }
     match &prop.typed {
         Typed::Length(None)
         | Typed::Percent(None)
@@ -1659,6 +1721,12 @@ impl Resolved {
 
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Whether the chain gives any of the twelve language properties. They are the last of the text properties by their order ([`P`]) and the text properties the last of all, so the last entry
+    /// says it: no walk.
+    pub(crate) fn has_language(&self) -> bool {
+        self.entries.last().is_some_and(|((kind, p), _)| *kind == Kind::Text && p.is_language())
     }
 
     /// Every property the chain gives, and where.

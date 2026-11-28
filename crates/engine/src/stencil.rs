@@ -13,6 +13,14 @@
 //! is a plain `0`, and a share of 1 is `Width` or `Height`. A flowchart master may also keep a slant or a rounded end the same size
 //! while the box grows: `Width-Height*0.25` is a vertex a quarter of the height in from the right, at any width.
 //!
+//! **Fixed lengths follow the page's drop scale** (owner 2026-11-27; `docs/editing-commands.md`). A master dropped on a page whose
+//! drawing scale is beyond the range of eight of its own keeps its size on paper, and a figure must look the same on paper as at 1:1, so **a length a master's formulas hold as a constant (the
+//! head of a lifeline, a rounded box's corner, a package's tab, the markers of BPMN, the label bands of C4) is written times the factor the drop wrote**: `0.4*IF(DropOnPageScale>0,DropOnPageScale,1)`
+//! on a shape of one piece, and `0.4*IF(Sheet.5!DropOnPageScale>0,Sheet.5!DropOnPageScale,1)` in a member of a group, which no drop writes a factor on. A cell found nowhere reads
+//! 0, so the formula falls back to 1 where there is none, and a drawing whose root style has no such cell keeps the lengths it had. The one place that makes the text is `Co::formula` for the
+//! coordinates of an outline and of a connection point, `scaled!` for a table of member frames, and `dress` for the margin of a container (`group_master::drop_factor` is the factor). A share of
+//! the width or the height already follows the size and is written as it was, and so is anything that is no length: a ratio, an angle, a count, a text size or a line weight.
+//!
 //! **Connection points**: rows of the `Connection` section, `IX` 0 up, each with `X`,
 //! `Y`, `DirX`, `DirY` (the way a connector leaves) and `Type` 0. Every two-dimensional master has at least four, and each lies on its outline.
 //!
@@ -43,6 +51,15 @@
 use std::sync::{Arc, LazyLock};
 
 use diacraft_doc::{Cell, CellName, DocError, Document, Links, Master, Row, Section, Shape, ShapeList, ShapeType, Sheet, Value};
+
+/// A length of a member's frame that follows the page's drop scale, as the text of a formula: `scaled!("0.08")` is `0.08*IF(Sheet.5!DropOnPageScale>0,Sheet.5!DropOnPageScale,1)`
+/// (a drop beyond the range of eight writes the factor on the group, `Sheet.5`, and no member holds one). A table of frames is `&'static str`, so the
+/// text is made at compile time; `group_master::drop_factor` holds the same text (a test says they are one). Only a length is written so: a share of the group's width or height is not.
+macro_rules! scaled {
+    ($length:literal) => {
+        concat!($length, "*IF(Sheet.5!DropOnPageScale>0,Sheet.5!DropOnPageScale,1)")
+    };
+}
 
 mod arrows;
 mod bpmn;
@@ -81,6 +98,7 @@ mod uml_component;
 mod uml_sequence;
 mod uml_state;
 mod uml_usecase;
+mod unique;
 pub mod xfunc;
 
 pub(crate) use bring::left_out_words;
@@ -88,12 +106,13 @@ pub use bring::{Brought, Identity, MAX_BRING_NODES, Refusal, bring_master, find_
 pub use callout::{CALLOUT_HEIGHT, CALLOUT_TEXT, CALLOUT_WIDTH, CalloutStyle, STYLES as CALLOUT_STYLES, find_style as find_callout_style};
 pub(crate) use callout::{CalloutFrame, callout_shape, free_tip_cells, tied_tip_cells};
 pub(crate) use drawn::{DrawnFrame, drawn_shape};
+pub(crate) use unique::repair_old_ids;
 // The words a family's table is written in (STENCIL2): the family modules import them from here, and a stub names none yet.
 #[allow(unused_imports)]
 pub(crate) use dress::{CharRow, Dress, FieldDef, FieldKind, FieldText, More, PartKind, Role, TextSpec};
 pub use icon::{IconFormat, IconInfo, IconProblem, MAX_ICON_BYTES, decode as decode_icon, inspect as inspect_icon};
 pub(crate) use instance::drop_group_master;
-pub use instance::{MAX_LISTED_MEMBERS, OpenedDrop, drop_opened};
+pub use instance::{MAX_LISTED_MEMBERS, OpenedDrop, drop_opened, drop_opened_following};
 #[allow(unused_imports)]
 pub(crate) use look::{ConnectorLook, Flag, LineEnd, Route};
 pub use opened::{
@@ -125,6 +144,10 @@ pub const FLOWCHART_NAME: &str = "Basic Flowchart";
 ///
 /// The value is `w * Width + h * Height + min * MIN(Width,Height) + k + rs * MIN(rad, MIN(Width,Height) * 0.25)`. The last term is **the corner radius**: a rounded box keeps a corner of
 /// `rad` inches until the box is smaller than four of them, and then the corner follows the box (`kit::rounded_box`). A coordinate holds at most one radius.
+///
+/// **The two lengths follow the page's drop scale**: the value is the one at the master's own scale, and the formula writes `k` and `rad` as
+/// `k*<factor>` and `MIN(rad*<factor>,...)`, the factor being the `DropOnPageScale` that a drop beyond the range of eight writes (`group_master::drop_factor`), so that a fixed length is as long
+/// on paper at every scale as it is on the master's. A share of the box already follows the box, and is written as it was.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Co {
     w: f64,
@@ -179,8 +202,10 @@ impl Co {
         self.w * width + self.h * height + self.min * least + self.k + corner
     }
 
-    /// The formula, or `None` when there is no term of the box: a plain constant (0, or a fixed length). A share of 1 is the bare name: `Width`, `Width-Height*0.5`.
-    fn formula(self) -> Option<String> {
+    /// The formula, or `None` when there is no length at all: the plain constant 0. A share of 1 is the bare name: `Width`, `Width-Height*0.5`. **A fixed length or a corner radius is written
+    /// times the factor of the drop scale** (`of`): `Width-0.2*IF(DropOnPageScale>0,DropOnPageScale,1)`, `0.4*IF(...)` for a length alone.
+    fn formula(self, of: Factor) -> Option<String> {
+        let factor = drop_factor(of);
         let mut text = String::new();
         for (k, name) in [(self.w, "Width"), (self.h, "Height"), (self.min, "MIN(Width,Height)")] {
             if k == 0.0 {
@@ -211,21 +236,29 @@ impl Co {
                 text.push_str(&number_text(self.rs.abs()));
                 text.push('*');
             }
-            text.push_str(&format!("MIN({},MIN(Width,Height)*0.25)", number_text(self.rad)));
-        }
-        if text.is_empty() {
-            return None;
+            text.push_str(&format!("MIN({}*{factor},MIN(Width,Height)*0.25)", number_text(self.rad)));
         }
         if self.k != 0.0 {
-            text.push(if self.k < 0.0 { '-' } else { '+' });
-            text.push_str(&number_text(self.k.abs()));
+            if text.is_empty() {
+                text.push_str(&number_text(self.k));
+            } else {
+                text.push(if self.k < 0.0 { '-' } else { '+' });
+                text.push_str(&number_text(self.k.abs()));
+            }
+            text.push('*');
+            text.push_str(factor);
         }
-        Some(text)
+        (!text.is_empty()).then_some(text)
     }
 
-    /// The cell: a length formula with the value it gives at the default size, or the constant (0, or a fixed length).
-    fn cell(self, width: f64, height: f64) -> Cell {
-        self.formula().map_or_else(|| length(self.k), |f| length_formula(&f, self.value(width, height)))
+    /// Whether the coordinate is a fixed length and nothing else: no share of the box and no corner radius.
+    fn is_fixed(self) -> bool {
+        self.w == 0.0 && self.h == 0.0 && self.min == 0.0 && self.rs == 0.0
+    }
+
+    /// The cell: a length formula with the value it gives at the default size, or the constant 0.
+    fn cell(self, width: f64, height: f64, of: Factor) -> Cell {
+        self.formula(of).map_or_else(|| length(self.k), |f| length_formula(&f, self.value(width, height)))
     }
 }
 
@@ -376,7 +409,7 @@ const fn pc(x: Co, y: Co, dx: f64, dy: f64) -> Point {
     Point { x, y, dx, dy }
 }
 
-use group_master::MemberSpec;
+use group_master::{Factor, MemberSpec, drop_factor};
 use kit::SIDES;
 
 /// Vertices of a regular pentagon fitted to its box: the golden ratio gives 0.809, 0.191 and 0.618.
@@ -588,6 +621,55 @@ pub fn all_masters() -> impl Iterator<Item = &'static MasterSpec> {
     stencils().iter().flat_map(|s| s.masters.iter())
 }
 
+/// What the table of the built-in masters' `BaseID`s holds of each: the shipped stencil that holds the master (none for a hidden master, a line end), and the master.
+type GuidEntry = (Option<&'static str>, &'static MasterSpec);
+
+/// The built-in masters' `BaseID`s (`MasterSpec::guid`, in capitals), each with what [`GuidEntry`] says. One table, made once.
+fn guid_table() -> &'static std::collections::HashMap<String, GuidEntry> {
+    static TABLE: LazyLock<std::collections::HashMap<String, GuidEntry>> = LazyLock::new(|| {
+        let mut table = std::collections::HashMap::new();
+        for stencil in stencils() {
+            for master in stencil.masters() {
+                // The first stencil that holds a master names it, which is the stencil it is in when it is in one only.
+                table.entry(master.guid().to_ascii_uppercase()).or_insert((Some(stencil.id), master));
+            }
+        }
+        for master in line_ends::MASTERS.iter() {
+            table.entry(master.guid().to_ascii_uppercase()).or_insert((None, master));
+        }
+        table
+    });
+    &TABLE
+}
+
+/// The id of the shipped built-in stencil that holds the master whose `BaseID` (or `UniqueID`, as 0.2.3 and the first builds of 0.2.4 wrote it: the same text) is `guid` (`MasterSpec::guid`,
+/// compared whole, in any case, with white space round it), if one does: what a drawing's masters say about the stencils they came from. A master that is in no stencil
+/// (the hidden line ends) is none's.
+pub(crate) fn stencil_of_guid(guid: &str) -> Option<&'static str> {
+    // No built-in guid is longer than 38 characters (`{D1AC0001-0000-4000-8000-000000000001}`): a longer text is none of them and is not copied.
+    if guid.len() > 64 {
+        return None;
+    }
+    guid_table().get(&guid.trim().to_ascii_uppercase()).and_then(|(stencil, _)| *stencil)
+}
+
+/// The built-in master whose `BaseID` is exactly `guid`, shipped or hidden: **the text as DiaCraft wrote it** (capitals, braces, no white space), and no other spelling of it. What the repair
+/// of a master of the old form asks (`unique::repair_old_ids`), which acts on the text 0.2.3 wrote and on nothing that only looks like it.
+pub(crate) fn builtin_of_guid(guid: &str) -> Option<&'static MasterSpec> {
+    // `{D1AC0001-0000-4000-8000-000000000001}`: 38 characters, and the first of the form a built-in master has (a cheap look before the table).
+    if guid.len() != 38 || !guid.starts_with("{D1AC") {
+        return None;
+    }
+    let (_, spec) = guid_table().get(guid)?;
+    (spec.guid() == guid).then_some(*spec)
+}
+
+/// Whether `guid` is the `BaseID` of a built-in master, shipped or hidden (compared as [`stencil_of_guid`] does): a master that holds one is a built-in master of some build, whatever `UniqueID`
+/// that build gave it, and a copy of it in another drawing is the same master by it alone.
+pub(crate) fn is_builtin_guid(guid: &str) -> bool {
+    guid.len() <= 64 && guid_table().contains_key(&guid.trim().to_ascii_uppercase())
+}
+
 /// A built-in master by its exact id, shipped or hidden: what [`More::brings`] names.
 fn find_any(id: &str) -> Option<&'static MasterSpec> {
     all_masters().chain(line_ends::MASTERS.iter()).find(|m| m.id == id)
@@ -653,8 +735,9 @@ impl MasterSpec {
         self.points.len()
     }
 
-    /// The `UniqueID` and `BaseID` of this master: fixed, so a drawing that already holds the master is found again (a copy keeps its `BaseID`).
-    /// Ours: no spec gives a form. `{D1AC<series as four hex digits>-0000-4000-8000-<ordinal as twelve>}`: Basic Shapes are `D1AC0001`, Basic
+    /// The `BaseID` of this master, which is also the `UniqueID` that 0.2.3 and the first builds of 0.2.4 wrote for it ([`MasterSpec::unique_id`] is the one written now): fixed, so a
+    /// drawing that already holds the master is found again (a copy keeps its `BaseID`). Ours: no spec gives a form.
+    /// `{D1AC<series as four hex digits>-0000-4000-8000-<ordinal as twelve>}`: Basic Shapes are `D1AC0001`, Basic
     /// Flowchart `D1AC0002`, each numbered from 1, and the second batch's stencils series 9 to 21 and the hidden line ends 22. Series 1 to 9 spell the text they had when the form was
     /// `D1AC000<series>`, so no saved drawing loses its masters (a series past 9 has more than one digit, which that form could not hold as a GUID).
     pub(crate) fn guid(&self) -> String {
@@ -666,7 +749,13 @@ impl MasterSpec {
     /// (`IX` 0 up). A shape dropped from the master has them there, whatever its place on the page (`shape.drop` gives it the master's size). What the window's drop
     /// preview passes the snap as the new shape's own places ([`crate::snap::dropped_points`]).
     pub fn connection_offsets(&self) -> Vec<(f64, f64)> {
-        self.points.iter().map(|p| (p.x.value(self.width, self.height), p.y.value(self.width, self.height))).collect()
+        self.connection_offsets_at(self.width, self.height)
+    }
+
+    /// [`MasterSpec::connection_offsets`] for a box of `width` by `height`: the places that follow the size (shares of it) move with it, a fixed distance does not. A drop beyond the
+    /// range of eight of the page's drawing scale has the master's size times the ratio.
+    pub fn connection_offsets_at(&self, width: f64, height: f64) -> Vec<(f64, f64)> {
+        self.points.iter().map(|p| (p.x.value(width, height), p.y.value(width, height))).collect()
     }
 
     /// Whether the master is one-dimensional: a connector, or a figure that is drawn along a line (`Fixed1D`). Its ends glue and it has a width and no height; the AutoConnect strip never
@@ -704,9 +793,34 @@ impl MasterSpec {
         xfunc::is_part(self.id) || self.dress().is_some_and(|d| matches!(d.role, Role::Part(_)))
     }
 
-    /// Whether the AutoConnect strip may offer this master: it is no connector, no part of a structure, and in a stencil that feeds the strip.
+    /// Whether the master is a container (the container role of its dress: a package, a subject): a shape dropped inside it joins it, and the AutoConnect strip passes over it.
+    pub fn is_container(&self) -> bool {
+        self.dress().is_some_and(|d| matches!(d.role, Role::Container { .. }))
+    }
+
+    /// Whether a drop of this master makes a structure of several shapes of its own (BPMN's Pool: a frame, a list of lanes and a lane) and not one shape of the master: the checks that drop a
+    /// master and look at the one shape it makes pass it over, and its own tests look at the structure.
+    pub fn makes_structure(&self) -> bool {
+        self.part_kind() == Some(PartKind::Pool)
+    }
+
+    /// What part of a structure the master is, when its drop is put in one: BPMN's Pool and Lane (their dress says so). The Swimlane and the Separator of the Cross-Functional Flowchart stencil are
+    /// parts by their ids (`xfunc::is_part`) and say none here.
+    pub(crate) fn part_kind(&self) -> Option<PartKind> {
+        match self.dress().map(|d| d.role) {
+            Some(Role::Part(kind)) => Some(kind),
+            _ => None,
+        }
+    }
+
+    /// Whether the AutoConnect strip may offer this master: it is no connector, no part of a structure, no container, **no shape that no connector joins** (a title or a key: the strip adds
+    /// a shape and joins it to the one it came from), and in a stencil that feeds the strip.
     pub fn on_strip(&self) -> bool {
-        !self.is_connector() && !self.is_part() && stencils().iter().filter(|s| !s.feeds_strip()).all(|s| s.masters.iter().all(|m| m.id != self.id))
+        !self.is_connector()
+            && !self.is_part()
+            && !self.is_container()
+            && !self.dress().is_some_and(|d| matches!(d.role, Role::Pointless))
+            && stencils().iter().filter(|s| !s.feeds_strip()).all(|s| s.masters.iter().all(|m| m.id != self.id))
     }
 
     /// Where the text goes.
@@ -755,10 +869,13 @@ pub fn find_master_in(stencil: &StencilSpec, key: &str) -> Option<&'static Maste
     stencil.masters.iter().find(|m| simple(m.id) == wanted || simple(m.name) == wanted)
 }
 
-/// A number as the text of a value: rounded to nine places, so that arithmetic noise (`0.30000000000000004`) is not kept.
+/// A number as the text of a value: rounded to nine places, so that arithmetic noise (`0.30000000000000004`) is not kept. **A zero is `0`, whichever way it came**: a negative zero
+/// (`-0.0`, or a number a hair below 0 that the rounding takes to it, which is what a point of a route carried into a connector's own frame and out again is) is no `-0` in a cell,
+/// where it would be noise in a file, and the difference between two writes of one route that is none.
 pub fn number_text(n: f64) -> String {
     let rounded = (n * 1.0e9).round() / 1.0e9;
-    Value::from_number(if rounded.is_finite() { rounded } else { 0.0 }).map_or_else(|| "0".to_owned(), |v| v.text().to_owned())
+    let rounded = if rounded.is_finite() && rounded != 0.0 { rounded } else { 0.0 };
+    Value::from_number(rounded).map_or_else(|| "0".to_owned(), |v| v.text().to_owned())
 }
 
 /// A length constant, in inches.
@@ -800,6 +917,18 @@ fn row(ix: u32, row_type: Option<&str>, cells: Vec<(&str, Cell)>) -> Arc<Row> {
     Arc::new(row)
 }
 
+/// A row of a text section (`Character`, `Paragraph`) keyed by `IX`, holding `cells`; **a row past the first is whole**: it holds every cell
+/// `diacraft_doc::root_text::row_cells` names for its section, those `cells` leaves out with the value the renderer assumes. A style holds row 0 alone, so a reader of the file takes nothing for a
+/// cell such a row lacks from anywhere else, and reads it as 0: a `FontScale` of 0 piles the letters of a run on one another. Row 0 leans on the
+/// styles, as the rows of files do.
+fn text_row(section: &str, ix: u32, cells: Vec<(&str, Cell)>) -> Arc<Row> {
+    let mut made = row(ix, None, cells);
+    if ix >= 1 {
+        diacraft_doc::root_text::complete_row_cells(section, &mut Arc::make_mut(&mut made).cells);
+    }
+    made
+}
+
 /// A `Geometry` section with its five flags: `NoFill` is 1 for a path that only strokes, and the others are 0.
 fn flagged_section(ix: u32, fill: bool) -> Section {
     let mut section = Section::new("Geometry", Some(ix));
@@ -827,33 +956,37 @@ fn ellipse_row(ix: u32, w: f64, h: f64) -> Arc<Row> {
 
 /// The ratio `D` of an elliptical arc whose semi-axes are `rx` along the box's x and `ry` along its y (`D` is the length of the
 /// axis the angle `C` points along over the other's). A formula of the two, so that the arc stays a half-ellipse as the box is resized.
-fn ratio_cell(rx: Co, ry: Co, w: f64, h: f64) -> Cell {
+fn ratio_cell(rx: Co, ry: Co, w: f64, h: f64, of: Factor) -> Cell {
     let (a, b) = (rx.value(w, h), ry.value(w, h));
     let value = if b == 0.0 { 1.0 } else { a / b };
-    match (rx.formula(), ry.formula()) {
+    // Two fixed lengths are in a ratio that the factor of the drop scale leaves as it is: a plain number.
+    if rx.is_fixed() && ry.is_fixed() {
+        return plain(value);
+    }
+    match (rx.formula(of), ry.formula(of)) {
         (Some(top), Some(bottom)) => Cell::with_formula(&format!("({top})/({bottom})"), Some(Value::from_text(&number_text(value)))),
         _ => plain(value),
     }
 }
 
-/// The row of a segment. The axis angle `C` of an arc is 0 (the box's x axis); its ratio `D` is 1 for a circle.
-fn seg_row(ix: u32, seg: &Seg, w: f64, h: f64) -> Arc<Row> {
-    let at = |x: &Co, y: &Co| [("X", x.cell(w, h)), ("Y", y.cell(w, h))];
+/// The row of a segment. The axis angle `C` of an arc is 0 (the box's x axis); its ratio `D` is 1 for a circle. A fixed length in it follows the drop scale through the factor `of` reads.
+fn seg_row(ix: u32, seg: &Seg, w: f64, h: f64, of: Factor) -> Arc<Row> {
+    let at = |x: &Co, y: &Co| [("X", x.cell(w, h, of)), ("Y", y.cell(w, h, of))];
     let arc = |kind: &str, to: &Xy, via: &Xy, ratio: Cell| {
         let [x, y] = at(&to.0, &to.1);
-        row(ix, Some(kind), vec![x, y, ("A", via.0.cell(w, h)), ("B", via.1.cell(w, h)), ("C", plain(0.0)), ("D", ratio)])
+        row(ix, Some(kind), vec![x, y, ("A", via.0.cell(w, h, of)), ("B", via.1.cell(w, h, of)), ("C", plain(0.0)), ("D", ratio)])
     };
     match seg {
         Seg::Move(x, y) => row(ix, Some("MoveTo"), at(x, y).into()),
         Seg::Line(x, y) => row(ix, Some("LineTo"), at(x, y).into()),
         Seg::Arc { to, via } => arc("EllipticalArcTo", to, via, plain(1.0)),
-        Seg::Half { to, via, rx, ry } => arc("EllipticalArcTo", to, via, ratio_cell(*rx, *ry, w, h)),
+        Seg::Half { to, via, rx, ry } => arc("EllipticalArcTo", to, via, ratio_cell(*rx, *ry, w, h, of)),
         Seg::Ellipse => ellipse_row(ix, w, h),
     }
 }
 
 /// One `Geometry` section from a path: `IX` `ix`, the flags it says, and its rows (at most `rows_left`, the rest of the master's [`MAX_ROWS`]). → the section.
-fn path_section(ix: u32, path: (bool, &[Seg], &Flag, &Flag), (w, h): (f64, f64), rows_left: &mut usize) -> Section {
+fn path_section(ix: u32, path: (bool, &[Seg], &Flag, &Flag), (w, h): (f64, f64), of: Factor, rows_left: &mut usize) -> Section {
     let (fill, segs, no_show, no_line) = path;
     let mut section = flagged_section(ix, fill);
     if !matches!(no_show, Flag::Off) {
@@ -867,19 +1000,19 @@ fn path_section(ix: u32, path: (bool, &[Seg], &Flag, &Flag), (w, h): (f64, f64),
             break;
         }
         *rows_left -= 1;
-        section.rows.push(seg_row(u32::try_from(i + 1).unwrap_or(u32::MAX), seg, w, h));
+        section.rows.push(seg_row(u32::try_from(i + 1).unwrap_or(u32::MAX), seg, w, h, of));
     }
     section
 }
 
 /// The sections of paths in a list, `IX` 0 up, within the caps of one master.
-fn path_sections(paths: &[(bool, &[Seg], &Flag, &Flag)], size: (f64, f64)) -> Vec<Section> {
+fn path_sections(paths: &[(bool, &[Seg], &Flag, &Flag)], size: (f64, f64), of: Factor) -> Vec<Section> {
     let mut rows_left = MAX_ROWS;
     paths
         .iter()
         .take(MAX_SECTIONS)
         .enumerate()
-        .map(|(n, path)| path_section(u32::try_from(n).unwrap_or(u32::MAX), *path, size, &mut rows_left))
+        .map(|(n, path)| path_section(u32::try_from(n).unwrap_or(u32::MAX), *path, size, of, &mut rows_left))
         .collect()
 }
 
@@ -891,16 +1024,17 @@ fn spec_paths(paths: &'static [PathSpec]) -> Vec<(bool, &'static [Seg], &'static
 /// The `Geometry` sections of a master: `IX` 0 up, each one path, `NoFill` 0 for a path that takes the fill. A master made by code is held to [`MAX_SECTIONS`] sections and [`MAX_ROWS`] rows
 /// in all (the catalogue test, [`caps_problem`], fails a master that goes past them, and a build never does).
 fn geometry(spec: &MasterSpec) -> Vec<Section> {
-    outline_sections(&spec.outline, (spec.width, spec.height))
+    outline_sections(&spec.outline, (spec.width, spec.height), Factor::Shape)
 }
 
-/// The `Geometry` sections an outline draws in a box of `w` by `h`: a master's own, or a member's of a group master.
-fn outline_sections(outline: &Outline, (w, h): (f64, f64)) -> Vec<Section> {
+/// The `Geometry` sections an outline draws in a box of `w` by `h`: a master's own, or a member's of a group master. A fixed length in one is written times the factor of the drop scale that `of`
+/// says where to read: the shape's own, or the group's for a member.
+fn outline_sections(outline: &Outline, (w, h): (f64, f64), of: Factor) -> Vec<Section> {
     match outline {
         Outline::Connector(_) => {
             let mut section = flagged_section(0, false);
-            section.rows.push(seg_row(1, &Seg::Move(fw(0.0), fh(0.0)), w, h));
-            section.rows.push(seg_row(2, &Seg::Line(fw(1.0), fh(0.0)), w, h));
+            section.rows.push(seg_row(1, &Seg::Move(fw(0.0), fh(0.0)), w, h, of));
+            section.rows.push(seg_row(2, &Seg::Line(fw(1.0), fh(0.0)), w, h, of));
             vec![section]
         }
         Outline::Ellipse => {
@@ -920,11 +1054,11 @@ fn outline_sections(outline: &Outline, (w, h): (f64, f64)) -> Vec<Section> {
             }
             vec![section]
         }
-        Outline::Paths { paths, .. } | Outline::Fixed1D { paths, .. } => path_sections(&spec_paths(paths), (w, h)),
+        Outline::Paths { paths, .. } | Outline::Fixed1D { paths, .. } => path_sections(&spec_paths(paths), (w, h), of),
         Outline::Code { build, .. } => {
             let built = build();
             let paths: Vec<(bool, &[Seg], &Flag, &Flag)> = built.iter().map(|p| (p.fill, p.segs.as_slice(), &p.no_show, &p.no_line)).collect();
-            path_sections(&paths, (w, h))
+            path_sections(&paths, (w, h), of)
         }
         // A group has no geometry of its own: its members draw (`group_master`).
         Outline::Group { .. } => Vec::new(),
@@ -982,18 +1116,18 @@ pub(crate) fn caps_problem(spec: &MasterSpec) -> Option<String> {
 
 /// The `Connection` section: a row for each point, `IX` 0 up, at most [`MAX_POINTS`].
 fn connections(spec: &MasterSpec) -> Section {
-    connection_section(spec.points, (spec.width, spec.height))
+    connection_section(spec.points, (spec.width, spec.height), Factor::Shape)
 }
 
-/// The `Connection` section of `points` in a box of `w` by `h`.
-fn connection_section(points: &[Point], (w, h): (f64, f64)) -> Section {
+/// The `Connection` section of `points` in a box of `w` by `h`; a fixed distance in one follows the drop scale by the factor `of` reads.
+fn connection_section(points: &[Point], (w, h): (f64, f64), of: Factor) -> Section {
     let mut section = Section::new("Connection", None);
     for (i, p) in points.iter().take(MAX_POINTS).enumerate() {
         let ix = u32::try_from(i).unwrap_or(u32::MAX);
         section.rows.push(row(
             ix,
             None,
-            vec![("X", p.x.cell(w, h)), ("Y", p.y.cell(w, h)), ("DirX", plain(p.dx)), ("DirY", plain(p.dy)), ("Type", plain(0.0))],
+            vec![("X", p.x.cell(w, h, of)), ("Y", p.y.cell(w, h, of)), ("DirX", plain(p.dx)), ("DirY", plain(p.dy)), ("Type", plain(0.0))],
         ));
     }
     section
@@ -1051,13 +1185,13 @@ fn master_shape(spec: &MasterSpec) -> Shape {
     let text = if orgchart::is_position(spec) {
         Some(Arc::new(orgchart::decorate(spec, &mut sheet)))
     } else {
-        spec.dress().and_then(|dress| dress::decorate(dress, &mut sheet)).map(Arc::new)
+        spec.dress().and_then(|dress| dress::decorate(dress, &mut sheet, Factor::Shape)).map(Arc::new)
     };
     let (kind, children) = match &spec.outline {
         Outline::Group { members, .. } => (ShapeType::Group, ShapeList::from_vec(group_master::build_members(spec, members))),
         _ => (ShapeType::Shape, ShapeList::default()),
     };
-    Shape {
+    let mut shape = Shape {
         id: MASTER_SHAPE_ID,
         name: Some(Arc::from(spec.name)),
         name_u: Some(Arc::from(spec.name)),
@@ -1066,7 +1200,11 @@ fn master_shape(spec: &MasterSpec) -> Shape {
         text,
         children,
         ..Shape::new(MASTER_SHAPE_ID)
-    }
+    };
+    // A text a cell of the master holds says `STR` (the unit of a string): the master's cells are the ones an instance inherits, and a program that reads the `U`
+    // takes a text with none for a number it cannot read. The tables say it where they make a cell, and this is what no table forgot.
+    shape.fit_string_units();
+    shape
 }
 
 /// Whether a sheet holds a formula that has no value yet: a cell a dress or a flag gave as a formula alone.
@@ -1107,17 +1245,16 @@ fn build_master(spec: &MasterSpec, id: u32) -> Master {
     for name in ["PageScale", "DrawingScale"] {
         put(&mut page_sheet.cells, name, length(1.0));
     }
-    let guid = spec.guid();
     let mut raw = diacraft_doc::RawAttrs::new();
-    raw.push("BaseID", &guid);
+    raw.push("BaseID", &spec.guid());
     if spec.is_hidden() {
         raw.push("Hidden", "1");
     }
+    // The `UniqueID` is made last, from what the master holds (`unique.rs`): the `BaseID` is the fixed identity and the `UniqueID` tells the master apart from every other in the first three groups.
     let mut master = Master {
         id,
         name: Some(Arc::from(spec.name)),
         name_u: Some(Arc::from(spec.name)),
-        unique_id: Some(Arc::from(guid.as_str())),
         pattern_flags: Some(line_ends::pattern_flags(spec)),
         sheet: Arc::new(page_sheet),
         raw,
@@ -1127,6 +1264,7 @@ fn build_master(spec: &MasterSpec, id: u32) -> Master {
     if master.shapes.iter().any(|shape| shape_has_unsettled(shape)) {
         master = settle_values(master);
     }
+    master.unique_id = Some(Arc::from(unique::unique_id_of(spec, &master).as_str()));
     master
 }
 
@@ -1139,14 +1277,17 @@ pub(crate) fn dropped_text(spec: &MasterSpec) -> Option<diacraft_doc::Text> {
 const MAX_BRING_DEPTH: usize = 4;
 
 /// The `ID` of the master `spec` is in `doc`, copying the master in when the document has none of it. Whether it has is decided by the one
-/// matcher ([`find_same_master`]): a built-in master's `UniqueID` and `BaseID` are the same fixed GUID, and a master of the
-/// document that has that `UniqueID` and another `BaseID` is another master, so the copy gets a `UniqueID` of its own then.
+/// matcher ([`find_same_master`]): a built-in master is known by its fixed `BaseID`, and by a `UniqueID` of the same text, which is what 0.2.3 and the first builds of 0.2.4 wrote
+/// for it (the `UniqueID` of a master this build makes is another, `unique.rs`: a drawing of either kind is found by the `BaseID`). A master of the document that has that `UniqueID` and another
+/// `BaseID` is another master, and the copy keeps its own `UniqueID` unless the first three groups of it are another master's (`bring::unique_id_for`).
 /// **The masters it brings** (`More::brings`: a connector's line end) are copied in first, each by the same rule.
 pub fn ensure_master(doc: &mut Document, spec: &MasterSpec) -> Result<u32, DocError> {
     ensure_master_within(doc, spec, MAX_BRING_DEPTH)
 }
 
 fn ensure_master_within(doc: &mut Document, spec: &MasterSpec, depth: usize) -> Result<u32, DocError> {
+    // The probe names the master by the text it had in drawings of earlier builds (a `UniqueID` that is the `BaseID`'s text) and by its `BaseID`: the one a build now makes is no key, which a
+    // drawing of an earlier build does not hold and which costs the master built to make.
     let guid = spec.guid();
     let mut probe = Master { unique_id: Some(Arc::from(guid.as_str())), ..Master::default() };
     probe.raw.push("BaseID", &guid);

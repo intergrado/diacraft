@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use diacraft_doc::{Cell, CellName, Row, Section, Sheet, Text, TextPart, Value};
 
+use super::dress::TEXT_FORMAT;
 use super::{MasterSpec, More, Outline, SIDES, length, plain, put};
 use crate::formatting::Rgb;
 
@@ -90,10 +91,12 @@ fn look_of(at: u16) -> Look {
     }
 }
 
+/// A cell that holds a number as text (`0`, `0001`): no unit.
 fn text_cell(text: &str) -> Cell {
     Cell::constant(Value::from_text(text))
 }
 
+/// A cell that holds a string (the label, the prompt, the format, a field's text): `STR`.
 fn string_cell(text: &str) -> Cell {
     text_cell(text).with_unit("STR")
 }
@@ -126,11 +129,11 @@ fn property_section(name: &str, title: &str) -> Section {
             row,
             vec![
                 ("Value", string_cell(value)),
-                ("Label", text_cell(label)),
-                ("Prompt", text_cell(prompt)),
+                ("Label", string_cell(label)),
+                ("Prompt", string_cell(prompt)),
                 ("Type", text_cell("0")),
-                ("Format", text_cell("")),
-                ("SortKey", text_cell(&format!("{:04}", i + 1))),
+                ("Format", string_cell("")),
+                ("SortKey", string_cell(&format!("{:04}", i + 1))),
                 ("Invisible", text_cell("0")),
                 ("Verify", text_cell("0")),
                 ("Calendar", text_cell("0")),
@@ -146,18 +149,20 @@ fn field_section(name: &str, title: &str) -> Section {
     for (ix, (formula, shown)) in [("Prop.Name", name), ("Prop.Title", title)].into_iter().enumerate() {
         let mut row = Row { ix: Some(u32::try_from(ix).unwrap_or(0)), ..Row::default() };
         row.cells.insert(CellName::new("Value"), Cell::with_formula(formula, Some(Value::from_text(shown))).with_unit("STR"));
-        row.cells.insert(CellName::new("Format"), text_cell(""));
+        // The picture of a text: the text as it is (`FIELDPICTURE(37)`); an empty one shows nothing.
+        row.cells.insert(CellName::new("Format"), string_cell(TEXT_FORMAT));
         row.cells.insert(CellName::new("Type"), text_cell("0"));
         section.rows.push(Arc::new(row));
     }
     section
 }
 
-/// The `Character` section: the name bold at 10 points, the title at 8 (a size is in inches, 1/72 to the point).
+/// The `Character` section: the name bold at 10 points, the title at 8 (a size is in inches, 1/72 to the point). The title's row is whole (`super::text_row`): a
+/// reader of the file takes none of its cells from the styles, which hold row 0 alone.
 fn character_section() -> Section {
     let mut section = Section::new("Character", None);
-    section.rows.push(super::row(0, None, vec![("Size", length(10.0 / 72.0)), ("Style", plain(1.0))]));
-    section.rows.push(super::row(1, None, vec![("Size", length(8.0 / 72.0)), ("Style", plain(0.0))]));
+    section.rows.push(super::text_row("Character", 0, vec![("Size", length(10.0 / 72.0)), ("Style", plain(1.0))]));
+    section.rows.push(super::text_row("Character", 1, vec![("Size", length(8.0 / 72.0)), ("Style", plain(0.0))]));
     section
 }
 

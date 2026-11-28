@@ -7,6 +7,13 @@
 //! `epaint_default_fonts` by name. The constant for the icon font is never referenced, so its bytes are not
 //! in the binary. A test in xtask reads Cargo.lock and fails if `epaint` depends on `epaint_default_fonts`,
 //! which is what the feature adds on any member and target; `NOTICE` lists what is in the binary.
+//!
+//! **A character no face has is a box, never a panic.** egui's `MissingGlyphPolicy` is `Tofu` unless something sets `Panic`, and nothing in the window, the desktop app or the
+//! web shell does: only `egui_kittest` does, so that a test window fails on a word of ours that holds such a character. A test that gives the window a person's text lays it out as
+//! shipped (`tests/it/glyphs.rs`, `tests/it/support.rs::as_shipped`). Every proportional chain ends with Hack, so the characters Hack has and Ubuntu Light lacks (the arrows of a
+//! status-bar notice) are drawn by the bundled faces alone, which are the only faces the web build loads.
+
+mod script_faces;
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -32,15 +39,17 @@ const MAX_UI_FACE_BYTES: usize = 8 << 20;
 /// The platform logos excluded from the bundled interface font set must stay excluded after an upgrade.
 const LOGOS: [char; 5] = ['\u{E618}', '\u{E61F}', '\u{E624}', '\u{E625}', '\u{F8FF}'];
 
-/// The always-available definitions: Ubuntu Light for text, with Hack first for monospace.
+/// The always-available definitions: Ubuntu Light for text with Hack behind it, and Hack first for monospace.
 pub fn font_definitions() -> FontDefinitions {
     let mut definitions = FontDefinitions::empty();
     definitions.font_data.insert(HACK.to_owned(), Arc::new(FontData::from_static(epaint_default_fonts::HACK_REGULAR)));
     definitions.font_data.insert(UBUNTU_LIGHT.to_owned(), Arc::new(FontData::from_static(epaint_default_fonts::UBUNTU_LIGHT)));
-    definitions.families.insert(FontFamily::Proportional, vec![UBUNTU_LIGHT.to_owned()]);
+    // Hack behind Ubuntu Light, for the characters Ubuntu Light lacks and Hack has: the arrows, the box-drawing and block characters, more of the geometric shapes. It is in the
+    // binary already, so the module is no larger; a character neither has is a box (egui's `Tofu`, which eframe keeps), and no letter of the proportional text moves.
+    definitions.families.insert(FontFamily::Proportional, vec![UBUNTU_LIGHT.to_owned(), HACK.to_owned()]);
     // Ubuntu Light after Hack, for the characters Hack lacks (a square root, say), as egui's own default does.
     definitions.families.insert(FontFamily::Monospace, vec![HACK.to_owned(), UBUNTU_LIGHT.to_owned()]);
-    definitions.families.insert(strong_family(), vec![UBUNTU_LIGHT.to_owned()]);
+    definitions.families.insert(strong_family(), vec![UBUNTU_LIGHT.to_owned(), HACK.to_owned()]);
     definitions
 }
 
@@ -53,7 +62,7 @@ pub fn font_definitions_with(db: &FontDb) -> FontDefinitions {
         let Some(regular) = interface_face(db, family, false) else { continue };
         let regular_name = format!("{family}-UI-Regular");
         insert_face(&mut definitions, &regular_name, &regular);
-        let regular_chain = vec![regular_name, UBUNTU_LIGHT.to_owned()];
+        let regular_chain = vec![regular_name, UBUNTU_LIGHT.to_owned(), HACK.to_owned()];
         let mut strong_chain = regular_chain.clone();
         if let Some(bold) = interface_face(db, family, true) {
             let bold_name = format!("{family}-UI-Bold");
@@ -64,6 +73,8 @@ pub fn font_definitions_with(db: &FontDb) -> FontDefinitions {
         definitions.families.insert(strong_family(), strong_chain);
         break;
     }
+    // A face for Arabic and one for Hebrew, behind the others, for the text box (`script_faces.rs`).
+    script_faces::add_script_faces(db, &mut definitions);
     definitions
 }
 

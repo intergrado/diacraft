@@ -501,9 +501,10 @@ fn page_routing_reports_what_the_page_holds_and_the_defaults() {
 fn connector_path_gives_the_corners_in_paper_inches() {
     for scaled in [false, true] {
         let (mut s, c) = if scaled {
-            // The same drawing on a page of a scale of 10, made after the scale: the corners are paper's, whatever the cells hold.
+            // The same drawing on a page of a scale of 4, made after the scale: the corners are paper's, whatever the cells hold. (A scale of 4 is within the range of eight of the
+            // masters' own, so the shapes keep their size in the drawing; at 10 a drop keeps the master's size on paper, and the cells would say the same thing.)
             let mut s = blank_session();
-            run(&mut s, "page.scale", json!({"paper": 1, "paper_unit": "in", "drawing": 10, "drawing_unit": "in"}));
+            run(&mut s, "page.scale", json!({"paper": 1, "paper_unit": "in", "drawing": 4, "drawing_unit": "in"}));
             let a = drop_shape(&mut s, "rectangle", 3.0, 4.0);
             let b = drop_shape(&mut s, "rectangle", 9.0, 6.0);
             let c = id_of(&run(&mut s, "connector.add", json!({"from": {"id": a, "point": 3}, "to": {"id": b, "point": 1}})));
@@ -514,8 +515,8 @@ fn connector_path_gives_the_corners_in_paper_inches() {
         };
         let said = run(&mut s, "connector.path", json!({"id": c}));
         let points: Vec<(f64, f64)> = said["points"].as_array().unwrap().iter().map(|p| (num(&p[0]), num(&p[1]))).collect();
-        // (A rectangle is 1.5 inches across in the drawing, so 0.15 on a page of a scale of 10: its right and left points are 0.075 from its pin.)
-        let (out, back) = if scaled { (0.075, 0.075) } else { (0.75, 0.75) };
+        // (A rectangle is 1.5 inches across in the drawing, so 0.375 on a page of a scale of 4: its right and left points are 0.1875 from its pin.)
+        let (out, back) = if scaled { (0.1875, 0.1875) } else { (0.75, 0.75) };
         let want = [(3.0 + out, 4.0), (6.0, 4.0), (6.0, 6.0), (9.0 - back, 6.0)];
         assert!(points.len() == 4 && points.iter().zip(want).all(|(g, w)| near(g.0, w.0) && near(g.1, w.1)), "scaled {scaled}: {points:?}");
         assert_eq!(

@@ -36,6 +36,10 @@
 //!    the new index says and the index's ordinals must be those elements, each once; **and the start tags the save wrote attributes on are read
 //!    back**: each names no attribute twice, by namespace and local name, and each attribute written is there and is read by the
 //!    reader's own parser for it (`read::readback`). A package that does not check is an error and the caller never sees it.
+//! 6. **No part made names an attribute twice** (found by the hostile-file sweeps). The scan of tags sees no attribute and the read-back of the tags written on skips the
+//!    `xmlns` declarations, so a start tag that declared a prefix twice went out as a file the reader refuses, and the save said it had saved it. Each XML part the save changes or adds
+//!    ([`archive`]), and a flat document made ([`flat`]), is looked through for a start tag that names an attribute, a declaration included, twice ([`unique`]): a refusal in words that
+//!    name the part and no file made. The writers declare a prefix of their own on a tag once ([`splice::Splicer::declare`]), so the check is the backstop and not the way they are right.
 //!
 //! **The kind of package** ([`media`]): a template (`.otg`) is saved as a template, with every rule above, and a drawing as a drawing.
 //! [`WriteOptions::variant`] asks for a kind, which is always stated: the other kind changes the media type in the two places a package states it,
@@ -69,18 +73,21 @@
 //! copied, elements walked, edits made, attributes written, shapes and cells compared. A cap passed is [`WriteError::Limit`] and the caller's file
 //! is untouched: the writer returns bytes, and writes no file.
 
+mod alt;
 mod archive;
 mod attrs;
 mod comments;
 mod compare;
 mod convert;
 mod count;
+mod dash;
 mod emit;
 mod first;
 mod flat;
 mod frame;
 pub(crate) mod fx;
 mod geometry;
+mod glue;
 pub(crate) mod groups;
 mod held;
 pub(crate) mod kept;
@@ -91,15 +98,17 @@ mod marker_art;
 mod markers;
 mod media;
 mod meta;
+mod mirrors;
 mod model;
 pub(crate) mod newstyles;
 mod objects;
 mod outline;
-mod own;
+pub(crate) mod own;
 mod pages;
 mod parts;
 mod picture;
 mod plan;
+pub(crate) mod poly;
 mod route;
 pub(crate) mod runs;
 mod scan;
@@ -109,6 +118,7 @@ mod structure;
 pub(crate) use self::model::style_group_of_cells;
 pub use self::model::{model_refusal, without_carried_objects};
 pub(crate) use self::scan::is_legacy;
+pub use self::shapes::rows_are_listed_glue;
 pub(crate) use self::structure::Structure;
 /// For the Kani harnesses of the crate (`crate::kani_proofs`).
 #[cfg(kani)]
@@ -124,6 +134,7 @@ mod stylemap;
 mod styles;
 mod text;
 mod transform;
+mod unique;
 mod zero;
 
 use std::collections::{HashMap, HashSet};
@@ -510,6 +521,10 @@ pub enum WriteError {
     /// A group of a page that the save cannot write as it is: `why` in words, and the group named by the page it is on (its name, and `page_nth` among the pages of that name) and
     /// its number among the groups with no name of that page (`nth`), so that a person can find it and name it.
     Group { page: String, page_nth: u32, nth: u32, why: &'static str },
+    /// A group of a flat drawing that holds data of its own: a cell beyond what its markup gives it, a section, or a title and description it was given or changed. A package keeps that data in
+    /// DiaCraft's document file, **a flat file has no such file**, and the flat save wrote none of it and called the change no edit; it is refused in words instead, with nothing written. The group is named
+    /// by the page it is on (its name, and `page_nth` among the pages of that name) and by its own `name` (empty for a group with none) and its number `nth` among the groups of that name.
+    FlatGroup { page: String, page_nth: u32, name: String, nth: u32 },
 }
 
 impl WriteError {
@@ -525,7 +540,7 @@ impl WriteError {
             WriteError::SelfCheck(_) => "write_self_check",
             WriteError::MediaType(_) => "write_media_type",
             WriteError::Carried { .. } => "carried_entry_refused",
-            WriteError::Group { .. } => "write_unsupported",
+            WriteError::Group { .. } | WriteError::FlatGroup { .. } => "write_unsupported",
         }
     }
 }
@@ -550,6 +565,21 @@ impl fmt::Display for WriteError {
                     "saving does not yet write this change: {why}; it is the group with no name numbered {nth} on the page \"{page}\"{page_place}"
                 )
             }
+            WriteError::FlatGroup { page, page_nth, name, nth } => {
+                // The names are the file's: cut, and escaped, so that the sentence stays whole and no control character reaches a log or a dialog.
+                let shown = |text: &str| crate::error::shown(text).escape_debug().to_string();
+                let page_place = if *page_nth > 1 { format!(" (the page numbered {page_nth} of that name)") } else { String::new() };
+                let group = match (name.is_empty(), *nth > 1) {
+                    (true, _) => format!("the group with no name numbered {nth}"),
+                    (false, false) => format!("the group \"{}\"", shown(name)),
+                    (false, true) => format!("the group \"{}\" numbered {nth} of that name", shown(name)),
+                };
+                write!(
+                    f,
+                    "{group} on the page \"{}\"{page_place} has data of its own, and a flat file keeps none of it: put the data on a shape beside the group, or save the drawing as a .diacraft file, which holds it",
+                    shown(page)
+                )
+            }
         }
     }
 }
@@ -570,6 +600,9 @@ pub struct WriteWork {
     pub elements_walked: u64,
     /// Bytes of start tags looked at for their attributes.
     pub attribute_bytes: u64,
+    /// Bytes of the parts a save made that were read through for a start tag that names an attribute twice or declares a prefix twice: counted apart from the
+    /// scans, and held to [`Limits::max_write_bytes`] on their own.
+    pub checked_name_bytes: u64,
     /// Bytes copied: of the parts the splice wrote between its edits, and of the entries copied or replaced.
     pub bytes_copied: u64,
     /// Bytes of text the edits wrote.
@@ -736,6 +769,7 @@ impl Default for WriteWork {
             scan_bytes: 0,
             elements_walked: 0,
             attribute_bytes: 0,
+            checked_name_bytes: 0,
             bytes_copied: 0,
             bytes_written: 0,
             comment_bytes_held: 0,
@@ -1061,7 +1095,8 @@ pub fn write_counted(
         declared = layers::native_with(&report.native, &diff.new_layers, &diff.layer_flags, own, &own_flags, work)?;
         &declared
     };
-    diff.docfile = crate::ext::docfile::plan(doc, &baseline, native, &diff.structure, old_file.as_deref(), limits, work)?;
+    let elements = crate::ext::docfile::Elements { st: &diff.structure, held: original.index, fresh: &report.index };
+    diff.docfile = crate::ext::docfile::plan(doc, &baseline, native, &elements, old_file.as_deref(), limits, work)?;
     // The style sheets the file lacks: each is an empty common style of `styles.xml` (`newstyles.rs`), and the document file carries its sheet.
     diff.styles = newstyles::plan(doc, &baseline, &work.file_styles, &mut work.cells_compared, work.model_path).map_err(WriteError::Unsupported)?;
     // The names a shape's parent is written with: for a shape of the file whose links changed, and for a new shape whose links name a style sheet.
@@ -1373,6 +1408,8 @@ struct PartOut {
     tier2: Vec<(usize, u32, Arc<crate::ext::payload::Tier2>)>,
     /// The shapes whose text was edited: the page's place in the document, the element's ordinal after the save, and how many paragraphs the model has.
     read_back: Vec<ReadBack>,
+    /// The ends of connectors of the file that the save glued or took off their shapes: the file made is read again and each is held to the glue the model has.
+    glued: Vec<GluedBack>,
 }
 
 /// A shape whose text was edited, as the read of the file made is asked about it.
@@ -1550,10 +1587,80 @@ fn edited(opened: &mut Opened<'_>, original: &OriginalPackage<'_>, saving: Savin
     check_made_texts(&bytes, false, &outs, limits, work)?;
     check_read_back(&bytes, &outs, limits, work)?;
     check_tier2(&bytes, &outs, limits, work)?;
+    check_glue(&bytes, &outs, limits, work)?;
     check_made_kids(&bytes, false, &outs, limits, work)?;
     check_made_markers(&bytes, false, &outs, limits, work)?;
     newstyles::check(&bytes, doc, &newstyles::Expect { plan: Some(&diff.styles), links: newstyles::links_written(diff) }, &index, limits, work)?;
     Ok(Written { bytes, index, notes, edited: true, work: work.clone() })
+}
+
+/// An end of a connector of the file that the save glued, or took off its shape, as the file made is to read it: the page's place in the document, the connector's
+/// ordinal after the save, which end, and what it is glued to after the save (the shape's ordinal and the part, as `ToPart` says it), or `None` for an end the file must read free.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GluedBack {
+    page_at: usize,
+    connector: u32,
+    start: bool,
+    to: Option<(u32, u32)>,
+}
+
+/// What the file made says of the glue of one page: the `ID` each element ordinal reads as, and the page's glue by the connector's `ID` and the end (the begin first): the shape's
+/// `ID` and the part.
+type PageGlue = (HashMap<u32, u32>, HashMap<(u32, bool), (u32, u32)>);
+
+/// The glue of the page at `page_at` of the file made, indexed once: one pass over the page's shapes and connections, counted.
+fn page_glue(doc: &Document, report: &crate::ReadReport, page_at: usize, limits: &Limits, work: &mut WriteWork) -> Result<PageGlue, WriteError> {
+    let failed = |words: &str| WriteError::SelfCheck(words.to_owned());
+    let shapes = report.index.page(page_at).ok_or_else(|| failed("a page whose connector was glued is not read again"))?;
+    let page = doc.pages.get(page_at).ok_or_else(|| failed("a page whose connector was glued is not read again"))?;
+    work.charge_steps(shapes.ordinal_map().len().saturating_add(page.connects.len()))?;
+    let ids: HashMap<u32, u32> = shapes.ordinal_map().iter().map(|(id, ord)| (*ord, *id)).collect();
+    let mut glue: HashMap<(u32, bool), (u32, u32)> = HashMap::new();
+    glue.try_reserve(page.connects.len()).map_err(|_| too_much_memory(limits))?;
+    for c in page.connects.iter() {
+        if let (Some(start), Some(part)) = (compare::end_named(c.from_cell.as_deref()), c.to_part) {
+            glue.entry((c.from_sheet, start)).or_insert((c.to_sheet, part));
+        }
+    }
+    Ok((ids, glue))
+}
+
+/// Reads the file made again and holds each end the save glued to what the model says: the connector has a connection for the end, to the shape and the part the
+/// save named, or has none when the end was taken off its shape. **This is what makes a glue the save numbered wrongly (a point of a shape the file numbers another way) a refused save and
+/// never a connector glued to another point.** A package past the most the read back reads is left unchecked, as the other checks leave it.
+fn check_glue(bytes: &[u8], outs: &[(PartKind, PartOut)], limits: &Limits, work: &mut WriteWork) -> Result<(), WriteError> {
+    use std::collections::hash_map::Entry;
+    if !outs.iter().any(|(_, out)| !out.glued.is_empty()) || bytes.len() > MOST_READ_BACK {
+        return Ok(());
+    }
+    let failed = |words: &str| WriteError::SelfCheck(words.to_owned());
+    work.charge_scan(bytes.len(), limits)?;
+    work.read_back_bytes = work.read_back_bytes.saturating_add(bytes.len() as u64);
+    let (doc, report) = crate::read::read(bytes, limits).map_err(|e| WriteError::SelfCheck(format!("the file made does not read again: {e}")))?;
+    // Each page asked about is indexed once.
+    let mut pages: HashMap<usize, PageGlue> = HashMap::new();
+    for (_, out) in outs {
+        for g in &out.glued {
+            work.charge_steps(1)?;
+            let (ids, glue) = match pages.entry(g.page_at) {
+                Entry::Occupied(held) => held.into_mut(),
+                Entry::Vacant(room) => room.insert(page_glue(&doc, &report, g.page_at, limits, work)?),
+            };
+            let connector = ids.get(&g.connector).ok_or_else(|| failed("a connector the save glued is not read again"))?;
+            let want = match g.to {
+                None => None,
+                Some((ordinal, part)) => {
+                    Some((*ids.get(&ordinal).ok_or_else(|| failed("a shape the save glued a connector to is not read again"))?, part))
+                }
+            };
+            if glue.get(&(*connector, g.start)).copied() != want {
+                return Err(failed(
+                    "a connector end the save glued is not read back glued as the model has it (to the shape and the point the save named): the glue point the file numbers it by is another",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The paragraphs written on a shape: the page's place in the part, the element's ordinal after the save, and each paragraph with the text it reads as.
@@ -1587,6 +1694,7 @@ pub(crate) struct PageOutputs {
     kid_edits: Vec<PagedAttrs>,
     tier2: Vec<(usize, u32, Arc<crate::ext::payload::Tier2>)>,
     new_tags: Vec<EditedTag>,
+    glued: Vec<GluedBack>,
 }
 
 impl PageOutputs {
@@ -1596,7 +1704,7 @@ impl PageOutputs {
         let (scan_at, now_at) = at;
         // A new connector's targets are given ids of the form `id` and a number above the largest the part holds; a page's shapes take as many as there are connections
         // at most, and the next page's go on from there, so that no id is given twice in a part that several pages changed.
-        editor.max_id = editor.max_id.saturating_add(diff.new_connects.len() as u64);
+        editor.max_id = editor.max_id.saturating_add(diff.new_connects.len() as u64).saturating_add(diff.glue.len() as u64);
         for change in diff.shapes.iter().filter(|c| c.text.is_some()) {
             let now = done.new_ord.get(change.ord as usize).copied().unwrap_or(0);
             let paras: Vec<(usize, String)> = change.text.iter().flat_map(|t| t.written()).collect();
@@ -1646,6 +1754,29 @@ impl PageOutputs {
         }
         for (ordinal, carried) in done.new_tier2 {
             self.tier2.push((diff.page_at, ordinal, carried));
+        }
+        // The ends of connectors of the file that were glued or taken off their shapes: where each connector and each shape it is glued to stands after the save (a shape the model made
+        // stands after the elements of the file, at the place its number among the new shapes gives).
+        if !diff.glue.is_empty() {
+            let pseudo = done.new_ord.len().saturating_sub(diff.new.len());
+            let new_at: HashMap<u32, usize> = diff.new.iter().enumerate().map(|(k, n)| (n.shape.id, k)).collect();
+            for edit in &diff.glue {
+                let Some(connector) = done.new_ord.get(edit.ord as usize).copied().filter(|o| *o != 0) else { continue };
+                let to = match edit.to {
+                    None => None,
+                    Some(to) => {
+                        let after = match to.at {
+                            compare::Joined::Ord(o) => done.new_ord.get(o as usize).copied(),
+                            compare::Joined::New(id) => new_at.get(&id).and_then(|k| done.new_ord.get(pseudo.saturating_add(*k))).copied(),
+                        };
+                        match after.filter(|o| *o != 0) {
+                            Some(o) => Some((o, to.part)),
+                            None => continue,
+                        }
+                    }
+                };
+                self.glued.push(GluedBack { page_at: diff.page_at, connector, start: edit.start, to });
+            }
         }
         for (ordinal, attrs) in &done.new_tags {
             self.new_tags.extend(attrs.iter().filter(|_| *ordinal != 0).map(|(ns, local)| EditedTag {
@@ -1739,7 +1870,10 @@ fn splice_part(
     let structural = content && part_ctx.structure.any();
     let restyled = pages.iter().any(|p| p.shapes.iter().any(|s| s.style.is_some() || s.text.is_some() || s.tier2.is_some()) || !p.new.is_empty())
         || (content && part_ctx.added.iter().any(|p| !p.new.is_empty()));
-    let wants_book = restyled || pages.iter().any(|p| !p.deleted.is_empty()) || (content && !part_ctx.structure.deleted.is_empty());
+    let puts_styles = restyled || pages.iter().any(|p| !p.deleted.is_empty()) || (content && !part_ctx.structure.deleted.is_empty());
+    // **A connector of the file glued to a shape is numbered by the shape's style** (`diacraft:glue="own"` says the shape's glue ids start at its own points): the styles of the
+    // part are looked at for it, and none is written.
+    let wants_book = puts_styles || pages.iter().any(|p| p.glue.iter().any(|g| g.to.is_some()));
     let mut others: Vec<(Fam, String)> = part_ctx.taken.to_vec();
     // **The names the file's shapes held for their automatic styles**: the model writer writes a style under the name its shape held while the shape's style is as it
     // was, so no style the save makes anew takes such a name.
@@ -1762,7 +1896,7 @@ fn splice_part(
         .iter()
         .flat_map(|p| {
             let (PageSource::Page(at) | PageSource::MasterPage(at)) = p.source;
-            p.shapes.iter().filter(|s| s.text.is_some() || s.geo.is_some()).map(move |s| (at, s.ord))
+            p.shapes.iter().filter(|s| s.text.is_some() || s.geo.is_some() || s.alt.is_some() || s.glue_rows.is_some()).map(move |s| (at, s.ord))
         })
         .collect();
     // The styles of `styles.xml` are looked at for the markers they name when a marker may be taken out.
@@ -1837,7 +1971,7 @@ fn splice_part(
     } else {
         body.as_ref().map(|b| scan::RootChild { start: b.start, scope: b.scope, qname: b.qname.clone(), declares: b.declares })
     };
-    let auto = auto_styles_at(auto, anchor, wants_book)?;
+    let auto = auto_styles_at(auto, anchor, puts_styles)?;
     let office = if flat {
         children.get(crate::flat::Child::Body.rank()).and_then(Option::as_ref).and_then(|c| c.qname.split_once(':')).map(|(p, _)| p.to_owned())
     } else {
@@ -1880,6 +2014,7 @@ fn splice_part(
         common_text: String::new(),
         kept: shapes::KeptMarkup::default(),
         doc: part_ctx.doc,
+        resolver: diacraft_doc::Resolver::new(part_ctx.doc),
         commons: common_names.iter().cloned().collect(),
         rich: None,
         part_names: None,
@@ -1901,7 +2036,7 @@ fn splice_part(
     if structural {
         structure::apply(&mut editor, &mut out, &scan_pages, drawing_scope, part_ctx, &ord_map)?;
     }
-    let PageOutputs { applied, gone, new_ords, texts, inserted, zero: zeros, read_back, kid_edits, tier2, new_tags } = out;
+    let PageOutputs { applied, gone, new_ords, texts, inserted, zero: zeros, read_back, kid_edits, tier2, new_tags, glued } = out;
     let (mut masters_inserted, mut masters_removed) = (Vec::new(), Vec::new());
     match kind {
         // The pages of `content.xml` that were resized name their master page.
@@ -1984,6 +2119,7 @@ fn splice_part(
             restructured,
             tier2,
             read_back,
+            glued,
         },
     ))
 }
@@ -2679,6 +2815,9 @@ fn check_tier2(bytes: &[u8], outs: &[(PartKind, PartOut)], limits: &Limits, work
     // search of the page for each shape that carries tier 2 was a pass over the page for each of them, counted and not held to a cap).
     type PageIndex<'a> = (HashMap<u32, u32>, HashMap<u32, &'a diacraft_doc::Shape>);
     let mut pages: HashMap<usize, PageIndex<'_>> = HashMap::new();
+    // The `Connect` rows of a page, by what a glued end of a segment held as a polyline is carried as: made once for a page that has such a shape.
+    type GlueKey<'a> = (u32, bool, u32, Option<u32>, Option<u32>, &'a str);
+    let mut glue_sets: HashMap<usize, std::collections::HashSet<GlueKey<'_>>> = HashMap::new();
     for (_, out) in outs {
         for (page_at, ordinal, carried) in &out.tier2 {
             work.order_steps = work.order_steps.saturating_add(1);
@@ -2709,6 +2848,37 @@ fn check_tier2(bytes: &[u8], outs: &[(PartKind, PartOut)], limits: &Limits, work
                     "a shape that carries tier 2 is not read back as the model has it: {what} of the shape with ID {}",
                     read.id
                 )));
+            }
+            // The glue of a segment the file holds as a polyline is a `Connect` row of the page, which the read makes of what the shape carries.
+            if !carried.connects.is_empty() {
+                if !glue_sets.contains_key(page_at) {
+                    let page = doc.pages.get(*page_at).ok_or_else(|| failed("a page whose shape carries tier 2 is not read again"))?;
+                    work.charge_steps(page.connects.len())?;
+                    let set = page
+                        .connects
+                        .iter()
+                        .map(|c| {
+                            (
+                                c.from_sheet,
+                                c.from_cell.as_deref() == Some("BeginX"),
+                                c.to_sheet,
+                                c.to_part,
+                                c.from_part,
+                                c.to_cell.as_deref().unwrap_or_default(),
+                            )
+                        })
+                        .collect();
+                    glue_sets.insert(*page_at, set);
+                }
+                let set = glue_sets.get(page_at).ok_or_else(|| failed("a page whose shape carries tier 2 is not read again"))?;
+                for glue in &carried.connects {
+                    if !set.contains(&(read.id, glue.begin, glue.to_sheet, glue.to_part, glue.from_part, glue.to_cell.as_str())) {
+                        return Err(failed(&format!(
+                            "a segment's glue is not read back as a connection of the page, of the shape with ID {}",
+                            read.id
+                        )));
+                    }
+                }
             }
         }
     }
@@ -2897,6 +3067,7 @@ mod tests {
             restructured: false,
             tier2: Vec::new(),
             read_back: Vec::new(),
+            glued: Vec::new(),
         }
     }
 
@@ -3432,11 +3603,19 @@ mod tests {
 
     /// As [`package`], with `styles.xml` left out when `styles_part` is false.
     fn package_with(body: &str, styles_part: bool) -> Vec<u8> {
+        package_bound(body, styles_part, scan::SVG_URI)
+    }
+
+    /// As [`package_with`], with the prefix `svg` bound to `svg_uri`.
+    fn package_bound(body: &str, styles_part: bool, svg_uri: &str) -> Vec<u8> {
         use diacraft_container::zip::ArchiveWriter;
-        let root = concat!(
-            r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" "#,
-            r#"xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" "#,
-            r#"xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.3""#
+        let root = format!(
+            concat!(
+                r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" "#,
+                r#"xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" "#,
+                r#"xmlns:svg="{}" office:version="1.3""#
+            ),
+            svg_uri
         );
         let content = format!(
             "<?xml version=\"1.0\"?><office:document-content {root}><office:body><office:drawing><draw:page draw:name=\"p\" draw:master-page-name=\"Default\">{body}</draw:page></office:drawing></office:body></office:document-content>"
@@ -3614,6 +3793,79 @@ mod tests {
         assert!(why(unreadable.map(|_| ())).contains("the reader does not read what the save wrote as"), "a value the reader refuses");
         let repeated = save(attrs::fault::Fault::Repeated);
         assert!(why(repeated.map(|_| ())).contains("twice"), "an attribute written twice");
+    }
+
+    /// The check of the bytes made saw neither a tag that declares a prefix twice (it skips `xmlns` attributes) nor any tag the save wrote nothing on by name.
+    /// A shape of a file that binds `svg` to the W3C namespace is moved, and its `svg:x` and `svg:y` are added under `svg1`, declared on the tag; with the declaration written twice
+    /// (the injected fault), the save is refused in words and no file is made.
+    #[test]
+    fn a_tag_that_declares_a_prefix_twice_is_not_kept_though_it_scans() {
+        use diacraft_doc::Value;
+        let limits = Limits::default();
+        let bytes = package_bound(r#"<draw:rect draw:name="a" svg:width="1cm" svg:height="1cm"/>"#, true, "http://www.w3.org/2000/svg");
+        let Ok((mut doc, report)) = read(&bytes, &limits) else { panic!("the package did not read") };
+        {
+            let Some(page) = doc.pages.get_mut(0) else { panic!("no page") };
+            let Some(shape) = Arc::make_mut(page).shapes.get_mut(0) else { panic!("no shape") };
+            let sheet = Arc::make_mut(&mut Arc::make_mut(shape).sheet);
+            let Some(cell) = sheet.cells.get_mut("PinX") else { panic!("no PinX") };
+            let before = cell.value.as_ref().and_then(Value::number).unwrap_or(0.0);
+            cell.value = Value::from_number(before + 0.5);
+        }
+        let save = |fault: attrs::fault::Fault| {
+            attrs::fault::INJECTED.set(fault);
+            let saved = write_with(&doc, Some(&OriginalPackage { bytes: &bytes, index: &report.index }), &WriteOptions::default());
+            attrs::fault::INJECTED.set(attrs::fault::Fault::Off);
+            saved
+        };
+        let made = save(attrs::fault::Fault::Off).unwrap_or_else(|e| panic!("the move was refused: {e}"));
+        assert!(made.edited);
+        let content =
+            crate::package::Package::read(&made.bytes, &limits).ok().and_then(|p| p.part("content.xml").map(<[u8]>::to_vec)).unwrap_or_default();
+        let content = String::from_utf8(content).unwrap_or_default();
+        assert_eq!(content.matches("xmlns:svg1=").count(), 1, "{content}");
+        assert!(content.contains("svg1:x=") && content.contains("svg1:y="), "{content}");
+        let twice = why(save(attrs::fault::Fault::DeclaredTwice).map(|_| ()));
+        assert!(twice.contains("content.xml") && twice.contains("declares one namespace prefix twice"), "{twice}");
+    }
+
+    /// The same for a flat document: the document made is looked through for a tag that declares a prefix twice, and the refusal says "the document".
+    #[test]
+    fn a_flat_document_with_a_tag_that_declares_a_prefix_twice_is_not_kept_though_it_scans() {
+        use diacraft_doc::Value;
+        let limits = Limits::default();
+        let bytes = concat!(
+            r#"<?xml version="1.0"?><office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" "#,
+            r#"xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="http://www.w3.org/2000/svg" "#,
+            r#"office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.graphics"><office:automatic-styles><style:page-layout style:name="PM1">"#,
+            r#"<style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm"/></style:page-layout></office:automatic-styles>"#,
+            r#"<office:master-styles><style:master-page style:name="Default" style:page-layout-name="PM1"/></office:master-styles>"#,
+            r#"<office:body><office:drawing><draw:page draw:name="p" draw:master-page-name="Default"><draw:rect draw:name="a" svg:width="1cm" svg:height="1cm"/>"#,
+            r#"</draw:page></office:drawing></office:body></office:document>"#
+        )
+        .as_bytes()
+        .to_vec();
+        let Ok((mut doc, report)) = read(&bytes, &limits) else { panic!("the flat document did not read") };
+        {
+            let Some(page) = doc.pages.get_mut(0) else { panic!("no page") };
+            let Some(shape) = Arc::make_mut(page).shapes.get_mut(0) else { panic!("no shape") };
+            let sheet = Arc::make_mut(&mut Arc::make_mut(shape).sheet);
+            let Some(cell) = sheet.cells.get_mut("PinX") else { panic!("no PinX") };
+            let before = cell.value.as_ref().and_then(Value::number).unwrap_or(0.0);
+            cell.value = Value::from_number(before + 0.5);
+        }
+        let save = |fault: attrs::fault::Fault| {
+            attrs::fault::INJECTED.set(fault);
+            let saved = write_with(&doc, Some(&OriginalPackage { bytes: &bytes, index: &report.index }), &WriteOptions::default());
+            attrs::fault::INJECTED.set(attrs::fault::Fault::Off);
+            saved
+        };
+        let made = save(attrs::fault::Fault::Off).unwrap_or_else(|e| panic!("the move was refused: {e}"));
+        let text = String::from_utf8(made.bytes).unwrap_or_default();
+        assert_eq!(text.matches("xmlns:svg1=").count(), 1, "{text}");
+        assert!(text.contains("svg1:x=") && text.contains("svg1:y="), "{text}");
+        let twice = why(save(attrs::fault::Fault::DeclaredTwice).map(|_| ()));
+        assert!(twice.contains("the document has an element") && twice.contains("declares one namespace prefix twice"), "{twice}");
     }
 
     #[test]

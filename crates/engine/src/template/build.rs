@@ -60,7 +60,7 @@ pub fn build(cmd: &str, spec: &TemplateSpec) -> Result<Built> {
 }
 
 /// What a template puts on its page (ours): the lanes of a cross-functional flowchart, 0.5 inch in from the page's top left corner, as wide as the page less a margin each side and as
-/// thick as the page lets them be, at most 2 inches; or an org chart's Executive, in the middle of the page, an inch below its top edge.
+/// thick as the page lets them be, at most 2 inches, on a page that has Auto Size on; or an org chart's Executive, in the middle of the page, an inch below its top edge.
 fn seed_page(doc: &mut Document, page: u32, seed: Seed) -> std::result::Result<(), draw::Problem> {
     match seed {
         Seed::Swimlanes { lanes, phases } => {
@@ -69,6 +69,8 @@ fn seed_page(doc: &mut Document, page: u32, seed: Seed) -> std::result::Result<(
             let band = crate::draw::container::PHASE_BAND_INCHES;
             let length = (setup.width - 1.0).max(4.0);
             let thickness = ((setup.height - 1.0 - band) / lanes.max(1) as f64).clamp(crate::draw::container::MIN_INCHES, 2.0);
+            // **The page has Auto Size on** (ours: the specifications say nothing of a template's page): a lane added past its last sheet makes the page grow, as any shape does.
+            draw::set_auto_size(doc, page, true)?;
             swimlane::create(
                 doc,
                 page,

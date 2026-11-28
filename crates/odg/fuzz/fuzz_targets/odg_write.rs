@@ -38,6 +38,17 @@
 //! properties, one whose parent it is, a paragraph style sheet, a style sheet with a bitmap fill and the fill image's definition) and the picture's entry with its row, and an automatic
 //! style `gr4` of a bitmap fill that the page body may name, so that the model writer writes style sheets natively and pictures of fill images; a model written from nothing then holds
 //! every fill image's picture in the package and reads back with the style sheets the model has.
+//! Adds op 51: a one-dimensional shape of a geometry of its own put on the first page (a segment of two to six points, a cubic row when the byte says so, a section that fills
+//! or has no line, ends that may be level or one point, a route style of 16 or none, and a glue to the page's first shape or none): written as the polyline or the path it draws when it is
+//! glued at no end, as a connector of the type `line` when it is glued (a polyline has no glue another program keeps) or, when it is none of those, as it was; a save
+//! reads back with the model's ends, and a second one through the new index is no edit.
+//! Adds op 52, the glue of a connector of the first page changed (the one `which` picks among them): by the amount's two low bits, its begin taken off its shape, its
+//! end taken off its shape, its begin or its end glued to a point of another shape of the page (the amount's next bits pick the shape and the row) or to the whole of it. A save gives
+//! bytes that read again with the glue the model has (the writer's own check refuses a save that does not), and a second save through the new index is no edit.
+//! CPDOUBLE.ODG adds op 53, the connection points of a shape of the first page changed (a row put in, two, the last taken away, every `X` set): a save writes the shape's glue points
+//! as the file says them, or leaves them in DiaCraft's data, and gives bytes that read again or is refused in words.
+//! Writes the same changes from nothing (`model_points`): the model of any package with the connection points of one shape changed as op 52 does it, and a turn of that shape, and its flips, the
+//! input's last byte picks, written by `write_with(doc, None, ..)`: bytes that read again and are the same bytes a second time, or an error of a known class that is no fault of the writer.
 //! Adds, for a run whose edits are all text edits (ops 6 and 15), the property of R10: every bookmark, reference mark and soft page break the page body holds
 //! stands in the saved `content.xml` as often as before (a text edit moves a zero-width element and never drops one), and the seeds of the target hold them in
 //! every form R10 places (a point, a range across paragraphs, inside a span, in a list item, in a paragraph that is taken out or joined, beside spaces and fields).
@@ -844,6 +855,216 @@ fn fx_look(doc: &mut Document, (_, which, amount): (u8, u8, u8)) {
     }
 }
 
+/// Adds op 50: a shape of the first page given a line pattern, a cap, or both: a pattern of the table (2 to 23, from the byte), 0 or 1, a number the table has no row for (24 to 31,
+/// a fraction), or none (the cell taken off); and a cap of 0 to 3 (3 is no cap there is) or none. A save of the model writes a pattern of the table as a dash of DiaCraft's own, in the form the cap
+/// draws, with its definition in `office:styles` once and no definition no style names; the other numbers are carried; and a save reads back the model's cells, and a second one through the new
+/// index is no edit.
+fn dash_look(doc: &mut Document, (_, which, amount): (u8, u8, u8)) {
+    let Some(page) = doc.pages.get_mut(0) else { return };
+    let page = Arc::make_mut(page);
+    let count = page.shapes.len();
+    if count == 0 {
+        return;
+    }
+    let Some(shape) = page.shapes.get_mut(usize::from(which) % count) else { return };
+    let sheet = Arc::make_mut(&mut Arc::make_mut(shape).sheet);
+    let number = |v: f64| Cell::constant(Value::from_number(v).unwrap_or_else(|| Value::from_text("0")));
+    let rest = amount / 8;
+    match amount % 8 {
+        0..=2 => {
+            sheet.cells.insert(CellName::new("LinePattern"), number(f64::from(rest)));
+        }
+        3 => {
+            sheet.cells.insert(CellName::new("LinePattern"), number(f64::from(rest) + 0.5));
+        }
+        4 => {
+            sheet.cells.remove("LinePattern");
+        }
+        5 => {
+            sheet.cells.insert(CellName::new("LineCap"), number(f64::from(rest % 4)));
+        }
+        6 => {
+            sheet.cells.remove("LineCap");
+        }
+        _ => {
+            sheet.cells.insert(CellName::new("LinePattern"), number(f64::from(2 + rest % 22)));
+            sheet.cells.insert(CellName::new("LineCap"), number(f64::from(which % 3)));
+        }
+    }
+}
+
+/// Op 51: a new one-dimensional shape of a geometry of its own on the first page, from the bytes (see the target's documentation). `next_id` is an `ID` above the page's.
+fn segment_new(doc: &mut Document, (_, which, amount): (u8, u8, u8), next_id: u32) {
+    let Some(page) = doc.pages.get_mut(0) else { return };
+    let page = Arc::make_mut(page);
+    let next_id = next_id.max(page.shapes.iter().map(|s| s.id).max().unwrap_or(0).saturating_add(1));
+    let number = |v: f64| Value::from_number(v).unwrap_or_else(|| Value::from_text("0"));
+    let (x1, y1) = (1.0 + f64::from(which % 8) / 2.0, 1.0 + f64::from(which / 8 % 8) / 2.0);
+    let (x2, y2) = (x1 + f64::from(amount % 16) / 4.0, y1 + f64::from(amount / 16 % 4) / 2.0 - 0.5);
+    let length = (x2 - x1).hypot(y2 - y1);
+    let mut shape = Shape::new(next_id);
+    let sheet = Arc::make_mut(&mut shape.sheet);
+    for (name, v) in
+        [("BeginX", x1), ("BeginY", y1), ("EndX", x2), ("EndY", y2), ("Width", length), ("Height", 0.0), ("LocPinX", length / 2.0), ("LocPinY", 0.0)]
+    {
+        sheet.cells.insert(CellName::new(name), Cell::constant(number(v)).with_unit("IN"));
+    }
+    sheet.cells.insert(CellName::new("PinX"), Cell::constant(number((x1 + x2) / 2.0)).with_unit("IN"));
+    sheet.cells.insert(CellName::new("PinY"), Cell::constant(number((y1 + y2) / 2.0)).with_unit("IN"));
+    sheet.cells.insert(CellName::new("Angle"), Cell::constant(number((y2 - y1).atan2(x2 - x1))));
+    if which & 0x80 != 0 {
+        sheet.cells.insert(CellName::new("ShapeRouteStyle"), Cell::constant(number(16.0)));
+        sheet.cells.insert(CellName::new("ConLineRouteExt"), Cell::constant(number(1.0)));
+    }
+    let mut geometry = Section::new("Geometry", Some(0));
+    geometry.cells.insert(CellName::new("NoFill"), Cell::constant(number(if which & 0x40 != 0 { 0.0 } else { 1.0 })));
+    if amount & 0x40 != 0 {
+        geometry.cells.insert(CellName::new("NoLine"), Cell::constant(number(f64::from(amount & 1))));
+    }
+    let points = 2 + usize::from(amount % 5);
+    for k in 0..points {
+        let x = if k + 1 == points { length } else { length * k as f64 / (points - 1) as f64 };
+        let y = if k == 0 || k + 1 == points {
+            0.0
+        } else if k % 2 == 1 {
+            0.1
+        } else {
+            -0.1
+        };
+        let kind = match (k, amount & 0x80 != 0) {
+            (0, _) => "MoveTo",
+            (1, true) => "NURBSTo",
+            _ => "LineTo",
+        };
+        let mut row = Row { row_type: Some(Arc::from(kind)), ix: Some(k as u32 + 1), ..Row::default() };
+        row.cells.insert(CellName::new("X"), Cell::constant(number(x)).with_unit("IN"));
+        row.cells.insert(CellName::new("Y"), Cell::constant(number(y)).with_unit("IN"));
+        if kind == "NURBSTo" {
+            let (a, b) = (length / 3.0, length * 2.0 / 3.0);
+            let text = format!("NURBS(1,3,1,1,{a},{y},0,1,{b},{y},0,1)");
+            row.cells.insert(CellName::new("E"), Cell::constant(Value::from_text(&text)));
+        }
+        geometry.rows.push(Arc::new(row));
+    }
+    sheet.sections.push(Arc::new(geometry));
+    let target = page.shapes.get(0).map(|s| s.id).filter(|_| amount & 0x20 != 0);
+    page.shapes.push(Arc::new(shape));
+    if let Some(target) = target {
+        let mut rows: Vec<Connect> = page.connects.iter().cloned().collect();
+        rows.push(Connect {
+            from_sheet: next_id,
+            from_cell: Some(Arc::from("BeginX")),
+            from_part: Some(9),
+            to_sheet: target,
+            to_cell: Some(Arc::from("Connections.X1")),
+            to_part: Some(100),
+            ..Connect::default()
+        });
+        page.connects = Connects::from_vec(rows);
+    }
+}
+
+/// Op 52 (its `op % 16` is 4, not a text edit to the property): the glue of a connector of the first page changes, as `connector.reconnect` leaves the model: the
+/// old `Connect` row of the end gone, and a new one when the end is glued to a shape (the end's two cells then hold the glue's formula, with the value they had), or none and the end's
+/// cells plain. The amount's two low bits say what: 0 the begin taken off its shape, 1 the end, 2 the begin and 3 the end glued to another shape of the page that is no connector (the
+/// next two bits pick which) at a row of it (the two after pick one of the four side middles, or, from the byte's high bit, the whole of the shape).
+fn glue_look(doc: &mut Document, (_, which, amount): (u8, u8, u8)) {
+    let Some(page) = doc.pages.get_mut(0) else { return };
+    let page = Arc::make_mut(page);
+    let connectors: Vec<usize> = page.shapes.iter().enumerate().filter(|(_, s)| s.sheet.cell("ShapeRouteStyle").is_some()).map(|(i, _)| i).collect();
+    let Some(&at) = connectors.get(usize::from(which) % connectors.len().max(1)) else { return };
+    let targets: Vec<u32> = page.shapes.iter().filter(|s| s.sheet.cell("BeginX").is_none() && s.children.is_empty()).map(|s| s.id).collect();
+    let Some(connector) = page.shapes.get(at).map(|s| s.id) else { return };
+    let begin = matches!(amount % 4, 0 | 2);
+    let to = if amount % 4 >= 2 {
+        let Some(&shape) = targets.get(usize::from(amount / 4 % 4) % targets.len().max(1)) else { return };
+        let part = if amount & 0x80 != 0 { 3 } else { 100 + u32::from(amount / 16 % 4) };
+        Some((shape, part))
+    } else {
+        None
+    };
+    let (x, y) = if begin { ("BeginX", "BeginY") } else { ("EndX", "EndY") };
+    let mut rows: Vec<Connect> =
+        page.connects.iter().filter(|c| !(c.from_sheet == connector && c.from_cell.as_deref() == Some(x))).cloned().collect();
+    if let Some((shape, part)) = to {
+        rows.push(Connect {
+            from_sheet: connector,
+            from_cell: Some(Arc::from(x)),
+            from_part: Some(if begin { 9 } else { 12 }),
+            to_sheet: shape,
+            to_cell: Some(Arc::from(if part == 3 { "PinX".to_owned() } else { format!("Connections.X{}", part - 100 + 1) })),
+            to_part: Some(part),
+            ..Connect::default()
+        });
+    }
+    page.connects = Connects::from_vec(rows);
+    let Some(shape) = page.shapes.get_mut(at) else { return };
+    let sheet = Arc::make_mut(&mut Arc::make_mut(shape).sheet);
+    for name in [x, y] {
+        let Some(cell) = sheet.cells.get_mut(name) else { continue };
+        let value = cell.value.clone();
+        let unit = cell.unit.clone();
+        *cell = match to {
+            Some((shape, part)) if part >= 100 => {
+                let n = part - 100 + 1;
+                Cell::with_formula(&format!("PAR(PNT(Sheet.{shape}!Connections.X{n},Sheet.{shape}!Connections.Y{n}))"), value)
+            }
+            _ => Cell { value, ..Cell::default() },
+        };
+        cell.unit = unit;
+    }
+}
+
+/// CPDOUBLE.ODG, op 53 (its `op % 16` is 5, not a text edit to the property): the connection points of a shape of the first page (a childless shape that is no connector, the one `which` picks) change as a doubling or a halving leaves
+/// the model: by the amount's two low bits, one row appended (a place the rest of the amount picks, a constant), two appended, the last row taken away, or every row's `X` set to a
+/// constant the amount picks. A shape of the file then has glue points written or taken out (`write/glue.rs`), a shape the save writes has them listed in its geometry, and a save that
+/// cannot say them leaves them in DiaCraft's data: a save gives bytes that read again or is refused in words, and a second save through the new index is no edit.
+fn points_look(doc: &mut Document, (_, which, amount): (u8, u8, u8)) {
+    let Some(page) = doc.pages.get_mut(0) else { return };
+    let page = Arc::make_mut(page);
+    let shapes: Vec<usize> =
+        page.shapes.iter().enumerate().filter(|(_, s)| s.sheet.cell("BeginX").is_none() && s.children.is_empty()).map(|(i, _)| i).collect();
+    let Some(&at) = shapes.get(usize::from(which) % shapes.len().max(1)) else { return };
+    let Some(shape) = page.shapes.get_mut(at) else { return };
+    let sheet = Arc::make_mut(&mut Arc::make_mut(shape).sheet);
+    let place = f64::from(amount / 4) / 64.0;
+    let row_at = |ix: u32| {
+        let mut row = Row { ix: Some(ix), ..Row::default() };
+        for (cell, value) in [("X", place), ("Y", 1.0 - place), ("DirX", 0.0), ("DirY", 1.0), ("Type", 0.0)] {
+            row.cells.insert(CellName::new(cell), Cell::constant(Value::from_number(value).unwrap_or_else(|| Value::from_text("0"))));
+        }
+        Arc::new(row)
+    };
+    let slot = sheet.sections.iter().position(|s| s.name.as_str() == "Connection");
+    let slot = match slot {
+        Some(slot) => slot,
+        None => {
+            sheet.sections.push(Arc::new(Section::new("Connection", None)));
+            sheet.sections.len() - 1
+        }
+    };
+    let Some(section) = sheet.sections.get_mut(slot) else { return };
+    let section = Arc::make_mut(section);
+    match amount % 4 {
+        0 | 1 => {
+            for _ in 0..=amount % 4 {
+                let next = u32::try_from(section.rows.len()).unwrap_or(u32::MAX);
+                section.rows.push(row_at(next));
+            }
+        }
+        2 => {
+            section.rows.pop();
+        }
+        _ => {
+            for row in section.rows.iter_mut() {
+                Arc::make_mut(row)
+                    .cells
+                    .insert(CellName::new("X"), Cell::constant(Value::from_number(place).unwrap_or_else(|| Value::from_text("0"))));
+            }
+        }
+    }
+}
+
 /// The corners of the route of each connector of page 0 on the page, by the shape's `ID`, hops and points on a leg taken out, and whether the route has a hop (a row that is
 /// not a `LineTo`, but the first row's `MoveTo`: a hop of any style, the gap's among them); the target's own reading of the rows, in inches, y up. A connector whose cells do not read is left out.
 fn route_corners(doc: &Document) -> std::collections::BTreeMap<u32, (bool, Vec<(f64, f64)>)> {
@@ -940,6 +1161,22 @@ fn edit(doc: &mut Document, (op, which, amount): (u8, u8, u8), next_id: u32) {
     }
     if op == 49 {
         fx_look(doc, (op, which, amount));
+        return;
+    }
+    if op == 50 {
+        dash_look(doc, (op, which, amount));
+        return;
+    }
+    if op == 51 {
+        segment_new(doc, (op, which, amount), next_id);
+        return;
+    }
+    if op == 52 {
+        glue_look(doc, (op, which, amount));
+        return;
+    }
+    if op == 53 {
+        points_look(doc, (op, which, amount));
         return;
     }
     if matches!(op, 40..=45) {
@@ -1489,6 +1726,85 @@ fn empty_fields(doc: &Document, input: &[u8], limits: &Limits) {
     }
 }
 
+/// The model of any package with the connection points of one of its shapes changed as op 52 changes them (the shape and the change picked by two bytes of the input) and
+/// that shape turned by the input's last byte (a quarter turn, a slant, half a turn, none), **written from nothing** (`write_with(doc, None, ..)`): a shape the reader made keeps the
+/// glue point elements its file held, and the rows the change added have an element of their own, in the page's axes when the shape is turned (`write/glue.rs`). The write ends as bytes
+/// that read again, and that are the same bytes when the model is written a second time, or as an error of a known class that is no fault of the writer. One input in four.
+fn model_points(doc: &Document, input: &[u8], limits: &Limits) {
+    let (Some(which), Some(amount), Some(pick)) = (input.first(), input.get(1), input.last()) else { return };
+    if pick & 3 != 1 {
+        return;
+    }
+    let mut model = doc.clone();
+    points_look(&mut model, (52, *which, *amount));
+    // The shape `points_look` changed is turned: the same choice among the childless shapes that are no connector.
+    if let Some(page) = model.pages.get_mut(0) {
+        let page = Arc::make_mut(page);
+        let shapes: Vec<usize> =
+            page.shapes.iter().enumerate().filter(|(_, s)| s.sheet.cell("BeginX").is_none() && s.children.is_empty()).map(|(i, _)| i).collect();
+        if let Some(shape) = shapes.get(usize::from(*which) % shapes.len().max(1)).and_then(|at| page.shapes.get_mut(*at)) {
+            let turn = [0.0, 0.5, std::f64::consts::FRAC_PI_2, std::f64::consts::PI][usize::from((pick >> 2) & 3)];
+            let cells = &mut Arc::make_mut(&mut Arc::make_mut(shape).sheet).cells;
+            cells.insert(CellName::new("Angle"), Cell::constant(Value::from_number(turn).unwrap_or_else(|| Value::from_text("0"))));
+            // And flipped, by bits 4 and 5 of the last byte (`FlipX`, `FlipY`): a shape of the file that keeps the geometry it held says the flips in the element it writes, a flip of an
+            // object geometry is refused in words, and the glue point elements it held are written again for the turn and the flips.
+            for (bit, name) in [(0x10, "FlipX"), (0x20, "FlipY")] {
+                if pick & bit != 0 {
+                    cells.insert(CellName::new(name), Cell::constant(Value::from_number(1.0).unwrap_or_else(|| Value::from_text("1"))));
+                }
+            }
+        }
+    }
+    let options = WriteOptions::default();
+    match write_with(&model, None, &options) {
+        Err(e) => {
+            assert!(
+                CLASSES.contains(&e.class()) || is_unscannable_part(&e, input),
+                "an unknown class from the model writer with changed connection points: {e:?}"
+            );
+            assert!(
+                !matches!(e, diacraft_odg::WriteError::Mismatch(_) | diacraft_odg::WriteError::SelfCheck(_)) || is_unscannable_part(&e, input),
+                "a fault of the model writer with changed connection points: {e:?}"
+            );
+        }
+        Ok(written) => {
+            read(&written.bytes, limits).expect("the package the model writer made, with changed connection points, reads");
+            let again = write_with(&model, None, &options).expect("a second write of a model written");
+            assert_eq!(again.bytes, written.bytes, "the same model gives the same bytes");
+        }
+    }
+}
+
+/// How many `svg:d` attributes the `draw:connector` start tags of `content` hold, outside the attribute values (class F1: ODF 1.0 and 1.1 have none on that element). A start tag
+/// ends at the first `>` outside a quoted value; `draw:connector-` and the like are no connector.
+fn connector_routes(content: &[u8]) -> usize {
+    const OPEN: &[u8] = b"<draw:connector";
+    let mut total = 0;
+    let mut at = 0;
+    while let Some(found) = content.get(at..).and_then(|rest| rest.windows(OPEN.len()).position(|w| w == OPEN)) {
+        let start = at + found + OPEN.len();
+        at = start;
+        let rest = content.get(start..).unwrap_or_default();
+        if !rest.first().is_some_and(|b| b.is_ascii_whitespace() || matches!(b, b'/' | b'>')) {
+            continue;
+        }
+        // The tag's bytes outside its quoted values, the values themselves left out.
+        let (mut outside, mut quote) = (Vec::new(), None);
+        for (i, &b) in rest.iter().enumerate() {
+            at = start + i + 1;
+            match (quote, b) {
+                (Some(q), b) if b == q => quote = None,
+                (Some(_), _) => {}
+                (None, b'"' | b'\'') => quote = Some(b),
+                (None, b'>') => break,
+                (None, b) => outside.push(b),
+            }
+        }
+        total += outside.windows(7).filter(|w| w[0].is_ascii_whitespace() && &w[1..] == b"svg:d=").count();
+    }
+    total
+}
+
 fuzz_target!(|data: &[u8]| {
     let limits = Limits::default();
     let (bytes, edits, flags, kind): (Vec<u8>, Vec<(u8, u8, u8)>, Flags, Kind) = match data.split_first() {
@@ -1513,6 +1829,7 @@ fuzz_target!(|data: &[u8]| {
     let Ok((mut doc, report)) = read(&bytes, &limits) else { return };
     model_write(&doc, &bytes, &limits);
     empty_fields(&doc, &bytes, &limits);
+    model_points(&doc, &bytes, &limits);
     // A package with an entry nothing reads that is damaged (a CRC or a size that is wrong, left out of the model and said) is read, and is no package for the package
     // layer, which refuses it: the checks below read the original and the saved package through it (and a save copies the damaged entry), so they are not made for it.
     if Form::of(&bytes) == Form::Package && Package::read(&bytes, &limits).is_err() {
@@ -1925,15 +2242,17 @@ fuzz_target!(|data: &[u8]| {
                     }
                 }
             }
-            // Class F1: a part of ODF 1.0 or 1.1 gains no `xml:id` and no `svg:d`, and its version is the file's own.
+            // Class F1: a part of ODF 1.0 or 1.1 gains no `xml:id`, and no `svg:d` on a `draw:connector` (the schemas of those versions have no
+            // `svg:d` on that element; a `draw:path`'s `svg:d` is ODF 1.0's own markup, so it is counted on the connectors' start tags alone), and its version is
+            // the file's own.
             if flags.legacy()
                 && let (Ok(now), Ok(was)) = (Package::read(&saved.bytes, &limits), Package::read(&bytes, &limits))
             {
-                let count =
-                    |p: &Package, needle: &[u8]| p.part("content.xml").map_or(0, |c| c.windows(needle.len()).filter(|w| *w == needle).count());
-                for needle in [&b" xml:id=\""[..], &b" svg:d=\""[..]] {
-                    assert!(count(&now, needle) <= count(&was, needle), "a part of ODF 1.0 or 1.1 gained {}", String::from_utf8_lossy(needle));
-                }
+                let content = |p: &Package| p.part("content.xml").map(<[u8]>::to_vec).unwrap_or_default();
+                let (now, was) = (content(&now), content(&was));
+                let ids = |c: &[u8]| c.windows(b" xml:id=\"".len()).filter(|w| *w == b" xml:id=\"").count();
+                assert!(ids(&now) <= ids(&was), "a part of ODF 1.0 or 1.1 gained  xml:id=\"");
+                assert!(connector_routes(&now) <= connector_routes(&was), "a part of ODF 1.0 or 1.1 gained an svg:d on a draw:connector");
                 assert_eq!(
                     read(&saved.bytes, &limits).map(|(_, r)| r.office_version).ok(),
                     read(&bytes, &limits).map(|(_, r)| r.office_version).ok(),

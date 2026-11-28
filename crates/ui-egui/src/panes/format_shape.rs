@@ -34,6 +34,8 @@ pub enum FormatTab {
     #[default]
     FillLine,
     Effects,
+    /// The Alt Text section (`alt_text.rs`): a third tab, as the area A specification pictures the pane.
+    AltText,
 }
 
 impl FormatTab {
@@ -42,12 +44,18 @@ impl FormatTab {
         match self {
             FormatTab::FillLine => "Fill & Line",
             FormatTab::Effects => "Effects",
+            FormatTab::AltText => "Alt Text",
         }
     }
 
-    /// The tab named `name`, in any case.
+    /// The tab named `name`, in any case. **Size & Properties** is the name the Microsoft page gives the tab that holds the Alt Text section: it opens this tab, which holds
+    /// that section alone (Size & Position is a pane of its own here).
     pub fn from_name(name: &str) -> Option<FormatTab> {
-        [FormatTab::FillLine, FormatTab::Effects].into_iter().find(|t| t.name().eq_ignore_ascii_case(name.trim()))
+        let name = name.trim();
+        if name.eq_ignore_ascii_case("Size & Properties") {
+            return Some(FormatTab::AltText);
+        }
+        [FormatTab::FillLine, FormatTab::Effects, FormatTab::AltText].into_iter().find(|t| t.name().eq_ignore_ascii_case(name))
     }
 }
 
@@ -90,7 +98,7 @@ impl DiacraftApp {
             None => FormatTab::FillLine,
             Some(name) => FormatTab::from_name(name).ok_or_else(|| diacraft_engine::EngineError::BadParams {
                 cmd: "format.options".to_owned(),
-                msg: format!("no tab `{}`; the tabs are: Fill & Line, Effects", diacraft_engine::shown(name, 32)),
+                msg: format!("no tab `{}`; the tabs are: Fill & Line, Effects, Alt Text", diacraft_engine::shown(name, 32)),
             })?,
         };
         self.ui.panes.format.tab = chosen;
@@ -106,10 +114,12 @@ impl DiacraftApp {
         if let Mix::One(Some(rgb)) = self.line_mix() {
             self.ui.panes.format.solid_line = rgb.hex();
         }
-        ui.horizontal(|ui| {
-            for (tab, label, name) in
-                [(FormatTab::FillLine, "Fill & Line", "pane.format.tab.fill_line"), (FormatTab::Effects, "Effects", "pane.format.tab.effects")]
-            {
+        ui.horizontal_wrapped(|ui| {
+            for (tab, label, name) in [
+                (FormatTab::FillLine, "Fill & Line", "pane.format.tab.fill_line"),
+                (FormatTab::Effects, "Effects", "pane.format.tab.effects"),
+                (FormatTab::AltText, "Alt Text", "pane.format.tab.alt_text"),
+            ] {
                 let selected = self.ui.panes.format.tab == tab;
                 let r = ui.add(egui::Button::selectable(selected, egui::RichText::new(label).font(theme::font(size::LABEL)).color(t.text)));
                 self.note(name, r.rect, true);
@@ -122,7 +132,8 @@ impl DiacraftApp {
         // What is selected on another page than the one on view is not shown, and nothing of it can be formatted from here (`selection_on_view`).
         let selected = self.selection_here().is_some();
         let enabled = selected && self.command_enabled("format.shape").is_ok();
-        if !selected {
+        // (The Alt Text tab says in its own words what it needs.)
+        if !selected && self.ui.panes.format.tab != FormatTab::AltText {
             ui.add(egui::Label::new(egui::RichText::new("Select a shape to format it.").font(theme::font(size::LABEL)).color(t.text_dim)).wrap());
             ui.add_space(4.0);
         }
@@ -133,6 +144,7 @@ impl DiacraftApp {
                 self.line_section(ui, t, enabled);
             }
             FormatTab::Effects => self.effects_section(ui, t, enabled),
+            FormatTab::AltText => self.alt_text_section(ui, t),
         }
     }
 

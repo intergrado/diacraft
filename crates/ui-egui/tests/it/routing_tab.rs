@@ -111,14 +111,15 @@ fn the_layout_launcher_opens_the_tab_and_the_command_names_it() {
     assert!(w.state().is_modal_open());
     assert!(w.state().element("pagesetup.tab.Layout and Routing").is_some_and(|e| e.enabled), "the tab works now");
     run_command(&mut w, "window.pageSetup", json!({"close": true}));
-    // The command takes the tab's name; Alt Text still has nothing behind it.
+    // The command takes the tab's name, in any case; Alt Text has its boxes.
     run_command(&mut w, "window.pageSetup", json!({"tab": "layout and routing"}));
     assert_eq!(w.state().window_state()["pageSetup"], TAB);
     run_command(&mut w, "window.pageSetup", json!({"close": true}));
-    let refusal = w.state_mut().execute("window.pageSetup", &json!({"tab": "Alt Text"})).unwrap_err().to_string();
-    assert!(refusal.contains("Alt Text") && refusal.contains("no controls"), "{refusal}");
+    run_command(&mut w, "window.pageSetup", json!({"tab": "alt text"}));
+    assert_eq!(w.state().window_state()["pageSetup"], "Alt Text");
+    run_command(&mut w, "window.pageSetup", json!({"close": true}));
     let unknown = w.state_mut().execute("window.pageSetup", &json!({"tab": "Nonsense"})).unwrap_err().to_string();
-    assert!(unknown.contains("Layout and Routing"), "the tabs that work are listed, this one among them: {unknown}");
+    assert!(unknown.contains("Layout and Routing") && unknown.contains("Alt Text"), "the tabs are listed, these among them: {unknown}");
 }
 
 #[test]

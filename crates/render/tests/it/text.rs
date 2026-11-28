@@ -191,3 +191,67 @@ fn laid_out_text_is_kept_so_a_second_frame_does_not_lay_it_out_again() {
     assert_eq!(first.r.rgba_premul, second.r.rgba_premul, "the same frame");
     assert_eq!(renderer.texts_laid_out(), 1, "a second frame lays nothing out again");
 }
+
+/// Issue 9: a face the file names that the machine lacks is its own kind of note, and the sample says which face and what drew it. A drawing made where Liberation Sans is
+/// installed and opened where it is not (the web build) showed "1 text block drawn in a stand-in font or cut short" with the face named in neither the line nor the tooltip; and a face
+/// the machine has is no note at all (the same drawing on the desktop showed nothing).
+#[test]
+fn a_face_the_machine_lacks_is_noted_with_its_name_and_the_face_that_drew_it() {
+    let drawn_in = |font: &str, has: &[&str]| {
+        let mut db = diacraft_fonts::FontDb::bundled();
+        for name in has {
+            db.add_font_data(diacraft_fonts::synth::SynthFont::new(name).ascii(600).build());
+        }
+        let doc = one_page(vec![label("Hello", 0.5).row_cell("Character", None, RowKey::Ix(0), "Font", font)]);
+        draw_with(&mut diacraft_render::Renderer::with_fonts(db), &doc).r
+    };
+    let lacking = drawn_in("Liberation Sans", &[]);
+    let noted = lacking
+        .skipped
+        .iter()
+        .find(|s| s.kind == SkipKind::FaceStandIn)
+        .unwrap_or_else(|| panic!("the missing face is noted: {:?}", lacking.skipped));
+    assert_eq!(noted.count, 1, "one text block");
+    assert!(noted.first.starts_with("Liberation Sans (drawn in ") && noted.first.ends_with(')'), "{:?}", noted.first);
+    assert_eq!(lacking.count(SkipKind::TextNote), 0, "it is not the catch-all note");
+    // The face is on the machine: nothing is said.
+    let has = drawn_in("Liberation Sans", &["Liberation Sans"]);
+    assert_eq!((has.count(SkipKind::FaceStandIn), has.count(SkipKind::TextNote)), (0, 0), "{:?}", has.skipped);
+}
+
+/// Two faces are named once each, in the order they were met, and a fifth is "and more": the sample is bounded, and a name from a file is cut.
+#[test]
+fn the_faces_named_in_the_sample_are_each_once_in_order_and_at_most_four() {
+    let names = ["Aa Missing", "Bb Missing", "Aa Missing", "Cc Missing", "Dd Missing", "Ee Missing", "Ff Missing"];
+    let blocks: Vec<ShapeBuilder> = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            rect(i as u32 + 1, 0.5 + i as f64 * 0.5, 1.0, 0.4, 0.4).cell("FillPattern", "0").cell("LinePattern", "0").text("x").row_cell(
+                "Character",
+                None,
+                RowKey::Ix(0),
+                "Font",
+                name,
+            )
+        })
+        .collect();
+    let r = draw(&one_page(blocks)).r;
+    let noted = r.skipped.iter().find(|s| s.kind == SkipKind::FaceStandIn).expect("noted");
+    assert_eq!(noted.count, 7, "seven text blocks");
+    let sample: Vec<&str> = noted.first.split("; ").collect();
+    assert_eq!(sample.len(), 5, "{sample:?}");
+    assert!(
+        sample[0].starts_with("Aa Missing (drawn in ")
+            && sample[1].starts_with("Bb Missing")
+            && sample[2].starts_with("Cc Missing")
+            && sample[3].starts_with("Dd Missing"),
+        "{sample:?}"
+    );
+    assert_eq!(sample[4], "and more");
+    // A name of any length is cut.
+    let long = "L".repeat(500);
+    let r = draw(&one_page(vec![label("x", 0.5).row_cell("Character", None, RowKey::Ix(0), "Font", &long)])).r;
+    let noted = r.skipped.iter().find(|s| s.kind == SkipKind::FaceStandIn).expect("noted");
+    assert!(noted.first.chars().count() < 200, "{}", noted.first.chars().count());
+}

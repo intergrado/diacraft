@@ -23,3 +23,5 @@ thiserror = { workspace = true }
 [dev-dependencies]
 diacraft-testkit = { workspace = true }
 proptest = { workspace = true }
+# The picture the roots' tests insert (`tests/it/automation_roots.rs`).
+png = { workspace = true }

@@ -389,6 +389,8 @@ impl<'a> Book<'a> {
             }
             None => tree.root.children.push(Node::El(data_el)),
         }
+        // Written again, so with no XML declaration, as `solution_tree` writes the part.
+        tree.drop_declaration();
         let out = tree.bytes(name)?;
         if out.len() as u64 > limit {
             self.data_not_saved("the part would be larger than DiaCraft reads");
@@ -757,7 +759,8 @@ impl<'a> Book<'a> {
             build::take_raw(raw)?;
         }
         let root = element("SolutionXML", vec![("Name".to_owned(), "DiaCraft".to_owned())], vec![Node::El(data_el)]);
-        let tree = Tree::new(root);
+        // No XML declaration: the solution parts of the files the VSDX application writes have none.
+        let tree = Tree::bare(root);
         if tree.bytes("the DiaCraft part")?.len() as u64 > Limits::default().max_solution_part_bytes {
             return Err(WriteError::Limit("the DiaCraft data would make a part larger than DiaCraft reads"));
         }

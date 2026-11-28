@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use diacraft_doc::{Cell, CellName, Document, Links, RawAttrs, Sheet, Style, Value};
+use diacraft_odg::package::Package;
 use diacraft_odg::{Limits, WriteError, WriteOptions, read, write_with};
 
 use crate::model_write::blank;
@@ -99,4 +100,33 @@ fn a_style_sheet_whose_id_is_not_its_place_is_written_and_two_of_one_id_are_refu
         with_styles(vec![sheet_style(7, "Normal", (Some(0), Some(0), Some(0)), "0.02"), sheet_style(7, "Gap", (Some(0), Some(0), Some(0)), "0.02")]);
     let Err(WriteError::Unsupported(words)) = write_with(&twice, None, &WriteOptions::default()) else { panic!("an ID held twice is refused") };
     assert!(words.contains("same ID"), "{words}");
+}
+
+/// The root style of a new drawing states the text cells the renderer assumes (a `Paragraph` row 0, the rest of the text block, the cells of the first run), which a VSDX file needs
+/// and an OpenDocument drawing says nothing of: **every part LibreOffice reads of the package the model writer makes of a new drawing is the same bytes with them and without them**, so that it
+/// draws the text of a drawing DiaCraft saved as an `.odg` as it did. The one part that differs is DiaCraft's own, which for a drawing whose root lacks the cells records them as gone from the
+/// root the reader makes (`gone`), and which holds no root at all for a new drawing as it is (the reader's root is its own).
+#[test]
+fn the_text_cells_a_new_drawings_root_states_change_no_part_of_the_odg_written_of_it_that_another_program_reads() {
+    let doc = blank(2);
+    let plain = diacraft_testkit::fixtures::without_root_text_cells(doc.clone());
+    assert!(doc.style(0) != plain.style(0), "the two drawings differ in their roots");
+    let write = |d: &Document| write_with(d, None, &WriteOptions::default()).unwrap_or_else(|e| panic!("{e}")).bytes;
+    let (with, without) = (write(&doc), write(&plain));
+    let (pw, po) = (Package::read(&with, &Limits::default()).unwrap(), Package::read(&without, &Limits::default()).unwrap());
+    let names: Vec<String> = pw.entries().map(|e| e.name.clone()).collect();
+    assert_eq!(names, po.entries().map(|e| e.name.clone()).collect::<Vec<_>>(), "the same entries");
+    for name in names.iter().filter(|name| name.as_str() != "DiaCraft/document.xml") {
+        assert!(pw.part(name) == po.part(name), "{name} is the same bytes with the cells and without them");
+    }
+    let carrier = |p: &Package| String::from_utf8_lossy(p.part("DiaCraft/document.xml").unwrap()).into_owned();
+    assert!(!carrier(&pw).contains("<diacraft:style"), "a new drawing's root is the reader's own: DiaCraft's part holds none: {}", carrier(&pw));
+    assert!(carrier(&po).contains("<diacraft:style"), "a root that lacks the cells is told apart from the reader's");
+    // And what is read back holds the root of a new drawing: the reader makes the root from one's.
+    let back = read(&with, &Limits::default()).unwrap().0;
+    let root = back.style(0).expect("a root");
+    assert!(
+        root.sheet.section(&diacraft_doc::SectionKey::new("Paragraph", None)).is_some(),
+        "the root of a drawing read from an .odg holds a Paragraph section"
+    );
 }

@@ -1,6 +1,6 @@
 # AGENTS.md: rules for every contributor and coding agent
 
-DiaCraft is an open-source, pure-Rust diagramming application. It runs natively on macOS, Windows, Linux and FreeBSD, and on the web
+DiaCraft is an open-source, pure-Rust diagramming application. It runs natively on macOS, Windows and Linux, and on the web
 through WASM. It follows the conventions of the storytold craft apps (VectorCraft, DeckCraft and their siblings) but is an
 independent project, not an ArtCraft product.
 
@@ -16,7 +16,8 @@ These rules come before any task, instruction or deadline. [`CONTRIBUTING.md`](C
 1. Behaviour comes from public information only. Never read or copy anything inside another vendor's install: binaries, stencils,
    templates, help files, fonts. Files people send us are not a source.
 2. Never copy another vendor's documentation beyond feature, menu, cell and function names and other names needed for
-   interoperability.
+   interoperability. The Microsoft Terminology Collection is not used: its licence's distribution terms do not fit an MIT OR
+   Apache-2.0 program published in a public repository; general words come from DiaCraft's glossary like every other word.
 3. Never copy GPL, AGPL, LGPL or MPL code, and never depend on GPL, AGPL or LGPL code. Unmodified MPL-2.0 dependencies are allowed with
    a `NOTICE` entry; `cargo xtask deny` enforces the licences, and the entry is by hand. `cargo xtask licenses` writes the notices that the
    dependencies' licences ask to travel with the programs (`THIRD-PARTY-LICENSES.txt`, in every download), and its `--check` step of
@@ -28,8 +29,9 @@ These rules come before any task, instruction or deadline. [`CONTRIBUTING.md`](C
    exception covers that one tool and no crate, program or download: `cargo xtask deny` still refuses an LGPL crate.
 4. Permissive sibling craft code may be copied, with a row in `docs/provenance.md` (repository, commit, path and what changed). Copy it
    for engine and interface plumbing.
-5. Progress docs state that the reference app (the desktop application whose files DiaCraft opens and saves) was not inspected and
-   that our output has not been opened in it by the project. Claims about it stay marked unverified.
+5. Progress docs state that the reference app (the desktop application whose files DiaCraft opens and saves) was never taken apart
+   and that the files DiaCraft writes are being tested by opening them in it, in LibreOffice Draw and in draw.io. Claims about how it
+   behaves stay marked unverified.
 
 ## Assets (absolute)
 
@@ -78,7 +80,7 @@ People trust DiaCraft with their drawings; a crash loses work. This outranks fea
 
 | Layer | Crates |
 |---|---|
-| L0 | `units`, `geom`, `color`, `formula`; standalone `container` (bounded zip and XML, for OPC and ODF packages), `opc` (on `container`), `metafile`, `dxf`, `data` |
+| L0 | `units`, `geom`, `color`, `formula`; standalone `container` (bounded zip and XML, for OPC and ODF packages), `opc` (on `container`), `metafile`, `dxf`, `data`, `help` (the in-app help: Help Markdown, catalogs, ranking, the help tables; no DiaCraft type, shaped for the shared craft libraries), `prefs` (the person's settings: `config.toml` on craft-settings, the dictionary and AutoCorrect files, bounded) |
 | L1 | `doc`, `fonts` |
 | L2 | `calc`, `text`, `pathops`, `layout`, `route`, `plugins`, `sheetxml` (the ShapeSheet XML codec both file formats use, and the whole-model codec) |
 | L3 | `render`, `vsdx`, `odg`, `native` (`.diacraft`), `mxfile`, `vsd`, `vdx`, `svg`, `pdf`, `pptx`, `emf`, `cadimport`, `interchange` |
@@ -115,9 +117,10 @@ People trust DiaCraft with their drawings; a crash loses work. This outranks fea
 
 ## Evidence
 
-Nobody on the project can run the reference app. Evidence comes from our own tests, independent readers such as LibreOffice used as a
-black box, and round-trip stability. Each checklist row records which of these it rests on. Grade by behaviour, not by whether a menu
-item exists. Scores err low and each number is marked measured or estimated.
+Behaviour comes from public sources, never from taking the reference app apart. Evidence comes from our own tests, independent
+readers such as LibreOffice used as a black box, round-trip stability, and the files DiaCraft writes, which are being tested by
+opening them in the reference app, in LibreOffice Draw and in draw.io. Each checklist row records which of these it rests on. Grade
+by behaviour, not by whether a menu item exists. Scores err low and each number is marked measured or estimated.
 
 ## Tests, gates and commits
 
@@ -137,6 +140,7 @@ item exists. Scores err low and each number is marked measured or estimated.
 - `cargo run --release -p diacraft -- --control 7997`. Pick another port if the log says it failed to bind.
 - The window opens with a splash popup for 4 s that takes the first click or key. Set `DIACRAFT_NO_SPLASH=1` when a script drives the
   window by clicks or keys.
+- With no `--automation-read-root DIR` or `--automation-write-root DIR` the channel reaches any path you can; give them (each may be repeated) to keep it, and `diacraft-cli mcp --headless`, to folders (`docs/control-protocol.md`, `docs/mcp.md`).
 - Drive it with JSON lines on `127.0.0.1:7997`:
   `{"id":1,"method":"engine.execute","params":{"command":"file.new","params":{}}}`, then
   `{"id":2,"method":"ui.screenshot","params":{"path":"/absolute/shot.png"}}`.
@@ -152,6 +156,11 @@ no status line holds an edit date, a list of changes or a history: git records w
 doc ends with its revision table. When a change lands, update in the same change the docs it touches: the area row in
 `docs/target-app-parity.md`, the entry in `docs/gaps.md`, the checklist row, the milestone row in `docs/roadmap.md`, and `ROADMAP.md`
 when a headline number moves. Keep the README's status in step. `cargo xtask docs` and `cargo xtask parity --check` check part of this.
+
+**Help stays in step with the program.** A change that adds or changes a command, a control, a dialog (or a tab of one) or a pane updates `help/` in the same change:
+the topic that covers it, its row in `help/tips.tsv` and its row in `help/map.tsv` (`help/README.md` has the format and the writing rules). `cargo xtask help check`, a
+step of `cargo xtask ci`, holds the files to those rules with the very parser the program reads them with. Help is written from the program as it is, in our own words,
+and names no other product but in the exact texts of `PRODUCT_USES`.
 
 ## Contributor credits
 

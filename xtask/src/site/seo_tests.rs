@@ -984,3 +984,106 @@ fn a_code_point_is_a_character_but_zero_the_surrogates_the_c1_controls_and_what_
         assert_eq!(seo::code_point(value), None, "{value:#x}");
     }
 }
+
+// ------------------------------------------------------------------------------------------------------------------------ videos
+
+/// A body that links a video as the home page links the tour: the link marked `data-video`, which holds the picture and the two times, named by the title and described by a paragraph.
+const VIDEO: &str = r#"<p id="about">A tour of the editor, &amp; its files.</p>
+<a data-video="" href="https://youtu.be/eEROjf1YHEA" aria-labelledby="name" aria-describedby="about"><img src="/assets/hashed/tour.0123456789ab.webp" alt="The tour's picture" width="1280" height="720" /><time datetime="PT6M53S">6:53</time>
+<cite id="name">The   full
+tour</cite> <time datetime="2026-11-26">26 November 2026</time></a>"#;
+
+/// A page whose body is `body`.
+fn video_page(body: &str) -> String {
+    page("DiaCraft", "The home.").replace("<p>Hello</p>", body)
+}
+
+#[test]
+fn a_page_that_links_a_video_has_a_video_object_made_from_what_the_page_says() {
+    let out = seo::render(&video_page(VIDEO), &settings(), "index.html", "https://drawing.example/").unwrap();
+    let data = blocks(&out);
+    assert_eq!(data.iter().map(|d| d["@type"].as_str().unwrap()).collect::<Vec<_>>(), ["SoftwareApplication", "WebSite", "VideoObject"]);
+    assert_eq!(
+        data[2],
+        json!({
+            "@context": "https://schema.org",
+            "@type": "VideoObject",
+            "name": "The full tour",
+            "description": "A tour of the editor, & its files.",
+            "thumbnailUrl": "https://drawing.example/assets/hashed/tour.0123456789ab.webp",
+            "uploadDate": "2026-11-26",
+            "duration": "PT6M53S",
+            "embedUrl": "https://www.youtube.com/embed/eEROjf1YHEA",
+            "url": "https://youtu.be/eEROjf1YHEA",
+        })
+    );
+    // The video's page is its `url`, and no `contentUrl`: that is the address of the video's own bytes, which YouTube does not give.
+    assert!(data[2].get("contentUrl").is_none());
+    // Made again, it is the same page.
+    assert_eq!(seo::render(&out, &settings(), "index.html", "https://drawing.example/").unwrap(), out);
+    // The picture follows the pages' domain.
+    let mut moved = settings();
+    moved.domain = "https://pages.example".into();
+    let out = seo::render(&video_page(VIDEO), &moved, "index.html", "https://pages.example/").unwrap();
+    assert_eq!(blocks(&out)[2]["thumbnailUrl"], "https://pages.example/assets/hashed/tour.0123456789ab.webp");
+    // Any page that links a video has its object after its own data; a page that links none has none.
+    let guide = blocks(&seo::render(&video_page(VIDEO), &settings(), "guides/one.html", "u").unwrap());
+    assert_eq!(guide.iter().map(|d| d["@type"].as_str().unwrap()).collect::<Vec<_>>(), ["TechArticle", "VideoObject"]);
+    let plain = blocks(&seo::render(&video_page("<p>Hello</p>"), &settings(), "index.html", "u").unwrap());
+    assert!(plain.iter().all(|d| d["@type"] != "VideoObject"));
+    // A plain link to a video (the Short, the channel, the same video again) is no video of the page: only the marked link is.
+    let more = format!("{VIDEO}<a href=\"https://youtu.be/eEROjf1YHEA\">Watch</a><a href=\"https://www.youtube.com/shorts/lcnmzfaxEDA\">Short</a>");
+    assert_eq!(blocks(&seo::render(&video_page(&more), &settings(), "index.html", "u").unwrap()).len(), 3);
+}
+
+#[test]
+fn a_video_link_that_does_not_say_what_its_data_needs_is_refused() {
+    for (from, to, diagnostic) in [
+        ("https://youtu.be/eEROjf1YHEA", "https://www.youtube.com/watch?v=eEROjf1YHEA", "not the address of a video on YouTube"),
+        ("https://youtu.be/eEROjf1YHEA", "https://youtu.be/eEROjf1YHE", "not the address of a video on YouTube"),
+        ("https://youtu.be/eEROjf1YHEA", "https://youtu.be/eEROjf1YHEAA", "not the address of a video on YouTube"),
+        ("https://youtu.be/eEROjf1YHEA", "https://youtu.be/eEROjf1Y.EA", "not the address of a video on YouTube"),
+        ("https://youtu.be/eEROjf1YHEA", "https://youtu.be/eEROjf1YHEA?t=3", "not the address of a video on YouTube"),
+        ("https://youtu.be/eEROjf1YHEA", "http://youtu.be/eEROjf1YHEA", "not the address of a video on YouTube"),
+        (" href=\"https://youtu.be/eEROjf1YHEA\"", "", "not the address of a video on YouTube"),
+        (" aria-labelledby=\"name\"", "", "aria-labelledby"),
+        ("aria-labelledby=\"name\"", "aria-labelledby=\"nothing\"", "no element with the id `nothing`"),
+        ("aria-labelledby=\"name\"", "aria-labelledby=\"name about\"", "one id"),
+        (" aria-describedby=\"about\"", "", "aria-describedby"),
+        ("<p id=\"about\">A tour of the editor, &amp; its files.</p>", "<p id=\"about\"> </p>", "no words"),
+        ("<time datetime=\"PT6M53S\">6:53</time>", "", "one time that is a duration"),
+        ("<time datetime=\"2026-11-26\">26 November 2026</time>", "", "one time that is a date"),
+        ("<time datetime=\"PT6M53S\">", "<time datetime=\"PT1M\">1:00</time><time datetime=\"PT6M53S\">", "one time that is a duration"),
+        ("<time datetime=\"2026-11-26\">", "<time datetime=\"2026-11-25\">25</time><time datetime=\"2026-11-26\">", "one time that is a date"),
+        ("datetime=\"PT6M53S\"", "datetime=\"6:53\"", "neither a date nor a duration"),
+        ("datetime=\"2026-11-26\"", "datetime=\"2026-11-31\"", "neither a date nor a duration"),
+        ("<time datetime=\"PT6M53S\">", "<time>", "neither a date nor a duration"),
+        ("src=\"/assets/hashed/tour", "src=\"https://drawing.example/assets/hashed/tour", "a path of the site"),
+        ("src=\"/assets/hashed/tour", "src=\"//drawing.example/assets/hashed/tour", "a path of the site"),
+        ("src=\"/assets/hashed/tour", "src=\"assets/hashed/tour", "a path of the site"),
+        ("<img ", "<img src=\"/a.webp\" alt=\"\" width=\"1\" height=\"1\" /><img ", "one picture"),
+        ("<img src=\"/assets/hashed/tour.0123456789ab.webp\" alt=\"The tour's picture\" width=\"1280\" height=\"720\" />", "", "one picture"),
+        ("<a data-video=\"\"", "<span data-video=\"\"></span><a data-video=\"\"", "marks the link to a video"),
+    ] {
+        let source = video_page(&VIDEO.replace(from, to));
+        assert_ne!(source, video_page(VIDEO), "{from:?} is not in the page");
+        let error = seo::render(&source, &settings(), "index.html", "u").unwrap_err();
+        assert!(error.contains(diagnostic), "{from:?} -> {to:?}: {error}");
+    }
+    // The page for a missing address has no structured data, so it links no video that would need some.
+    let error = seo::render(&video_page(VIDEO), &settings(), "404.html", "u").unwrap_err();
+    assert!(error.contains("no structured data"), "{error}");
+}
+
+#[test]
+fn a_duration_is_hours_minutes_and_seconds_after_pt() {
+    for good in ["PT6M53S", "PT55S", "PT1H", "PT1H2M3S", "PT90M", "PT0S", "PT9999H"] {
+        assert!(seo::valid_duration(good), "{good}");
+    }
+    for bad in [
+        "", "P", "PT", "6:53", "P6M", "P1D", "PT6M53", "pt6m53s", "PT53S6M", "PT6M6M", "", "PT-1S", "PT+1S", "PT６M", "PT10000H", " PT1S", "PT1S ",
+        "PTM", "PT1HS",
+    ] {
+        assert!(!seo::valid_duration(bad), "{bad:?}");
+    }
+}

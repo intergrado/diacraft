@@ -191,7 +191,8 @@ fn the_dialog_is_waited_for_from_the_moment_it_is_asked_for() {
     assert!(w.state().stencil_dialog_open(), "asked for, and no frame has started it: it is still the window's to wait for");
     assert!(!w.state().can_pick_stencil(), "and another one cannot be asked for");
     let again = w.state_mut().execute("shapes.openStencil", &json!({})).unwrap_err().to_string();
-    assert!(again.contains("being chosen"), "{again}");
+    // (Said with the words every refusal of a second file dialog has: it names the dialog that is open.)
+    assert!(again.contains("The dialog that chooses a stencil is open"), "{again}");
     assert!(opened_ids(&w).is_empty());
     w.rest();
     assert!(!w.state().stencil_dialog_open() && w.state().can_pick_stencil());
@@ -804,7 +805,7 @@ fn imported_plain_left_arrow_and_vertical_lines_keep_their_own_outline() {
         let master = &list.iter().find(|stencil| !stencil.builtin).unwrap().masters[0];
         assert!(master.one_d);
         assert!(!master.directed_preview());
-        let figure = Scratch::open(&path).unwrap().figure(master).unwrap();
+        let figure = Scratch::open(&path, &diacraft_engine::file_access::ScopeHandle::capture()).unwrap().figure(master).unwrap();
         assert!(figure.areas.is_empty());
         assert_eq!(figure.lines.len(), 1, "{name}: no right-arrow head was added");
         assert_eq!(figure.lines[0].len(), 2);

@@ -10,6 +10,27 @@ fn the_lockfile_has_no_unused_patch() {
     assert_eq!(unused, 0, "{unused} [patch] entries are used by no crate: remove them or add the dependency that uses them");
 }
 
+/// The desktop app's Copy and Cut, and every text field, must reach the system clipboard: without eframe's `clipboard` feature
+/// egui keeps a private clipboard, so a copy or a paste never leaves DiaCraft. This holds the app to turning it on (public issue:
+/// copy and paste with other programs).
+#[test]
+fn the_desktop_app_connects_egui_to_the_system_clipboard() {
+    let text = std::fs::read_to_string(xtask::root().join("apps/diacraft/Cargo.toml")).unwrap();
+    let manifest: toml::Table = text.parse().expect("apps/diacraft/Cargo.toml is TOML");
+    let features = manifest
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.get("eframe"))
+        .and_then(|eframe| eframe.get("features"))
+        .and_then(toml::Value::as_array)
+        .unwrap_or_else(|| panic!("apps/diacraft/Cargo.toml names eframe with no `features` list"));
+    assert!(
+        features.iter().any(|feature| feature.as_str() == Some("clipboard")),
+        "the desktop app's eframe has no `clipboard` feature ({features:?}): egui then keeps a private clipboard, so Copy, Cut and every text \
+         field never reach the system clipboard on Windows, macOS or Linux, and text copied in another program cannot be pasted in (public \
+         issue: copy and paste with other programs)"
+    );
+}
+
 /// The `[[package]]` entries of a Cargo.lock named `package`, each with the first word of every dependency it lists
 /// (cargo writes `"name"`, and `"name 1.2.3"` or `"name 1.2.3 (source)"` where two versions of a crate exist).
 fn lock_entries(lock: &str, package: &str) -> Vec<(String, Vec<String>)> {
@@ -213,4 +234,142 @@ fn the_recursion_limit_check_finds_the_feature() {
     assert_eq!(found, [vec!["default".to_owned(), "std".to_owned()], vec!["std".to_owned(), "unbounded_depth".to_owned()]]);
     assert_eq!(features_enabled(&metadata, "other"), [vec!["unbounded_depth".to_owned()]]);
     assert!(features_enabled(&metadata, "absent").is_empty());
+}
+
+// ------------------------------------------------------------------------------------------------------ unused entries of the root manifest
+
+/// The names of the `[dependencies]`, `[dev-dependencies]` and `[build-dependencies]` of a member manifest, those under a `[target.*]` too, that say `workspace = true`.
+fn inherited_dependencies(member: &toml::Table) -> Vec<String> {
+    const KINDS: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+    let mut tables: Vec<&toml::Table> = KINDS.iter().filter_map(|kind| member.get(*kind)?.as_table()).collect();
+    if let Some(targets) = member.get("target").and_then(|t| t.as_table()) {
+        for target in targets.values().filter_map(|t| t.as_table()) {
+            tables.extend(KINDS.iter().filter_map(|kind| target.get(*kind)?.as_table()));
+        }
+    }
+    let says_workspace = |spec: &toml::Value| spec.get("workspace").and_then(|w| w.as_bool()) == Some(true);
+    tables.into_iter().flat_map(|table| table.iter().filter(|(_, spec)| says_workspace(spec)).map(|(name, _)| name.clone())).collect()
+}
+
+/// The `[package]` fields of a member manifest that say `workspace = true` (`version.workspace = true`).
+fn inherited_fields(member: &toml::Table) -> Vec<String> {
+    let Some(package) = member.get("package").and_then(|p| p.as_table()) else { return Vec::new() };
+    package.iter().filter(|(_, v)| v.get("workspace").and_then(|w| w.as_bool()) == Some(true)).map(|(name, _)| name.clone()).collect()
+}
+
+/// What cargo's two manifest lints (`unused_workspace_dependencies`, `unused_workspace_package_fields`) warn of on every command: the `[workspace.dependencies]` and the
+/// `[workspace.package]` fields that no member of `members` inherits. → both lists, sorted.
+fn unused_entries(root: &str, members: &[&str]) -> (Vec<String>, Vec<String>) {
+    let root: toml::Table = root.parse().expect("the root manifest is TOML");
+    let workspace = root.get("workspace").and_then(|w| w.as_table());
+    let names = |key: &str| -> Vec<String> {
+        workspace.and_then(|w| w.get(key)).and_then(|t| t.as_table()).map(|t| t.keys().cloned().collect()).unwrap_or_default()
+    };
+    let (mut dependencies, mut fields) = (names("dependencies"), names("package"));
+    for member in members {
+        let member: toml::Table = member.parse().expect("a member manifest is TOML");
+        let (used_dependencies, used_fields) = (inherited_dependencies(&member), inherited_fields(&member));
+        dependencies.retain(|name| !used_dependencies.contains(name));
+        fields.retain(|name| !used_fields.contains(name));
+    }
+    dependencies.sort();
+    fields.sort();
+    (dependencies, fields)
+}
+
+/// Every manifest of the workspace's members, read as the root's `members` names them (`crates/*`, `apps/*`, `xtask`).
+fn member_manifests() -> Vec<String> {
+    let root = xtask::root();
+    let manifest: toml::Table = std::fs::read_to_string(root.join("Cargo.toml")).unwrap().parse().unwrap();
+    let members = manifest.get("workspace").and_then(|w| w.get("members")).and_then(|m| m.as_array()).expect("the root manifest lists its members");
+    let mut folders = Vec::new();
+    for member in members.iter().filter_map(|m| m.as_str()) {
+        match member.strip_suffix("/*") {
+            Some(parent) => {
+                let mut found: Vec<_> =
+                    std::fs::read_dir(root.join(parent)).unwrap().flatten().map(|e| e.path()).filter(|p| p.join("Cargo.toml").is_file()).collect();
+                found.sort();
+                folders.extend(found);
+            }
+            None => folders.push(root.join(member)),
+        }
+    }
+    assert!(folders.len() > 20, "the members were not found: {folders:?}");
+    folders.iter().map(|folder| std::fs::read_to_string(folder.join("Cargo.toml")).unwrap()).collect()
+}
+
+/// A `[workspace.dependencies]` entry and a `[workspace.package]` field that no member uses make cargo print a warning on every build
+/// (`unused workspace dependency`, `unused field in workspace.package`). A crate that is not used yet is added to the table with the first member that depends on it, not before,
+/// and a field is inherited by the members that ship.
+#[test]
+fn the_root_manifest_has_no_unused_workspace_dependency_or_package_field() {
+    let root = std::fs::read_to_string(xtask::root().join("Cargo.toml")).unwrap();
+    let members = member_manifests();
+    let members: Vec<&str> = members.iter().map(String::as_str).collect();
+    let (dependencies, fields) = unused_entries(&root, &members);
+    assert!(
+        dependencies.is_empty(),
+        "workspace dependencies that no member uses (cargo warns of each on every build): {dependencies:?}; declare each with `{{ workspace = true }}` in the crate that uses it"
+    );
+    assert!(
+        fields.is_empty(),
+        "`workspace.package` fields that no member inherits (cargo warns of each on every build): {fields:?}; inherit each with `field.workspace = true`"
+    );
+}
+
+/// The check above is tried on made-up manifests, in every spelling cargo reads: a dotted key, a table, a rename of the table, the three kinds of dependency, a target's, and
+/// a dependency that is not the workspace's.
+#[test]
+fn the_unused_entry_check_reads_every_spelling_of_an_inheritance() {
+    let root = r#"
+[workspace]
+members = ["a", "b"]
+[workspace.package]
+version = "1"
+edition = "2024"
+repository = "https://example.org/x"
+[workspace.dependencies]
+one = { path = "one" }
+two = { path = "two" }
+three = "3"
+four = "4"
+five = "5"
+six = "6"
+"#;
+    let a = r#"
+[package]
+name = "a"
+version.workspace = true
+edition = "2024"
+[dependencies]
+one = { workspace = true }
+two = { workspace = true, features = ["x"] }
+[dev-dependencies.three]
+workspace = true
+"#;
+    let b = r#"
+[package]
+name = "b"
+[package.repository]
+workspace = true
+[build-dependencies]
+four = { workspace = true }
+[target.'cfg(windows)'.dependencies]
+five = { workspace = true }
+[dependencies]
+six = "6"
+"#;
+    assert_eq!(
+        unused_entries(root, &[a, b]),
+        (vec!["six".to_owned()], vec!["edition".to_owned()]),
+        "six is the crate's own `six`, and edition is spelled out in a"
+    );
+    assert_eq!(unused_entries(root, &[a]).0, ["five", "four", "six"]);
+    assert_eq!(
+        unused_entries(root, &[]),
+        (
+            vec!["five", "four", "one", "six", "three", "two"].into_iter().map(String::from).collect(),
+            vec!["edition".to_owned(), "repository".to_owned(), "version".to_owned()]
+        )
+    );
 }

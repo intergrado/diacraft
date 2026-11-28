@@ -34,6 +34,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, channel};
 
+use diacraft_engine::file_access::ScopeHandle;
 use diacraft_engine::{EngineError, guard, shown};
 use egui::Context;
 use serde_json::{Value, json};
@@ -72,6 +73,13 @@ pub(crate) struct Saving {
     pub(crate) after: Option<Then>,
     /// The question about a file that is there, when a name the window gave a file type to names one (M2).
     pub(crate) replacing: Option<Replacing>,
+    /// The automation roots in force when each card was raised (`diacraft_engine::file_access`), **one for each card**, so that a card raised later (the person's, with no roots) cannot
+    /// loosen the roots a request's card is waiting under: a card a request raised is answered under the request's roots, whoever answers it, and one the person raised and the
+    /// control channel answers is answered under the roots of the frame that answers it. Taken again when that card is raised again.
+    pub(crate) asking_scope: ScopeHandle,
+    pub(crate) replacing_scope: ScopeHandle,
+    pub(crate) changed_scope: ScopeHandle,
+    pub(crate) macros_scope: ScopeHandle,
     /// The question about a file that changed on the disk, and the save to run again if the answer is to overwrite it (M3).
     pub(crate) changed: Option<SaveAgain>,
     /// The question about a macro project the type chosen cannot hold, and the save to run again if the answer is to leave the macros out.
@@ -110,7 +118,8 @@ impl DiacraftApp {
 
     /// Whether Save can be used now: a drawing is open and the engine has the commands.
     pub fn can_save(&self) -> bool {
-        self.command_enabled("file.save").is_ok() && !self.save_dialog_open()
+        // A drawing with a file is saved in place with no dialog; one with none needs the Save dialog, which waits for any other file dialog (`file_dialog.rs`).
+        self.command_enabled("file.save").is_ok() && !self.save_dialog_open() && (self.session.path().is_some() || self.file_dialog().is_none())
     }
 
     /// Whether Save As can be used now: as [`DiacraftApp::can_save`], and the app has a dialog to ask for the name.
@@ -119,6 +128,7 @@ impl DiacraftApp {
             && (self.saving.picker.is_some() || self.has_file_host())
             && !self.save_dialog_open()
             && !self.name_card_for(crate::file_host::Purpose::Save)
+            && self.file_dialog().is_none()
     }
 
     /// Save: writes the drawing to its file, or asks for one if it has none (Ctrl+S, the Quick Access Toolbar, the File view).
@@ -139,6 +149,10 @@ impl DiacraftApp {
         self.commit_pending_text();
         // (A drawing that came from a flat `.fodg` is saved as any drawing is, made `file.save_as` usable for it, so nothing here is its own.)
         if self.command_enabled("file.save_as").is_err() || self.save_dialog_open() || self.name_card_for(crate::file_host::Purpose::Save) {
+            return;
+        }
+        // One file dialog at a time (`file_dialog.rs`).
+        if self.refuse_while_a_file_dialog_is_open() {
             return;
         }
         // With a host (the browser) the page names the file, or the window's own card does (`file_host.rs`).
@@ -221,6 +235,7 @@ impl DiacraftApp {
         let text = if typed { format!("{text}.{}", self.own_extension()) } else { text.to_owned() };
         if typed && is_there(&text) {
             self.saving.replacing = Some(Replacing::Save(text));
+            self.saving.replacing_scope = ScopeHandle::capture();
             ctx.request_repaint();
             return;
         }
@@ -251,6 +266,7 @@ impl DiacraftApp {
             Err(EngineError::MacrosNotAllowed { msg, .. }) if !drop_macros => {
                 let keep_as = self.macro_enabled_name(text);
                 self.saving.macros = Some(SaveWithout { path: text.to_owned(), force, words: sentence(&shown(&msg, WORDS_SHOWN)), keep_as });
+                self.saving.macros_scope = ScopeHandle::capture();
                 ctx.request_repaint();
             }
             Err(e) => self.save_failed(&e),
@@ -275,6 +291,7 @@ impl DiacraftApp {
         let own = self.session.path().is_some_and(|own| own == std::path::Path::new(path));
         if is_there(path) && !own {
             self.saving.replacing = Some(Replacing::Macros(path.to_owned()));
+            self.saving.replacing_scope = ScopeHandle::capture();
             ctx.request_repaint();
         } else {
             self.save_text_with(ctx, path, force, false);
@@ -284,6 +301,7 @@ impl DiacraftApp {
     /// The file changed on the disk: asks what to do, and keeps what to do afterwards (`saving.after`) until it is answered.
     fn ask_changed(&mut self, ctx: &Context, again: SaveAgain) {
         self.saving.changed = Some(again);
+        self.saving.changed_scope = ScopeHandle::capture();
         ctx.request_repaint();
     }
 
@@ -369,8 +387,10 @@ impl DiacraftApp {
 
     /// Asks before the window closes with unsaved changes. A close a program asked for (`app.quit`) is not asked about.
     ///
-    /// **A label being typed is sent first** (M1): a close from the desktop's frame or Alt+F4 finds the drawing changed, and asks. A close while
-    /// another question is on the screen is held back (the person answers that one), and not asked about on top of it.
+    /// **A label being typed is sent first** (M1): a close from the desktop's frame or Alt+F4 finds the drawing changed, and asks. **A close while
+    /// another question is on the screen is held back** (the person answers that one), and not asked about on top of it: any card of the saving flow
+    /// ([`DiacraftApp::a_card_waits`]), the question about unsaved changes too, since a card keeps the place, and the roots, it was raised with (a close
+    /// card that took its place would take the roots of the frame the person closed in).
     pub(crate) fn watch_close(&mut self, ctx: &Context) {
         let close_asked = ctx.input(|i| i.viewport().close_requested());
         if !close_asked || self.saving.may_close || self.quit_requested() {
@@ -379,21 +399,34 @@ impl DiacraftApp {
         self.commit_pending_text();
         if self.is_dirty() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            if self.saving.replacing.is_none() && self.saving.changed.is_none() && self.saving.macros.is_none() {
+            if !self.a_card_waits() {
                 self.saving.asking = Some(Then::Close);
+                self.saving.asking_scope = ScopeHandle::capture();
             }
         }
     }
 
-    /// Does `then`, after asking first if the drawing has unsaved changes. A label being typed is sent first, so it counts (M1).
+    /// Does `then`, after asking first if the drawing has unsaved changes. A label being typed is sent first, so it counts (M1). **While a card is waiting for its answer
+    /// another is not raised over it** (as `watch_close` does not): the card on the screen is answered first, and what was asked now is said not to have been done, so that a
+    /// card a request raised keeps the place, and the roots, it was raised with.
     pub fn ask_then(&mut self, ctx: &Context, then: Then) {
         self.commit_pending_text();
         if self.is_dirty() {
+            if self.a_card_waits() {
+                self.set_notice("A question is waiting for its answer: answer it first, and then ask again.");
+                return;
+            }
             self.saving.asking = Some(then);
+            self.saving.asking_scope = ScopeHandle::capture();
             ctx.request_repaint();
         } else {
             self.proceed(ctx, then);
         }
+    }
+
+    /// Whether a card of the saving flow is on the screen: unsaved changes, a file to replace, a file that changed, or macros to leave out.
+    fn a_card_waits(&self) -> bool {
+        self.saving.asking.is_some() || self.saving.replacing.is_some() || self.saving.changed.is_some() || self.saving.macros.is_some()
     }
 
     fn proceed(&mut self, ctx: &Context, then: Then) {
@@ -516,5 +549,100 @@ mod tests {
     fn a_bug_is_told_without_its_details() {
         let text = save_failure_text("a.vsdx", &EngineError::Internal { cmd: "file.save".into(), msg: "index out of bounds: secret".into() });
         assert!(text.contains("internal problem") && !text.contains("secret"), "{text}");
+    }
+
+    /// A card is not raised over another: the one on the screen keeps its place (and the roots it was raised under), and what was asked is said not to have been done.
+    #[test]
+    fn a_question_is_not_raised_over_another() {
+        let ctx = Context::default();
+        let mut app = DiacraftApp::new(diacraft_engine::Session::new(), None);
+        app.execute("file.new", &json!({})).expect("a drawing");
+        app.execute("page.add", &json!({})).expect("an edit, so that the drawing has unsaved changes");
+        assert!(app.is_dirty());
+        // With no card up, it asks.
+        app.ask_then(&ctx, Then::New);
+        assert_eq!(app.saving.asking, Some(Then::New));
+        app.saving.asking = None;
+        // With a card of any of the four up, it asks nothing and says so.
+        for raise in [
+            |s: &mut Saving| s.changed = Some(SaveAgain::InPlace),
+            |s: &mut Saving| s.replacing = Some(Replacing::Save("a.vsdx".to_owned())),
+            |s: &mut Saving| s.asking = Some(Then::Close),
+        ] {
+            let mut app = DiacraftApp::new(diacraft_engine::Session::new(), None);
+            app.execute("file.new", &json!({})).expect("a drawing");
+            app.execute("page.add", &json!({})).expect("an edit");
+            raise(&mut app.saving);
+            let before = (app.saving.asking.clone(), app.saving.replacing.clone(), app.saving.changed.clone());
+            app.ask_then(&ctx, Then::New);
+            assert_eq!(
+                (app.saving.asking.clone(), app.saving.replacing.clone(), app.saving.changed.clone()),
+                before,
+                "the card that was up is as it was"
+            );
+            assert!(app.notice().is_some_and(|n| n.contains("waiting for its answer")), "{:?}", app.notice());
+        }
+    }
+
+    /// The window runs `watch_close` for a close the desktop asked for, in a frame of its own.
+    fn close_asked(app: &mut DiacraftApp, ctx: &Context) {
+        let mut input = egui::RawInput::default();
+        input.viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(input, |ui| app.watch_close(ui.ctx()));
+        // (The pass's texture changes are not applied by anything here: dropping them unhandled is a panic of epaint's.)
+        output.textures_delta.clear();
+    }
+
+    /// A close the desktop asks for is held back while any card of the saving flow is on the screen, the one about unsaved changes too (as `ask_then` holds back what it is asked): the
+    /// card that was raised first keeps its place, what it was raised for and **the roots it was raised under** (a request's New, answered under the request's roots), and is not
+    /// replaced by a close card that takes the roots of the frame the person closed in.
+    #[test]
+    fn a_close_is_not_raised_over_the_question_about_unsaved_changes_and_keeps_the_roots_it_was_raised_under() {
+        use diacraft_engine::file_access::{AutomationRoots, confine, current};
+        let dir = std::env::temp_dir().join(format!("diacraft-save-close-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a folder for the root");
+        let roots = AutomationRoots::new(&[], &[dir.as_path()]).expect("a root").expect("roots");
+        let ctx = Context::default();
+        let mut app = DiacraftApp::new(diacraft_engine::Session::new(), None);
+        app.execute("file.new", &json!({})).expect("a drawing");
+        app.execute("page.add", &json!({})).expect("an edit, so that the drawing has unsaved changes");
+        // A request asks (File > New, by a key it sent), under its roots.
+        confine(Some(&roots), || app.ask_then(&ctx, Then::New));
+        let under_roots = |app: &DiacraftApp| app.saving.asking_scope.clone().run(|| current().is_some());
+        assert_eq!(app.saving.asking, Some(Then::New));
+        assert!(under_roots(&app), "the question was raised under the request's roots");
+        // The person closes the window, in a frame that has no roots.
+        close_asked(&mut app, &ctx);
+        assert_eq!(app.saving.asking, Some(Then::New), "the question on the screen is answered first, and not replaced by the close");
+        assert!(under_roots(&app), "and it keeps the roots it was raised under");
+        assert!(!app.saving.may_close, "and nothing closed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The cards that already held a close back still do, and a close with no card up asks, with the roots of the frame it came in.
+    #[test]
+    fn a_close_with_no_card_up_asks_and_one_with_a_card_up_does_not() {
+        let ctx = Context::default();
+        let dirty = || {
+            let mut app = DiacraftApp::new(diacraft_engine::Session::new(), None);
+            app.execute("file.new", &json!({})).expect("a drawing");
+            app.execute("page.add", &json!({})).expect("an edit");
+            app
+        };
+        let mut app = dirty();
+        close_asked(&mut app, &ctx);
+        assert_eq!(app.saving.asking, Some(Then::Close), "no card was up: the close asks");
+        for raise in
+            [|s: &mut Saving| s.changed = Some(SaveAgain::InPlace), |s: &mut Saving| s.replacing = Some(Replacing::Save("a.vsdx".to_owned()))]
+        {
+            let mut app = dirty();
+            raise(&mut app.saving);
+            close_asked(&mut app, &ctx);
+            assert_eq!(app.saving.asking, None, "a card was up: the close is held back");
+        }
+        let mut clean = DiacraftApp::new(diacraft_engine::Session::new(), None);
+        clean.execute("file.new", &json!({})).expect("a drawing");
+        close_asked(&mut clean, &ctx);
+        assert_eq!(clean.saving.asking, None, "nothing to save: nothing is asked");
     }
 }

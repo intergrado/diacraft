@@ -27,7 +27,7 @@ use super::settings::Settings;
 use crate::draw::shapes::{move_each, resize_cells};
 use crate::draw::{Problem, settle};
 use crate::stencil::container::{Side, StyleSpec, find_style};
-use crate::stencil::swimlane::{DIRECTION_ROW, FRAME, LANE, LANES, PHASE, PHASES, ROLE_ROW};
+use crate::stencil::swimlane::{DIRECTION_ROW, FRAME, LANE, LANES, PHASE, PHASES, POOL, ROLE_ROW};
 
 /// The most members of a list that are laid out. A list of more is refused in words (a file may hold a list of any length, and it is moved with its members as any other).
 pub const MAX_LIST_MEMBERS: usize = 512;
@@ -55,7 +55,7 @@ pub(crate) enum Role {
 impl Role {
     fn from_word(word: &str) -> Role {
         match word {
-            FRAME => Role::Frame,
+            FRAME | POOL => Role::Frame,
             LANES => Role::Lanes,
             PHASES => Role::Phases,
             LANE => Role::Lane,
@@ -105,7 +105,8 @@ pub(super) fn own_role(page: &Page<'_>, id: u32) -> Result<Option<Role>, Problem
     page.work.charge(4)?;
     let Some(sheet) = page.sheet(id) else { return Ok(None) };
     let found = page.reader.resolver().resolve(&sheet, &row(ROLE_ROW));
-    Ok(found.and_then(|f| f.value.cell.and_then(|c| c.value.as_ref().map(|v| Role::from_word(v.text().trim())))))
+    // A cell that holds a formula and no saved value is what the formula works out to, as the picture reads it.
+    Ok(found.and_then(|f| page.reader.worked().text_of(&sheet, &row(ROLE_ROW), &f).map(|text| Role::from_word(text.trim()))))
 }
 
 /// The role of a shape: from its own `User.DiaCraftSwimlane`, and for a shape that has none, from the file's own cells ([`FileParts`]). The reads are charged.
@@ -114,6 +115,42 @@ pub(super) fn role(page: &Page<'_>, id: u32) -> Result<Role, Problem> {
         Some(role) => Ok(role),
         None => file_role(page, id),
     }
+}
+
+/// Whether the shape is the frame of a pool: its own `User.DiaCraftSwimlane` row says `pool`. A pool is a frame like any other, with the pool's name in a strip on the side of its heading
+/// (ours: a line separates a pool's label from what it holds, and the layout leaves room for it): the frame is the box of its lists and that strip. The read is charged.
+pub(super) fn is_pool(page: &Page<'_>, id: u32) -> Result<bool, Problem> {
+    page.work.charge(4)?;
+    let Some(sheet) = page.sheet(id) else { return Ok(false) };
+    let found = page.reader.resolver().resolve(&sheet, &row(ROLE_ROW));
+    Ok(found.and_then(|f| page.reader.worked().text_of(&sheet, &row(ROLE_ROW), &f).map(|text| text.trim() == POOL)).unwrap_or(false))
+}
+
+/// The box of a pool's frame round the box of its lists, `to`: the strip for the pool's name, on the side of its heading. Any other frame is the box of its lists.
+fn with_strip(page: &Page<'_>, frame: u32, to: Screen) -> Result<Screen, Problem> {
+    if !is_pool(page, frame)? {
+        return Ok(to);
+    }
+    let settings = Settings::read(page, frame)?;
+    Ok(match settings.heading {
+        Side::Left => Screen { l: to.l - settings.band, ..to },
+        Side::Right => Screen { r: to.r + settings.band, ..to },
+        Side::Top => Screen { t: to.t - settings.band, ..to },
+        Side::Bottom => Screen { b: to.b + settings.band, ..to },
+    })
+}
+
+/// How much of a pool frame's size across the lanes (`dir`) is its strip: the lanes are the rest. Nothing for a frame that is no pool, and for a strip that lies along the lanes.
+fn strip_across(page: &Page<'_>, frame: u32, dir: Dir) -> Result<f64, Problem> {
+    if !is_pool(page, frame)? {
+        return Ok(0.0);
+    }
+    let settings = Settings::read(page, frame)?;
+    let across = match dir {
+        Dir::Down => matches!(settings.heading, Side::Left | Side::Right),
+        Dir::Across => matches!(settings.heading, Side::Top | Side::Bottom),
+    };
+    Ok(if across { settings.band } else { 0.0 })
 }
 
 /// The direction of a list that DiaCraft lays out: its `User.DiaCraftListDirection`, and for a list of a file that has none, the way its lanes lie ([`file_direction`]); `None` for a shape
@@ -755,6 +792,7 @@ pub(super) fn plan(page: &Page<'_>, s: &Structure, trigger: Trigger, anchor: Anc
             },
             None => whole,
         };
+        let to = with_strip(page, frame, to)?;
         if let Some(write) = write_for(page, frame, now, to)? {
             writes.push(write);
         }
@@ -902,7 +940,10 @@ pub(super) fn after_resize(doc: &mut Document, page: u32, ids: &[u32]) -> Result
                 Role::Frame if own_role(&p, *id)?.is_none() => continue,
                 Role::Lanes | Role::Frame => match structure_of(&p, *id)? {
                     Some(s) => match (direction(&p, s.lanes)?, screen_of(&p, *id)?) {
-                        (Some(dir), Some(b)) => Trigger::Length(b.cross(dir)),
+                        // A pool's frame is its lanes and the strip of its name: the lanes are as long as the rest.
+                        (Some(dir), Some(b)) => {
+                            Trigger::Length(b.cross(dir) - if role(&p, *id)? == Role::Frame { strip_across(&p, *id, dir)? } else { 0.0 })
+                        }
                         _ => continue,
                     },
                     None => continue,

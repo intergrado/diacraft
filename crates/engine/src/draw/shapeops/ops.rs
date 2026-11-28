@@ -11,6 +11,7 @@
 use craft_pathops::{FillRule, PathOpsError, PathfinderOp, Shape, try_pathfinder_with, try_unite_all_with};
 use kurbo::{BezPath, ParamCurve, PathEl, PathSeg, Point, Rect, Shape as _, Vec2};
 
+use super::runs::{Run, runs_of};
 use super::{MERGE, PRECISION};
 use crate::draw::Problem;
 
@@ -65,6 +66,46 @@ pub(super) fn fragment(fills: &[BezPath], cuts: &[BezPath]) -> Result<Vec<BezPat
     let made = try_pathfinder_with(PathfinderOp::Divide, &shapes, PRECISION).map_err(refusal)?;
     let faces: Vec<BezPath> = made.into_iter().filter(|s| s.key != CUT && !s.path.elements().is_empty()).map(|s| s.path).collect();
     Ok(in_order(faces))
+}
+
+/// Trim: the stretches of the paths of `runs` between the places where they cross, touch or meet themselves, in the order the library gives them: the paths in
+/// the order of `runs`, and each path's stretches in path order **from its first cut** (a closed path starts at the first place it is cut after its own start, so the
+/// stretch that holds its start comes last). A path nothing cuts is its own single stretch, and a stretch that two paths run along is kept once, in the place of the
+/// earlier path.
+///
+/// This is the library's Pathfinder **Outline**, not its `Trim`, which is the illustration app's operation (it removes what a shape in front hides of one behind). Outline
+/// cuts each path where three or more of its edges meet in the planar map of all of them (a crossing, the end of a path on another, a place a path meets itself), keeps each
+/// piece's own segments (a line stays a line, a curve is cut exactly where it is crossed), and gives a path nothing crosses as itself. Its refusals are the library's
+/// (`try_`): too many segments, too many places where they cross, a number that is not finite.
+///
+/// **Two things are done for the library's sake.**
+///
+/// * **Every path goes in as one shape**, a subpath each. The library holds the windings of every shape it is given for each piece of the sweep that lies across it, which
+///   is about 90 bytes for the square of the number of *shapes* when they lie across one another's heights: 20,000 separate segments, given as 20,000 shapes, took 24 GB and
+///   were killed. One shape holding them costs what the paths do (32,000 take a second). Nothing here needs a shape's key, and which path a piece came from is told by where
+///   it is.
+/// * **A marker path is added far from the drawing, and its piece taken out again.** A drawing of closed paths only is cut by the filled arrangement of its shapes, whose
+///   edges that cancel under a fill rule (the shared side of two squares) are no edges, so that the corners they meet at are no places where three edges meet; one open path
+///   makes the library cut by the planar map of all the paths, every edge of them whatever it fills, which is what Trim is. The marker is a vertical segment one reach of the
+///   drawing beyond its top right corner, which no path of the drawing can meet.
+pub(super) fn trim_pieces(runs: &[Run]) -> Result<Vec<Run>, Problem> {
+    let mut all = BezPath::new();
+    for run in runs {
+        for el in run.path().elements() {
+            all.push(*el);
+        }
+    }
+    let rect = bounds([&all]).ok_or_else(|| Problem::failed("the shapes have no geometry to cut"))?;
+    let reach = rect.width().max(rect.height()).max(1.0);
+    let (from, to) = (Point::new(rect.x1 + reach, rect.y1 + reach), Point::new(rect.x1 + reach, rect.y1 + 2.0 * reach));
+    all.move_to(from);
+    all.line_to(to);
+    let made = try_pathfinder_with(PathfinderOp::Outline, &[Shape::new(all, FillRule::EvenOdd, 0)], PRECISION).map_err(refusal)?;
+    let is_marker = |piece: &Run| {
+        let (a, b) = (piece.start, piece.end());
+        (a.distance(from) <= MERGE && b.distance(to) <= MERGE) || (a.distance(to) <= MERGE && b.distance(from) <= MERGE)
+    };
+    Ok(made.iter().flat_map(|piece| runs_of(&piece.path)).filter(|piece| !is_marker(piece)).collect())
 }
 
 /// The one path a pathfinder result holds, or an empty path for none.

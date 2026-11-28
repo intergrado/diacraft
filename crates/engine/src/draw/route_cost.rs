@@ -458,6 +458,32 @@ fn the_routings_of_one_edit_share_its_tries_and_say_what_they_left() {
     assert_eq!(super::settle::ATTEMPTED.with(std::cell::Cell::get), 8);
 }
 
+/// The scan's finding 3: the pages one commit reached are routed within **one budget of the evaluator's steps**, as the tries are one budget for the edit, and not a budget
+/// for each page: a move of a shape that three pages read hands the routings of those pages 20 million steps in all, and the page of the move 20 million more.
+#[test]
+fn the_pages_a_commit_reached_are_routed_within_one_budget_of_steps() {
+    let mut s = blank();
+    run(&mut s, "page.rename", json!({"id": 1, "name": "One"}));
+    let one = drop_rectangle(&mut s, 1.0, 1.0);
+    for k in 0..3 {
+        let page = id_of(&run(&mut s, "page.add", json!({"name": format!("Reader-{k}")})));
+        let drop = |s: &mut Session, x: f64, y: f64| id_of(&run(s, "shape.drop", json!({"master": "rectangle", "page": page, "x": x, "y": y})));
+        let (a, b) = (drop(&mut s, 2.0, 2.0), drop(&mut s, 6.0, 4.0));
+        run(&mut s, "connector.add", json!({"page": page, "from": {"id": a, "point": 3}, "to": {"id": b, "point": 1}}));
+        run(&mut s, "sheet.set_cell", json!({"page": page, "id": a, "cell": "PinX", "formula": format!("Pages[One]!Sheet.{one}!PinX+1")}));
+    }
+    super::settle::GRANTED.with(|c| c.set(0));
+    super::settle::ATTEMPTED.with(|c| c.set(0));
+    run(&mut s, "shape.move", json!({"ids": [one], "page": 1, "dx": 3.0, "dy": 0.0}));
+    let tried = super::settle::ATTEMPTED.with(std::cell::Cell::get);
+    assert!(tried >= 3, "the connector of each of the three pages was tried: {tried}");
+    let granted = super::settle::GRANTED.with(std::cell::Cell::get);
+    assert!(
+        granted <= 2 * diacraft_calc::Budget::DEFAULT_STEPS,
+        "{granted} steps handed to the routings: the page of the move and one budget for the three pages it reached"
+    );
+}
+
 /// A fixed route whose ends moved is **followed square**, and the follow is a **try**, counted as the crossing test is. A move of the shape
 /// ten thousand connectors set to reroute never are glued to tries each once, writes each route once, searches the page for no shape, and passes over the page's `Connect` rows once;
 /// a route of more rows than the crossing test reads is not read at all and is not written. Against the yardstick of the same move with the connectors set freely, which are each
@@ -622,4 +648,242 @@ fn timed_a_move_past_the_budget_against_the_move_that_routes_none() {
     let (mut s, a, _, _) = crowded(n, Route::Hand, "freely");
     let crafted = timed_move(&mut s, a, "20,000, freely");
     within("a move of the shape 20,000 connectors are glued to", crafted, yardstick, 3.0);
+}
+
+// ---- the connectors a recalculation moved ----
+
+/// The shape ten thousand connectors are glued to is resized by **a formula** and not named: a write to the anchor it reads. The connectors are routed again once each, as they are
+/// by the move of the shape named (the yardstick, same page, same count), by the comparison of the drawing before and after the recalculation: the routing **passes over the page's
+/// `Connect` rows once**, the page is searched for the anchor and no more (a search for each connector would be ten thousand walks of ten thousand shapes), and the points of the shape
+/// are read once for the call.
+#[test]
+fn routing_ten_thousand_connectors_of_a_shape_a_formula_resized_costs_what_the_move_of_it_costs() {
+    let (mut s, a, _, _) = crowded(CROWD, Route::Hand, "freely");
+    let yardstick = moved(&mut s, a, &format!("{CROWD} connectors, A named in a move"));
+    drop(s);
+    let (mut s, a, _, ids) = crowded(CROWD, Route::Hand, "freely");
+    let anchor = drop_rectangle(&mut s, 1.0, 9.0);
+    run(&mut s, "sheet.set_cell", json!({"id": a, "cell": "Width", "formula": format!("Sheet.{anchor}!Width")}));
+    let connects = s.document().unwrap().page(1).unwrap().connects.len();
+    let width = number(s.document().unwrap(), a, "Width");
+    let recalculated = counted(&mut s, "a write to the anchor A reads", "sheet.set_cell", json!({"id": anchor, "cell": "Width", "formula": "3"}));
+    assert!((number(s.document().unwrap(), a, "Width") - 3.0).abs() < 1.0e-9 && width != 3.0, "A follows the anchor: it was {width}");
+    assert_eq!((recalculated.attempted, recalculated.routed), (CROWD as usize, CROWD as usize), "every connector of A is routed again, once");
+    assert!(recalculated.connects <= connects, "the routing passed over {} `Connect` rows, the page holds {connects}", recalculated.connects);
+    // A few searches of the page for the anchor and for what the write names, and none for a connector.
+    assert!(
+        recalculated.finds <= yardstick.finds + 4 * (u64::from(CROWD) + 8),
+        "{} shapes visited by searches, {} with A named: the routing searched the page",
+        recalculated.finds,
+        yardstick.finds
+    );
+    let jumps = (super::MAX_JUMP_PARTICIPANTS as u64 + 1) * 8;
+    assert!(
+        recalculated.rows <= yardstick.rows + 2 * 4 + jumps + 64,
+        "the routing merged {} rows, {} with A named: the points of a glued shape are read once for the call",
+        recalculated.rows,
+        yardstick.rows
+    );
+    // Each is routed: the route it had (a hand path of six rows) is replaced by the route of its own ends.
+    for id in [ids[0], ids[ids.len() / 2], ids[ids.len() - 1]] {
+        assert!(own_route_rows(s.document().unwrap(), id) < 6, "connector {id} has a new route");
+    }
+}
+
+/// The faces a page's text is measured in, process-wide: the tests that set them take turns (nextest gives each a process of its own).
+static FACES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// A narrow default face and a wide one the themes of the catalogue name, so that a theme that changes the face changes the width of text on every machine. Held while the test runs.
+struct Faces(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+impl Faces {
+    fn narrow_default_and_wide_dejavu() -> Faces {
+        let held = FACES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut db = diacraft_fonts::FontDb::empty();
+        for (family, advance) in [("Liberation Sans", 450), ("DejaVu Sans", 800)] {
+            assert_eq!(db.add_font_data(diacraft_fonts::synth::SynthFont::new(family).ascii(advance).build()).added, 1, "{family}");
+        }
+        crate::measure::set_measure_fonts(Some(Arc::new(db)));
+        Faces(held)
+    }
+}
+
+impl Drop for Faces {
+    fn drop(&mut self) {
+        crate::measure::set_measure_fonts(None);
+    }
+}
+
+/// A page of `n` pairs: a box B whose width is its text's (`TEXTWIDTH(TheText)` and a margin), a plain box D and a connector from B to D. A theme that changes the face changes the width
+/// of every B. → the session, the connectors' `ID`s, and the `ID` of the first B.
+fn text_sized_pairs(n: u32) -> (Session, Vec<u32>, u32) {
+    let mut s = blank();
+    let mut wires = Vec::new();
+    let mut first = 0;
+    let mut writes = Vec::new();
+    for k in 0..n {
+        let (x, y) = (2.0 + f64::from(k % 10) * 2.5, 2.0 + f64::from(k / 10) * 2.0);
+        let b = drop_rectangle(&mut s, x, y);
+        let d = drop_rectangle(&mut s, x, y + 1.0);
+        if k == 0 {
+            first = b;
+        }
+        run(&mut s, "shape.set_text", json!({"id": b, "text": "Hello, world"}));
+        writes.push(json!({"id": b, "cell": "Width", "formula": "TEXTWIDTH(TheText)+0.4"}));
+        wires.push(id_of(&run(&mut s, "connector.add", json!({"from": {"id": b, "point": 1}, "to": {"id": d, "point": 3}}))));
+    }
+    run(&mut s, "sheet.set_cells", json!({"writes": writes}));
+    (s, wires, first)
+}
+
+/// A theme that changes the face every box's width is made of routes the connector of each box once and **reads the page's glue once** (twice the pairs, twice the work and no more: a
+/// pass for each connector would be four times), a theme that changes no size (the face the boxes had) routes none, and the same theme again routes none either.
+#[test]
+fn a_theme_that_resizes_every_box_routes_each_connector_once_and_one_that_resizes_none_routes_none() {
+    let _faces = Faces::narrow_default_and_wide_dejavu();
+    let mut costs: Vec<(u32, Cost)> = Vec::new();
+    for n in [20, 40] {
+        let (mut s, wires, first) = text_sized_pairs(n);
+        let width = number(s.document().unwrap(), first, "Width");
+        let page_connects = s.document().unwrap().page(1).unwrap().connects.len();
+        // The face the boxes have already (the default, Liberation Sans): the theme links every shape to a style and changes no size.
+        let same = counted(&mut s, &format!("theme.apply tidepool, {n} pairs"), "theme.apply", json!({"theme": "tidepool"}));
+        assert!((number(s.document().unwrap(), first, "Width") - width).abs() < 1.0e-9, "the face is the default's: no width changes");
+        assert_eq!(
+            (same.attempted, same.routed),
+            (0, 0),
+            "{n} pairs: a theme that resizes nothing routes nothing, though it links every shape: {}",
+            same.answer
+        );
+        // The wide face: every box is wider, and the connector of each is routed again.
+        let wide = counted(&mut s, &format!("theme.apply fernwood, {n} pairs"), "theme.apply", json!({"theme": "fernwood"}));
+        assert!(number(s.document().unwrap(), first, "Width") > width + 0.1, "the wider face widens the boxes");
+        assert_eq!((wide.attempted, wide.routed), (n as usize, n as usize), "{n} pairs: each connector is routed again, once");
+        assert!(
+            wide.connects <= page_connects,
+            "{n} pairs: the routing passed over {} `Connect` rows, the page holds {page_connects}",
+            wide.connects
+        );
+        let again = counted(&mut s, &format!("theme.apply fernwood again, {n} pairs"), "theme.apply", json!({"theme": "fernwood"}));
+        assert_eq!((again.attempted, again.routed), (0, 0), "{n} pairs: the same theme again resizes nothing");
+        assert_eq!(wires.len(), n as usize);
+        costs.push((n, wide));
+    }
+    // Twice the pairs, no more than about twice the work: the counts that would show a pass over the page for each connector or for each shape moved.
+    let ((_, small), (_, large)) = (&costs[0], &costs[1]);
+    let linear = |what: &str, a: u64, b: u64| {
+        assert!(b <= 2 * a + 64, "{what}: {b} for 40 pairs, {a} for 20: more than twice, the work grows faster than the pairs");
+    };
+    linear("shapes visited by searches", small.finds, large.finds);
+    linear("rows merged", small.rows, large.rows);
+    linear("cells walked", small.cells, large.cells);
+    linear("`Connect` rows passed over", small.connects as u64, large.connects as u64);
+}
+
+// ---- the pages a recalculation moved shapes on share one budget of steps (the security scan's finding) ----
+
+/// A drawing of `pages` pages that are each a small diagram: a box B as wide as its text (`TEXTWIDTH(TheText)` and a margin), a box D, a connector from B to D, and `readers` cells of D
+/// that read the route of the connector (each is worked out again when the connector is routed, and in the page's whole recalculation). B is shape 1 of its page.
+fn text_diagrams(pages: u32, readers: u32) -> Session {
+    let mut s = blank();
+    for p in 1..=pages {
+        let page = if p == 1 { 1 } else { id_of(&run(&mut s, "page.add", json!({"name": format!("Page-{p}")}))) };
+        let drop = |s: &mut Session, x: f64, y: f64| id_of(&run(s, "shape.drop", json!({"master": "rectangle", "page": page, "x": x, "y": y})));
+        let (b, d) = (drop(&mut s, 2.0, 2.0), drop(&mut s, 7.0, 4.0));
+        run(&mut s, "shape.set_text", json!({"page": page, "id": b, "text": "Hi"}));
+        run(&mut s, "sheet.set_cell", json!({"page": page, "id": b, "cell": "Width", "formula": "TEXTWIDTH(TheText)+0.4"}));
+        let wire = id_of(&run(&mut s, "connector.add", json!({"page": page, "from": {"id": b}, "to": {"id": d}})));
+        s.edit("readers of the route", |doc| {
+            let at = doc.find_shape(Owner::Page(page), d).unwrap();
+            let shape = super::shape_mut(doc, page, &at.path).unwrap();
+            let sheet = Arc::make_mut(&mut shape.sheet);
+            for k in 0..readers {
+                let addr = diacraft_doc::CellAddr::in_row("User", None, diacraft_doc::RowKey::name(&format!("R{k}")), "Value");
+                let cell = Cell::with_formula(&format!("Sheet.{wire}!Geometry1.X2+{k}"), Some(Value::from_text("0")));
+                sheet.set_cell(&addr, cell).unwrap();
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+    s
+}
+
+/// The rows of the first `Geometry` section of the connector of page `page` (the page's only connector).
+fn route_rows_on(doc: &Document, page: u32) -> usize {
+    let wire = doc.page(page).unwrap().connects.iter().next().unwrap().from_sheet;
+    let at = doc.find_shape(Owner::Page(page), wire).unwrap();
+    doc.shape(&at).unwrap().sheet.sections.iter().find(|s| s.name.as_str() == "Geometry" && s.ix == Some(0)).map_or(0, |s| s.rows.len())
+}
+
+/// Writes the text of box B (shape 1) of every page and works the cells that read it out, with no command, so that nothing routes. → the pages.
+fn widened(doc: &mut Document) -> Vec<u32> {
+    use diacraft_doc::{Text, TextPart};
+    let pages: Vec<u32> = doc.pages.iter().map(|p| p.id).collect();
+    for page in &pages {
+        let at = doc.find_shape(Owner::Page(*page), 1).unwrap();
+        let shape = super::shape_mut(doc, *page, &at.path).unwrap();
+        shape.text = Some(Arc::new(Text { parts: vec![TextPart::Chars(Arc::from("Hello, wonderful world"))], ext: Default::default() }));
+        let cells = vec![(SheetRef::Shape(at), diacraft_doc::CellAddr::direct("TheText"))];
+        super::settle::commit(doc, *page, &diacraft_calc::Changes { cells, ..diacraft_calc::Changes::default() }).unwrap();
+    }
+    pages
+}
+
+/// **The pages a recalculation resized shapes on are routed within one budget of the evaluator's steps** (`Budget::DEFAULT_STEPS`, the budget of a whole drawing), and not a budget for
+/// each page: the refresh of the fields of a drawing of many pages routes every page it changed, and each routing was handed 20 million steps (`route_recalculated_pages`). The same for a
+/// replacement over the pages of a drawing (`edit.replace`, which routes after its writes).
+#[test]
+fn the_pages_a_recalculation_resized_shapes_on_are_routed_within_one_budget_of_steps() {
+    let pages = 6;
+    let s = text_diagrams(pages, 20);
+    let was = s.document().unwrap().clone();
+    let mut doc = was.clone();
+    widened(&mut doc);
+    super::settle::GRANTED.with(|c| c.set(0));
+    super::settle::ATTEMPTED.with(|c| c.set(0));
+    super::settle::route_recalculated_pages(&mut doc, &was).unwrap();
+    assert_eq!(super::settle::ATTEMPTED.with(std::cell::Cell::get), pages as usize, "the connector of each page is routed again");
+    let granted = super::settle::GRANTED.with(std::cell::Cell::get);
+    assert!(granted <= diacraft_calc::Budget::DEFAULT_STEPS, "{granted} steps handed to the routings of {pages} pages: one budget for all of them");
+    // The replacement of a text over the pages.
+    let mut s = text_diagrams(pages, 20);
+    super::settle::GRANTED.with(|c| c.set(0));
+    super::settle::ATTEMPTED.with(|c| c.set(0));
+    let answer = run(&mut s, "edit.replace", json!({"what": "Hi", "with": "Hello, wonderful world", "scope": "all"}));
+    assert_eq!(answer["shapes"], json!(pages), "{answer}");
+    assert_eq!(super::settle::ATTEMPTED.with(std::cell::Cell::get), pages as usize, "each page's connector is routed again, once");
+    // The commit of each page's cells is handed its budget (a drawing of more than one page keeps the pages a commit reaches within one, which may be none), and the routing of all
+    // the pages one more: a routing for each page was twice as many.
+    let granted = super::settle::GRANTED.with(std::cell::Cell::get);
+    let most = (u64::from(pages) + 1) * diacraft_calc::Budget::DEFAULT_STEPS;
+    assert!(granted <= most, "{granted} steps handed to the commits and routings of the replacement over {pages} pages, at most {most}");
+}
+
+/// **A theme over many pages is refused when the routing of all of them passes the budget together**, though each page's routing is under it: the pages of a drawing that each cost a
+/// share of the steps and together cost more are one call with one budget (the theme's recalculation of each page is its own, as it always was). The budget is a third of what the whole
+/// theme takes, so that the routing of the pages (about as much as the recalculation of them) passes it and the recalculation or the routing of one page does not.
+#[test]
+fn a_theme_over_many_pages_whose_routings_together_pass_the_budget_is_refused() {
+    let _faces = Faces::narrow_default_and_wide_dejavu();
+    let pages = 8;
+    let s = text_diagrams(pages, 300);
+    let all: Vec<u32> = s.document().unwrap().pages.iter().map(|p| p.id).collect();
+    let fernwood = crate::theme::find("fernwood").unwrap();
+    let apply = |budget: &diacraft_calc::Budget| {
+        let mut doc = s.document().unwrap().clone();
+        diacraft_calc::work::reset();
+        let done = crate::theme::apply_within(&mut doc, &all, crate::theme::Choice::Theme(fernwood, 0), crate::theme::Base::Root, budget);
+        (done, diacraft_calc::work::steps(), doc)
+    };
+    let (done, total, themed) = apply(&diacraft_calc::Budget::default());
+    done.unwrap();
+    eprintln!("a theme over {pages} pages of 300 readers: {total} steps of the evaluator");
+    for page in &all {
+        assert!(route_rows_on(&themed, *page) > 0, "page {page} has a route");
+    }
+    let (done, used, _) = apply(&diacraft_calc::Budget::with_steps(total / 3));
+    let refused = done.unwrap_err();
+    assert!(refused.message.contains("too large to recalculate"), "{}", refused.message);
+    assert!(used <= total, "the refused theme took {used} steps, the whole {total}");
 }

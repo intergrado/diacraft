@@ -4,6 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![forbid(unsafe_code)]
 
+mod automation_roots;
 mod backend;
 mod check_before;
 mod protocol;

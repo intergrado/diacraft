@@ -715,6 +715,7 @@ pub fn refit_groups(before: &Document, doc: &mut Document) -> Result<Refit, Prob
 /// The groups of a page are kept together with the commit that works out what reads them, or not at all: a commit the budget does not cover leaves the page's
 /// groups as they were (and the budget spent, so that the pages after it are left too), and they are said.
 fn refit_within(before: &Document, doc: &mut Document, mut steps: u64) -> Result<Refit, Problem> {
+    let _call = super::settle::CallScope::enter();
     let mut report = Refit::default();
     let mut allowance = Allowance::new();
     let pages: Vec<Arc<Page>> = doc.pages.iter().cloned().collect();

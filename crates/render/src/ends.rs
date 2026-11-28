@@ -11,6 +11,9 @@
 //!   Nothing is drawn past the tip.
 //! * **Size.** A mark's unit `S` is a base for its size class plus the line's weight, on paper and not scaled by the drawing.
 //!   Class 6 has a base of 18 points, twice class 5's, and a number outside 0 to 6 is drawn as class 2.
+//! * **Paint** (the owner's ruling of 2026-11-26, which supersedes): a *solid* closed part is filled in the line's colour, a *hollow* one is an outline of one line weight in the line's colour whose
+//!   **inside takes the shape's own fill** (its colour, transparency, pattern or gradient; the frame paints it, from [`Ends::hollow`], before the outline), and an *open* mark has no closed part. A shape with no fill leaves the
+//!   inside transparent.
 //! * **The shaft** stops short of a solid or hollow mark, so that nothing shows through or past its back: 0.1 `S` inside the back of an opaque
 //!   solid mark, exactly at the back otherwise. The back is the rearmost solid or hollow part's. An open mark leaves the
 //!   stroke running on to the vertex.
@@ -245,6 +248,9 @@ pub(crate) struct Ends {
     pub fill: BezPath,
     /// The strokes: open pieces and the outlines of hollow ones, to be stroked at the line weight.
     pub strokes: BezPath,
+    /// The closed parts of the hollow pieces, one path each (paper inches), the same outlines as in [`Ends::strokes`]: the frame paints the shape's fill in each, before the outline is stroked
+    /// Never more than two for a mark (34, 38 and 40 have two closed parts). A custom end has none.
+    pub hollow: Vec<BezPath>,
     /// The sections of a custom end that are filled, to be filled by the odd-crossings rule as a shape's fill is (a hole in a section stays a hole).
     pub fill_even_odd: BezPath,
 }
@@ -280,7 +286,7 @@ pub(crate) fn plan(path: &BezPath, request: &Request) -> Plan {
     if end_art.is_none() && begin_art.is_none() && end_custom.is_none() && begin_custom.is_none() {
         return Plan { ends: None, directionless: 0 };
     }
-    let mut out = Ends { shaft: BezPath::new(), fill: BezPath::new(), strokes: BezPath::new(), fill_even_odd: BezPath::new() };
+    let mut out = Ends { shaft: BezPath::new(), fill: BezPath::new(), strokes: BezPath::new(), hollow: Vec::new(), fill_even_odd: BezPath::new() };
     let (mut any, mut directionless) = (false, 0usize);
     for sub in subpaths(path) {
         let open = match classify(&sub) {
@@ -523,21 +529,26 @@ fn place(art: &Art, s: f64, tip: Point, back: Vec2, out: &mut Ends) {
                 }
             }
             Piece::Closed(form, paint) => {
-                let target = match paint {
-                    Paint::Solid => &mut out.fill,
-                    Paint::Ring => &mut out.strokes,
-                };
+                // The form in paper inches, as one path: a ring is its outline in the strokes and, as the same path, the region the shape's fill is painted in.
+                let mut closed = BezPath::new();
                 match form {
-                    Form::Poly(points) => polygon(target, points.iter().map(|p| map(*p))),
+                    Form::Poly(points) => polygon(&mut closed, points.iter().map(|p| map(*p))),
                     Form::Disc(cx, r) => {
                         let circle = kurbo::Circle::new(map((*cx, 0.0)), r * s);
                         for el in kurbo::Shape::path_elements(&circle, 0.01) {
-                            target.push(el);
+                            closed.push(el);
                         }
                     }
                     Form::Square(cx, half) => {
                         let square = [(cx - half, -half), (cx + half, -half), (cx + half, *half), (cx - half, *half)];
-                        polygon(target, square.iter().map(|p| map(*p)));
+                        polygon(&mut closed, square.iter().map(|p| map(*p)));
+                    }
+                }
+                match paint {
+                    Paint::Solid => out.fill.extend(closed.elements().iter().copied()),
+                    Paint::Ring => {
+                        out.strokes.extend(closed.elements().iter().copied());
+                        out.hollow.push(closed);
                     }
                 }
             }

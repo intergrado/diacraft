@@ -387,6 +387,27 @@ a:hover > .arrow-out { translate: .14em -.14em; }
   background-repeat: no-repeat;
 }
 
+/* Video: the tour's picture is a link to it, and the words stand in the second column that the other sections share. Nothing is loaded from the video's site: the picture is the site's own. */
+.tour-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-areas: "video copy"; align-items: center; gap: var(--space-7) var(--split-gap); }
+.tour-copy { grid-area: copy; }
+.tour-copy > * + * { margin-top: var(--space-4); }
+.tour-copy h2 { margin-top: var(--space-4); }
+.tour-copy > p:not(.label) { max-width: var(--measure); }
+.tour-copy .actions { margin-top: var(--space-5); }
+.tour-more { display: flex; flex-wrap: wrap; gap: 0 1.5rem; }
+.tour-video { grid-area: video; display: block; min-width: 0; color: var(--ink-body); text-decoration: none; }
+.tour-shot { position: relative; display: block; border-radius: var(--radius-m); box-shadow: var(--shadow); }
+.tour-shot img { width: 100%; height: auto; border-radius: inherit; }
+/* A play mark, drawn here: a disc of ink and a triangle of paper, at the middle of the picture. */
+.tour-play { position: absolute; left: 50%; top: 50%; width: clamp(3rem, 8%, 4.5rem); aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; background: rgb(11 11 12 / .8); box-shadow: 0 0 0 3px rgb(255 255 255 / .92), 0 8px 18px -6px rgb(0 0 0 / .45); transition: scale .2s var(--ease), background-color .15s; }
+.tour-play::after { content: ""; position: absolute; inset: 31% 27% 31% 37%; background: #fff; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.tour-length { position: absolute; right: .75rem; bottom: .75rem; padding: .15rem .5rem; border-radius: var(--radius-s); background: rgb(11 11 12 / .86); color: #fff; font: 500 var(--text-xs)/1.5 var(--font-mono); letter-spacing: .04em; }
+.tour-name { display: block; margin-top: 1rem; color: var(--ink); font-size: var(--text-l); font-style: italic; line-height: 1.35; text-wrap: balance; transition: color .15s; }
+.tour-when { display: block; margin-top: .35rem; color: var(--ink-muted); font: 500 var(--text-xs)/1.5 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+.tour-video:hover .tour-name, .tour-video:focus-visible .tour-name { color: var(--teal); text-decoration: underline; text-decoration-thickness: .06em; text-underline-offset: .2em; }
+.tour-video:hover .tour-play, .tour-video:focus-visible .tour-play { scale: 1.08; background: var(--brand-teal); }
+.tour-video:focus-visible { outline-offset: .5rem; }
+
 /* Formats: one drawing on three sheets, each cut from a different file */
 .formats { overflow: hidden; background: var(--teal-wash); border-top-color: transparent; }
 /* The sheets take eight parts of twelve, and the section's heading keeps to the same two columns. */
@@ -864,6 +885,7 @@ footer .ruler { border-top: 0; }
 }
 @media (max-width: 52rem) {
   .head-split, .formats .head-split { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .tour-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "copy" "video"; }
   .extras { grid-template-columns: minmax(0, 1fr); }
   .slab-top, .slab-text { grid-template-columns: minmax(0, 1fr); }
   .platforms { grid-template-columns: minmax(0, 1fr); }

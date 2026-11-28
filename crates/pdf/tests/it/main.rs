@@ -8,6 +8,7 @@
 
 mod hostile;
 mod independent;
+mod line_end_fill;
 mod pdf;
 mod print;
 mod readback;

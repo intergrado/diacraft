@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # A smoke test of the two release programs on the machine that built them: they start, say their version, and the command line
-# makes a small drawing, saves it as .vsdx, converts it to .diacraft and back, and draws it as PNG, SVG and PDF. Nothing opens a window.
+# makes a small drawing, saves it as .vsdx, converts it to .diacraft and back, and draws it as PNG, SVG and PDF, and writes its shell completions and a manual page.
+# Nothing opens a window.
 # The CI workflow's Windows and macOS jobs and the release workflow run it on the binaries they built.
 #
 #   packaging/smoke.sh BIN_DIR [EXPECTED_TAG]
@@ -183,5 +184,45 @@ case $reply in
 *'"result"'*) ;;
 *) die "the MCP server did not answer initialize: '$reply'" ;;
 esac
+
+# 6. The shell completions and the manual pages the command line writes: each shell's script is made, names the program, and parses where the shell is here; so does the app's. A
+# refused shell is refused. Programs that are an installed package's (the folder is /usr/bin) have put them where the shells and `man` look.
+step "shell completions and manual pages"
+for shell in bash zsh fish powershell elvish; do
+    "$cli" completions "$shell" >"completions.$shell" || die "diacraft-cli completions $shell failed"
+    [ "$(wc -c <"completions.$shell" | tr -d ' ')" -gt 500 ] || die "the $shell completions are almost empty"
+    grep -q "diacraft-cli" "completions.$shell" || die "the $shell completions do not name the program"
+    grep -q "convert" "completions.$shell" || die "the $shell completions do not hold the commands"
+done
+"$cli" completions bash --program diacraft >completions.app.bash || die "the app's bash completions failed"
+grep -q -e "--control" completions.app.bash || die "the app's completions do not hold --control"
+bash -n completions.bash || die "the bash completions do not parse"
+bash -n completions.app.bash || die "the app's bash completions do not parse"
+if command -v zsh >/dev/null 2>&1; then
+    zsh -n completions.zsh || die "the zsh completions do not parse"
+fi
+if command -v fish >/dev/null 2>&1; then
+    fish --no-execute completions.fish || die "the fish completions do not parse"
+fi
+if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -NonInteractive -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$(native "$work/completions.powershell")', [ref]\$null, [ref]\$e); if (\$e.Count -gt 0) { \$e | ForEach-Object { \$_.Message }; exit 1 }" ||
+        die "the PowerShell completions do not parse"
+fi
+if "$cli" completions tcsh >/dev/null 2>&1; then
+    die "completions for a shell it does not know were not refused"
+fi
+"$cli" man >man.roff || die "diacraft-cli man failed"
+grep -q "^\.TH diacraft-cli 1" man.roff || die "the manual page of diacraft-cli has no title"
+[ -n "$("$cli" man --list)" ] || die "diacraft-cli man --list lists no page"
+if [ "$bin" = /usr/bin ]; then
+    for program in diacraft-cli diacraft; do
+        for f in "/usr/share/bash-completion/completions/$program" "/usr/share/fish/vendor_completions.d/$program.fish" "/usr/share/man/man1/$program.1.gz"; do
+            [ -s "$f" ] || die "the package did not install $f"
+        done
+        # zsh looks in Debian's folder (the .deb) or in Fedora's (the .rpm).
+        [ -s "/usr/share/zsh/vendor-completions/_$program" ] || [ -s "/usr/share/zsh/site-functions/_$program" ] ||
+            die "the package did not install the zsh completions of $program (/usr/share/zsh/vendor-completions or /usr/share/zsh/site-functions)"
+    done
+fi
 
 echo "smoke: ok"

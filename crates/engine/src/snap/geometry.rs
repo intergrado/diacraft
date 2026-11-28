@@ -236,7 +236,7 @@ pub(crate) fn outline_for(reader: &Reader<'_>, at: &ShapeRef, k: f64, budget: &m
         budget.points -= points;
         budget.spent.bytes += bytes;
         budget.spent.points += points;
-        let (geom, _) = diacraft_render::geom_rows(&rows);
+        let (geom, _) = reader.worked().geom_rows(&sheet, key, &rows);
         let bound = Bound { curve_work: budget.work, path_elements: budget.elements };
         let Ok(built) = build_paths_bounded(&geom, size, rules::FILL_RUN_JOIN, bound) else {
             // A section whose path would pass what is left of the budget is left out, and what is left is gone: the next section is not built either.

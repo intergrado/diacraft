@@ -151,12 +151,10 @@ fn a_new_drawing_with_masters_shapes_text_and_connects_reads_back_as_the_model()
     let page = PageBuilder::new()
         .name("Main & <Page>")
         .cell_u("PageWidth", "11", "IN")
-        .shape(ShapeBuilder::new(1).master(1).named("Box.1", "Box.1").cell("PinX", "3.50").formula("PinY", "Sheet.2!PinY", "4").text(nasty).row_cell(
-            "User",
-            None,
-            RowKey::name("Mine"),
-            "Value",
-            "\"a\"",
+        .shape(ShapeBuilder::new(1).master(1).named("Box.1", "Box.1").cell("PinX", "3.50").formula("PinY", "Sheet.2!PinY", "4").text(nasty).set(
+            CellAddr::in_row("User", None, RowKey::name("Mine"), "Value"),
+            // (A text that says no unit is given `STR` by the writers, `string_units.rs`: the drawing a test expects back says it.)
+            diacraft_doc::Cell::constant(Value::from_text("\"a\"")).with_unit("STR"),
         ))
         .shape(ShapeBuilder::new(2).group().cell("PinX", "1").child(ShapeBuilder::new(3).text_parts(vec![
             TextPart::Cp(0),
@@ -655,13 +653,20 @@ fn a_saved_drawing_reads_back_through_the_reader_and_its_first_save_is_stable() 
     let doc = DocBuilder::new().page(1, PageBuilder::new().shape(ShapeBuilder::new(1).cell("PinX", "1.50").text("x"))).build();
     let first = write_new(&doc);
     let (read_doc, _) = read(&first.bytes, &diacraft_vsdx::Limits::default()).unwrap();
-    // The returned model is the file's, but for the unknown elements of the document and the font table, which are the caller's (the
-    // skeleton's `DocumentSettings`, and the default face it lists for a drawing that names none).
+    // The returned model is the file's, but for the unknown elements of the document, the font table and the root style, which are the caller's (the
+    // skeleton's `DocumentSettings`, the default face it lists for a drawing that names none, and the root of a drawing that came from no file, to which
+    // the writer adds the cells a reader would take as another value: the file holds them and the baseline of the next save does not, so that they are no edit).
     let mut expected = first.document.clone();
     assert!(expected.passthrough.is_empty() && read_doc.passthrough.len() == 1);
     assert!(expected.fonts.is_empty() && read_doc.fonts.len() == 1);
+    assert!(
+        read_doc.style(0).is_some_and(|root| root.sheet.cell("DefaultTabStop").is_some())
+            && expected.style(0).is_some_and(|root| root.sheet.cell("DefaultTabStop").is_none()),
+        "the file's root holds the cells added to it and the model given back the caller's"
+    );
     expected.passthrough = read_doc.passthrough.clone();
     expected.fonts = read_doc.fonts.clone();
+    expected.styles = read_doc.styles.clone();
     assert_eq!(read_doc, expected);
     let second = save(&read_doc, &first.bytes, None);
     assert_eq!(parts(&first.bytes).get("/visio/pages/page1.xml"), parts(&second.bytes).get("/visio/pages/page1.xml"));

@@ -2,11 +2,11 @@
 
 `diacraft-cli` runs DiaCraft's commands without a window, for scripts and for agents. It reaches the same registry of
 commands the menus and the [control channel](control-protocol.md) do, so a command does the same thing wherever it is
-asked for. The reference app has not been inspected: what the commands do is DiaCraft's own, and is not a claim about the reference
+asked for. The reference app has never been taken apart: what the commands do is DiaCraft's own, and is not a claim about the reference
 app.
 
 ```
-diacraft-cli mcp [--headless | --connect ADDR] [--bundled-fonts]
+diacraft-cli mcp [--headless | --connect ADDR] [--automation-read-root DIR]... [--automation-write-root DIR]... [--bundled-fonts]
 diacraft-cli run [--cmd ID [--params JSON] | --commands FILE|-]... [--bundled-fonts]
 diacraft-cli commands
 diacraft-cli oracle FILE... [--json] [--source NAME]
@@ -17,6 +17,9 @@ diacraft-cli roundtrip FILE --out PATH [--move DX,DY] [--bundled-fonts]
 diacraft-cli roundtrip FILE --out PATH --via diacraft [--edit cell|move|retext|delete|add | --move DX,DY] [--bundled-fonts]
 diacraft-cli compare FIRST SECOND
 diacraft-cli compare --content FIRST SECOND
+diacraft-cli completions SHELL [--program diacraft|diacraft-cli]
+diacraft-cli man [--list | PAGE]
+diacraft-cli --color auto|always|never COMMAND ...
 diacraft-cli --version
 diacraft-cli --help
 ```
@@ -29,8 +32,89 @@ Results go to standard output and nothing else does: messages for people, and th
 | 1 | A step failed, a file could not be read, or a connection could not be made. Standard error says which. |
 | 2 | A mistake in the command line: an option that does not exist, a value left out, an option given twice. Nothing ran. |
 
-`--version` and `--help` win over everything else on the line, a mistake in it included. With no command at all the usage
-is printed on standard error and the status is 2.
+`--version` and `--help` win over everything else on the line, a mistake in it included, as long as they come before a `--` (after it they are file names). With no command at all the usage
+is printed on standard error and the status is 2. The help is coloured and wrapped at a terminal, and plain everywhere else
+([Help, colour and the terminal](#help-colour-and-the-terminal)); `completions` and `man` write the shell scripts and the manual pages ([below](#shell-completions)).
+
+## Help, colour and the terminal
+
+`diacraft-cli --help` prints one page, and `--help` anywhere on a line prints that same page (after a command too: `diacraft-cli export --help`). **When standard output is not a terminal** (a pipe, a
+file, a script) the page is plain text, the same bytes everywhere, with the line breaks of the table of its words (`apps/diacraft-cli/src/help/text.rs`). **At a terminal** it is the same words,
+wrapped to the terminal's width (kept between 40 and 120 columns; each paragraph and each option's description keeps its indent) and painted: headings in bold green, the names a person types
+(commands, options, and what stands in backticks) in bold cyan, the places to fill in (`FILE`, `ADDR`, `<command>`) in cyan. Stripping the colour codes from the painted page gives the plain one.
+
+**Whether to colour**, by `--color auto|always|never` (an option of every command, before or after it, given once; `auto` is the default) and the environment, in the order they are asked:
+
+| Rule | Result |
+|---|---|
+| `--color always` | colour, whatever the environment says |
+| `--color never` | plain, whatever the environment says |
+| (`auto`) `NO_COLOR` set and not empty | plain |
+| `CLICOLOR_FORCE` set, not empty and not `0` | colour, even where the output is not a terminal |
+| `CLICOLOR=0` | plain |
+| the stream is a terminal and `TERM` is neither empty nor `dumb` (a Windows console has no `TERM` and needs none) | colour |
+| anything else (a pipe, a file, a dumb terminal) | plain |
+
+Each stream is judged on its own: the page by standard output, the words of a failure by standard error, so a person who sends the JSON to a file still sees a failure in colour. A terminal's width is
+read only for standard output, and only when it is a terminal: a pipe is never wrapped, so `diacraft-cli --help | grep ...` finds the same lines wherever it runs.
+
+```
+$ diacraft-cli --help | less -R                  # plain: a pipe
+$ diacraft-cli --color always --help | less -R   # painted, for a pager that shows it
+$ NO_COLOR=1 diacraft-cli --help                 # plain, at a terminal
+$ CLICOLOR_FORCE=1 diacraft-cli --help | less -R # painted, though a pipe
+```
+
+**Colour is for people and never for programs.** It is in two places: the help page, and the words that tell a person that a command line is a mistake or that a step failed (`diacraft-cli:` in bold red,
+the words after it plain, on standard error). It is never in what a program reads: the JSON lines of `run`, `commands`, `export` and the rest, the MCP stream, the exit statuses, and the notes the MCP
+server writes on standard error (`diacraft-cli: MCP server on stdio, ...`) are the same bytes with every switch on, which `apps/diacraft-cli/tests/it/ux.rs` runs. Every escape is taken off the stream
+that is plain, so even a message that held one could never put one on a terminal. On Windows a console is put in the mode that understands the codes (an old console that has none gets the same colours
+through its own calls); a stream that is not a console gets no codes.
+
+**The words of the options.** Every option stands where it likes, and a value is the next word whatever it begins with (`--out --bundled-fonts` names a file called `--bundled-fonts`). An option the command
+does not have, a value left out and an option given twice are mistakes (status 2, nothing ran), in the words `docs/cli.md` has always had (`unknown option `--x` for `export`; see --help`, `--out was given
+twice`, `--out needs a value`). `--` ends the options for every command (what follows is a file, `-odd.vsdx`, `--help` and `--version` included, so that `export --out p.svg -- --help` reads a drawing named `--help`; before it, a word with one dash is an option the command does not have,
+as in the app: it was a file name before), and a command line is read by clap (`apps/diacraft-cli/src/cli.rs` describes it, once, for the parser, the completions and the manual pages).
+
+## Shell completions
+
+`diacraft-cli completions SHELL [--program diacraft|diacraft-cli]` writes the completion script of a shell on standard output, and nothing else: SHELL is `bash`, `zsh`, `fish`, `powershell` or
+`elvish`. With `--program diacraft` the script is the app's, `diacraft`, which has options of its own (`--control PORT`, `--automation-read-root FOLDER` and `--automation-write-root FOLDER`, `--reset-graphics`, `--version`, `--help`, and the drawing to open). A shell or a program that is not
+named is a mistake (status 2). The script is made by the program that runs, so it lists that build's commands.
+
+What each script completes:
+
+| | bash, zsh, fish, PowerShell | Elvish |
+|---|---|---|
+| The commands and the options of each | yes | yes |
+| The values of an option that takes a few: `--text` (`text`, `outlines`), `--via`, `--edit`, `--color`, `--program`, the shell of `completions`, the page of `man`, the usual pixel counts of `--dpi` | yes (PowerShell's are added after what clap_complete writes, which has none) | no (clap_complete writes none) |
+| `run --cmd`: every command id of the registry, the list `commands` prints, with its label in zsh, fish and PowerShell | yes | no |
+| Files **by their type**: a drawing where a drawing is read (the types `file.open` reads: `.diacraft`, `.diacraft-stencil`, `.diacraft-template`, the six VSDX types, `.odg`, `.otg`, `.fodg`, in any case of the letters), a picture where `export` writes one (`.png`, `.svg`, `.pdf`), the types `convert` writes after `--out`, the reports `oracle --aggregate` reads, and always the folders, so that a path can be walked (the folder of `--automation-read-root` and `--automation-write-root`, in `mcp` and in the app's script, is completed as a folder and no other path); a steps file (`run --commands`) completes every file | yes (bash: the word after the command, and the word after `--out`; PowerShell completes a path as it does for any program) | the shell completes a path as it does for any program |
+
+Where each shell looks:
+
+| Shell | For you | For every user |
+|---|---|---|
+| bash | `diacraft-cli completions bash > ~/.local/share/bash-completion/completions/diacraft-cli` (the bash-completion package loads it), or `source <(diacraft-cli completions bash)` in `~/.bashrc` | `/usr/share/bash-completion/completions/diacraft-cli` |
+| zsh | `diacraft-cli completions zsh > ~/.zfunc/_diacraft-cli`, and `fpath=(~/.zfunc $fpath)` before `compinit` in `~/.zshrc` | `/usr/share/zsh/vendor-completions/_diacraft-cli` |
+| fish | `diacraft-cli completions fish > ~/.config/fish/completions/diacraft-cli.fish` | `/usr/share/fish/vendor_completions.d/diacraft-cli.fish` |
+| PowerShell | `diacraft-cli completions powershell \| Out-String \| Invoke-Expression` in `$PROFILE` (`notepad $PROFILE`) | |
+| Elvish | `eval (diacraft-cli completions elvish \| slurp)` in `rc.elv` | |
+
+For the app's own options add `--program diacraft` and name the file `diacraft` (`_diacraft`, `diacraft.fish`).
+
+**The packages.** The `.deb` installs both programs' scripts for bash, zsh and fish at the paths of the last column, and the manual pages (below) in `/usr/share/man/man1`; it writes them with the program it
+packages, so a package for the other CPU than the machine's is made without them and says so. **The `.rpm` does the same**, with zsh's in `/usr/share/zsh/site-functions`, Fedora's folder, and not in Debian's `vendor-completions`. The tarball, the Windows zip and the macOS app install nothing: their `README.txt` shows the commands above.
+The AppImage writes them through its command line (`./diacraft-<version>-linux-<cpu>.AppImage --cli completions bash`). The `.msi` adds none: `diacraft-cli completions powershell` is on the `PATH` it sets.
+`packaging/smoke.sh` makes each script, parses it with the shells that are there (`bash -n`, `zsh -n`, `fish --no-execute`, PowerShell's parser) and, run on an installed `.deb` or `.rpm`, looks for the files (zsh's in either folder). The tests ask bash, fish and PowerShell what they would complete (`apps/diacraft-cli/tests/it/ux.rs`); zsh and Elvish are not asked, and their scripts are read.
+
+clap_complete is held to 4.5: its 4.6 breaks bash completion of the commands of a program whose name has a hyphen (clap-rs/clap#6421), and a test asks bash itself to complete a line.
+
+## Manual pages
+
+`diacraft-cli man [--list | PAGE]` writes a manual page in the format the `man` program reads, on standard output. The pages are `diacraft-cli` (the program and its commands), one for each command
+(`diacraft-cli-run`, `diacraft-cli-export`, ... as `git`'s are named) and `diacraft` (the app); `--list` names them, the program's first, one on a line. Read one with `diacraft-cli man diacraft-cli-run |
+man -l -`. A page says what the help page says (the sentences are the table's, by key), so a change of the table changes both. The `.deb` and the `.rpm` install them gzipped in `/usr/share/man/man1`.
 
 ## Fonts
 
@@ -80,6 +164,30 @@ The sheet is named by `id` (with `page`), `page`, `master` (with `id`), `style` 
 
 See [Editing commands](editing-commands.md), "Connection points: double and halve (CPDOUBLE)".
 
+**Doubling and halving connection points**. `shape.connection_points` puts a new connection point in the middle of every portion of the edges it is given and moves nothing (`"action":"double"`), or takes away the points of the newest doubling of each edge and never an original one (`"action":"halve"`), as one undo step, with every connector kept glued (`edge` names one edge by the number `shape.connection_edges` gives it, `at` the edge nearest a place on the page, and neither every edge of every shape named): `diacraft-cli run --cmd file.new --cmd shape.drop --params '{"master":"rectangle","page":1,"x":3,"y":2}' --cmd shape.connection_points --params '{"id":1,"action":"double","edge":2}' --cmd shape.connection_points --params '{"id":1,"action":"halve"}' --cmd shape.connection_points --params '{"id":1,"action":"halve"}'` doubles the Rectangle's top (1 point becomes 3, 4 in all become 6), halves it back (generation 1, the two points the doubling made) and then is refused, in words and with exit status 1, because nothing is left to halve. The lines of the last three commands:
+
+```
+{"command":"shape.connection_points","result":{"action":"double","changed":true,"min_gap":0.11811023622047245,"page":1,"reglued":[],"renumbered":0,"scale_note":null,"shapes":[{"edges":[{"after":3,"before":1,"edge":2,"generation":1,"kind":"straight"}],"id":1,"points_after":6,"points_before":4,"skipped":null,"skipped_edges":[]}]},"step":2}
+{"command":"shape.connection_points","result":{"action":"halve","changed":true,"min_gap":0.11811023622047245,"page":1,"reglued":[],"renumbered":0,"scale_note":null,"shapes":[{"edges":[{"after":1,"before":3,"edge":2,"generation":1,"kind":"straight"}],"id":1,"points_after":4,"points_before":6,"skipped":null,"skipped_edges":[]}]},"step":3}
+diacraft-cli: step 4 (shape.connection_points): `shape.connection_points` failed: nothing to halve: the edge has no points a doubling made
+```
+
+
+**Offset and Fit Curve**. `shape.offset {ids, distance}` makes the two sides of each shown section of the shapes named (a copy outside and one inside a closed path, one left and one right of an open one, with the formatting of the shape it copies, no fill and no text) and keeps the shapes, and `shape.fit_curve {ids, tolerance, flags?}` makes the paths of the shapes named of fewer segments within the tolerance (`flags`: 1 periodic splines, 2 circular arcs, 4 break at abrupt changes, a sum) and keeps them the same shapes. Both take their number in the cells' own units (inches on a page of the default scale), answer `{page, ids, deleted, kept, changed, not_fitted}` like the other shape operations (`ids` the shapes made, `changed` the shapes a fit made smaller, `not_fitted` the shapes it left as they were that hold something to fit), and each is one undo step; a Fit Curve that changes nothing is none. `diacraft-cli run --commands offset.jsonl` with the steps below draws a rectangle and offsets it by a quarter of an inch (the copies are shapes 2 and 3), and `diacraft-cli export` of the file the steps save draws them:
+
+```
+$ cat offset.jsonl
+{"command":"file.new"}
+{"command":"shape.drop","params":{"master":"rectangle","page":1,"x":4.0,"y":4.0}}
+{"command":"shape.offset","params":{"ids":[1],"distance":0.25}}
+{"command":"file.save_as","params":{"path":"offset.diacraft"}}
+$ diacraft-cli run --commands offset.jsonl | tail -2 | head -1
+{"command":"shape.offset","result":{"changed":[],"deleted":[],"ids":[2,3],"kept":null,"not_fitted":[],"page":1},"step":2}
+$ diacraft-cli export offset.diacraft --out offset.png
+```
+
+A distance of 0 or less, or one that is not a number, or under 0.0001 or over 350,000,000, is refused in words, as is a path that crosses itself in too many places (the library's limits, shared among the command's calls). See [Editing commands](editing-commands.md), "Offset and Fit Curve".
+
 **The six types**. `file.open` reads `.vsdx`, `.vsdm`, `.vssx`, `.vssm`, `.vstx` and `.vstm`, the type being the package's own (the content type of its document part) and not the extension; an extension that disagrees is a warning. **A template opens as a new drawing made from it**: the document is the template's content and the result says `file.new_from_template: true`, but the drawing has no file (`file.save` is an error that says to use `file.save_as`), the first edit makes it unsaved, and the template on the disk is never written; the drawing keeps no file's bytes, so the template's other parts are the model's and the first file saved from it, a `.diacraft` file or a VSDX type written from the model, has times of its own. `file.open {path, edit_template: true}` opens the template file itself, to change it, and `file.save` then writes it. `file.save_as` takes the type from the extension; a Save As between the six rewrites the document's content type and keeps every other part (a drawing saved as a template, a template as a drawing, a drawing as a stencil, which keeps its pages and says so), and a stencil saved as a drawing or a template gets a part for each page that had none. **Macros** (`.vsdm`, `.vssm`, `.vstm`): the VBA project and its signatures are kept as bytes by every save, never run and never read. A file that holds a project, saved as `.vsdx`, `.vssx` or `.vstx`, is refused with `EngineError::MacrosNotAllowed` and nothing is written; `file.save_as {path, drop_macros: true}` leaves the project, its signatures and their relationships out of the new file and says so in `warnings` (`macros_dropped` counts the parts). That the reference app does the same is not known: it rests on the packaging and preservation specs and is on the check list of choices to compare.
 
 **A `.diacraft` file** (DiaCraft's own format). `file.open` also reads one, told by its bytes first and not its extension (`file`'s `variant` is `diacraft`, `diacraft-stencil` or `diacraft-template`), and `file.save` and `file.save_as` write one: `diacraft-cli run --cmd file.open --params '{"path":"a.vsdx"}' --cmd file.save_as --params '{"path":"a.diacraft"}'` opens a VSDX drawing and saves it as `.diacraft`, which is then the drawing's own file. The three kinds are chosen by the extension of the name (`.diacraft`, `.diacraft-stencil`, `.diacraft-template`); a `.diacraft` drawing is saved as a VSDX type from the drawing alone (the thumbnail, `Application` and `modified` are the file's while the drawing is the one its VSDX file held, and a drawing made from a template, which no file of its own was read for, is written with a new file's); it is saved as an `.odg` or an `.otg` from the drawing alone too (the `.odg` model writer; the thumbnail and the generator are the file's while the drawing is the one the file held, and a drawing made new is written with a new file's), and a drawing opened from a VSDX file is saved as an `.odg` or an `.otg`, and one opened from an `.odg` as a VSDX type, by the model writer of the target (a save across the formats: below). **A drawing opened from an `.odg` is saved as `.diacraft`** (`diacraft-cli run --cmd file.open --params '{"path":"a.odg"}' --cmd file.save_as --params '{"path":"a.diacraft"}'`; the file holds everything the `.odg` held, and keeps no original), and from the `.diacraft` drawing it goes on to a VSDX type. **A new drawing is a `.diacraft` drawing**: `file.new`, blank or from a template, keeps its model and no file's bytes, its first `file.save_as` to a `.diacraft` name writes the package from the model and copies nothing, and to a VSDX type writes the file from the model alone (`diacraft-cli run --cmd file.new --cmd file.save_as --params '{"path":"a.vsdx"}'`); a drawing opened from a `.vsdx` is saved by `file.save` as a `.vsdx`, silently, and `file.save_as` to a `.diacraft` name is the way to the new format. `diacraft-cli export` reads a `.diacraft` file too. See [Editing commands](editing-commands.md), "`.diacraft` files".
@@ -89,7 +197,7 @@ and `file.save` and `file.save_as` write it by splicing the edit into the file's
 '{"path":"a.odg"}' --cmd shape.move --params '{"ids":[1],"dx":1,"dy":0}' --cmd file.save` moves a shape of a LibreOffice drawing and writes it back. A drawing is saved in its own
 format: an `.odg` is saved as an `.odg`, an `.otg` or as `.diacraft`, a `.diacraft` drawing or a new one as an `.odg` or an `.otg` from the drawing alone, and a VSDX file as an `.odg` or an `.otg` too, and an `.odg` as a VSDX type (a save across the formats: what the file written cannot say rides inside it, and the save result says what, in `carried`). **A change the `.odg` writer does not write is a refused save in its
 own words**, with nothing written and the file as it was: the step is named and the words follow, for example `diacraft-cli: step 2 (file.save): ... the drawing could not be saved: saving does
-not yet write this change: a dashed line (...)`. The thumbnail of an edited save is rendered, and `warnings` say what a new shape has that the file does not carry (only the text formatting a style sheet gives the text and the link to the Theme style, each by its kind, with how many shapes and the first: rounded corners, a shadow, a text block that is not the whole shape, shape data, the layer, other cells and sections and the text itself are carried), what a copy of a shape held that a new shape cannot, and that a signed drawing's signature no longer matches; **every refusal but one for memory (which has its own words and its own way out) and one for a shape an undo put back (which says to redo, `edit.redo`) ends with the way out, `Undo the change (edit.undo) to save`**, and the answers of `connector.add` and `connector.style` carry no `warnings` list for a curved connector (the save writes it). A drawing template (`.otg`) opens as a new drawing made from it (below). **The open says what the drawing does not hold**: the first of `file.warnings` is then the line `What DiaCraft does not hold of this file: ...`, and a line for each class with its count follows (shapes of kinds kept only as placeholders, shapes in hyperlinks, font declarations that repeat a name, style properties no copy writes, and the like); a save into the file keeps all of it, and a copy saved as another file is without it.
+not yet write this change: a dashed line (...)`. The thumbnail of an edited save is rendered, and `warnings` say what a new shape has that the file does not carry (only the text formatting a style sheet gives the text and the link to the Theme style, each by its kind, with how many shapes and the first: rounded corners, a shadow, a text block that is not the whole shape, shape data, the layer, other cells and sections and the text itself are carried), what a copy of a shape held that a new shape cannot, and that a signed drawing's signature no longer matches; **every refusal but one for memory (which has its own words and its own way out), one for a shape an undo put back (which says to redo, `edit.redo`) and one for a group with no name that holds data (which names the group and says to name it, to put its data on a shape beside it or to use Save As for a `.diacraft` file) ends with the way out, `Undo the change (edit.undo) to save`**, and the answers of `connector.add` and `connector.style` carry no `warnings` list for a curved connector (the save writes it). A drawing template (`.otg`) opens as a new drawing made from it (below). **The open says what the drawing does not hold**: the first of `file.warnings` is then the line `What DiaCraft does not hold of this file: ...`, and a line for each class with its count follows (shapes of kinds kept only as placeholders, shapes in hyperlinks, font declarations that repeat a name, style properties no copy writes, and the like); a save into the file keeps all of it, and a copy saved as another file is without it.
 **An `.odg` from the model, and the `.otg`**. `diacraft-cli run --cmd file.open --params '{"path":"a.diacraft"}' --cmd file.save_as --params '{"path":"a.odg"}'` writes an `.odg` from a `.diacraft` drawing, and so does a `file.new` drawing, blank or from a built-in template, saved to an `.odg` name (the package data of DiaCraft's own VSDX skeleton, which a template drawing holds, is left out: it is no person's): the `.odg` model writer makes the package from the drawing alone (no file to splice into), and the file written is the drawing's own, so a later `file.save` splices into it. The save's answer is the `.odg` save's (`variant` `odg` or `otg`, `kind`, `form: "package"`, `edited`: whether the drawing is not the content a file it was read from held). **The thumbnail and the generator follow the content stamp** and never the dirty flag: an `.odg` that visited `.diacraft` and comes back unedited keeps the thumbnail and the generator it was read with, an edit gives the thumbnail of an edited save and DiaCraft's generator, a drawing made new has no stamp and is given a rendered thumbnail. What the `.odg` cannot say of a drawing rides inside the file (a VSDX file's package data and the window settings among it), and the save's `carried` says what; a background page (a master page that holds shapes) added to the drawing is refused in words that say what is missing and name `.diacraft` and `.vsdx` as the ways out, with nothing written. **An `.otg`** (a drawing template) is a format to open and save and no built-in template: `file.open` of one makes a new unnamed drawing from it (`file` says `variant: "otg"`, `kind: "template"`, `new_from_template: true`), `edit_template: true` opens the template itself, and `file.save_as` to an `.otg` name writes a template (to an `.odg` name, a drawing). **A flat OpenDocument drawing** (`.fodg`, one XML document) is opened by `file.open` by what the file is and not by its name, as the model of the package that holds the same elements: `file` says `form: "flat"` (`"package"` for an `.odg`) and gives first, among `warnings`, a note of what Save does with it. **`file.save` writes it back as a flat file, in place**, whatever the file is called: unedited it is the file's own bytes (`edited: false`), an edit is spliced into the one document (what the edit did not touch is the file's own markup), and the answer says `form: "flat"`. A change the flat writer does not write (a master a stencil shape brings, a page added) is a refused save in words with nothing written, as for an `.odg`. **`file.save_as` writes it as another type**: a `.diacraft` file, an `.odg` or `.otg` package or a VSDX type, from the model, and the flat file stays as it was; `file.save_as` of it, or of any other drawing, to a `.fodg` name says Save As does not offer it. `export` draws a flat drawing as it draws a package.
 The save's answer is `{bytes, variant: "odg", kind, form, edited, macros_dropped: 0, dirty: false, warnings, warning_count, notes, carried, checked}` (`notes` is empty, or holds the save note: what the drawing holds that a LibreOffice save would drop; it is not a warning; `carried` and `checked` are the fields of the table under `convert`); `edited` is false for a drawing saved again with nothing changed, which
 writes the same bytes. See [Editing commands](editing-commands.md), "`.odg` files".
@@ -126,6 +234,26 @@ $ diacraft-cli run --commands steps.jsonl | tail -1
 
 The connector draws a right-angle route whatever the direction (a directional style leans, and the router that follows will take it up). A direction the style does not take is refused in words, and the run stops there:
 `diacraft-cli: step 1 (page.set_routing): invalid parameters for `page.set_routing`: the style `right_angle` takes no direction: leave `direction` out`.
+
+**Reverse Ends**. `connector.reverse_ends` swaps the begin and the end of the connectors and lines it is given, in one undo step, each end staying glued to what it was glued to and the path walked the
+other way, so the arrow ends up at the other end ([Editing commands](editing-commands.md), "Reverse Ends"). `id` names one shape and `ids` several (at most 4,096); a shape that has no begin and end is left alone and
+listed in `skipped`, one whose `LockBegin` or `LockEnd` is on in `locked`, and a call that reverses none stops the run, in words. These are real lines: the connector between two boxes is reversed together with a box,
+and `connector.path` reads the route back from the other end.
+
+```
+$ cat steps.jsonl
+{"command":"file.new"}
+{"command":"shape.drop","params":{"master":"rectangle","page":1,"x":3.0,"y":4.0}}
+{"command":"shape.drop","params":{"master":"rectangle","page":1,"x":9.0,"y":6.0}}
+{"command":"connector.add","params":{"from":{"id":1,"point":3},"to":{"id":2,"point":1}}}
+{"command":"connector.reverse_ends","params":{"ids":[3,1]}}
+{"command":"connector.path","params":{"id":3}}
+$ diacraft-cli run --commands steps.jsonl | tail -2
+{"command":"connector.reverse_ends","result":{"begin":{"id":2,"point":1},"end":{"id":1,"point":3},"id":3,"ids":[3],"page":1,"reversed":1,"says":"Reversed shape 3: its begin and end are swapped, with their glue, and the arrows stay on the ends of the path. Left as it was: shape 1.","skipped":[{"id":1,"why":"shape 1 is not a connector or a line: it has no begin and end to swap"}]},"step":4}
+{"command":"connector.path","result":{"editable":true,"hand_edited":false,"id":3,"page":1,"points":[[8.25,6.0],[6.0,6.0],[6.0,4.000000001],[3.75,4.000000001]],"reroute":"freely","route_style":{"code":1,"direction":null,"own":false,"style":"right_angle"},"style":"right_angle"},"step":5}
+```
+
+The connector now begins at the second box and ends at the first, and its route runs from 8.25, 6 back to 3.75, 4: the line it was, the other way. The window's key for it, Ctrl+Alt+R, is listed with the command by `diacraft-cli commands`.
 
 ### Where steps come from
 
@@ -207,6 +335,8 @@ Runs the [MCP server](mcp.md) on standard input and output, until the client clo
 | `--headless` | A session of this process, with no window. |
 | `--connect ADDR` | The running app's control channel, such as `127.0.0.1:7997`. Fails with status 1 if nothing answers there, or if what answers is not DiaCraft. |
 | neither | Looks for the app at `127.0.0.1:7997` once. If DiaCraft answers, the server uses it; if nothing answers, or another program does, it says why on standard error and runs headless. |
+
+`--automation-read-root DIR` and `--automation-write-root DIR` (each may be given again for more folders) keep the files the agent's commands read and write to those folders, in a session of this process: [Keeping files to the folders you grant](mcp.md#keeping-files-to-the-folders-you-grant). `DIACRAFT_AUTOMATION_READ_ROOT` and `DIACRAFT_AUTOMATION_WRITE_ROOT` give the folders of a kind that has no flag. A folder that is not there is status 2, `--connect` with a root flag is status 2, and the default mode with a root flag stops with status 1 if the app answers (give `--headless`). With none of them nothing is limited. `run`, `export`, `convert`, `roundtrip`, `oracle` and `compare` have no roots: they read and write the paths typed.
 
 `--bundled-fonts` sets text in the bundled faces alone, in a session of this process (see [Fonts](#fonts)); the app has the faces it read, so
 `--connect` with `--bundled-fonts` is an error (status 2) like `--connect` with `--headless`.
@@ -291,7 +421,7 @@ $ diacraft-cli export drawing.vsdx --page 2 --out page2.svg
 |---|---|
 | `FILE` | The drawing, read as `file.open` reads it (a `.diacraft` file, told by its bytes first, a `.vsdx`, `.vsdm` and the like, or an OpenDocument drawing, `.odg`, told by the package's own type, or a flat `.fodg`, told by its content). A file that cannot be opened is an error that names the kind of trouble and never the path. |
 | `--out PATH` | Where to write, and what: `.png`, `.svg` or `.pdf` (any case). The file is written whole or not at all (a temporary file beside it, then a rename), so a failure leaves a file that was there as it was. It is never the drawing itself (a link to the drawing is caught too). |
-| `--page N` | The page's place in the drawing, from 1 (the default is 1). The result line names the page's `ID` and name. |
+| `--page N` | The page's place in the drawing, from 1, as the file lists its pages (the default is the first page that is not a background: a file lists its background pages first, so `--page 1` of such a file is the background). The result line names the page's `ID` and name. |
 | `--dpi N` | PNG only: pixels to the inch, 96 by default, at most 2400. The picture is the page's size at that resolution, and a page that would pass 16,384 pixels a side or 64 million in all is an error. |
 | `--text MODE` | SVG and PDF only: `text` (the default) writes letters as text where the font allows it, and `outlines` writes every letter as paths. |
 | `--transparent` | No white paper under the drawing. A PNG or an SVG has a clear page; a PDF is written without the white rectangle. |
@@ -300,14 +430,14 @@ $ diacraft-cli export drawing.vsdx --page 2 --out page2.svg
 What each format holds:
 
 * **PNG**: the page as the window draws it, in straight (not premultiplied) RGBA, with the physical size in the file.
-* **SVG**: paths in CSS pixels (96 to the inch), gradients, clips, blurred shadows as a Gaussian blur filter, pictures as PNG data URIs, and each run of letters whose glyphs are one for one as a `<text>` element naming the face with an x for every letter; ligatures, joined and right-to-left scripts and a made-up bold or slant are outlines.
+* **SVG**: paths in CSS pixels (96 to the inch), gradients, clips, blurred shadows as a Gaussian blur filter, pictures as PNG data URIs, a shape that is drawn as a `<g>` whose `<title>` is its alt text title (its name when it has no alt text) and whose `<desc>` is its description, the page's alt text as the file's own `<title>` and `<desc>`, and each run of letters whose glyphs are one for one as a `<text>` element naming the face with an x for every letter; ligatures, joined and right-to-left scripts and a made-up bold or slant are outlines.
 * **PDF**: one page of the page's size at 72 points to the inch, vector paths, gradients as shadings, clips, pictures, and letters as text in an embedded subset of the face (so the text can be selected and searched) where the face's licence allows embedding (`OS/2` `fsType`), else outlines. **A blurred shadow is drawn hard-edged** (PDF has no blur).
 
 `skipped` lists what the page left out or drew by a stand-in, with how many and the first of them in words, as the window counts it (`Skipped` in `crates/render`): an EMF or WMF picture whose header cannot be read is a placeholder, one drawn without some of its records says which of eight details it is (`MetafileRecordSkipped` and the like), a gradient direction or a shadow type is an approximation, `TextAsOutlines` says letters that could not be written as text. The grid, rulers and guides are not in the picture, as in the window.
 
 **Printing.** The engine's `file.print_preview {page?}` says what a print of the drawing would put on paper (for each page its paper, the way the sheet is held, the scale, the sheets across and down, and the runs of sheets that share a paper), and `file.print {path, page?, text?, color?}` writes what a printer would be given: a PDF with a page for each sheet at the paper's size, with the page's part for that sheet on it (`diacraft-cli run --cmd file.print` reaches it after a `file.open`). `color: grayscale` writes it in black and white, every colour as its grey (`0.299 R + 0.587 G + 0.114 B`, in `editing-commands.md`); `color` is the default. It has the rules of an export's path; it sends nothing to a printer, which only the window does. A print the drawing cannot have (margins that leave no room, a page that takes more than 1,024 sheets, a print that would hold more than 256 megabytes of drawing) is an error in words.
 
-**Where it writes.** Exactly where `--out` says. The command line has no granted folders: the automation roots of gaps A2 (`--automation-read-root`, `--automation-write-root`) are not built, and the engine's `file.export` (the same export, for a client other than the person who typed the path: `{path, page?, dpi?, text?, transparent?}`; `diacraft-cli run --cmd file.export` reaches it after a `file.open`) has the rules of a save and not the roots: a link at the path is refused unless it leads to the open drawing, and then the drawing itself is refused, the extension is judged on the file that would be written, and the open drawing is never written.
+**Where it writes.** Exactly where `--out` says. The command line has no granted folders: the automation roots of gaps A2 (`--automation-read-root`, `--automation-write-root`) are for `mcp` and the app's control channel, and this command writes the path its person typed. The engine's `file.export` (the same export, for a client other than the person who typed the path: `{path, page?, dpi?, text?, transparent?}`; `diacraft-cli run --cmd file.export` reaches it after a `file.open`) has the rules of a save, and under roots a write root as well: a link at the path is refused unless it leads to the open drawing, and then the drawing itself is refused, the extension is judged on the file that would be written, and the open drawing is never written.
 
 A mistake in the line (no `--out`, an extension that is not one of the three, an option for another format, a page below 1) is status 2 and writes nothing. A drawing that cannot be read or opened, a page the drawing does not have, a page too large for the format and a file that cannot be written are status 1, named on standard error.
 
@@ -328,7 +458,7 @@ $ diacraft-cli convert drawing.diacraft --out page1.png --page 1
 |---|---|
 | `FILE` | The drawing, stencil or template, opened as `file.open` opens it: a `.diacraft` file, a VSDX package, an OpenDocument drawing or a flat `.fodg`, told by its bytes and not its name. **A template is converted as the file itself** (as `roundtrip` opens one, `edit_template`), not as a new drawing made from it. A file that cannot be opened is an error that names the kind of trouble and never the path. |
 | `--out PATH` | Where to write, and what: the extension, in any case, names the type. A drawing type: `.diacraft`, `.diacraft-stencil`, `.diacraft-template`, `.vsdx`, `.vsdm`, `.vssx`, `.vssm`, `.vstx`, `.vstm`, `.odg` or `.otg`. A picture type: `.png`, `.svg` or `.pdf`. Any other extension (`.fodg` among them, which no Save As writes) is a mistake in the line. The file is written whole or not at all, and **it is never `FILE` itself** (a link to it, and another spelling of its path, are caught too). |
-| `--page N`, `--dpi N`, `--text MODE`, `--transparent`, `--bundled-fonts` | A picture's options, as `export` has them (the page's place from 1, pixels to the inch of a PNG, letters as `text` or `outlines` in an SVG or a PDF, no white paper, the bundled faces alone). **For a drawing type each is a mistake in the line**: nothing is ignored. |
+| `--page N`, `--dpi N`, `--text MODE`, `--transparent`, `--bundled-fonts` | A picture's options, as `export` has them (the page's place from 1, and the first page that is not a background when it is left out, pixels to the inch of a PNG, letters as `text` or `outlines` in an SVG or a PDF, no white paper, the bundled faces alone). **For a drawing type each is a mistake in the line**: nothing is ignored. |
 | `--drop-macros`, `--drop-objects` | A drawing type (a mistake for a picture): leave the macro project, or the embedded objects of the other format, out of the file written. They are options and never required: without `--drop-macros` a macro project that the type cannot hold (a VSDX type that allows no macros, whatever language the project is in) refuses the save in words that name `.vsdm`, `.vssm` and `.vstm` as the other way out; with `--drop-objects` each shape that showed an object shows its picture. The drawing keeps both: the `.diacraft` file saved from it holds them. |
 
 What each type holds:
@@ -348,10 +478,10 @@ The line is one object on standard output, with `in`, `out`, `format` and `bytes
 | `copied` | A drawing type: for a save as `.diacraft`, how many entries of the package were copied as they were from the file it was read from or last saved as; `null` for any other. |
 | `carried` | A drawing type: what the file carries of the data of the other format, the engine's own field `{classes, document_level, macros, objects, signatures_stale}` (`docs/diacraft-format.md`, 7.7): the classes in plain words ("line ends", "gradients", "style names", "window settings", ...), whether some of it is in DiaCraft's document data, whether a macro project or objects ride, and how many digital signatures no longer match the file. Empty classes and `false` for a save that carries nothing. It is never a warning. |
 | `checked` | A drawing type: what the check after the save found, the engine's own field `{done, classes: [{class, words, count}], as_values, reason}` (`docs/diacraft-format.md`, 7.7): after a save through a model writer (a VSDX file or an `.odg` written from the model, a `.diacraft` file written from a drawing of another format or made from a template file of one) the file is read back and compared with the drawing, class by class, and `classes` says each class that differs with the number of its items; `as_values` says that content is written in the forms the format holds (units, `Width*1` for `Width`, values from style sheets, links to style sheets), which is no difference; a formula that does not come back as a formula is counted in `formulas`; `done` is false, with `reason`, for a file written that could not be checked. `null` for a save into the drawing's own file, which is not checked in 0.2. It is never a warning. |
-| `warning_count`, `warnings` | A drawing type: how many warnings the save gave, and the class word of each of the first 20, as `roundtrip` tells them (`stencil_keeps_pages`, `macro_project_dropped`, `signature_no_longer_holds`, ... or `other`); the writer's words name parts and are not in the line. |
+| `warning_count`, `warnings` | A drawing type: how many warnings the save gave, and the first 20 of them, each as `{class, words}`. `class` is a fixed word a program reads (`field_as_text`, `style_links_not_written`, `text_format_not_written`, `macro_project_dropped`, `signature_no_longer_holds`, ...: one for every kind of warning a save gives, the VSDX writer's, the `.odg` writer's notes (one for each variant of `SaveNote`), what the engine adds and the `.diacraft` writer's, which `diacraft-cli` holds to the sources of the warnings by a test), and **`other` only for a warning that no class knows**, which a person reads in the window's save note. `words` says what changed and where: **the engine's own sentence** for a warning that holds only words and numbers (the `.odg` writer's notes and the engine's own, which count shapes and name them by their numbers: `2 fields of shape 3 on page 0 have no element in an .odg that is read back as a field, ...`), and **a sentence of the class** for a warning that may name a part or hold the words of an error (the VSDX writer's), which holds nothing of the warning. `roundtrip` tells only the class word, as it always did: its report may cross to a person who must not see the file. |
 | `page`, `width`, `height`, `skipped` | A picture type: `export`'s fields (the page's `ID` and name, the size in the format's own units, and what the page left out or drew by a stand-in). |
 
-**Where it writes.** Exactly where `--out` says, as `export` does: the command line has no granted folders. A convert never writes its input, and it makes one file.
+**Where it writes.** Exactly where `--out` says, as `export` does: the command line has no granted folders (the roots are `mcp`'s and the control channel's). A convert never writes its input, and it makes one file.
 
 A mistake in the line (no `FILE`, no `--out`, an extension that is not one of the types above, an option for another type, a page below 1) is status 2 and writes nothing. A file that cannot be read or opened, an engine refusal, a page the drawing does not have and a file that cannot be written are status 1, named on standard error in the engine's words or `export`'s, and never with the path. Batch conversion (many files, an output folder) is not part of `convert`.
 
@@ -433,7 +563,7 @@ The instrument of the visits of many files (the native format design's section 1
 | `cell` | `shape.format {weight: 1.23}` |
 | `move` | `shape.move {dx: 0.125, dy: 0.125}` |
 | `retext` | `shape.set_text {text: "salt"}` |
-| `delete` | `shape.delete` |
+| `delete` | `shape.delete`, which takes along the connectors glued to the shape |
 | `add` | `shape.drop {master: "rectangle"}` at the centre of the page (of the first page that has a shape, else the first page) |
 
 **The line is one shape every time.** It is the plan's `{via, input, diacraft, output, edit, content, model}` and the fields a reader needs to tell a trip that finished from one that did not:
@@ -478,11 +608,34 @@ Log records are written to standard error, one line each. `RUST_LOG` sets the le
 `info`, `debug` or `trace`; anything else is reported and `warn` is used. Text a client sent that a record repeats is
 escaped first, so that a control character in it does not reach a terminal.
 
+## The settings
+
+`run` and `mcp` (a session of this process: `mcp --headless`, and `mcp` when it fell back to a headless session; not `--connect`, which drives the window's session and its settings) open the person's settings, `config.toml` and the dictionaries and AutoCorrect lists beside it, as the window does, and save them when the command ends (`diacraft_engine::prefs`; `docs/development.md`, "The person's settings"). They share one file with the window: the command line holds the engine's sections (`[proofing]`, `[autocorrect]`, `[language]`) and keeps the window's own keys, and a key it does not know, as they are. The other commands (`commands`, `oracle`, `export`, `convert`, `roundtrip`, `compare`) read and write no settings.
+
+- `DIACRAFT_NO_PREFS` set to anything, the empty text too: nothing is read or written; what a run changes is kept in memory until it ends. **A script or an agent that must not touch the person's settings sets it.**
+- `DIACRAFT_CONFIG_DIR`: the folder of the settings in place of the platform's (`~/.config/diacraft` on Linux, `~/Library/Application Support/diacraft` on macOS, `%APPDATA%\diacraft` on Windows). Set but empty it does what `DIACRAFT_NO_PREFS` does.
+- What is wrong with the settings (a file that is broken, too big, not text or from a newer build, a folder that cannot be written) is said once on standard error, one `diacraft-cli: ...` line each, and the command goes on with the defaults or the file's values. A file that cannot be saved is said at the end. Standard output is not touched.
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-11-28 | trivial | The app's description in the command line takes `--reset-graphics` (added the option to the app, and the test that holds the description to the app's help failed), and "Shell completions" names it in the list of the app's options |
+| 2026-11-27 | minor | The salted `delete` edit is `shape.delete`, which takes the connectors glued to the shape along |
+| 2026-11-26 | minor | The section "The settings": `run` and `mcp` (a session of their own) open and save the person's settings, `DIACRAFT_NO_PREFS` and `DIACRAFT_CONFIG_DIR` isolate or move them, what is wrong is said once on standard error |
+| 2026-11-26 | minor | "The page's routing settings and a connector's route" is followed by an example of `connector.reverse_ends` (real lines: the ends swapped, a box left alone and listed, the route read back from the other end) |
+| 2026-11-26 | minor | Issue 10 of the demo video: `convert`'s `warnings` are objects `{class, words}` and not the bare class words, with a class for every kind of warning a save gives (a convert of a drawing the app made to `.odg` answered eight, all `other`), and the words say what changed and where (an array of strings before: a script that read each warning as a word reads `warnings[].class` now); `roundtrip` tells the same classes, as words only |
+| 2026-11-26 | minor | `shape.connection_points`, which doubles and halves the connection points of a shape's edges as one undo step, with a run of it and its refusal when nothing is left to halve ([Editing commands](editing-commands.md), "Connection points: double and halve (CPDOUBLE)") |
+| 2026-11-26 | minor | `--version` and `--help` are looked for before a `--` only, so that after it they are the names of files (`export --out p.svg -- --help` reads a drawing named `--help`; both used to print the page or the version) |
+| 2026-11-26 | minor | The refusal of an `.odg` save for a group with no name that holds data is one of the refusals that do not end with the undo |
+| 2026-11-26 | minor | Round 2: `export` and `convert` to a picture take the first page that is not a background page when `--page` is left out (meeting the table of words), and the packages' sentences name the `.rpm` beside the `.deb` (its zsh completions are in Fedora's folder) |
+| 2026-11-26 | minor | `mcp` and the app take `--automation-read-root` and `--automation-write-root` on the clap-read command line (meeting): the two are options given again for more folders, named as folders in the completions of `mcp` and of the app's script, with the words `needs a value` for a flag with no folder |
+| 2026-11-26 | minor | The command line is read by clap (`apps/diacraft-cli/src/cli.rs`, the one description of its commands and options), with the strictness and the words it had (`unknown option`, `was given twice`, `needs a value`); `--` ends the options for every command and a word with one dash is an option the command does not have (it was a file name); `--color auto\|always\|never` and `NO_COLOR`, `CLICOLOR_FORCE`, `CLICOLOR` and `TERM` colour the help and the words of a failure at a terminal and nowhere else (never the JSON, the MCP stream or the exit statuses), and the help is wrapped to the terminal's width; the help page comes from one table of its words (`src/help/text.rs`), as written for a pipe, byte for byte the page it was before the two new commands, `--color` and the colour variables; `completions SHELL [--program NAME]` writes the completion script of bash, zsh, fish, PowerShell or Elvish (commands, options, values, the command ids of `run --cmd`, files by their type) for the command line or the app; `man [--list \| PAGE]` writes the manual pages; the `.deb` installs both |
+| 2026-11-26 | minor | The SVG bullet of `export` says a shape is a group with its alt text as `<title>` and `<desc>` (its name as the title when it has none), and the page's alt text is the file's |
+| 2026-11-26 | minor | Follow-up: `export` and `convert` to a picture draw the first page that is not a background when `--page` is left out (it drew the page in the first place of the drawing, a background page in a file that lists them first) |
+| 2026-11-26 | minor | A paragraph on `shape.offset` and `shape.fit_curve` (the numbers are in the cells' own units, the answer's `changed` and `not_fitted`, one undo step, a Fit Curve that changes nothing is none) with the steps that draw an offset |
 | 2026-11-26 | minor | `shape.connection_edges`, a query of the edges of a shape's outline, the connection points on each and what a doubling of each would make under a minimum distance between points ([Editing commands](editing-commands.md), "Connection points: double and halve (CPDOUBLE)") |
+| 2026-11-26 | minor | `mcp` takes `--automation-read-root DIR` and `--automation-write-root DIR` (and the variables `DIACRAFT_AUTOMATION_READ_ROOT` and `DIACRAFT_AUTOMATION_WRITE_ROOT`); a folder that is not there and `--connect` with a root flag are status 2, the default mode stops when the app answers; the other commands have no roots |
 | 2026-11-26 | minor | `run` reaches the ShapeSheet's writes, `sheet.set_cell` and `sheet.set_cells`, with an example |
 | 2026-11-26 | minor | `run` reaches the ShapeSheet's rows and sections, `sheet.add_row`, `sheet.delete_row`, `sheet.add_section` and `sheet.delete_section`, with an example and the refusal of an insert a master numbers |
 | 2026-11-26 | minor | Follow-up: the example of a middle insert into a Process shape's Geometry takes a copy of its rows first (`renumbered.copied`), and the refusal it quotes is |

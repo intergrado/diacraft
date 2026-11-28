@@ -16,6 +16,7 @@ use diacraft_container::xml::El;
 use diacraft_doc::{Cell, CellName, Document, OdfPage, Page, RawAttrs, RawElement, SharedVec, Sheet};
 
 use super::Reader;
+use super::alt;
 use super::cells;
 use super::flat::Taken;
 use super::geometry::Budget;
@@ -655,6 +656,9 @@ fn read_page<'t>(
         // The rows of the document's layer set, as a page with none of its own has them: what a page the writer adds reads.
         r.document_layers = Some(sheet.section(&diacraft_doc::SectionKey::new("Layer", None)).cloned());
     }
+    // The page's own `svg:title` and `svg:desc` are the rows `visAltText` and `visAltDescription` of its sheet. **Only read, never taken out of the markup**: the
+    // page keeps its elements as it always did, and DiaCraft's own data says the rest (no `.odg` of the corpus has one on a page, so a page is written no element of its own).
+    alt::find(names, el).put(r, &mut sheet)?;
     let name = attrs.peek(Ns::Draw, "name").map_or_else(|| format!("Page-{}", ordinal + 1), str::to_owned);
     // What DiaCraft's document file says of the groups of this page, found by the page's name and its number among the pages of that name.
     let groups = r.groups.take_page(&name);

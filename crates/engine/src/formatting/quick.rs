@@ -17,17 +17,20 @@
 //! what choosing a style does). Cells a shape that follows the `Theme` style already reads from it are not written. **A page with no theme** has none to answer: the
 //! command fails in words, and so does a drawing with no `Theme` style (a page that selects a theme and a drawing that holds none).
 //!
+//! **A member reached through a group** keeps the line or the fill it does not draw (its `LinePattern` or `FillPattern` is not written as `THEMEVAL()`), and one filled with
+//! its own line colour keeps its fill cells (`formatting/mod.rs`).
+//!
 //! **Bounded.** At most [`MAX_QUICK_SHAPES`] shapes in one command, each with at most about forty cells; the gallery makes one copy of the document and one reading
 //! for each of its 46 tiles (a copy of a document is a handful of pointers) and reads one shape.
 
 use std::collections::BTreeMap;
 
-use diacraft_doc::{Cell, CellAddr, CellName, Document, Reading, Resolver, SheetRef};
+use diacraft_doc::{Cell, CellAddr, CellName, Document, ShapeRef, SheetRef};
 
 use super::effects::fx_look;
-use super::look::{FxLook, Reader, eval_ctx};
+use super::look::{FxLook, Reader, UnsavedBudget, eval_ctx};
 use super::shape_cells::{MAX_STOP_ROWS, row_addr};
-use super::{Edits, New, Rgb, first_leaf, targets};
+use super::{Edits, New, Rgb, fill_is_line, first_leaf, keeps_none, targets_reached};
 use crate::draw::Problem;
 use crate::theme::{follow_page_theme_refs, selection_of, theme_style_id};
 
@@ -96,10 +99,11 @@ impl QuickStyle {
 /// document is not touched when that is none.
 pub fn format_quick_style(doc: &mut Document, page: u32, ids: &[u32], style: QuickStyle) -> Result<usize, Problem> {
     require_theme(doc, page)?;
-    let shapes = targets(doc, page, ids)?;
-    if shapes.len() > MAX_QUICK_SHAPES {
-        return Err(Problem::failed(format!("a Quick Style is put on at most {MAX_QUICK_SHAPES} shapes at a time; {} were named", shapes.len())));
+    let targets = targets_reached(doc, page, ids)?;
+    if targets.len() > MAX_QUICK_SHAPES {
+        return Err(Problem::failed(format!("a Quick Style is put on at most {MAX_QUICK_SHAPES} shapes at a time; {} were named", targets.len())));
     }
+    let shapes: Vec<ShapeRef> = targets.iter().map(|target| target.at.clone()).collect();
     // A shape with no style of its own for a family follows the page's `Theme` style for it. **One pass over the places `targets` found**, one planner and one resolver for
     // all of them and no walk of the page to find a shape by its `ID` (a walk for each shape was 4,096 walks of the page), as a colour of the theme does (`formatting::shape_cells`).
     let linked: Vec<Option<diacraft_doc::Links>> = shapes.iter().map(|at| doc.shape(at).map(|s| s.sheet.links)).collect();
@@ -107,11 +111,12 @@ pub fn format_quick_style(doc: &mut Document, page: u32, ids: &[u32], style: Qui
     let mut touched: Vec<bool> = shapes.iter().zip(&linked).map(|(at, was)| doc.shape(at).map(|s| s.sheet.links) != *was).collect();
     let mut edits = Edits::default();
     {
-        let res = Resolver::new(doc);
-        for (at, was) in shapes.iter().zip(touched.iter_mut()) {
+        let mut ctx = eval_ctx();
+        let reader = Reader::new(doc, &mut ctx);
+        for (target, was) in targets.iter().zip(touched.iter_mut()) {
             edits.begin();
             let before = edits.planned();
-            plan(doc, &res, &SheetRef::Shape(at.clone()), style, &mut edits);
+            plan(doc, &reader, &SheetRef::Shape(target.at.clone()), style, target.through_group, &mut edits);
             *was |= edits.planned() > before;
         }
     }
@@ -140,46 +145,56 @@ fn direct(name: &str) -> CellAddr {
     CellAddr::direct(name)
 }
 
-/// Whether the cell at `addr` of the shape reads the theme's marker (`Themed`): a cell the theme answers.
-fn reads_theme(res: &Resolver<'_>, sheet: &SheetRef, addr: &CellAddr) -> bool {
-    res.resolve(sheet, addr).and_then(|found| found.value.cell?.value.as_ref().map(|v| v.reading())).is_some_and(|r| matches!(r, Reading::Themed))
+/// Whether the cell at `addr` of the shape follows the theme: it holds the theme's marker (`Themed`), **or a call of `THEMEVAL` and no saved value**, which the picture draws
+/// as the same call with the marker beside it: a cell the theme answers, which is not written over.
+fn reads_theme(reader: &Reader<'_, '_>, sheet: &SheetRef, addr: &CellAddr) -> bool {
+    reader.reads_theme(sheet, addr)
 }
 
-/// Whether the cell at `addr` reads a whole number, and this one.
-fn reads_number(res: &Resolver<'_>, sheet: &SheetRef, addr: &CellAddr, number: u32) -> bool {
-    res.resolve(sheet, addr).and_then(|found| found.value.cell?.value.as_ref()?.number()).is_some_and(|n| n == f64::from(number))
+/// Whether the cell at `addr` reads a whole number, and this one: its saved value, or for a cell that holds a formula and no saved value what the formula works out to.
+fn reads_number(reader: &Reader<'_, '_>, sheet: &SheetRef, addr: &CellAddr, number: u32) -> bool {
+    reader.held(sheet, addr).and_then(|value| value.number()).is_some_and(|n| n == f64::from(number))
 }
 
 /// The scheme cells that send a shape to its page (65534), for the ones the shape does not read as that already: a shape whose style is not `Theme` reads the root's 0, which is
 /// no theme. A Quick Style and a theme pick both ask for it, so that what they write is answered by the page's theme.
-pub(super) fn plan_scheme(doc: &Document, res: &Resolver<'_>, sheet: &SheetRef, edits: &mut Edits) {
+pub(super) fn plan_scheme(doc: &Document, reader: &Reader<'_, '_>, sheet: &SheetRef, edits: &mut Edits) {
     for name in SCHEME_CELLS {
         let addr = direct(name);
-        if !reads_number(res, sheet, &addr, PAGE_NUMBER) {
+        if !reads_number(reader, sheet, &addr, PAGE_NUMBER) {
             edits.put(doc, sheet, addr, &New::whole(PAGE_NUMBER));
         }
     }
 }
 
-fn plan(doc: &Document, res: &Resolver<'_>, sheet: &SheetRef, style: QuickStyle, edits: &mut Edits) {
+/// What a Quick Style writes for one shape. **A shape reached through a group** (`through_group`) that draws no line or no fill keeps its pattern, and one that is filled with its own line
+/// colour keeps its fill to the line: the style is the figure's, and the box of a name does not become a rectangle of it.
+fn plan(doc: &Document, reader: &Reader<'_, '_>, sheet: &SheetRef, style: QuickStyle, through_group: bool, edits: &mut Edits) {
     for name in ["QuickStyleLineMatrix", "QuickStyleFillMatrix", "QuickStyleEffectsMatrix"] {
         edits.put(doc, sheet, direct(name), &New::whole(style.matrix));
     }
     for name in ["QuickStyleLineColor", "QuickStyleFillColor", "QuickStyleShadowColor"] {
         edits.put(doc, sheet, direct(name), &New::whole(style.colour));
     }
-    plan_scheme(doc, res, sheet, edits);
+    plan_scheme(doc, reader, sheet, edits);
+    let no_line = keeps_none(reader, sheet, through_group, "LinePattern");
+    let no_fill = keeps_none(reader, sheet, through_group, "FillPattern");
+    let fill_follows_line = fill_is_line(reader, sheet, through_group);
     for name in LINE_CELLS.iter().chain(FILL_CELLS.iter()).chain(SHADOW_CELLS.iter()) {
+        let kept = (no_line && *name == "LinePattern") || (no_fill && *name == "FillPattern") || (fill_follows_line && FILL_CELLS.contains(name));
         let addr = direct(name);
-        if !reads_theme(res, sheet, &addr) {
+        if !kept && !reads_theme(reader, sheet, &addr) {
             edits.put(doc, sheet, addr, &New::Themed);
         }
+    }
+    if fill_follows_line {
+        return;
     }
     // The stops of the fill's gradient: a shape that follows the style has the ten rows already.
     for ix in 0..MAX_STOP_ROWS as u32 {
         if ["GradientStopColor", "GradientStopColorTrans", "GradientStopPosition"]
             .iter()
-            .all(|n| reads_theme(res, sheet, &row_addr("FillGradient", ix, n)))
+            .all(|n| reads_theme(reader, sheet, &row_addr("FillGradient", ix, n)))
         {
             continue;
         }
@@ -221,13 +236,24 @@ pub struct QuickLook {
 /// The gallery for the shape `ids` name (the first leaf): each tile is that shape **with the style put on it in a copy of the document**, so that a tile shows
 /// what the theme gives it and a program that reads the tiles sees what `shape.quick_style` would make. The document is not changed.
 pub fn quick_tiles(doc: &Document, page: u32, ids: &[u32]) -> Result<QuickLook, Problem> {
+    quick_tiles_within(doc, page, ids, &UnsavedBudget::new(diacraft_render::UNSAVED_STEPS))
+}
+
+/// [`quick_tiles`] with `budget` for the steps of the cells that hold a formula and no saved value, **one for all the readers the gallery makes** (a reader for the shape and
+/// two for each tile): the first exhaustion ends it for the rest, and a tile that is read after it reads those cells as they were before. The steps of
+/// the themed cells are one budget for the gallery too: one context, lent to each reader in turn and cleared of what it worked out between them.
+pub(super) fn quick_tiles_within(doc: &Document, page: u32, ids: &[u32], budget: &UnsavedBudget) -> Result<QuickLook, Problem> {
     require_theme(doc, page)?;
     let id = ids.first().copied().ok_or_else(|| Problem::bad("name a shape to show the styles of"))?;
     let at = first_leaf(doc, page, id)?;
+    // The first shape of a group is reached through it, as `shape.quick_style` reaches it.
+    let through_group = doc.shape(&at).is_some_and(|shape| shape.id != id);
     let sheet = SheetRef::Shape(at.clone());
+    let ctx = std::cell::RefCell::new(eval_ctx());
     let current = {
-        let mut ctx = eval_ctx();
-        let reader = Reader::new(doc, &mut ctx);
+        let mut ctx = ctx.borrow_mut();
+        ctx.invalidate();
+        let reader = Reader::lending(doc, &mut ctx, budget);
         let number = |name: &str| reader.num(&sheet, &direct(name), 100.0).round().max(0.0) as u32;
         QuickStyle { matrix: number("QuickStyleFillMatrix"), colour: number("QuickStyleFillColor") }
     };
@@ -236,12 +262,15 @@ pub fn quick_tiles(doc: &Document, page: u32, ids: &[u32]) -> Result<QuickLook, 
         follow_page_theme_refs(&mut copy, page, std::slice::from_ref(&at))?;
         let mut edits = Edits::default();
         {
-            let res = Resolver::new(&copy);
-            plan(&copy, &res, &sheet, style, &mut edits);
+            let mut ctx = ctx.borrow_mut();
+            ctx.invalidate();
+            let reader = Reader::lending(&copy, &mut ctx, budget);
+            plan(&copy, &reader, &sheet, style, through_group, &mut edits);
         }
         edits.apply_to_preview(&mut copy, page)?;
-        let mut ctx = eval_ctx();
-        let reader = Reader::new(&copy, &mut ctx);
+        let mut ctx = ctx.borrow_mut();
+        ctx.invalidate();
+        let reader = Reader::lending(&copy, &mut ctx, budget);
         let fx = fx_look(&reader, &sheet, page);
         let number = |name: &str, default: f64| reader.num(&sheet, &direct(name), default);
         Ok(QuickTile {

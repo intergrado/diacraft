@@ -28,10 +28,11 @@ use kurbo::Affine;
 
 use crate::frame::{Counts, Frame};
 use crate::limits::{Cancel, Limits, MAX_BACKGROUNDS, MAX_BLUR_PIXELS_PER_FRAME, MAX_BLURS_PER_FRAME};
-use crate::read::{Cx, THEME_STEPS, eval_ctx, eval_ctx_steps};
+use crate::read::{Cx, THEME_STEPS, UNSAVED_STEPS, eval_ctx, eval_ctx_steps};
 use crate::record::{Node, Recorder};
 use crate::skips::{SkipKind, Skips};
 use crate::text::Caches;
+use crate::worked::WorkedCache;
 use crate::{PageId, Renderer};
 
 /// Whether what the frame has spent, in all, leaves the walk in order its own course: no count could have ended the frame, nor changed a
@@ -134,6 +135,12 @@ pub(crate) fn steps_for_each(shares: usize) -> u64 {
     THEME_STEPS.div_ceil(u64::try_from(shares.max(1)).unwrap_or(u64::MAX))
 }
 
+/// The steps for the cells with no saved value that each of `shares` shares may take: [`UNSAVED_STEPS`] cut into equal parts, rounded up, as [`steps_for_each`] cuts the
+/// frame's.
+pub(crate) fn unsaved_steps_for_each(shares: usize) -> u64 {
+    UNSAVED_STEPS.div_ceil(u64::try_from(shares.max(1)).unwrap_or(u64::MAX))
+}
+
 /// What a share walked: its recording and what it spent.
 struct Done {
     nodes: Vec<Node>,
@@ -168,6 +175,9 @@ struct Common<'a> {
     /// What the shares have spent together, and the steps of the evaluator each may take.
     tally: &'a Tally,
     eval_steps: u64,
+    /// The steps of each share for the cells that hold a formula and no saved value, and the answers the earlier frames of the document kept.
+    unsaved_steps: u64,
+    kept: Option<&'a std::sync::Arc<WorkedCache>>,
 }
 
 /// Walks one unit in a frame of its own.
@@ -176,8 +186,8 @@ fn walk_unit(common: &Common<'_>, unit: &Unit, caches: &mut Caches) -> Done {
     crate::fault::strike_share(common.width, unit.range.start);
     let mut eval = eval_ctx_steps(common.eval_steps);
     let mut recorder = Recorder::new(common.width, common.height, common.to_px);
-    let (skips, counts) = {
-        let cx = Cx::new(common.doc, &mut eval);
+    let (skips, counts, unsaved_out) = {
+        let cx = Cx::new(common.doc, &mut eval).with_kept(common.kept).with_unsaved_steps(common.unsaved_steps);
         let counts = {
             let mut frame = Frame::new(&cx, &mut recorder, common.fonts, caches, common.limits);
             frame.clock = common.clock.clone();
@@ -189,9 +199,16 @@ fn walk_unit(common: &Common<'_>, unit: &Unit, caches: &mut Caches) -> Done {
             frame.draw_page_part(unit.page, Some(unit.range.clone()));
             frame.counts()
         };
-        (cx.take_skips(), counts)
+        (cx.take_skips(), counts, cx.unsaved_exhausted())
     };
-    Done { nodes: recorder.into_nodes(), skips, counts, steps: eval.stats.steps, exhausted: eval.stats.budget_exhausted, tops: unit.range.len() }
+    Done {
+        nodes: recorder.into_nodes(),
+        skips,
+        counts,
+        steps: eval.stats.steps,
+        exhausted: eval.stats.budget_exhausted || unsaved_out,
+        tops: unit.range.len(),
+    }
 }
 
 impl Renderer {
@@ -247,6 +264,8 @@ impl Renderer {
             to_px: crate::target::Target::to_px(target),
             tally: &tally,
             eval_steps: steps_for_each(units.len()),
+            unsaved_steps: unsaved_steps_for_each(units.len()),
+            kept: self.worked.as_ref(),
         };
         let caches: Vec<Mutex<Caches>> = std::mem::take(&mut self.share_caches).into_iter().map(Mutex::new).collect();
         let slots: Vec<Mutex<Option<Done>>> = units.iter().map(|_| Mutex::new(None)).collect();

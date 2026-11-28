@@ -744,7 +744,8 @@ fn the_committed_notices_name_the_programs_the_platforms_and_the_c_library() {
 fn the_committed_notices_hold_no_crate_the_programs_are_not_built_from() {
     let text = committed();
     // Crates of the workspace-wide resolution that the two programs do not compile: the OpenGL backend and the PDF reader.
-    for name in ["glutin 0.32", "egui_glow", "hayro-interpret", "arboard"] {
+    // `arboard` is not here: the desktop app builds eframe with its `clipboard` feature and compiles it.
+    for name in ["glutin 0.32", "egui_glow", "hayro-interpret"] {
         assert!(!text.contains(&format!("\n{name}")), "`{name}` is listed, and `cargo build -p diacraft -p diacraft-cli` does not compile it");
     }
     // The TLS stack and its C libraries are a build dependency of the Windows print library's build script, and in no program.

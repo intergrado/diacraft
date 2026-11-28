@@ -359,8 +359,9 @@ fn the_table_registers_every_crate_of_design_section_6() {
     for name in ["ui-egui", "mcp"] {
         assert_eq!(classify(&format!("diacraft-{name}")), Some(Class::Layer(6)), "{name}");
     }
-    // `container` is not in design section 6: the ZIP and XML layer carved out of `opc`.
-    for name in ["container", "opc", "metafile", "dxf", "data"] {
+    // `container` is not in design section 6: the ZIP and XML layer carved out of `opc`. Nor is `prefs`, the person's settings, a standalone crate so
+    // that its hostile-input parts have a fuzz target below the engine, nor `help`, the help layer: no app type, so that it can move to craft-libs.
+    for name in ["container", "opc", "metafile", "dxf", "data", "prefs", "help"] {
         assert_eq!(classify(&format!("diacraft-{name}")), Some(Class::Standalone), "{name}");
     }
     assert_eq!(classify("diacraft-testkit"), Some(Class::Testkit));
@@ -368,7 +369,7 @@ fn the_table_registers_every_crate_of_design_section_6() {
         assert_eq!(classify(name), Some(Class::Exempt), "{name}");
     }
     // Nothing else is registered, and nothing twice.
-    let registered = layers.iter().map(|(_, n)| n.len()).sum::<usize>() + 2 + 5 + 1 + 4;
+    let registered = layers.iter().map(|(_, n)| n.len()).sum::<usize>() + 2 + 7 + 1 + 4;
     assert_eq!(TABLE.len(), registered, "{TABLE:?}");
     let mut names: Vec<&str> = TABLE.iter().map(|(n, _)| *n).collect();
     names.sort_unstable();

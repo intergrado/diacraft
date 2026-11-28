@@ -92,7 +92,7 @@ impl Default for CharFormat {
 /// One tab stop of a `Tabs` row: where, and how text sits on it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TabStop {
-    /// `Position<j>`, paper inches from the text area's left edge.
+    /// `Position<j>`, paper inches from the text area's left edge, or from its right edge in a right-to-left paragraph (which mirrors: `place.rs`).
     pub position: f64,
     /// `Alignment<j>`: 0 starts there, 1 centres on it, 2 ends there, 3 and above line a decimal point up.
     pub alignment: u8,
@@ -109,15 +109,17 @@ pub struct ParaFormat {
     pub bullet_size: f64,
     /// `BulletStr`: replaces the table's mark when not empty.
     pub bullet_string: String,
-    /// `Flags`: 1 is right to left, anything else is left to right.
+    /// `Flags`: 1 is right to left, anything else is left to right. A right-to-left paragraph mirrors its indents, alignment, bullet and tab stops
+    /// `ind_left` is then the indent on the right, `ind_right` the one on the left, and `halign` 0 puts a line against the right.
     pub flags: u8,
-    /// `HorzAlign`: 0 left, 1 centred, 2 right, 3 justified, 4 force-justified; 6 to 8 justify as 3, anything else reads as 1.
+    /// `HorzAlign`: 0 left, 1 centred, 2 right, 3 justified, 4 force-justified; 6 to 8 justify as 3, anything else reads as 1. In a right-to-left paragraph 0 is
+    /// against the right edge and 2 against the left, and a justified paragraph's last line is against the right.
     pub halign: u8,
     /// `IndFirst`, from `ind_left`, for a paragraph's first line.
     pub ind_first: f64,
-    /// `IndLeft`.
+    /// `IndLeft`, the indent at the start of every line: the left, or the right in a right-to-left paragraph.
     pub ind_left: f64,
-    /// `IndRight`.
+    /// `IndRight`, the indent at the end of every line: the right, or the left in a right-to-left paragraph.
     pub ind_right: f64,
     /// `SpAfter`.
     pub sp_after: f64,
@@ -163,7 +165,8 @@ pub struct BlockFormat {
     pub vertical_align: u8,
     /// `TextDirection`: 1 sets text down the block, laid out by the `vertical` module; anything else is across.
     pub text_direction: u8,
-    /// `DefaultTabStop`, paper inches: automatic tab stops lie at whole multiples of it from the text area's left edge.
+    /// `DefaultTabStop`, paper inches: automatic tab stops lie at whole multiples of it from the text area's left edge (its right edge in a right-to-left
+    /// paragraph).
     pub default_tab_stop: f64,
     /// `TextBkgnd` resolved (`None` for 0 and 255) and `TextBkgndTrans`.
     pub background: Option<(Rgba, f64)>,

@@ -22,11 +22,12 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use diacraft_doc::{
-    Cell, CellAddr, CellName, Document, FormulaSlot, Resolved, Resolver, Row, RowKey, RowShape, Section, SectionKey, SheetRef, ix_to_row_number,
+    Cell, CellAddr, CellName, Document, FormulaSlot, Resolved, Resolver, Row, RowKey, RowShape, Section, SectionKey, SheetRef, cell_names,
+    cells_changed, ix_to_row_number,
 };
 
 use super::Problem;
-use super::sheet_rows::{default_cell, plain, sheet_mut};
+use super::sheet_rows::{default_cell, plain};
 
 /// The most cells one copy writes. A section holds at most 320,000 rows of at most 4,096 cells, which is more than a drawing can carry; this holds a copy to what a drawing of 30,000
 /// shapes of Geometry can.
@@ -147,10 +148,14 @@ pub(super) fn plan_copy(
 /// Writes the copy into the sheet's own section (made if the sheet holds none): each effective row replaces the sheet's own row at its number, or is added; the rows the sheet dropped
 /// are left as they are.
 pub(super) fn apply_copy(doc: &mut Document, sheet: &SheetRef, key: &SectionKey, plan: &CopyPlan) -> Result<(), Problem> {
-    let target = sheet_mut(doc, sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
+    let mut target = doc.counted_mut(sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
     let section = target.section_mut(key).map_err(|e| Problem::failed(e.to_string()))?;
-    for (name, cell) in &plan.flags {
-        section.cells.insert(name.clone(), cell.clone());
+    if !plan.flags.is_empty() {
+        let before = cell_names(&section.passthrough, &section.cells);
+        for (name, cell) in &plan.flags {
+            section.cells.insert(name.clone(), cell.clone());
+        }
+        cells_changed(&mut section.passthrough, &before, &section.cells);
     }
     let element = key.name.as_str();
     let mut at: HashMap<RowKey, usize> = HashMap::new();
@@ -159,31 +164,63 @@ pub(super) fn apply_copy(doc: &mut Document, sheet: &SheetRef, key: &SectionKey,
             at.entry(held).or_insert(place);
         }
     }
-    let mut added = false;
+    let mut added: Vec<Row> = Vec::new();
     for row in &plan.rows {
         let Some(held) = row.key(element) else { continue };
         match at.get(&held).copied().and_then(|place| section.rows.get_mut(place)) {
             Some(slot) => {
                 let own = Arc::make_mut(slot);
+                let before = cell_names(&own.passthrough, &own.cells);
                 own.cells = row.cells.clone();
+                cells_changed(&mut own.passthrough, &before, &own.cells);
                 own.row_type = row.row_type.clone();
             }
-            None => {
-                section.rows.push(Arc::new(row.clone()));
-                added = true;
-            }
+            None => added.push(row.clone()),
         }
     }
-    if added {
-        section.rows.sort_by_key(|row| (row.ix.is_none(), row.ix));
-    }
+    put_in_order(section, added);
     Ok(())
+}
+
+/// The key rows are put in order by: the number, and a row with none last.
+fn order_of(row: &Row) -> (bool, Option<u32>) {
+    (row.ix.is_none(), row.ix)
+}
+
+/// Puts `added` among the section's rows in the order of their numbers, after the rows that hold the same number, in one merge of the two lists, and moves the nodes that stood among
+/// the section's children with the rows that were there (a node goes on following the row it followed, ahead of the rows put in after it). A section whose rows are not in order (a row
+/// a cell write made for an instance goes after the rows it holds, whatever its number) is put in order first (`Section::sort_rows_by_key`), and the nodes follow the rows that change
+/// places.
+fn put_in_order(section: &mut Section, mut added: Vec<Row>) {
+    if added.is_empty() {
+        return;
+    }
+    added.sort_by_key(order_of);
+    section.sort_rows_by_key(order_of);
+    let old = std::mem::take(&mut *section.rows);
+    let old_len = old.len();
+    let mut merged: Vec<Arc<Row>> = Vec::with_capacity(old_len.saturating_add(added.len()));
+    let mut places: Vec<usize> = Vec::with_capacity(added.len());
+    let mut new_rows = added.into_iter().map(Arc::new).peekable();
+    for row in old {
+        while let Some(next) = new_rows.next_if(|next| order_of(next) < order_of(&row)) {
+            places.push(merged.len());
+            merged.push(next);
+        }
+        merged.push(row);
+    }
+    for next in new_rows {
+        places.push(merged.len());
+        merged.push(next);
+    }
+    *section.rows = merged;
+    section.passthrough.children_inserted(section.cells.len(), old_len, &places, true);
 }
 
 /// After the rows are moved: gives the row at each number the layers hold every cell they hold in the row there that it lacks, as a cell of its own at its default, so that the layers'
 /// cell is not read through it.
 pub(super) fn mask_leaks(doc: &mut Document, sheet: &SheetRef, key: &SectionKey, plan: &CopyPlan) -> Result<(), Problem> {
-    let target = sheet_mut(doc, sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
+    let mut target = doc.counted_mut(sheet).ok_or_else(|| Problem::failed("the sheet went away"))?;
     let section = target.section_mut(key).map_err(|e| Problem::failed(e.to_string()))?;
     let element = key.name.as_str();
     for slot in section.rows.iter_mut() {
@@ -196,11 +233,13 @@ pub(super) fn mask_leaks(doc: &mut Document, sheet: &SheetRef, key: &SectionKey,
             continue;
         }
         let own = Arc::make_mut(slot);
+        let before = cell_names(&own.passthrough, &own.cells);
         for name in names {
             if !own.cells.contains_key(name) {
                 own.cells.insert(name.clone(), default_cell(element, name.as_str()).unwrap_or_else(|| plain("0")));
             }
         }
+        cells_changed(&mut own.passthrough, &before, &own.cells);
     }
     Ok(())
 }

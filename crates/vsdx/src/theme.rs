@@ -23,6 +23,13 @@ use crate::theme_entries::{Tally, read_entries};
 /// The twelve slots of a colour scheme, in the order `ColorScheme::colors` holds them.
 const SLOTS: [&str; 12] = ["dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink"];
 
+/// The content type of a theme part: what a part with no relationship is known as a theme by.
+pub(crate) const CT_THEME: &str = "application/vnd.openxmlformats-officedocument.theme+xml";
+
+/// The conventional place of a theme part, relative to the document part (a folder `theme` beside it, in every sample): where a part is looked for when no
+/// relationship and no content type says which part is a theme.
+pub(crate) const CONVENTIONAL_THEME: &str = "theme/theme1.xml";
+
 /// The namespace R7 calls `vt:`, and the placeholder MS-VSDX gives it (which no file uses).
 pub(crate) const NS_VT: &str = "http://schemas.microsoft.com/office/visio/2012/theme"; // brand-ok: a namespace the format defines
 pub(crate) const NS_VT_PLACEHOLDER: &str = "http://visThemeSchemaUri";

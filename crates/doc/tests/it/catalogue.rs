@@ -239,3 +239,37 @@ fn every_listed_cell_name_is_one_the_catalogue_shares() {
         .collect();
     assert!(not_shared.is_empty(), "{not_shared:?} are in the tables and not in the list of shared names");
 }
+
+#[test]
+fn a_direct_cell_is_found_by_its_name_in_any_letter_case() {
+    use diacraft_doc::direct_cell_spelling;
+    // The spelling the table lists, whatever the case asked for, and the exact name as it is.
+    for (asked, listed) in [
+        ("Width", "Width"),
+        ("WIDTH", "Width"),
+        ("width", "Width"),
+        ("wIdTh", "Width"),
+        ("PINX", "PinX"),
+        ("pinx", "PinX"),
+        ("BEGINARROW", "BeginArrow"),
+    ] {
+        assert_eq!(direct_cell_spelling(asked), Some(listed), "{asked}");
+    }
+    // A name that is none of them in any case, an empty one, one with other letters, and one longer than any the table lists.
+    let (long_a, long_b) = ("w".repeat(1024), "Width".repeat(200));
+    for asked in ["", "Mine", "Widt", "Widthh", "Wi dth", "Wïdth", "Geometry1", "User", long_a.as_str(), long_b.as_str()] {
+        assert_eq!(direct_cell_spelling(asked), None, "{asked}");
+    }
+}
+
+#[test]
+fn no_two_direct_cells_differ_only_by_case_so_a_name_in_another_case_is_one_cell() {
+    let mut seen = BTreeSet::new();
+    for (section, name, _) in listed_cells() {
+        if section.is_none() {
+            assert!(seen.insert(name.to_ascii_lowercase()), "{name} and another listed cell differ only by case");
+            assert_eq!(diacraft_doc::direct_cell_spelling(&name.to_ascii_uppercase()), Some(name), "{name}");
+        }
+    }
+    assert!(seen.len() > 100);
+}

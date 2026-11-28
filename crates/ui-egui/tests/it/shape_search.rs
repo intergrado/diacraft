@@ -5,7 +5,9 @@
 //! right-click menu or by dragging it across the divider, and the AutoConnect flyout offers them.
 
 use diacraft_ui_egui::edit::autoconnect::{ARROWS_DELAY, FLYOUT_DELAY};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect};
+use diacraft_ui_egui::theme::Tokens;
+use egui::epaint::{ClippedPrimitive, Primitive, Vertex};
+use egui::{Event, Key, Modifiers, MouseWheelSource, MouseWheelUnit, PointerButton, Pos2, Rect, Shape, TouchPhase, vec2};
 use serde_json::{Value, json};
 
 use crate::editing::{drag_tile_to, edit_window, key, type_text};
@@ -86,7 +88,8 @@ fn enter_in_the_box_searches_every_stencil_and_shows_the_results_under_the_stenc
     }
     assert!(!tiles.contains(&"Rectangle".to_owned()));
     // The matches stand under the name of the stencil that holds them, in the order of the stencils.
-    assert_eq!(headings(&w), ["Arrow Shapes", "Gane-Sarson"], "{tiles:?}");
+    // (A stencil of the second batch that ships holds matches too: its words come after, in the order of the stencils.)
+    assert!(headings(&w).starts_with(&["Arrow Shapes".to_owned(), "Gane-Sarson".to_owned()]), "{:?} {tiles:?}", headings(&w));
     assert!(rect_of(&w, "shapes.group.Arrow Shapes").min.y < rect_of(&w, "shapes.tile.Right Arrow").min.y);
     assert!(rect_of(&w, "shapes.tile.Right Arrow").min.y < rect_of(&w, "shapes.group.Gane-Sarson").min.y);
     // A master of the results drops as any does.
@@ -203,11 +206,13 @@ fn a_query_that_is_refused_says_so_in_the_status_bar_and_the_results_stay() {
 fn the_results_follow_the_stencils_the_session_has_open() {
     let mut w = window();
     run_command(&mut w, "shapes.search", json!({"text": "process"}));
-    assert_eq!(headings(&w), ["Basic Flowchart", "Gane-Sarson"], "{:?}", tile_names(&w));
+    // (A stencil of the second batch that ships holds matches too: its words come after, in the order of the stencils.)
+    let first_two = ["Basic Flowchart".to_owned(), "Gane-Sarson".to_owned()];
+    assert!(headings(&w).starts_with(&first_two), "{:?} {:?}", headings(&w), tile_names(&w));
     // A template that closes the flowchart still finds it: a stencil DiaCraft ships is searched whether or not it is open.
     run_command(&mut w, "file.new", json!({"template": "basic_diagram"}));
     run_command(&mut w, "shapes.search", json!({"text": "process"}));
-    assert_eq!(headings(&w), ["Basic Flowchart", "Gane-Sarson"]);
+    assert!(headings(&w).starts_with(&first_two), "{:?}", headings(&w));
 }
 
 // ------------------------------------------------------------------------------------------------------------------------- Quick Shapes
@@ -454,5 +459,190 @@ fn the_flyout_offers_no_swimlane_or_separator_and_nothing_of_arrow_shapes_and_ag
         assert!(got.iter().all(|n| n != "Swimlane" && n != "Separator" && !n.contains("Arrow")), "{stencil}: {got:?}");
         assert_eq!(w.state_mut().autoconnect_offer().into_iter().map(|m| m.name).collect::<Vec<_>>(), want, "{stencil}: the window's own reading");
         key(&mut w, Key::Escape, Modifiers::NONE);
+    }
+}
+
+// ----------------------------------------------------------------------------------------------------------------------- the box's own look
+
+/// What the window's last frame drew at `pos`, in software: the flat-coloured triangles of the frame, in the order they were painted, each only inside its own clip rectangle (text and
+/// pictures take their colours from a texture, and are left out). Colours are premultiplied, as the frame's are.
+fn colour_at(w: &Window, pos: Pos2) -> [f32; 4] {
+    let output = w.output();
+    let mut seen = [0.0_f32; 4];
+    for ClippedPrimitive { clip_rect, primitive } in w.ctx.tessellate(output.shapes.clone(), output.pixels_per_point) {
+        let Primitive::Mesh(mesh) = primitive else { continue };
+        if !clip_rect.contains(pos) {
+            continue;
+        }
+        for corners in mesh.indices.as_chunks::<3>().0 {
+            let v: Vec<Vertex> = corners.iter().filter_map(|i| mesh.vertices.get(*i as usize).copied()).collect();
+            if v.len() != 3 || v[0].uv != v[1].uv || v[1].uv != v[2].uv {
+                continue;
+            }
+            let (a, b, c) = (v[0].pos, v[1].pos, v[2].pos);
+            let det = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+            if det.abs() < 1.0e-9 {
+                continue;
+            }
+            let wa = ((b.x - pos.x) * (c.y - pos.y) - (b.y - pos.y) * (c.x - pos.x)) / det;
+            let wb = ((c.x - pos.x) * (a.y - pos.y) - (c.y - pos.y) * (a.x - pos.x)) / det;
+            let wc = 1.0 - wa - wb;
+            if wa < -1.0e-4 || wb < -1.0e-4 || wc < -1.0e-4 {
+                continue;
+            }
+            let colour = |k: usize| v[k].color.to_array().map(|n| f32::from(n) / 255.0);
+            let (ca, cb, cc) = (colour(0), colour(1), colour(2));
+            let src: Vec<f32> = (0..4).map(|k| wa * ca[k] + wb * cb[k] + wc * cc[k]).collect();
+            for k in 0..4 {
+                seen[k] = src[k] + seen[k] * (1.0 - src[3]);
+            }
+        }
+    }
+    seen
+}
+
+/// The lines of text the last frame laid out: the words, and the rectangle of the line.
+fn texts(w: &Window) -> Vec<(String, Rect)> {
+    fn walk(shape: &Shape, out: &mut Vec<(String, Rect)>) {
+        match shape {
+            Shape::Text(t) => out.push((t.galley.job.text.clone(), t.galley.rect.translate(t.pos.to_vec2()))),
+            Shape::Vec(inner) => inner.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &w.output().shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// The wheel turned over `at`, down the tiles by `by` points (up, for a number below 0).
+fn wheel(w: &mut Window, at: Pos2, by: f32) {
+    move_to(w, at);
+    w.input_mut().events.push(Event::MouseWheel {
+        unit: MouseWheelUnit::Point,
+        delta: vec2(0.0, -by),
+        phase: TouchPhase::Move,
+        modifiers: Modifiers::NONE,
+        source: MouseWheelSource::Unknown,
+    });
+    // The wheel is smoothed over a few frames.
+    for _ in 0..30 {
+        w.step();
+    }
+    w.rest();
+}
+
+/// A window of `size` points at `ppp` pixels to the point, in the `theme` (`light` or `dark`), on a stencil that has more tiles than the window can show at once.
+fn crowded_window(size: [f32; 2], ppp: f32, theme: &str) -> Window {
+    // The harness's size is in the points of the screen before the scale: the window is that much smaller in its own points at a larger scale.
+    let mut w = edit_window([size[0] * ppp, size[1] * ppp]);
+    w.set_pixels_per_point(ppp);
+    run_command(&mut w, "window.theme", json!({ "theme": theme }));
+    let list = w.state_mut().stencil_list();
+    let most = list.iter().filter(|s| !s.is_gathered()).max_by_key(|s| s.masters.len()).expect("a stencil is open").id.clone();
+    run_command(&mut w, "window.stencil", json!({ "stencil": most }));
+    w
+}
+
+/// Scrolls the tiles so that the first of them stands across the bottom edge of the box, and returns where to look: a point of the edge, inside a tile that stands across it.
+/// The box's edge is a point wide and the tile is under it, so whatever of the tile is painted at that point shows in the frame.
+fn scroll_a_tile_under_the_box(w: &mut Window) -> Pos2 {
+    let (search, gallery) = (rect_of(w, "shapes.search"), rect_of(w, "shapes.gallery"));
+    let tiles = elements_named(w, "shapes.tile");
+    let first =
+        tiles.iter().map(|t| t.1).min_by(|a, b| a.min.y.total_cmp(&b.min.y).then(a.min.x.total_cmp(&b.min.x))).expect("the stencil has tiles");
+    wheel(w, gallery.center(), first.min.y - (search.bottom() - 20.0));
+    let edge = search.bottom() - 0.5;
+    let under = elements_named(w, "shapes.tile").into_iter().map(|t| t.1).find(|t| t.min.y < edge && t.max.y > edge);
+    let under = under
+        .unwrap_or_else(|| panic!("no tile stands across the box's bottom edge ({edge}) after the scroll: {:?}", elements_named(w, "shapes.tile")));
+    Pos2::new(under.center().x, edge)
+}
+
+/// A narrow window and a wide one, at each scale, in each theme.
+const LOOKS: [([f32; 2], f32, &str); 5] = [
+    ([800.0, 520.0], 1.0, "light"),
+    ([800.0, 520.0], 1.5, "dark"),
+    ([1600.0, 640.0], 2.0, "light"),
+    ([1280.0, 560.0], 1.0, "dark"),
+    ([1600.0, 900.0], 1.5, "light"),
+];
+
+/// The area the tiles are drawn and clipped in begins where the box ends: nothing of a tile can reach the box's edge.
+#[test]
+fn the_tiles_area_begins_where_the_search_box_ends() {
+    for (size, ppp, theme) in LOOKS {
+        let w = crowded_window(size, ppp, theme);
+        let (search, gallery) = (rect_of(&w, "shapes.search"), rect_of(&w, "shapes.gallery"));
+        assert!(
+            gallery.min.y >= search.max.y - 0.01,
+            "{size:?} {ppp} {theme}: the tiles' area ({gallery:?}) begins above the box's bottom edge ({search:?})"
+        );
+    }
+}
+
+/// The tiles scroll under the box, and what is above the gallery is not theirs to paint: the box's bottom edge is as it was before the scroll, in each theme, at each scale, in a
+/// narrow window and in a wide one.
+#[test]
+fn scrolled_tiles_do_not_paint_over_the_search_box() {
+    for (size, ppp, theme) in LOOKS {
+        let mut w = crowded_window(size, ppp, theme);
+        let t = Tokens::get(&w.ctx);
+        let (search, gallery) = (rect_of(&w, "shapes.search"), rect_of(&w, "shapes.gallery"));
+        let first_before = elements_named(&w, "shapes.tile").into_iter().map(|t| t.1.min.y).fold(f32::MAX, f32::min);
+        // The box's bottom edge, over the tile that will come to stand across it.
+        let probe_x = elements_named(&w, "shapes.tile").into_iter().map(|t| t.1.center().x).fold(f32::MAX, f32::min);
+        let before = colour_at(&w, Pos2::new(probe_x, search.bottom() - 0.5));
+        let want = t.input_border.to_array().map(|n| f32::from(n) / 255.0);
+        for k in 0..3 {
+            assert!(
+                (before[k] - want[k]).abs() < 0.02,
+                "{size:?} {ppp} {theme}: the probe does not see the box's edge: {before:?} is not the border {want:?}"
+            );
+        }
+        let at = scroll_a_tile_under_the_box(&mut w);
+        let first_after = elements_named(&w, "shapes.tile").into_iter().map(|t| t.1.min.y).fold(f32::MAX, f32::min);
+        assert!(first_after < first_before - 1.0, "{size:?} {ppp} {theme}: the tiles did not scroll ({first_before} to {first_after})");
+        assert!(first_after < search.bottom(), "{size:?} {ppp} {theme}: the tiles are not under the box");
+        let after = colour_at(&w, at);
+        for k in 0..4 {
+            assert!(
+                (after[k] - before[k]).abs() < 0.02,
+                "{size:?} {ppp} {theme}: a tile painted over the box's bottom edge: {before:?} became {after:?} at {at:?}"
+            );
+        }
+        let (search_after, gallery_after) = (rect_of(&w, "shapes.search"), rect_of(&w, "shapes.gallery"));
+        assert_eq!(search_after, search, "scrolling the tiles moves nothing above them");
+        assert_eq!(gallery_after, gallery, "the tiles' area stays where it was");
+    }
+}
+
+/// The words in the box, the prompt and the words typed, stand in the middle of the box from top to bottom, as the text of any field does.
+#[test]
+fn the_words_in_the_search_box_are_centred_in_it_from_top_to_bottom() {
+    for (ppp, theme) in [(1.0, "light"), (1.5, "dark"), (2.0, "light")] {
+        let mut w = crowded_window([1280.0, 700.0], ppp, theme);
+        let search = rect_of(&w, "shapes.search");
+        let line = |w: &Window, words: &str| {
+            texts(w).into_iter().find(|(text, _)| text == words).map(|(_, r)| r).unwrap_or_else(|| panic!("{words:?} is not drawn: {:?}", texts(w)))
+        };
+        let prompt = line(&w, "Search shapes");
+        assert!(
+            (prompt.center().y - search.center().y).abs() <= 1.0,
+            "{ppp} {theme}: the prompt ({prompt:?}) is not in the middle of the box ({search:?})"
+        );
+        let at = rect_of(&w, "shapes.filter").center();
+        click(&mut w, at);
+        w.rest();
+        type_text(&mut w, "Ag");
+        let typed = line(&w, "Ag");
+        assert!(
+            (typed.center().y - search.center().y).abs() <= 1.0,
+            "{ppp} {theme}: the words typed ({typed:?}) are not in the middle of the box ({search:?})"
+        );
+        // The words and the prompt stand at the same height.
+        assert!((typed.center().y - prompt.center().y).abs() <= 1.0, "{ppp} {theme}: {typed:?} and {prompt:?} differ in height");
     }
 }

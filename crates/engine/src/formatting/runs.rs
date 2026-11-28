@@ -7,7 +7,8 @@
 //!
 //! ours; no specification says what a person's formatting of a part of a run does to the file:
 //!
-//! * A **new row** holds **a copy of the cells the run's row resolves to** (the formulas as written and the values saved), with the change.
+//! * A **new row** holds **a copy of the cells the run's row resolves to** (the formulas as written and the values saved), with the change, and a row
+//!   past the first **every cell of ** (`diacraft_doc::root_text::row_cells`), each the copy lacks with the value the renderer assumes.
 //!   [`plan`] gives each new marker the next `IX` above every row the shape's text and its sheet, master and styles hold (so it inherits nothing by
 //!   the key it has); the numbers a file ends up with are decided by the caller (`text.rs`) in one of two cases, both of which write **every row
 //!   the text names as a local row** when a split is made (a reader that takes the first local row for run 0, as LibreOffice does, then reads a

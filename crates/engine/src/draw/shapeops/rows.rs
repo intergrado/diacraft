@@ -17,6 +17,7 @@ use std::sync::Arc;
 use diacraft_doc::{Cell, CellName, Row, Section, Value};
 use kurbo::{BezPath, PathEl, Point, Rect, Shape as _};
 
+use super::runs::{Run, Seg};
 use super::{MERGE, MIN_AREA};
 use crate::stencil::number_text;
 
@@ -94,7 +95,7 @@ fn cubic_of_quad(from: Point, c: Point, to: Point) -> (Point, Point) {
 }
 
 /// The contours of `path` as rings. A contour with a point that is not a number is left out.
-fn rings_of(path: &BezPath) -> Vec<Loop> {
+pub(super) fn rings_of(path: &BezPath) -> Vec<Loop> {
     let mut out: Vec<Loop> = Vec::new();
     let mut pts: Vec<Point> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
@@ -383,7 +384,7 @@ pub(super) fn section_of(ring: &Loop, frame: &Frame, ix: u32) -> Section {
     let mut section = flagged(ix, false);
     let Some(first) = ring.nodes.first() else { return section };
     let mut row_ix = 1_u32;
-    section.rows.push(row(row_ix, "MoveTo", vec![("X", frame.x_cell(first.p)), ("Y", frame.y_cell(first.p))]));
+    section.append_row(row(row_ix, "MoveTo", vec![("X", frame.x_cell(first.p)), ("Y", frame.y_cell(first.p))]));
     for (i, node) in ring.nodes.iter().enumerate() {
         row_ix = row_ix.saturating_add(1);
         // The last edge comes back to the first vertex, whose formulas the row repeats.
@@ -392,7 +393,61 @@ pub(super) fn section_of(ring: &Loop, frame: &Frame, ix: u32) -> Section {
             Edge::Line => row(row_ix, "LineTo", vec![("X", frame.x_cell(to)), ("Y", frame.y_cell(to))]),
             Edge::Cubic(a, b) => cubic_row(row_ix, frame, (a, b), to),
         };
-        section.rows.push(new_row);
+        section.append_row(new_row);
+    }
+    section
+}
+
+/// The flags of a section written from runs: `NoShow` is always 0, a hidden section being read by no operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Flags {
+    pub no_fill: bool,
+    pub no_line: bool,
+    pub no_snap: bool,
+    pub no_quick_drag: bool,
+}
+
+impl Flags {
+    /// The flags of a section that is new, with `NoFill` as given: the other three are 0.
+    pub(super) const fn new(no_fill: bool) -> Flags {
+        Flags { no_fill, no_line: false, no_snap: false, no_quick_drag: false }
+    }
+}
+
+/// The section of one run (a path that is not a ring of the area operations: a chain Join made, a stretch Trim cut, a side Offset drew), its coordinates shares of `frame`,
+/// numbered `ix`: a `MoveTo`, a `LineTo` for each straight segment and one clamped cubic `NURBSTo` for each curved one. A run whose ends meet ends on the formulas its
+/// `MoveTo` starts with, so that it closes exactly. `no_fill` is the section's `NoFill`: 1 for a section that strokes only, which is every open one, and every piece
+/// that cutting made even where its ends meet.
+pub(super) fn section_of_run(run: &Run, frame: &Frame, ix: u32, no_fill: bool) -> Section {
+    section_of_runs(std::slice::from_ref(run), frame, ix, Flags::new(no_fill))
+}
+
+/// The section of several runs one after the other, each starting with a `MoveTo` (a section of many paths, as Fit Curve keeps one and Offset's side of a section is), numbered
+/// `ix`, with the five flags as `flags` gives them; the rows are numbered on from 1. A segment that is an arc is an `ArcTo` row: `X`, `Y` and `A`, the bow, a length.
+pub(super) fn section_of_runs(runs: &[Run], frame: &Frame, ix: u32, flags: Flags) -> Section {
+    let mut section = flagged(ix, flags.no_fill);
+    for (name, on) in [("NoLine", flags.no_line), ("NoSnap", flags.no_snap), ("NoQuickDrag", flags.no_quick_drag)] {
+        put(&mut section.cells, name, plain(if on { 1.0 } else { 0.0 }));
+    }
+    let mut row_ix = 0_u32;
+    let mut next = || {
+        row_ix = row_ix.saturating_add(1);
+        row_ix
+    };
+    for run in runs {
+        let closes = run.closed();
+        section.append_row(row(next(), "MoveTo", vec![("X", frame.x_cell(run.start)), ("Y", frame.y_cell(run.start))]));
+        for (i, seg) in run.segs.iter().enumerate() {
+            let last = i + 1 == run.segs.len();
+            let to = if last && closes { run.start } else { seg.end() };
+            let at = next();
+            let new_row = match *seg {
+                Seg::Line(_) => row(at, "LineTo", vec![("X", frame.x_cell(to)), ("Y", frame.y_cell(to))]),
+                Seg::Cubic(a, b, _) => cubic_row(at, frame, (a, b), to),
+                Seg::Arc { bow, .. } => row(at, "ArcTo", vec![("X", frame.x_cell(to)), ("Y", frame.y_cell(to)), ("A", length(bow))]),
+            };
+            section.append_row(new_row);
+        }
     }
     section
 }

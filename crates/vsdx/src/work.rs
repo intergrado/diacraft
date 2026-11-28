@@ -553,3 +553,83 @@ pub use kept_on::{kept_entries_copied, kept_steps};
 pub(crate) fn kept_step(_: usize) {}
 #[cfg(not(feature = "test-support"))]
 pub(crate) fn kept_copy(_: usize) {}
+
+// The walk that makes the language cells of a drawing the tag alone (`plain_languages.rs`), counted on their own: a test reads them before and after the work it measures.
+#[cfg(feature = "test-support")]
+mod language_on {
+    use std::cell::Cell;
+
+    thread_local! {
+        static LANGUAGE_SHEETS: Cell<u64> = const { Cell::new(0) };
+        static LANGUAGE_CELLS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// The sheets the walk for the language cells looked at: one for each sheet that is not the very allocation the baseline holds at its place.
+    #[must_use]
+    pub fn language_sheets_walked() -> u64 {
+        LANGUAGE_SHEETS.with(Cell::get)
+    }
+
+    /// The cells the walk for the language cells wrote as the tag alone: one for each.
+    #[must_use]
+    pub fn language_cells_written() -> u64 {
+        LANGUAGE_CELLS.with(Cell::get)
+    }
+
+    pub(crate) fn language_sheet() {
+        LANGUAGE_SHEETS.with(|c| c.set(c.get().saturating_add(1)));
+    }
+
+    pub(crate) fn language_cell() {
+        LANGUAGE_CELLS.with(|c| c.set(c.get().saturating_add(1)));
+    }
+}
+
+#[cfg(feature = "test-support")]
+pub(crate) use language_on::{language_cell, language_sheet};
+#[cfg(feature = "test-support")]
+pub use language_on::{language_cells_written, language_sheets_walked};
+#[cfg(not(feature = "test-support"))]
+pub(crate) fn language_sheet() {}
+#[cfg(not(feature = "test-support"))]
+pub(crate) fn language_cell() {}
+
+// The walk that gives the text cells of a drawing their unit (`string_units.rs`), counted on its own: a test reads the counts before and after the work it measures.
+#[cfg(feature = "test-support")]
+mod string_on {
+    use std::cell::Cell;
+
+    thread_local! {
+        static STRING_SHEETS: Cell<u64> = const { Cell::new(0) };
+        static STRING_FITTED: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// The sheets the walk for the text cells looked at: one for each sheet of the drawing (the document's, the styles', the masters', the pages' and every shape's).
+    #[must_use]
+    pub fn string_sheets_walked() -> u64 {
+        STRING_SHEETS.with(Cell::get)
+    }
+
+    /// The sheets the walk for the text cells gave the unit on a cell: one for each sheet that held a cell without it.
+    #[must_use]
+    pub fn string_sheets_fitted() -> u64 {
+        STRING_FITTED.with(Cell::get)
+    }
+
+    pub(crate) fn string_sheet() {
+        STRING_SHEETS.with(|c| c.set(c.get().saturating_add(1)));
+    }
+
+    pub(crate) fn string_sheet_fitted() {
+        STRING_FITTED.with(|c| c.set(c.get().saturating_add(1)));
+    }
+}
+
+#[cfg(feature = "test-support")]
+pub(crate) use string_on::{string_sheet, string_sheet_fitted};
+#[cfg(feature = "test-support")]
+pub use string_on::{string_sheets_fitted, string_sheets_walked};
+#[cfg(not(feature = "test-support"))]
+pub(crate) fn string_sheet() {}
+#[cfg(not(feature = "test-support"))]
+pub(crate) fn string_sheet_fitted() {}

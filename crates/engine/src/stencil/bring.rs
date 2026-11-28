@@ -66,7 +66,7 @@ use diacraft_doc::{
     RawAttrs, RawNode, Row, Section, Shape, ShapeList, Sheet, Style, Text, TextPart, Value,
 };
 
-use super::refs;
+use super::{refs, unique};
 
 /// The most shapes, cells, rows and styles one copy visits, all together. Real masters hold a few hundred; the largest the reader will take
 /// holds millions, and this stops a copy of one from holding the engine.
@@ -1171,14 +1171,18 @@ pub(crate) fn left_out_words(n: usize, whose: &str) -> String {
     )
 }
 
-/// The `UniqueID` of the copy: the source's if the target holds none like it, else one of ours that it does not.
+/// The `UniqueID` of the copy: the source's if the target holds none like it, else one of ours that it does not. **"Like it" is the first three groups**: the VSDX
+/// application keeps no more of a `UniqueID`, so a master whose `UniqueID` starts as the copy's is the same master there, and the copy gets one of its own then (a hash of the source's, of a
+/// version 4 form, whose first three groups no master of the target has). A text that is no GUID of five groups is held whole.
 pub(super) fn unique_id_for(doc: &Document, source: Option<&str>) -> Option<Arc<str>> {
     let source = source?;
-    let taken: HashSet<String> = doc.masters.iter().filter_map(|m| m.unique_id.as_deref()).map(guid_key).collect();
-    if !taken.contains(&guid_key(source)) {
+    let taken: HashSet<String> = doc.masters.iter().filter_map(|m| m.unique_id.as_deref()).map(unique::prefix_key).collect();
+    if !taken.contains(&unique::prefix_key(source)) {
         return Some(Arc::from(source));
     }
-    (1_u64..).map(|n| format!("{{D1AC0003-0000-4000-8000-{n:012X}}}")).find(|g| !taken.contains(&guid_key(g))).map(|g| Arc::from(g.as_str()))
+    // A hash that lands on a taken prefix is tried again; the tries are as many as there are masters and a few more, so that a hostile drawing cannot hold the loop.
+    let tries = u64::try_from(taken.len()).unwrap_or(u64::MAX).saturating_add(64);
+    (1..=tries).map(|n| unique::renewed(source, n)).find(|g| !taken.contains(&unique::prefix_key(g))).map(|g| Arc::from(g.as_str()))
 }
 
 /// Writes the plan into `doc`.
@@ -1192,9 +1196,9 @@ fn apply(doc: &mut Document, plan: Plan) -> Result<Brought, Refusal> {
     if let (Some(was), Some(now)) = (plan_unique.as_deref(), master.unique_id.as_deref())
         && was != now
     {
-        // A `UniqueID` is renewed when the target would hold it twice, and the copy says so.
+        // A `UniqueID` is renewed when the target would hold it twice (the first three groups are all the VSDX application keeps), and the copy says so.
         notes.push(format!(
-            "the drawing already has a master with the UniqueID {}, so the copy has {}",
+            "the drawing already has a master whose UniqueID starts as {}, so the copy has {}",
             crate::text::shown(was, 64),
             crate::text::shown(now, 64)
         ));

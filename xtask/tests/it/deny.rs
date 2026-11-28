@@ -78,7 +78,9 @@ fn deny_toml_allows_only_the_storytold_git_sources_and_the_forks_a_pull_request_
             "https://github.com/storytold/winprint.rs",
             // `rfd`, the native file dialogs, at one immutable revision of the one-bit fork, until the next rfd release holds its changes: then this source goes (and so does this line).
             "https://github.com/one-bit/rfd",
-            "https://github.com/storytold/egui",
+            // The egui family, at one immutable revision of the one-bit fork that holds the text fix for Ctrl and the left Alt key on Windows, until
+            // storytold/egui merges it: then the storytold/egui source returns in this place and this one goes (and so does this line).
+            "https://github.com/one-bit/egui",
             "https://github.com/storytold/winit"
         ]
     );

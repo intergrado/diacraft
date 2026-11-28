@@ -54,28 +54,116 @@ pub(crate) fn close(a: f64, b: f64) -> bool {
     (a - b).abs() <= CLOSE * (1.0 + a.abs().max(b.abs()))
 }
 
-/// The colour a text names in `doc`: `#RRGGBB`, or an index of the colour table.
-fn colour_of(doc: &Document, text: &str) -> Option<[u8; 4]> {
+/// The index of the colour table a text names (a colour of the fixed palette, 0 to 23, or an `IX` of the document's table): a whole number from 0 to 100,000, or `None`.
+fn colour_index(text: &str) -> Option<i64> {
+    let index = diacraft_doc::Value::from_text(text.trim()).number()?;
+    if index.fract() != 0.0 || !(0.0..=100_000.0).contains(&index) {
+        return None;
+    }
+    Some(index as i64)
+}
+
+/// The colour a text names: `#RRGGBB`, or an index of the fixed palette (no table is read for one) or of the document's colour table (`table`, which a text past the palette needs: [`needs`]).
+fn colour_of(table: Option<&ColourTable<'_>>, text: &str) -> Option<[u8; 4]> {
     let text = text.trim();
     if text.starts_with('#') {
         return diacraft_color::Rgba::from_hex(text).map(|c| [c.r, c.g, c.b, c.a]);
     }
-    let index = diacraft_doc::Value::from_text(text).number()?;
-    if index.fract() != 0.0 || !(0.0..=100_000.0).contains(&index) {
-        return None;
-    }
-    doc.color(index as i64).map(|c| [c.r, c.g, c.b, c.a])
+    let index = colour_index(text)?;
+    let colour = diacraft_color::fixed_color(index).or_else(|| table.and_then(|t| t.colour(index)))?;
+    Some([colour.r, colour.g, colour.b, colour.a])
 }
 
-/// The name of the font face a `Font` cell's value names in `doc`: the face whose `ID` the value is, else the face at that place of the table.
-fn face_of(doc: &Document, text: &str) -> Option<String> {
+/// The colours of a document's table by their `IX`, made in one pass for a walk that looks many cells up: [`diacraft_doc::Document::color`]'s answer in one probe a cell, where it walks the whole table
+/// for each (the neighbour of the security scan's finding on for the faces). The caller pays for the pass, a step for each colour.
+pub(crate) struct ColourTable<'d> {
+    /// The `RGB` of the first entry of each `IX`, the one [`diacraft_doc::Document::color`] finds.
+    by_ix: std::collections::HashMap<u32, &'d str>,
+}
+
+impl<'d> ColourTable<'d> {
+    pub(crate) fn of(doc: &'d Document) -> ColourTable<'d> {
+        let mut by_ix = std::collections::HashMap::with_capacity(doc.colors.len());
+        for entry in doc.colors.iter() {
+            by_ix.entry(entry.ix).or_insert(entry.rgb.as_ref());
+        }
+        #[cfg(test)]
+        probed_colours(doc.colors.len());
+        ColourTable { by_ix }
+    }
+
+    /// What [`diacraft_doc::Document::color`] answers for an index past the fixed palette.
+    fn colour(&self, index: i64) -> Option<diacraft_color::Rgba> {
+        #[cfg(test)]
+        probed_colours(1);
+        let ix = u32::try_from(index).ok()?;
+        self.by_ix.get(&ix).and_then(|rgb| diacraft_color::Rgba::from_hex(rgb))
+    }
+}
+
+/// The number a `Font` cell's value names a face by: a whole number from 0 to 1,000,000, or `None`.
+pub(crate) fn face_number(text: &str) -> Option<u64> {
     let n = diacraft_doc::Value::from_text(text.trim()).number()?;
     if n.fract() != 0.0 || !(0.0..=1_000_000.0).contains(&n) {
         return None;
     }
-    let id = format!("{}", n as u64);
-    let face = doc.fonts.iter().find(|f| f.raw.get("ID") == Some(id.as_str())).or_else(|| doc.fonts.get(n as usize));
-    face.map(|f| f.name_u.to_ascii_lowercase())
+    Some(n as u64)
+}
+
+/// The faces of a table by their `ID`, made in one pass for a walk that looks many cells up: the face a `Font` cell's value names (the face whose `ID` the value is, else the face at that place of the
+/// table) in one probe a cell (the security scan's findings: a walk of the table for each cell, unpaid). The caller pays for the pass, a step for each face.
+pub(crate) struct FaceTable<'d> {
+    doc: &'d Document,
+    /// The place of the first face of each `ID`.
+    by_id: std::collections::HashMap<&'d str, usize>,
+}
+
+impl<'d> FaceTable<'d> {
+    pub(crate) fn of(doc: &'d Document) -> FaceTable<'d> {
+        let mut by_id = std::collections::HashMap::with_capacity(doc.fonts.len());
+        for (at, face) in doc.fonts.iter().enumerate() {
+            if let Some(id) = face.raw.get("ID") {
+                by_id.entry(id).or_insert(at);
+            }
+        }
+        #[cfg(test)]
+        probed(doc.fonts.len());
+        FaceTable { doc, by_id }
+    }
+
+    /// The name in lower case of the face `text` names, or `None`.
+    pub(crate) fn face_of(&self, text: &str) -> Option<String> {
+        let n = face_number(text)?;
+        #[cfg(test)]
+        probed(1);
+        let id = format!("{n}");
+        let face = self.by_id.get(id.as_str()).and_then(|at| self.doc.fonts.get(*at)).or_else(|| self.doc.fonts.get(n as usize));
+        face.map(|f| f.name_u.to_ascii_lowercase())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The faces of a table a lookup of a face has looked at in this thread (test support: the security scan's finding, a lookup for each cell that walked the table unpaid).
+    pub(crate) static FACE_PROBES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts `n` faces looked at ([`FACE_PROBES`]).
+#[cfg(test)]
+pub(crate) fn probed(n: usize) {
+    FACE_PROBES.with(|probes| probes.set(probes.get().saturating_add(u64::try_from(n).unwrap_or(u64::MAX))));
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The colours of a table a lookup of a colour has looked at in this thread (test support, as [`FACE_PROBES`]).
+    pub(crate) static COLOUR_PROBES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts `n` colours looked at ([`COLOUR_PROBES`]).
+#[cfg(test)]
+pub(crate) fn probed_colours(n: usize) {
+    COLOUR_PROBES.with(|probes| probes.set(probes.get().saturating_add(u64::try_from(n).unwrap_or(u64::MAX))));
 }
 
 /// Whether a text is what a cell of `kind` is when nothing gives it a value: the number 0, black, the empty string, the face `0`.
@@ -110,8 +198,47 @@ pub(crate) fn is_drawn_default(section: Option<&str>, name: &str, text: &str) ->
     drawn_default(section, name).is_some_and(|d| number_of(text).is_some_and(|n| (n - d).abs() <= CLOSE))
 }
 
-/// Whether the value text `vb` of the drawing and `va` of the file read back are one value, for a cell of `kind`.
-pub(crate) fn same_value(before: &Document, after: &Document, kind: ValueKind, vb: &str, va: &str) -> Same {
+/// The value the engine gives a `THEMEVAL()` cell of a style it made, where no number is known: it says only that a theme gives the cell its value.
+const THEME_PLACEHOLDER: &str = "Themed";
+
+/// Whether `text` is the placeholder of a `THEMEVAL()` cell, for a cell of `kind` (a text cell holds what a person typed).
+fn is_theme_placeholder(kind: ValueKind, text: &str) -> bool {
+    kind != ValueKind::Text && text.trim() == THEME_PLACEHOLDER
+}
+
+/// Which tables comparing two cell values reads (see [`needs`]): the faces and the colours, each for the drawing (first) and for the file read back (second).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Needs {
+    pub(crate) faces: (bool, bool),
+    pub(crate) colours: (bool, bool),
+}
+
+/// The tables [`same_value`] looks a number up in, for the sides that are made. A side with none names nothing by a number: [`needs`] says which a pair of texts reads, and the caller makes and pays for
+/// them before the comparison (the security scan's findings: the table walked for each cell, unpaid).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Tables<'t, 'd> {
+    pub(crate) faces: (Option<&'t FaceTable<'d>>, Option<&'t FaceTable<'d>>),
+    pub(crate) colours: (Option<&'t ColourTable<'d>>, Option<&'t ColourTable<'d>>),
+}
+
+/// The tables [`same_value`] reads to compare the value text `vb` of the drawing with `va` of the file read back, for a cell of `kind`: **none for two texts that are the same or both a default**
+/// (decided before any table is read), a face table for each side of a `Font` cell whose text is a number, and a colour table for each side of a colour cell whose text is an index past the fixed
+/// palette (a colour written out, and one of the palette, name their colours with no table).
+pub(crate) fn needs(kind: ValueKind, vb: &str, va: &str) -> Needs {
+    if vb == va || (is_default(kind, vb) && is_default(kind, va)) {
+        return Needs::default();
+    }
+    let past_palette =
+        |text: &str| !text.trim().starts_with('#') && colour_index(text).is_some_and(|index| diacraft_color::fixed_color(index).is_none());
+    match kind {
+        ValueKind::Font => Needs { faces: (face_number(vb).is_some(), face_number(va).is_some()), ..Needs::default() },
+        ValueKind::Color => Needs { colours: (past_palette(vb), past_palette(va)), ..Needs::default() },
+        _ => Needs::default(),
+    }
+}
+
+/// Whether the value text `vb` of the drawing and `va` of the file read back are one value, for a cell of `kind`, **reading the tables `tables` that [`needs`] asked for**.
+pub(crate) fn same_value(tables: Tables<'_, '_>, kind: ValueKind, vb: &str, va: &str) -> Same {
     if vb == va {
         return Same::Exactly;
     }
@@ -119,12 +246,18 @@ pub(crate) fn same_value(before: &Document, after: &Document, kind: ValueKind, v
     if is_default(kind, vb) && is_default(kind, va) {
         return Same::InAnotherForm;
     }
+    // **A cell a style gives through `THEMEVAL()` has no value of its own** (issue 10 of the demo video): the `Theme` style of the engine holds `THEMEVAL()` in the cells a theme gives
+    // (a line end's size, a connector's rounding) with the placeholder `Themed` as their value, and a file writes the value such a cell draws with, as a number (as values, one flag). The placeholder is
+    // no number to differ from, so what a file writes for it is the same content; a text cell that says `Themed` is a person's text and is judged as any text.
+    if is_theme_placeholder(kind, vb) {
+        return Same::InAnotherForm;
+    }
     match kind {
-        ValueKind::Color => match (colour_of(before, vb), colour_of(after, va)) {
+        ValueKind::Color => match (colour_of(tables.colours.0, vb), colour_of(tables.colours.1, va)) {
             (Some(x), Some(y)) => other_form(x == y),
             _ => other_form(vb.trim().eq_ignore_ascii_case(va.trim())),
         },
-        ValueKind::Font => match (face_of(before, vb), face_of(after, va)) {
+        ValueKind::Font => match (tables.faces.0.and_then(|t| t.face_of(vb)), tables.faces.1.and_then(|t| t.face_of(va))) {
             (Some(x), Some(y)) => other_form(x == y),
             _ => other_form(vb.trim().eq_ignore_ascii_case(va.trim())),
         },
@@ -261,17 +394,98 @@ mod tests {
 
     #[test]
     fn a_number_is_one_value_in_any_form_and_a_colour_in_any_spelling() {
-        let doc = Document::new_blank();
-        assert_eq!(same_value(&doc, &doc, ValueKind::Length, "2", "2.0"), Same::InAnotherForm);
-        assert_eq!(same_value(&doc, &doc, ValueKind::Length, "2", "2.0000000001"), Same::InAnotherForm);
-        assert_eq!(same_value(&doc, &doc, ValueKind::Length, "2", "2.001"), Same::No);
-        assert_eq!(same_value(&doc, &doc, ValueKind::Scalar, "TRUE", "1"), Same::InAnotherForm);
-        assert_eq!(same_value(&doc, &doc, ValueKind::Color, "#ff0000", "#FF0000"), Same::InAnotherForm);
-        assert_eq!(same_value(&doc, &doc, ValueKind::Color, "2", "#ff0000"), Same::InAnotherForm, "the palette's red is red");
-        assert_eq!(same_value(&doc, &doc, ValueKind::Color, "2", "#00ff00"), Same::No);
-        assert_eq!(same_value(&doc, &doc, ValueKind::Text, "a", "a"), Same::Exactly);
-        assert_eq!(same_value(&doc, &doc, ValueKind::Text, "a", "b"), Same::No);
-        assert_eq!(same_value(&doc, &doc, ValueKind::Length, "", "0"), Same::InAnotherForm, "what nothing gives a length is 0");
+        assert_eq!(same_value(Tables::default(), ValueKind::Length, "2", "2.0"), Same::InAnotherForm);
+        assert_eq!(same_value(Tables::default(), ValueKind::Length, "2", "2.0000000001"), Same::InAnotherForm);
+        assert_eq!(same_value(Tables::default(), ValueKind::Length, "2", "2.001"), Same::No);
+        assert_eq!(same_value(Tables::default(), ValueKind::Scalar, "TRUE", "1"), Same::InAnotherForm);
+        assert_eq!(same_value(Tables::default(), ValueKind::Color, "#ff0000", "#FF0000"), Same::InAnotherForm);
+        assert_eq!(same_value(Tables::default(), ValueKind::Color, "2", "#ff0000"), Same::InAnotherForm, "the palette's red is red");
+        assert_eq!(same_value(Tables::default(), ValueKind::Color, "2", "#00ff00"), Same::No);
+        assert_eq!(same_value(Tables::default(), ValueKind::Text, "a", "a"), Same::Exactly);
+        assert_eq!(same_value(Tables::default(), ValueKind::Text, "a", "b"), Same::No);
+        assert_eq!(same_value(Tables::default(), ValueKind::Length, "", "0"), Same::InAnotherForm, "what nothing gives a length is 0");
+    }
+
+    /// A document whose colour table holds `IX` 30 twice (the first is the one `Document::color` finds), `IX` 31 with an `RGB` that is no colour, and `IX` 32; and whose font table holds `Arial` with
+    /// `ID` 5, `Noto Sans` with `ID` 5 again, and `Mono` with no `ID`.
+    fn tabled() -> Document {
+        let mut doc = Document::new_blank();
+        doc.colors = std::sync::Arc::new(vec![
+            diacraft_doc::ColorEntry { ix: 30, rgb: "#102030".into() },
+            diacraft_doc::ColorEntry { ix: 30, rgb: "#ffffff".into() },
+            diacraft_doc::ColorEntry { ix: 31, rgb: "not a colour".into() },
+            diacraft_doc::ColorEntry { ix: 32, rgb: "#405060".into() },
+        ]);
+        let face = |name: &str, id: Option<&str>| diacraft_doc::FaceName {
+            name_u: name.into(),
+            raw: id.map_or_else(diacraft_doc::RawAttrs::new, |id| diacraft_doc::RawAttrs::from_pairs([("ID", id)])),
+            ext: Default::default(),
+        };
+        std::sync::Arc::make_mut(&mut doc.fonts).extend([face("Arial", Some("5")), face("Noto Sans", Some("5")), face("Mono", None)]);
+        doc
+    }
+
+    #[test]
+    fn a_colour_table_answers_what_the_document_does_for_every_index() {
+        let doc = tabled();
+        let table = ColourTable::of(&doc);
+        for index in [-1_i64, 0, 2, 23, 24, 29, 30, 31, 32, 33, 253, 100_000, 5_000_000_000] {
+            let want = doc.color(index).map(|c| [c.r, c.g, c.b, c.a]);
+            let got = diacraft_color::fixed_color(index).or_else(|| table.colour(index)).map(|c| [c.r, c.g, c.b, c.a]);
+            assert_eq!(got, want, "index {index}");
+        }
+        assert_eq!(colour_of(Some(&table), " 30 "), Some([0x10, 0x20, 0x30, 0xff]), "the first entry of an IX is the colour");
+        assert_eq!(colour_of(Some(&table), "31"), None, "an RGB that is no colour names none, as the document's answer");
+        assert_eq!(colour_of(Some(&table), "#405060"), Some([0x40, 0x50, 0x60, 0xff]));
+        assert_eq!(colour_of(None, "30"), None, "past the palette a text names a colour only through a table");
+        assert_eq!(colour_of(None, "2"), colour_of(Some(&table), "2"), "the palette needs no table");
+    }
+
+    #[test]
+    fn a_face_table_finds_the_first_face_of_an_id_and_else_the_face_at_that_place() {
+        let doc = tabled();
+        let table = FaceTable::of(&doc);
+        assert_eq!(table.face_of("5").as_deref(), Some("arial"), "the first face of ID 5");
+        assert_eq!(table.face_of("2").as_deref(), Some("mono"), "no face has ID 2: the face at place 2");
+        assert_eq!(table.face_of("0").as_deref(), Some("arial"), "no face has ID 0: the face at place 0");
+        assert_eq!(table.face_of("3"), None, "no face has ID 3 and no place 3 is there");
+        assert_eq!(table.face_of("Arial"), None, "a name is no number");
+        assert_eq!(table.face_of("1.5"), None);
+        assert_eq!(table.face_of("-1"), None);
+    }
+
+    #[test]
+    fn a_comparison_reads_a_table_only_for_a_text_that_is_a_number_the_table_could_answer() {
+        let none = Needs::default();
+        // The same text, and two defaults, are decided before any table is read.
+        assert_eq!(needs(ValueKind::Font, "5", "5"), none);
+        assert_eq!(needs(ValueKind::Font, "", "0"), none);
+        assert_eq!(needs(ValueKind::Color, "30", "30"), none);
+        // A face by its number: each side that is a number. A name needs none.
+        assert_eq!(needs(ValueKind::Font, "5", "Arial"), Needs { faces: (true, false), ..none });
+        assert_eq!(needs(ValueKind::Font, "Arial", "2"), Needs { faces: (false, true), ..none });
+        assert_eq!(needs(ValueKind::Font, "Arial", "Mono"), none);
+        // A colour by its index past the palette; the palette and a colour written out need none.
+        assert_eq!(needs(ValueKind::Color, "30", "#ff0000"), Needs { colours: (true, false), ..none });
+        assert_eq!(needs(ValueKind::Color, "#ff0000", " 31"), Needs { colours: (false, true), ..none });
+        assert_eq!(needs(ValueKind::Color, "2", "23"), none);
+        assert_eq!(needs(ValueKind::Color, "24", "23"), Needs { colours: (true, false), ..none });
+        // No other kind reads one.
+        assert_eq!(needs(ValueKind::Length, "30", "31"), none);
+        assert_eq!(needs(ValueKind::Scalar, "5", "6"), none);
+        // And the answer with the tables is the cell's: two numbers of one face, one colour in two spellings.
+        let doc = tabled();
+        let (faces, colours) = (FaceTable::of(&doc), ColourTable::of(&doc));
+        let tables = Tables { faces: (Some(&faces), Some(&faces)), colours: (Some(&colours), Some(&colours)) };
+        assert_eq!(same_value(tables, ValueKind::Font, "5", "0"), Same::InAnotherForm, "ID 5 and place 0 are one face");
+        assert_eq!(same_value(tables, ValueKind::Font, "5", "2"), Same::No);
+        assert_eq!(same_value(tables, ValueKind::Color, "30", "#102030"), Same::InAnotherForm);
+        assert_eq!(same_value(tables, ValueKind::Color, "30", "32"), Same::No);
+        assert_eq!(
+            same_value(Tables::default(), ValueKind::Color, "30", "#102030"),
+            Same::No,
+            "with no table the index names no colour: the texts differ"
+        );
     }
 
     #[test]

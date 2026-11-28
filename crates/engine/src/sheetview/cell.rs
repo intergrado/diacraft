@@ -4,11 +4,15 @@
 //! commit saved. Only a cell found nowhere that reads a printed formula as its default (the seven cells of Text Transform, the two picture sizes) has that formula worked out, on
 //! the sheet asked, within a budget of its own.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use diacraft_calc::{Budget, EvalResult, Value as Calc, evaluate_text_with, function_names, reference_name};
-use diacraft_doc::{CellAddr, CellClass, Document, FormulaSlot, Resolved, Resolver, RowKey, SheetRef, Source, ValueKind};
+use diacraft_calc::{
+    Budget, CellAddress, EvalCtx, EvalOptions, EvalResult, Evaluator, OperandMode, Value as Calc, evaluate_text_with, function_names, reference_name,
+    spell_row,
+};
+use diacraft_doc::{CellAddr, CellClass, Document, FormulaSlot, Keying, Resolved, Resolver, RowKey, SheetRef, Source, ValueKind, keying};
 use diacraft_formula::{Expr, Formula};
 use serde_json::{Value, json};
 
@@ -165,10 +169,58 @@ fn calls_unknown_function(formula: &Formula) -> bool {
     false
 }
 
-/// What a read of a cell is given: the resolver of the document, and the sheet.
+/// What a read of a cell is given: the resolver of the document, the sheet, and the evaluator that works out the cells that hold a formula and no saved value
+/// Which shows them as the picture draws them and not as the default of their kind.
 pub(crate) struct Ctx<'r, 'd> {
     pub res: &'r Resolver<'d>,
     pub sheet: &'r SheetRef,
+    ev: RefCell<Evaluator<'d, 'r>>,
+}
+
+impl<'r, 'd> Ctx<'r, 'd> {
+    /// A read of cells of `sheet`, working the cells with no saved value out in `eval` ([`read_eval_ctx`]: one for as many cells as the read has).
+    pub(crate) fn new(res: &'r Resolver<'d>, sheet: &'r SheetRef, eval: &'r mut EvalCtx) -> Ctx<'r, 'd> {
+        Ctx { res, sheet, ev: RefCell::new(Evaluator::new(res.document(), eval)) }
+    }
+}
+
+/// The most steps a read of cells (a window of up to 2,000 lines, or one cell) works the cells with no saved value out in: a themed call is 25, so the lines of a window
+/// are far within it. Past them the cells that are left show as they did before, with the default of their kind.
+pub const READ_UNSAVED_STEPS: u64 = 1_000_000;
+
+/// The state the evaluator of a read works in: the cells a formula reads are worked out as well (a cell it reads may have no saved value either), and the steps are
+/// [`READ_UNSAVED_STEPS`].
+pub(crate) fn read_eval_ctx() -> EvalCtx {
+    EvalCtx::new(EvalOptions { operands: OperandMode::Live, ..EvalOptions::default() }, Budget::with_steps(READ_UNSAVED_STEPS))
+}
+
+/// What a cell that holds a formula and no saved value shows as: the formula worked out on the sheet, **typed as a saved value would be** (a number is in the unit the cell
+/// shows in, `unit_attr` and the kind, and not in the unit the formula's own parts had: `Width*1.5` is inches here as it is for a saved value), and its error. `None` for a
+/// cell that is no such cell, a formula that gives no result (it does not parse, or names a function this evaluator lacks) and a read whose steps ran out: the cell then shows
+/// as it did before.
+fn worked_typed(
+    ctx: &Ctx<'_, '_>,
+    resolved: &Resolved<'_>,
+    addr: &CellAddr,
+    unit_attr: Option<&str>,
+    kind: ValueKind,
+) -> Option<(Typed, Option<String>)> {
+    if !resolved.holds_unsaved_formula() {
+        return None;
+    }
+    let mut ev = ctx.ev.borrow_mut();
+    let answer = ev.evaluate_worked_out(&CellAddress::new(ctx.sheet.clone(), addr.clone()))?;
+    if ev.exhausted() || matches!(answer, Calc::Unsupported(_)) {
+        return None;
+    }
+    let typed = match &answer {
+        Calc::Number(q) if q.stored.is_finite() => text::typed(&format!("{}", q.stored), unit_attr, kind),
+        Calc::Color(c) => text::typed(&c.hex(), unit_attr, kind),
+        Calc::Text(t) => text::typed(t, unit_attr, kind),
+        Calc::Bool(b) => text::typed(if *b { "TRUE" } else { "FALSE" }, unit_attr, kind),
+        other => text::typed_calc(other),
+    };
+    Some((typed, text::error_of(&answer).map(str::to_owned)))
 }
 
 /// Where a source is, for a view.
@@ -246,7 +298,7 @@ pub(crate) fn view(
     let typed = match value_cell.and_then(|c| c.value.as_ref()) {
         Some(v) => text::typed(v.text(), unit_attr, kind),
         None => {
-            let (typed, e) = default_typed(ctx, &resolved, addr);
+            let (typed, e) = worked_typed(ctx, &resolved, addr, unit_attr, kind).unwrap_or_else(|| default_typed(ctx, &resolved, addr));
             error = error.or(e);
             typed
         }
@@ -298,32 +350,20 @@ pub(crate) fn view(
 }
 
 /// The address a reference names, with a named row spelled as the file spells it (**a row's name in a reference matches without regard to letter
-/// case**, which `cell_address` cannot see, having no document). A row the sheet holds under exactly the name is left as it is; otherwise the row whose name matches in
-/// another case is meant, the one the sheet holds itself before one only a master or a style holds, then the first in the order of the section. A name no row matches in any
-/// case is left as given (it names a cell that is not there, and reads its default).
+/// case**, which `cell_address` cannot see, having no document). A row the sheet reads under exactly the name is left as it is, whether it holds the cell or not and even when it is
+/// deleted here; otherwise the row the evaluator would read for the name is meant (`diacraft_calc::spell_row`: the nearer sheet, then the lower `IX`, then the earlier place), so
+/// that this reading and a formula's agree on the row. A name no row matches in any case is left as given (it names a cell that is not there, and reads its default).
 pub(crate) fn respell(res: &Resolver<'_>, sheet: &SheetRef, addr: CellAddr) -> CellAddr {
     let (Some(section), Some(RowKey::Name(name))) = (&addr.section, &addr.row) else { return addr };
+    if keying(section.name.as_str()) == Keying::Indexed {
+        return addr;
+    }
     if res.row_cell_names(sheet, section, &RowKey::Name(name.clone())).is_none_or(|cells| !cells.is_empty()) {
         return addr;
     }
-    let Some(rows) = res.effective_row_keys(sheet, section) else { return addr };
-    let folded = name.to_lowercase();
-    let local = res.sheet(sheet).and_then(|held| held.section(section));
-    let mut best: Option<(bool, &RowKey)> = None;
-    for row in &rows {
-        let RowKey::Name(spelled) = &row.key else { continue };
-        if spelled == name {
-            return addr;
-        }
-        if spelled.to_lowercase() == folded {
-            let own = local.is_some_and(|held| held.row(&row.key).is_some());
-            if best.is_none_or(|(had, _)| own && !had) {
-                best = Some((own, &row.key));
-            }
-        }
-    }
-    match best {
-        Some((_, key)) => CellAddr { row: Some(key.clone()), ..addr },
+    let Some(layers) = res.section_layers(sheet, section) else { return addr };
+    match spell_row(&layers, name) {
+        Some(spelling) => CellAddr { row: Some(RowKey::Name(spelling)), ..addr },
         None => addr,
     }
 }
@@ -357,5 +397,41 @@ mod tests {
         assert!(calls_unknown_function(&parse("IF(1, 2, nosuchthing(3))")), "in any letter case, nested");
         assert!(!calls_unknown_function(&parse("1 +* 2")), "a formula that does not parse is not a call of anything");
         assert!(!calls_unknown_function(&parse("Width*2")));
+    }
+
+    /// A shape of a document with `n` cells `User.R<i>` that each hold `2+3` and no value.
+    fn doc_with_unsaved(n: u32) -> (Document, SheetRef) {
+        use diacraft_testkit::build::{DocBuilder, PageBuilder, ShapeBuilder};
+        let mut shape = ShapeBuilder::new(1);
+        for i in 0..n {
+            shape = shape.set(CellAddr::in_row("User", None, RowKey::name(&format!("R{i}")), "Value"), diacraft_doc::Cell::with_formula("2+3", None));
+        }
+        let doc = DocBuilder::new().page(1, PageBuilder::new().shape(shape)).build();
+        (doc, SheetRef::Shape(diacraft_doc::ShapeRef::top(diacraft_doc::Owner::Page(1), 0)))
+    }
+
+    fn shown(ctx: &Ctx<'_, '_>, i: u32) -> String {
+        let addr = CellAddr::in_row("User", None, RowKey::name(&format!("R{i}")), "Value");
+        view(ctx, &addr, "Value", None, None, &mut Counts::default()).unwrap().shown
+    }
+
+    #[test]
+    fn the_steps_of_a_read_run_out_and_the_cells_past_them_show_as_they_did_before() {
+        // Counted: what one cell costs is measured, and a read with the steps for two and a half shows the first two worked out and the rest with the default of their kind.
+        let (doc, sheet) = doc_with_unsaved(6);
+        let res = Resolver::new(&doc);
+        let one = {
+            let mut eval = read_eval_ctx();
+            let ctx = Ctx::new(&res, &sheet, &mut eval);
+            assert_eq!(shown(&ctx, 0), "5");
+            drop(ctx);
+            READ_UNSAVED_STEPS - eval.steps_left()
+        };
+        assert!(one > 0);
+        let mut eval = EvalCtx::new(EvalOptions::default(), Budget::with_steps(one * 2 + one / 2));
+        let ctx = Ctx::new(&res, &sheet, &mut eval);
+        let shown: Vec<String> = (0..6).map(|i| shown(&ctx, i)).collect();
+        assert_eq!(shown[..2], ["5", "5"], "{shown:?}");
+        assert!(shown[2..].iter().all(|s| s == "0"), "past the steps, the default: {shown:?}");
     }
 }

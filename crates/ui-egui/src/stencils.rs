@@ -349,9 +349,12 @@ pub struct Scratch {
 
 impl Scratch {
     /// A session with the stencil file at `path` open, or `None` when it cannot be (the file is gone or changed).
-    pub fn open(path: &std::path::Path) -> Option<Scratch> {
+    ///
+    /// `scope` is the one the stencil was opened in (`ScopeHandle::run_replay`): a stencil a request opened is read again under that request's roots, one the person opened under none.
+    pub fn open(path: &std::path::Path, scope: &diacraft_engine::file_access::ScopeHandle) -> Option<Scratch> {
         let mut session = Session::new();
-        let answer = session.execute("stencil.open", &json!({"path": path.to_str()?})).ok()?;
+        let text = path.to_str()?;
+        let answer = scope.clone().run_replay(|| session.execute("stencil.open", &json!({"path": text}))).ok()?;
         let stencil = answer.get("id")?.as_str()?.to_owned();
         Some(Scratch { session, stencil })
     }
@@ -447,20 +450,21 @@ fn union(a: (P, P), b: (P, P)) -> (P, P) {
     ((a.0.0.min(b.0.0), a.0.1.min(b.0.1)), (a.1.0.max(b.1.0), a.1.1.max(b.1.1)))
 }
 
-/// What the tile of a dropped shape is drawn from: the box to fit, and the paths in it (page inches, as the scene reads them). **A shape** is its own outline in its own frame.
-/// **A one-dimensional shape** is its outline in the box of its frame and its geometry together (a loop may go out farther than the line is long). **A group** is the outlines of
-/// its members at every depth ([`members_of`]) with its own, in the box of them all: its frame is no outline, and a group master has nothing to draw there.
+/// What the tile of a dropped shape is drawn from: the box to fit, and the paths in it (page inches, as the scene reads them). **Only what the page paints is drawn** ([`Item::painted_paths`]: a section that
+/// is hidden, a shape with no line and no fill and a path with no stroke and no fill are left out, as the renderer leaves them), so the tile is the figure the shape draws and not the geometry it holds.
+/// **A shape** is its own outline in its own frame. **A one-dimensional shape** is its outline in the box of its frame and its geometry together (a loop may go out farther than the line is long).
+/// **A group** is the outlines of its members at every depth ([`members_of`]) with its own, in the box of them all: its frame is no outline, and a group master has nothing to draw there.
 fn drawn(scene: &Scene, item: &Item) -> ((P, P), Vec<Vec<P>>) {
-    let mut paths: Vec<Vec<P>> = item.outline.clone();
+    let mut paths: Vec<Vec<P>> = item.painted_paths().cloned().collect();
     let mut frame = item.frame;
     match item.kind {
         ItemKind::Shape => {}
-        ItemKind::Connector => frame = union(frame, item.bounds),
+        ItemKind::Connector => frame = item.painted_bounds().map_or(frame, |painted| union(frame, painted)),
         ItemKind::Group => {
-            frame = union(frame, item.bounds);
+            frame = item.painted_bounds().map_or(frame, |painted| union(frame, painted));
             for member in members_of(scene, item.id) {
-                paths.extend(member.outline.iter().cloned());
-                frame = union(frame, member.bounds);
+                paths.extend(member.painted_paths().cloned());
+                frame = member.painted_bounds().map_or(frame, |painted| union(frame, painted));
             }
         }
     }
@@ -524,6 +528,9 @@ pub(crate) fn tile_figure(frame: (P, P), paths: &[Vec<P>], ends: Option<Ends>, s
     let drawn = !areas.is_empty() || !lines.is_empty() || !fills.is_empty() || !marks.is_empty();
     drawn.then_some(Figure { aspect: (w / longest, h / longest), areas, lines, separate_strokes, pattern, fills, marks })
 }
+
+#[cfg(test)]
+pub(crate) mod render_agreement;
 
 #[cfg(test)]
 mod tests {

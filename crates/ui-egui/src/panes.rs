@@ -24,6 +24,8 @@ use crate::app::DiacraftApp;
 use crate::theme::{self, Tokens, size};
 use crate::widgets::{self, label_colour, paint_button_bg, text_width};
 
+mod accessibility;
+pub(crate) mod alt_text;
 mod explorer;
 mod fields;
 mod format_fx;
@@ -47,11 +49,14 @@ pub enum Pane {
     ShapeData,
     /// The Comments pane (`comments_ui.rs`).
     Comments,
+    /// The Accessibility pane that Review, Accessibility, Check Accessibility opens (`panes/accessibility.rs`).
+    Accessibility,
 }
 
 impl Pane {
-    /// Every pane, in the order the View tab lists them (then Format Shape and Drawing Explorer, which other places open, Shape Data, which the Data tab and the shape's menu open, and Comments, which the Review tab and the title bar open).
-    pub const ALL: [Pane; 6] = [Pane::SizePosition, Pane::FormatShape, Pane::PanZoom, Pane::DrawingExplorer, Pane::ShapeData, Pane::Comments];
+    /// Every pane, in the order the View tab lists them (then Format Shape and Drawing Explorer, which other places open, Shape Data, which the Data tab and the shape's menu open, Comments, which the Review tab and the title bar open, and Accessibility, which the Review tab opens).
+    pub const ALL: [Pane; 7] =
+        [Pane::SizePosition, Pane::FormatShape, Pane::PanZoom, Pane::DrawingExplorer, Pane::ShapeData, Pane::Comments, Pane::Accessibility];
 
     /// The word the window's commands and the elements of `ui.elements` call it.
     pub const fn word(self) -> &'static str {
@@ -62,6 +67,7 @@ impl Pane {
             Pane::DrawingExplorer => "drawing_explorer",
             Pane::ShapeData => "shape_data",
             Pane::Comments => "comments",
+            Pane::Accessibility => "accessibility",
         }
     }
 
@@ -74,6 +80,7 @@ impl Pane {
             Pane::DrawingExplorer => "Drawing Explorer",
             Pane::ShapeData => "Shape Data",
             Pane::Comments => "Comments",
+            Pane::Accessibility => "Accessibility",
         }
     }
 
@@ -114,6 +121,10 @@ pub struct PanesState {
     pub(crate) explorer: explorer::ExplorerState,
     /// The last `shapedata.list` the Shape Data window asked, and the variable list row being typed in (`shape_data.rs`).
     pub(crate) data: shape_data::DataCache,
+    /// The last reading of the shapes' alt text that the Alt Text tab of Format Shape drew (`alt_text.rs`).
+    pub(crate) alt: alt_text::AltCache,
+    /// The Accessibility pane's last check, the finding selected and how often it has checked (`accessibility.rs`).
+    pub(crate) access: accessibility::AccessState,
 }
 
 /// The height of a space's header, in points.
@@ -269,6 +280,8 @@ impl DiacraftApp {
     /// that is left.
     pub(crate) fn right_dock(&mut self, ui: &mut Ui, t: Tokens) {
         self.ui.panes.fields.next_frame();
+        self.ui.panes.alt.next_frame();
+        self.ui.panes.access.next_frame();
         // (A value typed in a field is sent at the top of the frame, by `ui`, whether or not a pane is open.)
         self.forget_stale_refusal();
         if self.ui.panes.spaces.is_empty() {
@@ -329,6 +342,7 @@ impl DiacraftApp {
                     Pane::DrawingExplorer => self.explorer_body(ui, t),
                     Pane::ShapeData => self.shape_data_body(ui, t),
                     Pane::Comments => self.comments_body(ui, t),
+                    Pane::Accessibility => self.accessibility_body(ui, t),
                 }
             });
         });
@@ -480,6 +494,8 @@ impl DiacraftApp {
         self.ui.panes.pan_zoom.forget_picture();
         self.ui.panes.explorer.forget_tree();
         self.forget_shape_data_pane();
+        self.forget_alt_pane();
+        self.forget_access_pane();
         self.ui.format.forget_looks();
         // The sheets open were the old drawing's (`sheet/mod.rs`).
         self.forget_sheets();

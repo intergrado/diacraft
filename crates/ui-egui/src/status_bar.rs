@@ -9,7 +9,10 @@
 //! **The Snap mark is DiaCraft's own** (the reference application's status bar has none, the list): the magnet and "Snap on" or "Snap
 //! off", read from the document's own Snap switch each frame, and a click is `snap.set` with the switch the other way, as the View tab's Snap box sends it.
 
-use egui::{Align2, CornerRadius, Frame, Margin, Rect, Sense, Stroke, Ui, pos2, vec2};
+use std::sync::Arc;
+
+use egui::text::{LayoutJob, TextWrapping};
+use egui::{Align2, Color32, CornerRadius, FontId, Frame, Galley, Margin, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::app::DiacraftApp;
@@ -31,6 +34,13 @@ const SLIDER_W: f32 = 120.0;
 const WIDE_BAR: f32 = 760.0;
 const MEDIUM_BAR: f32 = 540.0;
 const BUTTON: f32 = 22.0;
+
+/// `text` on one line cut to `room` points: whole when it fits, else its start and an ellipsis, laid out once (egui keeps the layout of a text it has seen).
+fn elided(ui: &Ui, text: &str, font: &FontId, colour: Color32, room: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::simple_singleline(text.to_owned(), font.clone(), colour);
+    job.wrap = TextWrapping::truncate_at_width(room.max(1.0));
+    ui.fonts_mut(|f| f.layout_job(job))
+}
 
 impl DiacraftApp {
     pub(crate) fn status_bar(&mut self, ui: &mut Ui, t: Tokens) {
@@ -74,11 +84,17 @@ impl DiacraftApp {
             }
         }
         if let Some(notice) = self.notice().map(str::to_owned) {
-            let w = text_width(ui, &notice, &font).min((area.right() - x).max(0.0));
-            painter.text(pos2(x, bar.center().y), Align2::LEFT_CENTER, &notice, font.clone(), t.notice_text);
-            let r = Rect::from_min_size(pos2(x, bar.top()), vec2(w, bar.height()));
+            // A notice too long for the room ends in an ellipsis, its whole words are in a tooltip, in the accessible label and in `ui.inspect`: it was cut at the
+            // room's edge, in the middle of a letter, and nothing said that more had been said.
+            let galley = elided(ui, &notice, &font, t.notice_text, area.right() - x);
+            painter.galley(pos2(x, bar.center().y - galley.size().y * 0.5), Arc::clone(&galley), t.notice_text);
+            let r = Rect::from_min_size(pos2(x, bar.top()), vec2(galley.size().x, bar.height()));
             let resp = ui.interact(r, ui.scope_id().with("notice"), Sense::hover());
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &notice));
+            self.note("status.notice", r, true);
+            if galley.elided {
+                resp.on_hover_text(&notice);
+            }
             // Its time runs from here, and it then gives the language its room back (`notice.rs`).
             self.notice_shown();
         } else {

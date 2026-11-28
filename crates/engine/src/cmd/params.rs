@@ -43,6 +43,15 @@ pub(super) fn optional_whole(p: &Value, key: &str, cmd: &str) -> Result<Option<u
     }
 }
 
+/// The truth `p` gives for `key`, if it gives one: `true` or `false`, and `null` is none.
+pub(super) fn optional_bool(p: &Value, key: &str, cmd: &str) -> Result<Option<bool>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
+    }
+}
+
 /// The range of characters `p` gives as `start` and `end`: both or neither, whole numbers.
 pub(super) fn optional_range(p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
     let to_usize = |n: u32| usize::try_from(n).map_err(|_| bad(cmd, "`start` and `end` are too large"));
@@ -64,7 +73,7 @@ pub(super) fn required_ids(p: &Value, key: &str, cmd: &str) -> Result<Vec<u32>> 
     items.iter().map(|v| whole_of(v, key, cmd)).collect()
 }
 
-/// The page a command works on: the one named, or else the first page holding every one of `ids`, or else the first page. **Each page is walked once for all the `ID`s** (`draw::page_holding`):
+/// The page a command works on: the one named, or else the first page holding every one of `ids` (the pages that are not backgrounds before the backgrounds, as the tabs show them), or else the first page that is not a background. **Each page is walked once for all the `ID`s** (`draw::page_holding`):
 /// a search for each by `Document::find_shape` walked a page from the top for each, so 4,096 names on a page of 30,000 shapes were 58 million visits.
 pub(super) fn page_for(doc: &Document, named: Option<u32>, ids: &[u32], cmd: &str) -> Result<u32> {
     draw::page_holding(doc, named, ids).ok_or_else(|| bad(cmd, "the document has no pages"))

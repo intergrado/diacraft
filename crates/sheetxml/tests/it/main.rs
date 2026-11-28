@@ -46,6 +46,7 @@ mod model_util;
 mod model_vectors;
 mod model_weigh;
 mod namespaces;
+mod patch_moved;
 mod patchlist;
 mod reading;
 mod shared_read;

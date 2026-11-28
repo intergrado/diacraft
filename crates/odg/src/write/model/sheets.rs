@@ -246,6 +246,9 @@ pub(crate) struct Written {
     pub styles: usize,
     /// The pieces of them left out, whose prefix nothing binds in `office:styles` (an attribute or a child of the style or of its properties).
     pub left: usize,
+    /// The dashes of DiaCraft's own name that the styles written name, once each: a style sheet's line pattern is a dash its cells write, and the definition is put in
+    /// `office:styles` when the model's own definitions (as they were read) hold none of that name.
+    pub dashes: Vec<crate::write::dash::DashKey>,
 }
 
 /// The common styles of the model's style sheets this step writes (see the [module documentation](self)), to be put at the end of `office:styles`, where `bindings` are in force. `budget` is
@@ -267,10 +270,31 @@ pub(crate) fn common_styles(
         let form = crate::ext::odf14::cached(work, at, odf);
         let kept = form.as_ref().and_then(|f| f.kept.as_ref()).unwrap_or(&odf.kept.kept);
         let made = one(doc, style, odf, kept, bindings, limits, work, budget, &mut written.left)?;
+        note_dashes(&made, &mut written.dashes, work)?;
         out.push(made);
         written.styles += 1;
     }
     Ok((out, written))
+}
+
+/// Notes the dashes of DiaCraft's own name that the style `made` names (`draw:stroke-dash` on a properties element of it) into `dashes`, once each: at most one for each pattern and cap form.
+fn note_dashes(made: &El, dashes: &mut Vec<crate::write::dash::DashKey>, work: &mut WriteWork) -> Result<(), WriteError> {
+    for child in &made.children {
+        let Node::El(props) = child else { continue };
+        work.charge_steps(props.attrs.len().saturating_add(1))?;
+        for (name, value) in &props.attrs {
+            if local(name) == "stroke-dash"
+                && let Some(key) = crate::write::dash::DashKey::of_name(value)
+                && !dashes.contains(&key)
+            {
+                dashes
+                    .try_reserve(1)
+                    .map_err(|_| WriteError::Limit { what: "memory for the dashes of the style sheets", max: dashes.len() as u64 })?;
+                dashes.push(key);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The ODF name of the style sheet of `ID` `id`, as this step writes it (the root has none).

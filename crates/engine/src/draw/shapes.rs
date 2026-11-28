@@ -9,12 +9,13 @@ use diacraft_doc::{
     Value,
 };
 
+use super::drop_scale::{self, Follow, Scaling, Writes};
 use super::jumps;
 use super::read::{Pose, Reader};
 use super::route::P;
 use super::scan;
 use super::settle::settle;
-use super::{Problem, checked, page_mut, require_page, require_shape, shape_mut, write_cells, write_length};
+use super::{Problem, Which, checked, page_mut, require_page, require_shape, shape_mut, walkglue, write_cells, write_length};
 use crate::stencil::{self, MasterSpec};
 
 /// What a drop made.
@@ -25,9 +26,13 @@ pub struct DropInfo {
     /// The master's `ID` in the document.
     pub master: u32,
     pub name: String,
-    /// The size the instance has, which is the master's.
+    /// The size the instance has: the master's, or beyond the range of eight of the page's drawing scale the master's times the ratio (`drop_scale.rs`).
     pub width: f64,
     pub height: f64,
+    /// The ratio written as `DropOnPageScale` when the master was dropped beyond the range of eight; `None` when nothing was written.
+    pub drop_scale: Option<f64>,
+    /// Words for a ratio of scales that could not be used, when it could not (the master was dropped at its own size).
+    pub note: Option<String>,
 }
 
 /// The highest `ID` on a page, nested shapes counted, and how many shapes it holds. Iterative, and no deeper than the model allows.
@@ -83,14 +88,27 @@ pub fn drop_shape(doc: &mut Document, page: u32, spec: &MasterSpec, x: f64, y: f
 /// new shape's, though the shape is gone: a formula that named it does not name the new one, and the writer does not meet a new shape where
 /// the file had a picture.
 pub fn drop_shape_above(doc: &mut Document, page: u32, spec: &MasterSpec, x: f64, y: f64, above: u32) -> Result<DropInfo, Problem> {
+    drop_shape_following(doc, page, spec, (x, y), above, Follow::Page)
+}
+
+/// [`drop_shape_above`] that says whether the drop follows the page's drawing scale (`drop_scale.rs`): a master of another scale than the page's is scaled when it is dropped
+/// beyond the range of eight ([`Follow::Page`], every drop), and not by Change Shape's trial instance ([`Follow::Never`]), which is not a drop on a page.
+pub fn drop_shape_following(
+    doc: &mut Document,
+    page: u32,
+    spec: &MasterSpec,
+    (x, y): (f64, f64),
+    above: u32,
+    follow: Follow,
+) -> Result<DropInfo, Problem> {
     let (x, y) = (checked("x", x)?, checked("y", y)?);
     require_page(doc, page)?;
     if spec.is_connector() {
-        return drop_connector(doc, page, spec, (x, y), above);
+        return drop_connector(doc, page, spec, (x, y), above, follow);
     }
     // A group master is dropped with a member for each member of the master, as a stencil file's group master is (`stencil/instance.rs`).
     if spec.is_group() {
-        return stencil::drop_group_master(doc, page, spec, (x, y), above);
+        return stencil::drop_group_master(doc, page, spec, (x, y), above, follow);
     }
     let (highest, count) = page_stats(doc, page).ok_or_else(|| Problem::bad(format!("there is no page {page}")))?;
     if count >= MAX_SHAPES_PER_PAGE {
@@ -116,20 +134,41 @@ pub fn drop_shape_above(doc: &mut Document, page: u32, spec: &MasterSpec, x: f64
         // A master whose text holds fields (the `Dress`): the shown form of a field lives in the text that holds it.
         shape.text = Some(Arc::new(text));
     }
+    // Beyond the range of eight of the page's drawing scale the instance keeps the master's size on paper (`drop_scale.rs`): its `DropOnPageScale`, `Width` and `Height`.
+    let writes = Writes::of_shape(doc, page, master, follow);
+    writes.put(&mut sheet);
     shape.sheet = Arc::new(sheet);
-    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.push(Arc::new(shape));
-    Ok(DropInfo { id, master, name: name.to_string(), width: spec.width, height: spec.height })
+    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.push_shape(Arc::new(shape));
+    let (mut width, mut height) = (spec.width, spec.height);
+    if writes.factor.is_some() {
+        // What reads the cells written is worked out again, and the pin is put where the new box has its middle at the drop point.
+        drop_scale::settle(doc, page, id, Some((x, y)), &writes.names())?;
+        let at = require_shape(doc, page, id)?;
+        let reader = Reader::new(doc);
+        let sheet = SheetRef::Shape(at);
+        (width, height) = (reader.number(&sheet, "Width"), reader.number(&sheet, "Height"));
+    }
+    Ok(DropInfo { id, master, name: name.to_string(), width, height, drop_scale: writes.factor, note: writes.note })
 }
 
 /// Drops a one-dimensional master: its ends are the master's width apart, centred on (`x`, `y`) and level. **The instance inherits the master's look** (its line ends, pattern, weight and route):
 /// the arrowhead the connector tool writes on a connector of its own is taken out, so that the master's cells are what draws. A connector master is routed as any
 /// connector is. **A `Fixed1D` master is not routed**: it has no route marker and none of the route's own geometry, so its geometry is the master's, stretched along the line as its ends
 /// move, and the master's `ShapeRouteStyle` 16 keeps a reroute from laying a path over it.
-fn drop_connector(doc: &mut Document, page: u32, spec: &MasterSpec, (x, y): (f64, f64), above: u32) -> Result<DropInfo, Problem> {
-    let half = spec.width / 2.0;
+fn drop_connector(doc: &mut Document, page: u32, spec: &MasterSpec, (x, y): (f64, f64), above: u32, follow: Follow) -> Result<DropInfo, Problem> {
+    let master = stencil::ensure_master(doc, spec)?;
+    // Beyond the range of eight the ends are the master's length times the ratio apart (`drop_scale.rs`, DROPSCALE-1D-1); a length or an end that would not be a usable number
+    // makes it a drop within the range, with words.
+    let scaling = if follow == Follow::Never { Scaling::none() } else { Scaling::read(doc, page, master) };
+    let (scaling, half) = match scaling
+        .scale(spec.width / 2.0)
+        .filter(|half| !scaling.beyond() || (checked("begin x", x - half).is_ok() && checked("end x", x + half).is_ok()))
+    {
+        Some(half) => (scaling, half),
+        None => (scaling.too_big(), spec.width / 2.0),
+    };
     let begin = super::End::Point { x: checked("begin x", x - half)?, y };
     let end = super::End::Point { x: checked("end x", x + half)?, y };
-    let master = stencil::ensure_master(doc, spec)?;
     let before = doc.clone();
     let info = if spec.is_fixed_1d() {
         super::attach_connector_above(doc, page, &begin, &end, above)?
@@ -137,19 +176,57 @@ fn drop_connector(doc: &mut Document, page: u32, spec: &MasterSpec, (x, y): (f64
         super::add_connector_above(doc, page, &begin, &end, above)?
     };
     let at = require_shape(doc, page, info.id)?;
+    let master_has_a_fill_pattern = doc.master(master).and_then(|m| m.shapes.get(0)).is_some_and(|shape| shape.sheet.cell("FillPattern").is_some());
     let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the connector went away"))?;
     let name: Arc<str> = Arc::from(format!("{}.{id}", spec.name, id = info.id));
     shape.master = Some(master);
     shape.name = Some(Arc::clone(&name));
     shape.name_u = Some(Arc::clone(&name));
-    let sheet = Arc::make_mut(&mut shape.sheet);
-    sheet.cells.remove(&diacraft_doc::CellName::new("EndArrow"));
+    // A master whose text holds fields (a relationship's description over its technology: C4) or that carries a placeholder text (a message's `message()`: UML sequence) keeps a text of its own on the line, as a
+    // dropped shape's is (`stencil::dropped_text`): the shown form of a field lives in the text that holds it, and an `.odg` holds no master to take a text from.
+    if let Some(text) = stencil::dropped_text(spec) {
+        shape.text = Some(Arc::new(text));
+    }
+    let mut counted = shape.counted_sheet();
+    counted.remove_cell(&diacraft_doc::CellAddr::direct("EndArrow"));
+    // **No style link of its own**: the connector tool links the root style for the three families, as a shape with no master needs, and an instance takes its styles
+    // from its master shape (the instances of files carry none). The VSDX application reads an instance's own link before the master's cells of that family, so a link
+    // here hid the master's line ends, pattern and No Fill there (its check read `BeginArrow` 0, `EndArrow` 0 and `LinePattern` 1, the root's); DiaCraft reads the master shape's link when
+    // the instance has none (R32 step 3), so it draws the same.
+    counted.sheet.links = diacraft_doc::Links::default();
+    // The connector tool's No Fill (`connector_shape`) is the master's own too (`ConnectorLook` writes `FillPattern` 0 on every one-dimensional master), so the instance inherits it
+    // and holds no cell of its own; a master that said nothing of the fill leaves the instance its own No Fill.
+    if master_has_a_fill_pattern {
+        counted.remove_cell(&diacraft_doc::CellAddr::direct("FillPattern"));
+    }
     if spec.is_fixed_1d() {
-        // No route marker, and no route section: the geometry is the master's.
-        sheet.sections.retain(|section| !matches!(section.name.as_str(), "User" | "Geometry"));
+        // No route marker, and no route section: the geometry is the master's. And no routable flag or dynamic glue: a figure no one routes is no connector to the VSDX
+        // application either, which would lay a route over its geometry.
+        counted.remove_sections(|section| matches!(section.name.as_str(), "User" | "Geometry"));
+        counted.remove_cell(&diacraft_doc::CellAddr::direct(super::routable::OBJ_TYPE));
+        counted.remove_cell(&diacraft_doc::CellAddr::direct(super::routable::GLUE_TYPE));
         settle(doc, &before, page, &[info.id], &[])?;
     }
-    Ok(DropInfo { id: info.id, master, name: name.to_string(), width: spec.width, height: spec.height })
+    // The factor is written last, and what reads it is worked out again (the ends were placed by the ratio above; a connector has no box to centre).
+    let factor = scaling.factor();
+    if let Some(factor) = factor {
+        if let Some(shape) = shape_mut(doc, page, &at.path) {
+            shape
+                .counted_sheet()
+                .set_cell(&diacraft_doc::CellAddr::direct("DropOnPageScale"), drop_scale::factor_cell(factor))
+                .map_err(|e| Problem::failed(e.to_string()))?;
+        }
+        drop_scale::settle(doc, page, info.id, None, &["DropOnPageScale"])?;
+    }
+    Ok(DropInfo {
+        id: info.id,
+        master,
+        name: name.to_string(),
+        width: half * 2.0,
+        height: spec.height,
+        drop_scale: factor,
+        note: scaling.note().map(str::to_owned),
+    })
 }
 
 /// Moves shapes by (`dx`, `dy`). A shape moves by its pin; a one-dimensional shape (a connector) moves its ends that are not glued, and
@@ -313,6 +390,11 @@ fn write_moves_counting(doc: &mut Document, page: u32, paths: &[(u32, ShapeRef, 
             let sheet = SheetRef::Shape(at.clone());
             let (dx, dy) = reader.vector_from_page(at, *d);
             let planned = plan.len();
+            // A move by nothing (a nudge of 0, an align that finds the shape in line) writes nothing: it would only put the numbers the cells hold in them again (and take a formula out
+            // of them), and the shape is not counted among those moved.
+            if dx == 0.0 && dy == 0.0 {
+                continue;
+            }
             for (x_cell, y_cell) in moved_cells(doc, page, &reader, *id, &sheet) {
                 plan.push((sheet.clone(), x_cell, reader.number(&sheet, x_cell) + dx));
                 plan.push((sheet.clone(), y_cell, reader.number(&sheet, y_cell) + dy));
@@ -472,6 +554,53 @@ pub fn delete_shapes(doc: &mut Document, page: u32, ids: &[u32]) -> Result<usize
     Ok(ids.len())
 }
 
+/// The most connectors a delete takes along with the shapes it names: as many as a command takes shape `ID`s, so that what a call takes out stays as small as what a call
+/// could name. A shape with more connectors glued to it is refused in words (the connectors can be deleted first, or left with `connectors: false`).
+pub const MAX_CONNECTORS_ALONG: usize = 4_096;
+
+/// The connectors a delete of the shapes `ids` takes along: every shape outside `ids` (and outside what `ids` hold) that a `Connect` row glues, by its begin or its end, to
+/// one of the shapes `ids` or to a shape inside one, in ascending `ID` order, **but not one that the pointer cannot pick** (on a locked layer, or on hidden ones only: the window leaves
+/// such a connector with a free end, and so does a delete). A row names a shape by its `ID` and finds the first shape of that `ID` in document order, so a row that names
+/// an `ID` which a shape that stays has first is no row of a shape that goes (as `delete_shapes` reads it). A row that names a connector the page does not hold is passed over, and a
+/// connector named twice is one. At most [`MAX_CONNECTORS_ALONG`]; more is refused in words, with nothing changed.
+///
+/// **What it costs.** A page with no `Connect` row, or none that glues a shape that stays, costs one pass over its rows and no walk of the page; else a few walks of it, however many shapes and
+/// connectors there are: one finds the shapes `ids` name, one what is inside them, one the connectors, and the layers of the page, when it has any that is not plain, one more.
+pub fn glued_connectors(doc: &Document, page: u32, ids: &[u32]) -> Result<Vec<u32>, Problem> {
+    let Some(rows) = doc.page(page).map(|p| &p.connects) else { return Ok(Vec::new()) };
+    let named: HashSet<u32> = ids.iter().copied().collect();
+    let is_end = |c: &diacraft_doc::Connect| end_cells(c.from_cell.as_deref()).is_some();
+    if !rows.iter().any(|c| !named.contains(&c.from_sheet) && is_end(c)) {
+        return Ok(Vec::new());
+    }
+    // What goes: the shapes named and everything inside them, by the `ID`s that a `Connect` row finds in them.
+    let found = scan::Named::of(doc, page, named.iter().copied())?;
+    let (mut paths, mut inside): (Vec<Vec<u32>>, BTreeSet<u32>) = (Vec::new(), BTreeSet::new());
+    for id in &named {
+        if let Some((at, shape)) = found.get(*id).and_then(|at| doc.shape(at).map(|shape| (at, shape))) {
+            inside.extend(subtree_ids(shape));
+            paths.push(at.path.clone());
+        }
+    }
+    let gone = named_by(doc, page, &paths, &inside)?;
+    let wanted: BTreeSet<u32> =
+        rows.iter().filter(|c| is_end(c) && gone.contains(&c.to_sheet) && !gone.contains(&c.from_sheet)).map(|c| c.from_sheet).collect();
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let there = scan::find_named(doc, page, &wanted.iter().copied().collect())?;
+    let standing = super::layers::page_standing(doc, page)?;
+    let along: Vec<u32> =
+        wanted.into_iter().filter(|id| there.contains_key(id) && !standing.get(id).is_some_and(|st| st.locked || st.hidden)).collect();
+    if along.len() > MAX_CONNECTORS_ALONG {
+        return Err(Problem::bad(format!(
+            "{} connectors are glued to the shapes, and a delete takes at most {MAX_CONNECTORS_ALONG} along: delete some of them first, or give connectors: false to leave them with a free end",
+            along.len()
+        )));
+    }
+    Ok(along)
+}
+
 /// Takes out the shapes at `paths` (their members go with them), whose `ID`s and those of everything inside them are `gone`: the rest of
 /// [`delete_shapes`], for a caller that has found the shapes already (`edit.cut`, which found them in one walk of the page).
 pub(super) fn delete_paths(doc: &mut Document, page: u32, paths: Vec<Vec<u32>>, gone: &BTreeSet<u32>) -> Result<(), Problem> {
@@ -575,6 +704,14 @@ pub(super) fn unglue_connectors(doc: &mut Document, page: u32, gone: &BTreeSet<u
                     CellEdit::Cell(Cell::constant(Value::from_text(&stencil::number_text(value))).with_unit("IN")),
                 ));
             }
+            // The trigger of an end glued to the whole of the shape that goes names it: the application writes `_XFTRIGGER(REF())` for a shape that is gone.
+            let which = if x_cell == "BeginX" { Which::Begin } else { Which::End };
+            let trigger = walkglue::trigger_name(which);
+            if let Some(cell) =
+                doc.shape(at).and_then(|shape| shape.sheet.cell(trigger)).and_then(|cell| walkglue::trigger_after_delete(cell, c.to_sheet))
+            {
+                writes.push((sheet.clone(), CellAddr::direct(trigger), CellEdit::Cell(cell)));
+            }
             ids.insert(c.from_sheet);
         }
     }
@@ -597,10 +734,10 @@ fn remove_at(doc: &mut Document, page: u32, path: &[u32]) {
     let Ok(last) = usize::try_from(*last) else { return };
     if parent.is_empty() {
         if let Some(p) = page_mut(doc, page) {
-            p.shapes.remove(last);
+            p.remove_shape(last);
         }
     } else if let Some(shape) = shape_mut(doc, page, parent) {
-        shape.children.remove(last);
+        shape.remove_member(last);
     }
 }
 
@@ -664,6 +801,103 @@ mod tests {
         let shape = doc.shape(&at).unwrap();
         let begin = shape.sheet.cell("BeginX").unwrap();
         assert_eq!((begin.formula.text(), begin.value.as_ref().map(|v| v.text()), begin.unit.as_deref()), (None, Some("1"), Some("IN")));
+    }
+
+    /// How many shapes the walks of the page have visited since [`reset_walks`].
+    fn walked() -> usize {
+        super::super::NODES_WALKED.with(std::cell::Cell::get)
+    }
+
+    fn reset_walks() {
+        super::super::NODES_WALKED.with(|c| c.set(0));
+    }
+
+    #[test]
+    fn a_page_with_no_row_that_glues_a_shape_that_stays_costs_no_walk() {
+        // The box alone, and a box whose connectors are among the shapes that go.
+        let doc = document_with_connectors_glued_to_a_box(0);
+        reset_walks();
+        assert!(glued_connectors(&doc, 1, &[1]).unwrap().is_empty());
+        assert_eq!(walked(), 0);
+        let doc = document_with_connectors_glued_to_a_box(3);
+        reset_walks();
+        assert!(glued_connectors(&doc, 1, &[1, 2, 3, 4]).unwrap().is_empty(), "the connectors named go as named, not along");
+        assert_eq!(walked(), 0, "every row begins at a shape that goes");
+        assert!(glued_connectors(&doc, 7, &[1]).unwrap().is_empty(), "a page that is not there has none");
+    }
+
+    #[test]
+    fn the_connectors_glued_to_a_shape_are_found_in_a_few_walks_of_the_page_and_not_one_search_each() {
+        // 4,000 connectors glued to one shape: a search of the page for each would be 8e6 visits; the walks are three at most (what is inside the shapes named, the connectors; the walk
+        // that finds the shapes named stops at the first).
+        let n = MAX_CONNECTORS_ALONG as u32 - 96;
+        let doc = document_with_connectors_glued_to_a_box(n);
+        FINDS.with(|f| f.set(0));
+        reset_walks();
+        let along = glued_connectors(&doc, 1, &[1]).unwrap();
+        assert_eq!(along, (2..n + 2).collect::<Vec<u32>>(), "in ascending order");
+        assert_eq!(FINDS.with(|f| f.get()), 0, "no connector was looked for by itself");
+        assert!(walked() <= 3 * (n as usize + 1), "{} shapes walked on a page of {}", walked(), n + 1);
+    }
+
+    #[test]
+    fn more_connectors_than_a_delete_takes_are_refused_in_words() {
+        let n = MAX_CONNECTORS_ALONG as u32;
+        let doc = document_with_connectors_glued_to_a_box(n);
+        assert_eq!(glued_connectors(&doc, 1, &[1]).unwrap().len(), MAX_CONNECTORS_ALONG, "the most that go");
+        let doc = document_with_connectors_glued_to_a_box(n + 1);
+        let words = glued_connectors(&doc, 1, &[1]).unwrap_err().message;
+        assert!(words.contains("4097 connectors") && words.contains("4096") && words.contains("connectors: false"), "{words}");
+    }
+
+    #[test]
+    fn a_row_that_names_a_connector_the_page_does_not_hold_is_passed_over() {
+        let mut doc = document_with_connectors_glued_to_a_box(2);
+        if let Some(page) = page_mut(&mut doc, 1) {
+            let mut rows: Vec<Connect> = page.connects.iter().cloned().collect();
+            // Connector 99 is nowhere; connector 3 is named by two rows (a begin and an end), and shape 1 twice among the shapes asked about.
+            rows.push(Connect { from_sheet: 99, from_cell: Some(Arc::from("EndX")), to_sheet: 1, ..Connect::default() });
+            rows.push(Connect { from_sheet: 3, from_cell: Some(Arc::from("EndX")), to_sheet: 1, ..Connect::default() });
+            page.connects = Connects::from_vec(rows);
+        }
+        assert_eq!(glued_connectors(&doc, 1, &[1, 1]).unwrap(), [2, 3]);
+    }
+
+    #[test]
+    fn a_connector_glued_to_a_shape_inside_a_group_goes_with_the_group() {
+        let mut doc = document_with_connectors_glued_to_a_box(1);
+        // Shape 1 becomes the member of a group, shape 50.
+        if let Some(page) = page_mut(&mut doc, 1) {
+            let mut shapes: Vec<Arc<Shape>> = page.shapes.iter().cloned().collect();
+            let member = shapes.remove(0);
+            let mut group = Shape::new(50);
+            group.children = ShapeList::from_vec(vec![member]);
+            shapes.insert(0, Arc::new(group));
+            page.shapes = ShapeList::from_vec(shapes);
+        }
+        assert_eq!(glued_connectors(&doc, 1, &[50]).unwrap(), [2], "the connector is glued to a member of the group");
+        assert_eq!(glued_connectors(&doc, 1, &[1]).unwrap(), [2], "and to the member itself");
+        assert!(glued_connectors(&doc, 1, &[2]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_row_names_the_first_shape_of_its_id_so_a_twin_in_the_group_that_goes_takes_a_connector_only_when_it_is_first() {
+        // A file may hold two shapes of one `ID`; the row finds the first in document order (as `delete_shapes` reads it).
+        for (group_first, along) in [(false, Vec::<u32>::new()), (true, vec![2])] {
+            let mut doc = document_with_connectors_glued_to_a_box(1);
+            if let Some(page) = page_mut(&mut doc, 1) {
+                let mut shapes: Vec<Arc<Shape>> = page.shapes.iter().cloned().collect();
+                let mut group = Shape::new(50);
+                group.children = ShapeList::from_vec(vec![Arc::new(Shape::new(1))]);
+                if group_first {
+                    shapes.insert(0, Arc::new(group));
+                } else {
+                    shapes.push(Arc::new(group));
+                }
+                page.shapes = ShapeList::from_vec(shapes);
+            }
+            assert_eq!(glued_connectors(&doc, 1, &[50]).unwrap(), along, "the group first: {group_first}");
+        }
     }
 
     #[test]

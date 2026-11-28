@@ -183,9 +183,9 @@ fn new_row(plan: RowPlan) -> Row {
 /// ones the plan found missing.
 fn apply(doc: &mut Document, page: u32, plan: ShapePlan) -> Result<(), Problem> {
     let shape = shape_mut(doc, page, &plan.path).ok_or_else(|| Problem::failed("a shape went away"))?;
-    let sheet = Arc::make_mut(&mut shape.sheet);
+    let mut counted = shape.counted_sheet();
     let mut at: HashMap<Option<u32>, usize> = HashMap::new();
-    for (place, section) in sheet.sections.iter().enumerate() {
+    for (place, section) in counted.sheet.sections.iter().enumerate() {
         if section.name.as_str() == GEOMETRY {
             at.entry(section.ix).or_insert(place);
         }
@@ -195,15 +195,14 @@ fn apply(doc: &mut Document, page: u32, plan: ShapePlan) -> Result<(), Problem> 
         let place = match at.get(&wanted.ix) {
             Some(place) => *place,
             None => {
-                sheet.sections.push(Arc::new(Section::new(GEOMETRY, wanted.ix)));
-                let place = sheet.sections.len().saturating_sub(1);
+                let place = counted.push_section(Arc::new(Section::new(GEOMETRY, wanted.ix)));
                 at.insert(wanted.ix, place);
                 place
             }
         };
-        let section = sheet.sections.get_mut(place).map(Arc::make_mut).ok_or_else(|| Problem::failed("a section went away"))?;
+        let section = counted.sheet.sections.get_mut(place).map(Arc::make_mut).ok_or_else(|| Problem::failed("a section went away"))?;
         for (name, cell) in wanted.cells {
-            section.cells.insert(name, cell);
+            section.put_cell(&name, cell)?;
         }
         // The rows the section holds, by key: one pass, so that a section of very many rows is not searched for each row.
         let mut rows_at: HashMap<RowKey, usize> = HashMap::new();
@@ -223,21 +222,21 @@ fn apply(doc: &mut Document, page: u32, plan: ShapePlan) -> Result<(), Problem> 
                         held.row_type = row.row_type;
                     }
                     for (name, cell) in row.cells {
-                        held.cells.insert(name, cell);
+                        held.put_cell(&name, cell)?;
                     }
                 }
                 None => {
-                    section.rows.push(Arc::new(new_row(row)));
+                    section.append_row(Arc::new(new_row(row)));
                     added = true;
                 }
             }
         }
         // A section the shape had keeps its rows in `IX` order with the new ones among them, as a file lists them.
         if existed && added {
-            section.rows.sort_by_key(|row| row.ix.unwrap_or(u32::MAX));
+            section.sort_rows_by_key(|row| row.ix.unwrap_or(u32::MAX));
         }
     }
-    sheet.check_limits()?;
+    counted.sheet.check_limits()?;
     Ok(())
 }
 

@@ -62,6 +62,7 @@ impl DiacraftApp {
             && !self.export_dialog_open()
             && !self.name_card_for(crate::file_host::Purpose::Export)
             && !self.exporting_now()
+            && self.file_dialog().is_none()
     }
 
     /// Whether Export can be used now: a drawing is open (the engine's check, `command_enabled`) and the window has a dialog for it.
@@ -185,6 +186,7 @@ impl DiacraftApp {
         }
         if typed && crate::ask::is_there(&text) {
             self.saving.replacing = Some(crate::ask::Replacing::Export(PathBuf::from(text)));
+            self.saving.replacing_scope = diacraft_engine::file_access::ScopeHandle::capture();
             ctx.request_repaint();
             return;
         }

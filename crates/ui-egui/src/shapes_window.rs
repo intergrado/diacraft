@@ -455,13 +455,18 @@ impl DiacraftApp {
         let clear = Rect::from_center_size(pos2(magnifier.left() - 11.0, r.center().y), vec2(20.0, 22.0));
         let text_rect = r.shrink2(vec2(7.0, 2.0)).with_max_x(r.right() - 28.0 - if has_query { 22.0 } else { 0.0 });
         let mut buffer = ShapeFilterBuffer(&mut query);
-        let response = ui.put(
-            text_rect,
+        // The words go in a child of the window's `Ui`, not in `ui.put`: `put` leaves the window's cursor at the bottom of the words' rectangle, two points above the box's own bottom
+        // edge, and the tiles' area below then begins there, so tiles scrolled up paint over the edge. The words are centred between the box's top and bottom, as a field's are.
+        let mut field = ui.new_child(egui::UiBuilder::new().max_rect(text_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let response = field.add(
             egui::TextEdit::singleline(&mut buffer)
                 .id(id)
                 .font(theme::font(12.0))
                 .frame(Frame::NONE)
                 .margin(vec2(0.0, 2.0))
+                .align(Align2::LEFT_CENTER)
+                .desired_width(text_rect.width())
+                .min_size(text_rect.size())
                 .hint_text("Search shapes"),
         );
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Search shapes"));
@@ -865,7 +870,7 @@ pub(crate) fn paint_art(painter: &egui::Painter, rect: Rect, art: &Art, t: &Toke
                 }
             }
             // The lines as the master's pattern says, and the marks of its line ends (`tile_ends.rs`).
-            crate::tile_ends::paint(painter, figure, &at, pen);
+            crate::tile_ends::paint(painter, figure, &at, pen, t.stencil_fill);
         }
     }
 }
@@ -1198,9 +1203,9 @@ impl DiacraftApp {
             if self.ui.stencils.deferred.contains(id) {
                 return Figured::Later;
             }
-            let path = self.ui.stencils.files.iter().find(|(known, _)| known == id).map(|(_, path)| path.clone());
+            let path = self.ui.stencils.files.iter().find(|(known, ..)| known == id).map(|(_, path, scope)| (path.clone(), scope.clone()));
             self.ui.stencils.scratch_opens = self.ui.stencils.scratch_opens.saturating_add(1);
-            let opened = path.and_then(|p| Scratch::open(&p));
+            let opened = path.and_then(|(p, scope)| Scratch::open(&p, &scope));
             if opened.is_none() && diacraft_engine::memory::reserved() > 0 {
                 self.ui.stencils.deferred.insert(id.clone());
                 return Figured::Later;

@@ -5,11 +5,12 @@
 //! has selected afterwards is what the command made** (ours): the shapes pasted or duplicated, the group made, the members of the
 //! groups taken apart; after a cut, nothing.
 //!
-//! **The clipboard is the session's**: a paste is within one document. **The system clipboard** gets something as well (ours):
-//! egui carries **text or an image, one of the two** (the last asked for wins), and an image would need the page drawn from the shapes alone, so
-//! what goes there is **the text of the shapes' labels**, one shape to a line, members of a group after it, in the order of the selection. A copy
-//! of shapes with no text puts nothing there and leaves what another program put. Pasting from another program is not done: a paste is the
-//! session's clipboard.
+//! **The clipboard is the session's**: a paste of shapes is within one document. **The system clipboard** is the one the system keeps, so a
+//! person copies and pastes with other programs (ours): a copy or a cut puts **the text of the shapes' labels** there, one shape to a line,
+//! members of a group after it, in the order of the selection, and every text field's own Copy and Paste use it too (the desktop app builds eframe with
+//! its `clipboard` feature). egui carries **text or an image, one of the two** (the last asked for wins), and an image would need the page drawn from the
+//! shapes alone. A copy of shapes with no text puts nothing there and leaves what another program put. **A paste of shapes is still the session's
+//! clipboard**: what another program copied is never pasted as a shape, and a paste in a text field takes the text from the system clipboard.
 //!
 //! **Cut sends the shapes selected and no more** (ours): a connector glued to a shape that is cut stays, its end a plain point
 //! Where the Delete key takes such connectors with the shapes.

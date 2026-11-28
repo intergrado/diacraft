@@ -218,7 +218,7 @@ fn oracle_takes_files_and_its_own_options_and_nothing_else() {
 #[test]
 fn export_takes_a_drawing_an_output_and_the_options_that_suit_the_format() {
     use args::{ExportArgs, Format};
-    let make = |file: &str, page: usize, out: &str, format: Format| ExportArgs {
+    let make = |file: &str, page: Option<usize>, out: &str, format: Format| ExportArgs {
         file: file.to_owned(),
         page,
         out: out.to_owned(),
@@ -227,15 +227,15 @@ fn export_takes_a_drawing_an_output_and_the_options_that_suit_the_format() {
         outlines: false,
         transparent: false,
     };
-    assert_eq!(parse(&["export", "d.vsdx", "--out", "p.svg"]), Ok(Action::Export(make("d.vsdx", 1, "p.svg", Format::Svg))));
-    assert_eq!(parse(&["export", "--page", "3", "d.vsdx", "--out=p.PDF"]), Ok(Action::Export(make("d.vsdx", 3, "p.PDF", Format::Pdf))));
+    assert_eq!(parse(&["export", "d.vsdx", "--out", "p.svg"]), Ok(Action::Export(make("d.vsdx", None, "p.svg", Format::Svg))));
+    assert_eq!(parse(&["export", "--page", "3", "d.vsdx", "--out=p.PDF"]), Ok(Action::Export(make("d.vsdx", Some(3), "p.PDF", Format::Pdf))));
     assert_eq!(
         parse(&["export", "d.vsdx", "--out", "p.png", "--dpi", "150.5", "--transparent"]),
-        Ok(Action::Export(ExportArgs { dpi: Some(150.5), transparent: true, ..make("d.vsdx", 1, "p.png", Format::Png) }))
+        Ok(Action::Export(ExportArgs { dpi: Some(150.5), transparent: true, ..make("d.vsdx", None, "p.png", Format::Png) }))
     );
     assert_eq!(
         parse(&["export", "d.vsdx", "--out", "p.svg", "--text", "outlines"]),
-        Ok(Action::Export(ExportArgs { outlines: true, ..make("d.vsdx", 1, "p.svg", Format::Svg) }))
+        Ok(Action::Export(ExportArgs { outlines: true, ..make("d.vsdx", None, "p.svg", Format::Svg) }))
     );
     for bad in [
         &["export"][..],
@@ -273,7 +273,7 @@ fn bundled_fonts_is_an_option_of_the_commands_that_set_text_and_of_no_other() {
         (&["mcp", "--bundled-fonts", "--headless"][..], Action::Mcp(Mode::Headless)),
         (&["mcp", "--headless", "--bundled-fonts"][..], Action::Mcp(Mode::Headless)),
     ] {
-        assert_eq!(parse_fonts(line), Ok(args::Parsed { action, fonts: Bundled }), "{line:?}");
+        assert_eq!(parse_fonts(line), Ok(args::Parsed { action, fonts: Bundled, roots: Default::default() }), "{line:?}");
     }
     assert_eq!(parse_fonts(&["mcp", "--headless"]).map(|p| p.fonts), Ok(System), "the machine's faces are the default");
     let run = parse_fonts(&["run", "--cmd", "file.new", "--bundled-fonts"]).unwrap();
@@ -318,7 +318,7 @@ fn the_start_shares_the_faces_with_the_engine_for_the_commands_that_set_text() {
     crate::start_fonts(
         &Action::Export(args::ExportArgs {
             file: "d.vsdx".to_owned(),
-            page: 1,
+            page: None,
             out: "p.svg".to_owned(),
             format: args::Format::Svg,
             dpi: None,
@@ -448,7 +448,7 @@ fn compare_takes_content_once_and_two_files() {
 /// where it names the types), and says each type once.
 #[test]
 fn the_convert_help_names_every_type_it_writes_and_the_vsdx_types_by_their_product() {
-    let help: String = args::USAGE.split_whitespace().collect::<Vec<_>>().join(" ");
+    let help: String = crate::help::plain().split_whitespace().collect::<Vec<_>>().join(" ");
     let list = help.split("The types written are ").nth(1).and_then(|rest| rest.split(". ").next()).unwrap_or_default();
     assert!(list.contains("the Visio types .vsdx, .vsdm, .vssx, .vssm, .vstx and .vstm"), "{list}");
     for extension in crate::convert::drawing_types().iter().chain(&["png", "svg", "pdf"]) {
@@ -482,7 +482,7 @@ fn convert_takes_a_drawing_and_an_output_whose_extension_says_the_type_and_the_o
     }
     let picture = |out: &str, format: Format| ExportArgs {
         file: "d.vsdx".to_owned(),
-        page: 1,
+        page: None,
         out: out.to_owned(),
         format,
         dpi: None,
@@ -504,7 +504,7 @@ fn convert_takes_a_drawing_and_an_output_whose_extension_says_the_type_and_the_o
         Ok(Action::Convert(ConvertArgs {
             file: "d.vsdx".to_owned(),
             out: "p.PNG".to_owned(),
-            to: ConvertTo::Picture(ExportArgs { page: 3, dpi: Some(150.5), transparent: true, ..picture("p.PNG", Format::Png) }),
+            to: ConvertTo::Picture(ExportArgs { page: Some(3), dpi: Some(150.5), transparent: true, ..picture("p.PNG", Format::Png) }),
             drop_macros: false,
             drop_objects: false,
         }))
@@ -593,5 +593,353 @@ fn the_drawing_types_are_the_engines_own_names_in_the_order_the_help_lists_them(
         ("a", None),
     ] {
         assert_eq!(crate::convert::drawing_type(path), found, "{path}");
+    }
+}
+
+// ---- the automation roots (gaps A2 and A5) ------------------------------------------------------------------------------------------------------
+
+fn roots_of(args: &[&str]) -> Result<(Vec<String>, Vec<String>), String> {
+    let parsed = parse_fonts(args)?;
+    let words = |list: &[std::path::PathBuf]| list.iter().map(|p| p.to_str().expect("text").to_owned()).collect::<Vec<_>>();
+    Ok((words(parsed.roots.read()), words(parsed.roots.write())))
+}
+
+#[test]
+fn mcp_takes_root_flags_in_either_spelling_and_repeated() {
+    let (read, write) =
+        roots_of(&["mcp", "--headless", "--automation-read-root", "/a", "--automation-read-root=/b", "--automation-write-root", "/w"])
+            .expect("the flags are mcp's");
+    assert_eq!((read, write), (vec!["/a".to_owned(), "/b".to_owned()], vec!["/w".to_owned()]));
+    // The default mode takes them too (and stops at run time if the app answers, below); no flag is no root.
+    assert!(parse(&["mcp", "--automation-write-root", "/w"]).is_ok());
+    assert_eq!(roots_of(&["mcp", "--headless"]).expect("no flag"), (vec![], vec![]));
+    for (args, words) in [(&["mcp", "--automation-read-root"][..], "needs a value"), (&["mcp", "--automation-write-root="][..], "empty")] {
+        let error = parse(args).expect_err("a flag with no folder");
+        assert!(error.contains(words), "{args:?}: {error}");
+    }
+}
+
+#[test]
+fn the_root_flags_are_mcps_alone_and_cannot_keep_the_running_app() {
+    for command in ["run", "export", "convert", "roundtrip", "oracle", "compare", "commands"] {
+        let error = parse(&[command, "--automation-read-root", "/a"]).expect_err("only mcp has roots");
+        assert!(!error.is_empty(), "{command}: {error}");
+    }
+    // `--connect` names the app, which keeps to the roots it was started with: the flags would ask this process for what it cannot do.
+    let error = parse(&["mcp", "--connect", "127.0.0.1:1", "--automation-write-root", "/w"]).expect_err("not with --connect");
+    assert!(error.contains("--connect") && error.contains("--control") && error.contains("--headless"), "{error}");
+}
+
+/// The default mode with roots asked for, and the app answering: the server stops and says what to give, and has driven nothing in the app but the question who it is.
+#[test]
+fn the_default_mode_with_roots_does_not_go_on_in_an_app_it_cannot_keep() {
+    let dir = std::env::temp_dir().join(format!("diacraft-cli-roots-unit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a folder");
+    let roots = diacraft_engine::file_access::AutomationRoots::new(&[dir.as_path()], &[dir.as_path()]).expect("roots").expect("some");
+    let (addr, log) = fake_app("diacraft");
+    let mut output = Vec::new();
+    let ended = crate::mcp_with_roots(Mode::Auto, &addr, args::FontChoice::Bundled, Some(roots.clone()), FILE_NEW, &mut output);
+    let Err(crate::Failure::Message(words)) = ended else { panic!("the server went on in the app") };
+    assert!(words.contains("--headless") && words.contains("--automation-read-root"), "{words}");
+    assert!(output.is_empty(), "nothing was served");
+    assert_eq!(seen(&log), ["ui.inspect"], "only the question who it is reached the app");
+    // With no app answering, the same roots serve a session of this process, and a file outside is refused in words.
+    let outside = std::env::temp_dir().join(format!("diacraft-cli-roots-outside-{}.diacraft", std::process::id()));
+    let ask = format!(
+        "{}\n",
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "command_run", "arguments": {"id": "file.new"}}})
+    );
+    let save = format!(
+        "{}\n",
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "command_run", "arguments": {"id": "file.save_as", "params": {"path": outside.to_str().expect("text")}}}})
+    );
+    let mut output = Vec::new();
+    let ended =
+        crate::mcp_with_roots(Mode::Auto, &nothing_listens(), args::FontChoice::Bundled, Some(roots), format!("{ask}{save}").as_bytes(), &mut output);
+    assert!(ended.is_ok());
+    let replies = String::from_utf8(output).expect("UTF-8");
+    assert!(replies.contains("automation path rejected"), "{replies}");
+    assert!(!outside.exists(), "nothing was written outside the roots");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `completions` takes one shell, in lower case, and the program the script is for; `man` a page, or the list of them.
+#[test]
+fn completions_and_man_take_what_they_name_and_nothing_else() {
+    use args::{CompletionsArgs, ManArgs, Program};
+    use clap_complete::Shell;
+    for (word, shell) in
+        [("bash", Shell::Bash), ("zsh", Shell::Zsh), ("fish", Shell::Fish), ("powershell", Shell::PowerShell), ("elvish", Shell::Elvish)]
+    {
+        assert_eq!(parse(&["completions", word]), Ok(Action::Completions(CompletionsArgs { shell, program: Program::Cli })), "{word}");
+    }
+    assert_eq!(
+        parse(&["completions", "--program", "diacraft", "bash"]),
+        Ok(Action::Completions(CompletionsArgs { shell: Shell::Bash, program: Program::App })),
+        "the option stands where it likes"
+    );
+    assert_eq!(
+        parse(&["completions", "zsh", "--program=diacraft-cli"]),
+        Ok(Action::Completions(CompletionsArgs { shell: Shell::Zsh, program: Program::Cli }))
+    );
+    for bad in [
+        &["completions"][..],
+        &["completions", "tcsh"],
+        &["completions", "Bash"],
+        &["completions", "bash", "zsh"],
+        &["completions", "bash", "--program", "other"],
+        &["completions", "bash", "--program"],
+        &["completions", "bash", "--program", "diacraft", "--program", "diacraft"],
+        &["completions", "bash", "--bogus"],
+        &["completions", "bash", "--bundled-fonts"],
+    ] {
+        assert!(parse(bad).is_err(), "{bad:?} should be refused");
+    }
+    assert!(parse(&["completions"]).unwrap_err().contains("bash, zsh, fish, powershell or elvish"));
+    assert_eq!(parse(&["man"]), Ok(Action::Man(ManArgs::Page("diacraft-cli".to_owned()))));
+    assert_eq!(parse(&["man", "diacraft-cli-run"]), Ok(Action::Man(ManArgs::Page("diacraft-cli-run".to_owned()))));
+    assert_eq!(parse(&["man", "diacraft"]), Ok(Action::Man(ManArgs::Page("diacraft".to_owned()))));
+    assert_eq!(parse(&["man", "--list"]), Ok(Action::Man(ManArgs::List)));
+    for bad in [&["man", "run"][..], &["man", "a", "b"], &["man", "--list", "diacraft"], &["man", "--list", "--list"], &["man", "--bogus"]] {
+        assert!(parse(bad).is_err(), "{bad:?} should be refused");
+    }
+}
+
+/// `--color` is an option of every command, given once, before or after the command, and `--version` and `--help` still win over a mistake in it.
+#[test]
+fn color_is_taken_once_and_anywhere_and_never_stops_help_or_version() {
+    assert_eq!(parse(&["--color", "always", "commands"]), Ok(Action::Commands));
+    assert_eq!(parse(&["commands", "--color=never"]), Ok(Action::Commands));
+    assert_eq!(
+        parse(&["--color=auto", "export", "d.vsdx", "--color", "never", "--out", "p.svg"]).map(|a| matches!(a, Action::Export(_))),
+        Err("--color was given twice".to_owned())
+    );
+    for bad in [
+        &["--color", "red", "commands"][..],
+        &["--color", "Always", "commands"],
+        &["--color", "always", "--color", "never", "commands"],
+        &["commands", "--color", "always", "--color=never"],
+        &["--color", "always", "commands", "--color", "never"],
+        &["--color"],
+        &["commands", "--color"],
+        &["--color", "always"],
+        &["--color=always"],
+    ] {
+        assert!(parse(bad).is_err(), "{bad:?} should be refused");
+    }
+    assert!(parse(&["--color", "red", "commands"]).unwrap_err().contains("--color must be `auto`, `always` or `never`"));
+    assert_eq!(parse(&["--color", "red", "--help"]), Ok(Action::Help));
+    assert_eq!(parse(&["--color", "--version"]), Ok(Action::Version));
+    assert_eq!(parse(&["commands", "--color", "red", "-h"]), Ok(Action::Help));
+}
+
+/// What `--color` says is read from the line alone, loosely: the page and the messages are coloured as asked even when the rest of the line is a mistake.
+#[test]
+fn the_color_a_line_asks_for_is_read_loosely() {
+    use crate::term::When;
+    let scan = |line: &[&str]| args::scan_color(&line.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>());
+    assert_eq!(scan(&[]), When::Auto);
+    assert_eq!(scan(&["commands"]), When::Auto);
+    assert_eq!(scan(&["--color", "always"]), When::Always);
+    assert_eq!(scan(&["--color=never", "--bogus"]), When::Never);
+    assert_eq!(scan(&["export", "--bogus", "--color", "always", "--help"]), When::Always);
+    assert_eq!(scan(&["--color", "red"]), When::Auto, "a word that is no choice asks for nothing");
+    assert_eq!(scan(&["--color"]), When::Auto);
+    assert_eq!(scan(&["--color", "always", "--color", "red"]), When::Always, "the last choice that is one");
+    assert_eq!(scan(&["--colour", "always"]), When::Auto);
+}
+
+/// Clap reads the words as a person has always typed them, with the one difference that `--` ends the options for every command (a file that begins with a dash is named
+/// after it), and that a word with a single dash is an option, not a file.
+#[test]
+fn two_dashes_end_the_options_and_one_dash_is_an_option() {
+    use args::{ExportArgs, Format};
+    let export = |file: &str| {
+        Action::Export(ExportArgs {
+            file: file.to_owned(),
+            page: None,
+            out: "p.svg".to_owned(),
+            format: Format::Svg,
+            dpi: None,
+            outlines: false,
+            transparent: false,
+        })
+    };
+    assert_eq!(parse(&["export", "--out", "p.svg", "--", "-odd.vsdx"]), Ok(export("-odd.vsdx")));
+    assert_eq!(parse(&["export", "--out", "p.svg", "--", "--out"]), Ok(export("--out")), "after the two dashes nothing is an option");
+    assert!(parse(&["export", "-odd.vsdx", "--out", "p.svg"]).unwrap_err().contains("unknown option `-odd.vsdx` for `export`; see --help"));
+    assert!(
+        parse(&["export", "d.vsdx", "--out", "p.svg", "--", "e.vsdx"]).unwrap_err().contains("takes one drawing"),
+        "a second file after the two dashes is still a second file"
+    );
+    // A lone dash is a word.
+    assert_eq!(parse(&["export", "--out", "p.svg", "-"]), Ok(export("-")));
+    // Help and version are looked for before the two dashes only: after them they are the names of files.
+    for name in ["--help", "--version", "-h", "-V"] {
+        assert_eq!(parse(&["export", "--out", "p.svg", "--", name]), Ok(export(name)), "`{name}` after the two dashes is a file");
+    }
+    assert_eq!(parse(&["export", "--help", "--out", "p.svg", "--", "--version"]), Ok(Action::Help), "before the two dashes help still wins");
+    assert_eq!(parse(&["export", "--version", "--", "--help"]), Ok(Action::Version), "and so does version, over a help after them");
+    assert!(
+        parse(&["export", "--out", "p.svg", "--", "--help", "--version"]).unwrap_err().contains("takes one drawing"),
+        "two such words after the two dashes are two files, and no help"
+    );
+}
+
+/// What clap found wrong is said in the words the command line has always used, for each kind of mistake.
+#[test]
+fn the_words_of_a_mistake_are_the_ones_the_docs_give() {
+    let said = |line: &[&str]| parse(line).unwrap_err();
+    assert_eq!(said(&["export", "d.vsdx", "--bogus"]), "unknown option `--bogus` for `export`; see --help");
+    assert_eq!(said(&["mcp", "extra"]), "unknown option `extra` for `mcp`; see --help");
+    assert_eq!(said(&["export", "d.vsdx", "--out", "a", "--out", "b"]), "--out was given twice");
+    assert_eq!(said(&["export", "d.vsdx", "--transparent", "--transparent"]), "--transparent was given twice");
+    assert_eq!(said(&["mcp", "--bundled-fonts", "--bundled-fonts"]), "--bundled-fonts was given twice");
+    assert_eq!(said(&["export", "d.vsdx", "--out"]), "--out needs a value");
+    assert_eq!(said(&["run", "--cmd"]), "--cmd needs a value");
+    assert_eq!(said(&["commands", "extra"]), "`commands` takes no arguments; unexpected `extra`");
+    assert_eq!(said(&["compare", "--content=1", "a", "b"]), "unknown option `--content=1` for `compare`; see --help");
+    assert_eq!(said(&["bogus"]), "unknown command `bogus`; see --help");
+    assert_eq!(said(&["--bogus"]), "unknown command `--bogus`; see --help");
+    assert!(said(&[]).starts_with("no command given\n\nUsage: diacraft-cli <command> [options]\n"));
+    // An argument that holds a terminal escape is never echoed as one.
+    for line in [&["export", "\u{1b}[2J", "--\u{1b}[31mx"][..], &["\u{1b}[2J"], &["commands", "\u{1b}]0;x\u{7}"]] {
+        let error = said(line);
+        assert!(!error.chars().any(char::is_control) || error.starts_with("no command"), "{error:?}");
+    }
+    // A very long argument is cut.
+    let long = "x".repeat(10_000);
+    assert!(said(&["export", "d.vsdx", &format!("--{long}")]).len() < 200);
+}
+
+/// The steps of `run` are put back in the order the line gave them, though clap reads each option as a list of its own.
+#[test]
+fn run_puts_cmd_params_and_commands_back_in_the_order_given() {
+    use args::Source;
+    let Ok(Action::Run(sources)) = parse(&[
+        "run",
+        "--commands",
+        "a.jsonl",
+        "--cmd",
+        "file.new",
+        "--cmd",
+        "page.add",
+        "--params",
+        "{\"name\":\"Two\"}",
+        "--commands",
+        "-",
+        "--cmd=x",
+    ]) else {
+        panic!("a line of steps");
+    };
+    let shape: Vec<String> = sources
+        .iter()
+        .map(|source| match source {
+            Source::Cmd { id, params } => format!("cmd {id} {params}"),
+            Source::Commands(from) => format!("commands {from}"),
+        })
+        .collect();
+    assert_eq!(shape, ["commands a.jsonl", "cmd file.new {}", "cmd page.add {\"name\":\"Two\"}", "commands -", "cmd x {}"]);
+    for (line, words) in [
+        (&["run", "--params", "{}", "--cmd", "a"][..], "--params must follow the --cmd it is for"),
+        (&["run", "--cmd", "a", "--params", "{}", "--params", "{}"], "--params was given twice for one --cmd"),
+        (&["run", "--cmd", "a", "--commands", "f", "--params", "{}"], "--params must follow the --cmd it is for"),
+        (&["run", "--cmd", "a", "--params", "[1]"], "--params must be a JSON object"),
+        (&["run", "--commands", "-", "--commands", "-"], "--commands - was given twice: standard input is read once"),
+        (&["run"], "nothing to run: give --cmd or --commands"),
+    ] {
+        assert!(parse(line).unwrap_err().contains(words), "{line:?}");
+    }
+}
+
+/// **No line of words is a crash.** Lines made of the words of the grammar (commands, options, dashes, values) and of any text at all, in any order, are read without an internal error:
+/// clap's own panics (a description it finds inconsistent, a word it cannot place) are caught by `read` and become a refusal that says so, which this holds to never happening; and a
+/// line that is read is read the same way twice.
+mod hostile_lines {
+    use proptest::prelude::*;
+
+    use crate::args;
+
+    const WORDS: &[&str] = &[
+        "mcp",
+        "run",
+        "commands",
+        "oracle",
+        "export",
+        "convert",
+        "roundtrip",
+        "compare",
+        "completions",
+        "man",
+        "--out",
+        "--page",
+        "--dpi",
+        "--text",
+        "--cmd",
+        "--params",
+        "--commands",
+        "--color",
+        "--color=always",
+        "--connect",
+        "--headless",
+        "--bundled-fonts",
+        "--via",
+        "--edit",
+        "--move",
+        "--program",
+        "--list",
+        "--content",
+        "--aggregate",
+        "--cap",
+        "--source",
+        "--json",
+        "--help",
+        "--version",
+        "-h",
+        "-V",
+        "-",
+        "--",
+        "---",
+        "-o",
+        "-odd",
+        "=",
+        "--out=",
+        "--out=x",
+        "always",
+        "bash",
+        "diacraft",
+        "diacraft-cli-run",
+        "1",
+        "0",
+        "-1",
+        "1.5,2",
+        "{}",
+        "[]",
+        "a.vsdx",
+        "p.svg",
+        "p.png",
+        "",
+    ];
+
+    fn word() -> impl Strategy<Value = String> {
+        prop_oneof![
+            4 => proptest::sample::select(WORDS).prop_map(str::to_owned),
+            1 => "\\PC{0,12}",
+            1 => "[-=a-z0-9.,{}\\[\\]\"' ]{0,20}",
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(3000))]
+
+        #[test]
+        fn no_line_of_words_is_an_internal_error_and_each_is_read_the_same_twice(line in prop::collection::vec(word(), 0..12)) {
+            let first = args::parse(&line);
+            if let Err(e) = &first {
+                prop_assert!(!e.contains("internal error"), "{line:?}: {e}");
+                prop_assert!(!e.chars().any(|c| c.is_control() && c != '\n'), "{line:?}: {e:?}");
+            }
+            prop_assert_eq!(first, args::parse(&line));
+        }
     }
 }

@@ -484,7 +484,7 @@ fn new_page(
     let qname = format!("{}:page", pfx.draw);
     ed.work.charge_attribute(ed.limits)?;
     ed.work.charge_attribute(ed.limits)?;
-    let tag = format!("{indent}<{qname}{}{}{}", pfx.attr(Ns::Draw, "name", &model.name), pfx.attr(Ns::Draw, "master-page-name", master), pfx.declare);
+    let tag = format!("{indent}<{qname}{}{}", pfx.attr(Ns::Draw, "name", &model.name), pfx.attr(Ns::Draw, "master-page-name", master));
     // The page has no element in the part: its shapes are put after the start tag, which is where `to` is, in the order the model has them.
     // The page is put in the first `office:drawing`, whose bindings are the ones its new shapes' kept markup is written against, and declares nothing a kept name could use.
     let scan = ScanPage { open: (to, to), scope, ns: Some(Vec::new()), ..ScanPage::default() };
@@ -495,9 +495,10 @@ fn new_page(
     };
     let holds = !diff.new.is_empty() || !block.text.is_empty();
     if holds {
-        ed.splicer.insert(to, format!("{tag}{}>", block.declare));
+        // **Each prefix once**: the comments' block declares what the place does not bind for its own names, the page's own prefixes among them, which the tag has already.
+        ed.splicer.insert(to, format!("{tag}{}>", super::splice::merged_declarations(&pfx.declare, &block.declare)));
     } else {
-        ed.splicer.insert(to, format!("{tag}/>"));
+        ed.splicer.insert(to, format!("{tag}{}/>", pfx.declare));
     }
     let held = PageShapes::new(diff.source);
     let mut done = super::plan::apply_page(ed, &scan, diff, &held)?;

@@ -486,6 +486,172 @@ fn a_drop_on_a_page_at_another_scale_lands_where_its_ghost_showed() {
     assert!(near(middle.0, ghost.0, 1e-9) && near(middle.1, ghost.1, 1e-9), "the release is the ghost: {ghost:?} {placed:?}");
 }
 
+/// The window shows the built-in stencil `id` (it is opened, and then shown, as a click on its row of More Shapes does).
+fn show_stencil(w: &mut Window, id: &str) {
+    run_command(w, "stencil.open", json!({"id": id}));
+    run_command(w, "window.stencil", json!({"stencil": id}));
+}
+
+/// Drags the tile `tile` to the page place `to` and holds the button there, the frames of a person's drag.
+fn drag_tile(w: &mut Window, tile: &str, to: (f64, f64)) -> Pos2 {
+    let drawn = |w: &Window| w.state().elements().iter().filter(|e| e.name.starts_with("shapes.")).map(|e| e.name.clone()).collect::<Vec<_>>();
+    let from = w.state().element(tile).unwrap_or_else(|| panic!("{tile} is not drawn: {:?}", drawn(w))).rect.center();
+    let to = at_p(w, to);
+    move_to(w, from);
+    button(w, from, true);
+    for step in 1..=5 {
+        move_to(w, from + (to - from) * (step as f32 / 5.0));
+    }
+    to
+}
+
+/// What dragging a tile onto the page showed and made: the ghost's rectangle on the screen and its place on the page (inches), and the box of the shape the release made, on the
+/// screen and on the page (left, bottom, right, top, inches).
+struct Dragged {
+    ghost: egui::Rect,
+    at_ghost: (f64, f64),
+    made: egui::Rect,
+    placed: (f64, f64, f64, f64),
+}
+
+/// Drags the tile `tile` to the page place (5, 6), reads the ghost with the button still down, lets go, and reads the shape the drop made.
+fn drag_and_drop(w: &mut Window, tile: &str) -> Dragged {
+    let before = crate::editing::shape_ids(w);
+    let to = drag_tile(w, tile, (5.0, 6.0));
+    let ghost = w.state().tile_ghost_rect().expect("the ghost is drawn");
+    let at_ghost = w.state().tile_preview().expect("the ghost is over the page");
+    release(w, to);
+    let made = *crate::editing::shape_ids(w).iter().find(|i| !before.contains(i)).expect("dropped");
+    let placed = bounds(w, made);
+    // The box the drop made, on the screen: its top left and its bottom right.
+    let made = egui::Rect::from_min_max(at(w, placed.0, placed.3), at(w, placed.2, placed.1));
+    Dragged { ghost, at_ghost, made, placed }
+}
+
+impl Dragged {
+    /// The ghost is the box of the shape the drop made, to a tenth of a point, and its place is the release's.
+    fn assert_ghost_is_the_drop(&self, what: &str) {
+        let (ghost, want, placed) = (self.ghost, self.made, self.placed);
+        assert!(
+            (ghost.min - want.min).abs().max_elem() < 0.1 && (ghost.max - want.max).abs().max_elem() < 0.1,
+            "{what}: the ghost {ghost:?} is the box of the shape the drop made {want:?} ({} by {} points)",
+            want.width(),
+            want.height()
+        );
+        let middle = ((placed.0 + placed.2) / 2.0, (placed.1 + placed.3) / 2.0);
+        assert!(
+            near(middle.0, self.at_ghost.0, 1e-9) && near(middle.1, self.at_ghost.1, 1e-9),
+            "{what}: the release is the ghost: {:?} {placed:?}",
+            self.at_ghost
+        );
+    }
+}
+
+/// U49, the ghost of a master that follows its text: the ghost drawn while dragging a UML class is the box its drop makes, on a page drawn at `k` to 1. A class is a
+/// group of compartments whose height follows their text: beyond the range of eight of the page's scale (100 to 1) the drop keeps the master's size on paper, 1.6 inches wide and 1.2 tall
+/// (the compartments' least heights follow the page's drop scale, where they were constants a drop does not scale and left the class shorter than the master); within it
+/// (1 or 2 to 1) it is the master's drawing size over `k`. The ghost, the snap box it was pulled by and the shape the release makes are one box: the ghost's corners are the made shape's,
+/// to a tenth of a point, and its middle is the release's.
+fn the_ghost_of_a_class_is_the_box_its_drop_makes(k: f64) {
+    let mut w = edit_window([1280.0, 900.0]);
+    no_grid(&mut w);
+    let page = page_id(&w);
+    if k != 1.0 {
+        run_command(&mut w, "page.scale", json!({"page": page, "paper": 1.0, "drawing": k}));
+    }
+    show_stencil(&mut w, "uml-class");
+    let dragged = drag_and_drop(&mut w, "shapes.tile.Class");
+    dragged.assert_ghost_is_the_drop(&format!("scale {k}"));
+    // What the box is, so that the test says what it holds: the master's width over the ratio, or beyond the range its own, and beyond it the master's height too.
+    let placed = dragged.placed;
+    let width = placed.2 - placed.0;
+    assert!(near(width, if k > 8.0 { 1.6 } else { 1.6 / k }, 1e-9), "scale {k}: the width of the drop: {width}");
+    if k > 8.0 {
+        assert!(
+            near(placed.3 - placed.1, 1.2, 1e-6),
+            "scale {k}: the compartments' least heights follow the scale, so the drop is the master's height: {placed:?}"
+        );
+    }
+}
+
+#[test]
+fn the_ghost_of_a_class_is_the_box_its_drop_makes_at_1_to_1() {
+    the_ghost_of_a_class_is_the_box_its_drop_makes(1.0);
+}
+
+#[test]
+fn the_ghost_of_a_class_is_the_box_its_drop_makes_at_2_to_1() {
+    the_ghost_of_a_class_is_the_box_its_drop_makes(2.0);
+}
+
+/// The case of U49: beyond the range of eight, a group whose height follows its text.
+#[test]
+fn the_ghost_of_a_class_is_the_box_its_drop_makes_at_100_to_1() {
+    the_ghost_of_a_class_is_the_box_its_drop_makes(100.0);
+}
+
+/// The ghost of a master of a stencil file is the box its drop makes, beyond the range of eight too (the engine drops it on a copy of the document): the "Pointed" master is 2 by 1
+/// inches drawn at 1:1, and on a page at 100 to 1 the drop keeps that size on paper.
+#[test]
+fn the_ghost_of_a_stencil_file_master_is_the_box_its_drop_makes_beyond_the_range_of_eight() {
+    let dir = TempDir::new("pointed-ghost");
+    let path = fixture::write(dir.path(), "Pointed.vssx", &pointed_stencil());
+    let mut w = crate::editing::edit_window_with([1280.0, 900.0], |app| app.with_stencil_picker(crate::stencil_files::picker(path.clone())));
+    no_grid(&mut w);
+    let page = page_id(&w);
+    run_command(&mut w, "page.scale", json!({"page": page, "paper": 1.0, "drawing": 100.0}));
+    w.state_mut().execute("shapes.openStencil", &json!({})).unwrap();
+    w.rest();
+    let dragged = drag_and_drop(&mut w, "shapes.tile.Pointed");
+    dragged.assert_ghost_is_the_drop("a stencil file's master at 100 to 1");
+    let placed = dragged.placed;
+    assert!(near(placed.2 - placed.0, 2.0, 1e-9) && near(placed.3 - placed.1, 1.0, 1e-9), "the drop keeps the master's size on paper: {placed:?}");
+}
+
+/// U49, what it costs: the shape a drop would make is worked out **once for a drag**, whatever the pointer does over the page for dozens of frames, moving or still, and once more when the
+/// drawing changes under the drag (a change of the page's scale: the ghost is worked out again); a second drag makes its own. Counted (`snap::counts().drops`: the drops made on a copy of the
+/// document), not timed.
+#[test]
+fn the_shape_a_drop_would_make_is_worked_out_once_for_a_drag_and_again_when_the_scale_changes() {
+    let mut w = edit_window([1280.0, 900.0]);
+    no_grid(&mut w);
+    let page = page_id(&w);
+    show_stencil(&mut w, "uml-class");
+    diacraft_engine::snap::reset_counts();
+    let drops = || diacraft_engine::snap::counts().drops;
+    drag_tile(&mut w, "shapes.tile.Class", (5.0, 6.0));
+    assert_eq!(drops(), 1, "the first frames of the drag work the shape out once");
+    // Forty frames over the page: the pointer moving across it, then standing still.
+    for i in 0..20 {
+        let p = at_p(&w, (5.0 + 0.1 * f64::from(i), 6.0));
+        move_to(&mut w, p);
+    }
+    let still = at_p(&w, (7.0, 6.0));
+    for _ in 0..20 {
+        move_to(&mut w, still);
+    }
+    assert_eq!(drops(), 1, "forty more frames, moving and still, work nothing out");
+    let one_to_one = w.state().tile_ghost_rect().expect("the ghost is drawn");
+    // The page's scale changes under the drag: the drawing's revision is another, so the shape is worked out again, once, and the ghost is the box of 100 to 1: the master's size on paper (the compartments' least heights follow the scale, where the class was the shorter box).
+    w.state_mut().execute("page.scale", &json!({"page": page, "paper": 1.0, "drawing": 100.0})).unwrap();
+    for _ in 0..10 {
+        move_to(&mut w, still);
+    }
+    assert_eq!(drops(), 2, "a change of the page's scale works it out again, once");
+    let beyond = w.state().tile_ghost_rect().expect("the ghost is drawn");
+    assert!(
+        near(f64::from(beyond.height()), f64::from(one_to_one.height()), 1e-3)
+            && near(f64::from(beyond.width()), f64::from(one_to_one.width()), 1e-3),
+        "the least heights follow the scale, so the class keeps its size on paper: {one_to_one:?} then {beyond:?}"
+    );
+    release(&mut w, still);
+    assert_eq!(drops(), 2, "the release works nothing out");
+    // A second drag makes its own.
+    let to = drag_tile(&mut w, "shapes.tile.Class", (5.0, 3.0));
+    assert_eq!(drops(), 3, "another drag works its own shape out");
+    release(&mut w, to);
+}
+
 // ---------------------------------------------------------------------------------------------------------------- 8. the rotation handle through `snap_turn`
 
 /// The rotation handle turns a shape to another shape's angle within reach, which beats the step: at 150 points from the pin the step is 5 degrees and the

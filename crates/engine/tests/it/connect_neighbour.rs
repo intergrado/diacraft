@@ -77,16 +77,16 @@ fn the_nearest_wins_and_a_tie_goes_to_the_one_whose_centre_is_nearer_the_line() 
 }
 
 #[test]
-fn connectors_and_shapes_with_no_connection_point_are_no_neighbours() {
+fn a_connector_is_no_neighbour_and_a_group_with_no_connection_point_is_one() {
     let (mut s, a, b, c) = row();
     // A connector between b and c lies along the lane: it is not a neighbour of anything.
     run(&mut s, "connector.add", json!({"from": {"id": b}, "to": {"id": c}}));
     assert_eq!(neighbour(doc(&s), 1, a, Dir::Right), Some(b));
-    // A group has no connection point, so a connector could not be glued to it: it is passed over.
+    // A group has no connection point, and a connector is glued to the whole of it: it is the neighbour, being nearer than b.
     let near_one = drop_shape(&mut s, "rectangle", 5.0, 4.0);
     let far_one = drop_shape(&mut s, "ellipse", 5.2, 4.0);
-    run(&mut s, "shape.group", json!({"ids": [near_one, far_one]}));
-    assert_eq!(neighbour(doc(&s), 1, a, Dir::Right), Some(b), "the group between them is passed over");
+    let group = run(&mut s, "shape.group", json!({"ids": [near_one, far_one]}))["id"].as_u64().unwrap() as u32;
+    assert_eq!(neighbour(doc(&s), 1, a, Dir::Right), Some(group), "the group between them is the nearest shape a connector can be glued to");
 }
 
 #[test]
@@ -215,15 +215,22 @@ fn a_join_that_cannot_be_made_is_refused_in_words_and_changes_nothing() {
 }
 
 #[test]
-fn a_group_cannot_be_joined_by_a_drag_because_it_has_no_connection_point() {
+fn a_group_is_joined_by_a_drag_as_a_whole_and_a_point_named_on_it_is_refused() {
     let mut s = blank_session();
     let a = drop_shape(&mut s, "rectangle", 3.0, 4.0);
     let b = drop_shape(&mut s, "rectangle", 6.0, 4.0);
     let c = drop_shape(&mut s, "rectangle", 6.0, 6.0);
     let group = run(&mut s, "shape.group", json!({"ids": [b, c]}));
     let group = group["id"].as_u64().unwrap() as u32;
+    // It has no connection point, so none can be named: refused in words, nothing changes.
     let before = snapshot(&s);
-    let e = s.execute("connector.autoconnect", &json!({"from": a, "direction": "right", "to": group})).unwrap_err().to_string();
+    let e = s.execute("connector.autoconnect", &json!({"from": a, "direction": "right", "to": group, "to_point": 0})).unwrap_err().to_string();
     assert!(e.contains("connection point"), "{e}");
     assert_eq!(snapshot(&s), before);
+    // With no point named it is glued to as a whole.
+    let made = run(&mut s, "connector.autoconnect", json!({"from": a, "direction": "right", "to": group}));
+    assert_eq!(made["created"], false, "{made}");
+    assert_eq!(made["end"], json!({"id": group, "point": null}), "{made}");
+    assert!(made["begin"]["point"].is_u64(), "the arrow's own shape is glued at its point: {made}");
+    assert_eq!(check_session(&s), Ok(()));
 }

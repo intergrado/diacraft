@@ -401,11 +401,12 @@ fn a_cut_copies_and_deletes_in_one_step_and_a_paste_after_it_brings_the_shapes_b
 }
 
 #[test]
-fn a_cut_of_a_shape_with_a_connector_to_it_leaves_the_connector_with_a_plain_end_as_a_delete_does() {
+fn a_cut_of_a_shape_with_a_connector_to_it_leaves_the_connector_with_a_plain_end_as_a_delete_that_leaves_connectors_does() {
+    // A cut sends the shapes selected and no more, so it is the delete, which is `shape.delete` with `connectors: false` (takes the connectors).
     let mut a = joined();
     let mut b = joined();
     run(&mut a, "edit.cut", json!({"ids": [2]}));
-    run(&mut b, "shape.delete", json!({"ids": [2]}));
+    run(&mut b, "shape.delete", json!({"ids": [2], "connectors": false}));
     assert_eq!(doc(&a), doc(&b), "a cut is a delete after the copy");
 }
 

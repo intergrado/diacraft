@@ -13,6 +13,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+// The draw.io reader (`diacraft-mxfile`, layer 3) is declared ahead of the module that opens those files with it. Naming it here keeps cargo from reporting it as an unused dependency until
+// then (and keeps the workspace's entry for it used); the module that reads a draw.io file takes this line's place.
+use diacraft_mxfile as _;
+
 pub mod across;
 pub mod build_info;
 mod calc_index;
@@ -21,6 +25,7 @@ pub mod cmd;
 pub mod draw;
 pub mod error;
 pub mod file;
+pub mod file_access;
 pub mod formatting;
 pub mod guard;
 pub mod history;
@@ -33,6 +38,7 @@ pub mod odgfile;
 mod open_threads;
 pub mod print;
 mod session;
+mod setf_note;
 pub mod sheetview;
 pub mod snap;
 pub mod stencil;
@@ -47,8 +53,12 @@ mod kani_proofs;
 
 pub use cmd::{CommandInfo, CommandSpec, Enabled, MAX_BATCH_STEPS, Run, command_specs, find_command, param_keys};
 pub use diacraft_doc as doc;
+/// The person's settings: `config.toml`, the dictionaries and the AutoCorrect lists, one [`Profile`](diacraft_prefs::Profile) for the window, the command line and
+/// the MCP server (the crate `diacraft-prefs`, below the engine, so that its hostile-input parts are fuzzed on their own).
+pub use diacraft_prefs as prefs;
 pub use error::{EngineError, OpenProblem, Result};
 pub use history::History;
 pub use journal::{JOURNAL_LIMIT, JOURNAL_MAX_BYTES, JOURNAL_SLACK, Journal};
 pub use session::{HeldMemory, Session};
+pub use setf_note::dropped_words as setf_dropped_words;
 pub use text::shown;

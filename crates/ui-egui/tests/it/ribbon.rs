@@ -209,12 +209,14 @@ fn a_control_is_enabled_only_if_a_command_is_wired_to_it() {
         // The Review tab's Comments group: New Comment and the menu of the Comments pane, Show Markup, Previous and Next.
         "ReviewNewComment",
         "ShowCommentsMenu",
+        // Review, Accessibility, Check Accessibility opens the Accessibility pane wherever there is a drawing.
+        "AccessibilityChecker",
         // View, Show, Page Breaks is a box of the drawing; the Position menu and Re-Layout Page wait for a shape.
         "ShowPageBreaks",
     ] {
         assert!(enabled_seen.contains(&id), "{id} should work: {enabled_seen:?}");
     }
-    assert_eq!(enabled_seen.len(), 40, "{enabled_seen:?}");
+    assert_eq!(enabled_seen.len(), 41, "{enabled_seen:?}");
 }
 
 /// A disabled control says so to assistive technology too, and an enabled one does not.

@@ -7,7 +7,7 @@ members = ["crates/*", "apps/*", "xtask"]
 default-members = ["crates/*", "apps/diacraft", "apps/diacraft-cli", "xtask"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -24,6 +24,7 @@ diacraft-engine = { path = "crates/engine" }
 diacraft-fonts = { path = "crates/fonts" }
 diacraft-formula = { path = "crates/formula" }
 diacraft-geom = { path = "crates/geom" }
+diacraft-help = { path = "crates/help" }
 diacraft-layout = { path = "crates/layout" }
 diacraft-mcp = { path = "crates/mcp" }
 diacraft-metafile = { path = "crates/metafile" }
@@ -32,6 +33,7 @@ diacraft-native = { path = "crates/native" }
 diacraft-odg = { path = "crates/odg" }
 diacraft-opc = { path = "crates/opc" }
 diacraft-pdf = { path = "crates/pdf" }
+diacraft-prefs = { path = "crates/prefs" }
 diacraft-render = { path = "crates/render" }
 diacraft-route = { path = "crates/route" }
 diacraft-sheetxml = { path = "crates/sheetxml" }
@@ -54,14 +56,26 @@ craft-pathops = { git = "https://github.com/one-bit/craft-libs", rev = "53383939
 # revision until the crate's pull request to storytold/craft-libs merges; then this line moves to storytold/craft-libs at the merged revision. Its only
 # dependency is kurbo (one version here), so it needs no patch line.
 craft-snap = { git = "https://github.com/one-bit/craft-libs", rev = "70d5863acf50d8a22963323815b4737e6ca272ac" }
+# craft-settings: `config.toml` in the platform's config folder, atomic saves, a backup, recovery of a broken file, schema migration; the one settings store of DiaCraft.
+# On the web it has only the trait and the TOML helpers; `crates/prefs` keeps the same text in `localStorage` there. It brings `dirs` 7 and, through it, `option-ext` (MPL-2.0,
+# unmodified: NOTICE).
+craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "249a41bd9306a1b34330ac94e596a1a8b881378a" }
 
 # foundation
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
+# The settings file's TOML, read and written key by key with its comments kept (`crates/prefs`): the version craft-settings uses, so the build holds one.
+toml_edit = { version = "0.25", features = ["serde"] }
+# The system's language (MIT OR Apache-2.0): the first editing language of a new profile (`crates/prefs/src/locale.rs`). It reads the environment on Unix, the system
+# calls on Windows and macOS, and, with its `js` feature (`apps/diacraft-web`), the browser's languages; with none it finds nothing, and the profile says `en-US`.
+sys-locale = "0.3"
 # `O_NONBLOCK` for opening a file that may have been swapped for a pipe (crates/engine/src/file.rs). Already in the lock through the UI stack.
 libc = "0.2"
+# Whether two looks at a file are of one file, on Windows: its volume serial number and file index, which the standard library does not give on a stable toolchain
+# (crates/engine/src/file_access.rs). Already in the lock as walkdir's dependency; Unlicense OR MIT. Unix compares the device and the inode with the standard library alone.
+same-file = "1.0.6"
 # The global allocator of the desktop app and the command line, and of nothing else (owner 2026-11-21): Microsoft's mimalloc (MIT), the one C library
 # in the build, compiled by the `cc` crate. Both apps take it behind `cfg(not(target_arch = "wasm32"))`, so the web build never compiles it and keeps Rust's default allocator.
 mimalloc = { version = "0.1", default-features = false }
@@ -69,6 +83,22 @@ mimalloc = { version = "0.1", default-features = false }
 # -9999 to 9999, and a crate that needs more shifts by whole 400-year cycles (the log timestamp, `apps/diacraft/src/logging.rs`).
 jiff = { version = "1", default-features = false, features = ["std"] }
 proptest = "1"
+# The command line (`apps/diacraft-cli`, owner 2026-11-26): clap reads it and describes it to the completion and manual page generators, as the suite's command lines do. Its builder
+# API only (no derive, so no help text is fixed at compile time: the help is DiaCraft's own table, `apps/diacraft-cli/src/help`), and none of the features that print: the help, the colour and
+# the error text are ours. `string` lets a command id from the registry be a completion value.
+clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context", "string"] }
+# Shell completions. Held to 4.5: 4.6 breaks bash completion of the subcommands of a program whose name has a hyphen (clap-rs/clap#6421), and `diacraft-cli` has one. A test runs bash on the script.
+clap_complete = "~4.5.67"
+# Manual pages (roff), from the same command description.
+clap_mangen = "0.3"
+# Colour in the help and in the messages: styles, and a stream that strips them or, on a Windows console, turns them on. The versions clap uses.
+anstream = "1"
+anstyle = "1"
+# The width of the terminal the help is wrapped to (clap uses it too), and the width of a letter on it.
+terminal_size = "0.4"
+unicode-width = "0.2"
+# A pseudo-terminal for the command line's tests of its colours and width, on Unix (dev-dependency only). Already in the lock through the UI stack.
+rustix = { version = "1", default-features = false, features = ["std", "fs", "pty", "termios"] }
 # A counting allocator (MIT), the global allocator of `crates/sheetxml`'s test binary and of nothing else: the model's memory tests count the bytes
 # and the allocations a decode keeps, which the resident size of the process does not show. It passes every call on to the system's allocator. A dev-dependency only.
 stats_alloc = "0.1"
@@ -88,6 +118,8 @@ harfrust = "0.16"
 unicode-bidi = "0.3"
 unicode-linebreak = "0.1"
 unicode-segmentation = "1"
+# Folding for the help search (`diacraft-help`): decomposition, with the combining marks dropped. Pure Rust, in the lock already through the UI stack.
+unicode-normalization = "0.1"
 
 # ui (layer 6 only; `cargo xtask layers` enforces it)
 egui = "0.37"
@@ -180,16 +212,19 @@ hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "249
 # The sweep line behind `craft-pathops`, vendored in the fork the crate is pinned to (MIT OR Apache-2.0): the crate's README has an app that depends
 # on it by git add this entry. It moves with the `craft-pathops` line in `[workspace.dependencies]`.
 linesweeper = { git = "https://github.com/one-bit/craft-libs", rev = "533839399341547b29ababfb8ef030298b133914" }
-ecolor = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-emath = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-epaint = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-egui = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-egui-winit = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-egui_glow = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
-eframe = { git = "https://github.com/storytold/egui.git", rev = "310f43c5c003eee784b8a302a0c70c2985c04bfb" }
+# The egui family comes from the one-bit fork, on its `craft/altgr-ctrl-alt` branch pinned by full revision: the suite's fork at `310f43c5` (the revision every craft app pins)
+# plus the fork's `PATCHES.md` row E22, which keeps the text of a press with Ctrl and the left Alt key held on Windows (a layout with an AltGr key types `€`, `@` or `ł` for it;
+# egui-winit dropped that text as a chord's side effect). The 10 lines move together, back to storytold/egui when it merges the change and to its release when one holds it.
+ecolor = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+emath = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+epaint = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+epaint_default_fonts = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+egui = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+egui-winit = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+egui-wgpu = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+egui_glow = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+egui_kittest = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
+eframe = { git = "https://github.com/one-bit/egui.git", rev = "0a57a25f155dceadd8c5aca175adf3ca7524df10" }
 winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
 # The native file dialogs (`rfd`, used by `apps/diacraft` only), from the one-bit fork at the head of its `craft/0.18.0` branch: rfd 0.18.0 plus the Save dialog's chosen format
 # setting the file's extension on each system. The XDG portal part is the open upstream pull request PolyMeilex/rfd#341 (by itsF4LCON, a cherry-pick that keeps its

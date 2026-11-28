@@ -347,12 +347,12 @@ pub fn lock(doc: &mut Document, page: u32, ids: &[u32], locked: Option<bool>) ->
 }
 
 /// Puts the outline of `look` in place of the container's `Geometry` sections, where the first of them was.
-fn put_geometry(sheet: &mut diacraft_doc::Sheet, geometry: Vec<diacraft_doc::Section>) {
-    let place = sheet.sections.iter().position(|s| s.name.as_str() == "Geometry").unwrap_or(sheet.sections.len());
-    sheet.sections.retain(|s| s.name.as_str() != "Geometry");
-    let place = place.min(sheet.sections.len());
+fn put_geometry(counted: &mut diacraft_doc::Counted<'_>, geometry: Vec<diacraft_doc::Section>) {
+    let place = counted.sheet.sections.iter().position(|s| s.name.as_str() == "Geometry").unwrap_or(counted.sheet.sections.len());
+    counted.retain_sections(|s| s.name.as_str() != "Geometry");
+    let place = place.min(counted.sheet.sections.len());
     for (n, section) in geometry.into_iter().enumerate() {
-        sheet.sections.insert(place + n, Arc::new(section));
+        counted.insert_section(place + n, Arc::new(section));
     }
 }
 
@@ -370,7 +370,7 @@ pub(super) fn regeometry(
     let index = u32::try_from(at).map_err(|_| Problem::failed("a shape's place is out of range"))?;
     let new = look(style, side, size, band);
     let shape = shape_mut(doc, page, &[index]).ok_or_else(|| Problem::failed("a shape went away"))?;
-    put_geometry(Arc::make_mut(&mut shape.sheet), new.geometry);
+    put_geometry(&mut shape.counted_sheet(), new.geometry);
     Ok(())
 }
 
@@ -380,17 +380,17 @@ fn restyle(doc: &mut Document, page: u32, at: usize, style: &StyleSpec, side: Si
     let new = look(style, side, size, band);
     {
         let shape = shape_mut(doc, page, &[index]).ok_or_else(|| Problem::failed("a shape went away"))?;
-        let sheet = Arc::make_mut(&mut shape.sheet);
+        let mut counted = shape.counted_sheet();
         for (name, cell) in new.cells {
-            sheet.cells.insert(diacraft_doc::CellName::new(name), cell);
+            counted.set_cell(&diacraft_doc::CellAddr::direct(name), cell).map_err(|e| Problem::failed(e.to_string()))?;
         }
-        put_geometry(sheet, new.geometry);
+        put_geometry(&mut counted, new.geometry);
         // The heading's alignment is the style's; the other cells of its paragraph and characters are the person's.
         for section in new.text_sections.into_iter().filter(|s| s.name.as_str() == "Paragraph") {
             if let Some(row) = section.rows.first() {
                 for (name, cell) in row.cells.iter() {
                     let addr = diacraft_doc::CellAddr::in_row("Paragraph", None, diacraft_doc::RowKey::Ix(0), name.as_str());
-                    sheet.set_cell(&addr, cell.clone()).map_err(|e| Problem::failed(e.to_string()))?;
+                    counted.set_cell(&addr, cell.clone()).map_err(|e| Problem::failed(e.to_string()))?;
                 }
             }
         }
@@ -445,7 +445,9 @@ pub fn set_style(doc: &mut Document, page: u32, ids: &[u32], style_id: &str) -> 
         restyle(doc, page, r.at, style, r.settings.heading, r.size, r.band)?;
     }
     settle(doc, &before, page, ids, &[])?;
-    Ok(plan.len())
+    // The containers the style changed: one that has the look already is as it was, and is not counted.
+    let shape_at = |d: &Document, at: usize| d.page(page).and_then(|p| p.shapes.get(at)).cloned();
+    Ok(plan.iter().filter(|r| shape_at(doc, r.at) != shape_at(&before, r.at)).count())
 }
 
 /// Heading Style (`container.heading`): the side the heading is on, or the next one round (`None`, Rotate Heading). The containers are brought to their setting.
@@ -919,14 +921,14 @@ fn write_back(doc: &mut Document, page: u32, hits: Vec<(usize, ties::Ties)>) -> 
         let source = ties.print();
         let index = u32::try_from(at).map_err(|_| Problem::failed("a shape's place is out of range"))?;
         let shape = shape_mut(doc, page, &[index]).ok_or_else(|| Problem::failed("a shape went away"))?;
-        let sheet = Arc::make_mut(&mut shape.sheet);
+        let mut counted = shape.counted_sheet();
         if source == "SUM()" {
-            sheet.cells.remove("Relationships");
+            counted.remove_cell(&diacraft_doc::CellAddr::direct("Relationships"));
         } else {
-            let old = sheet.cell("Relationships").cloned();
+            let old = counted.sheet.cell("Relationships").cloned();
             let mut cell = diacraft_doc::Cell::with_formula(&source, Some(diacraft_doc::Value::from_text("0")));
             cell.unit = old.and_then(|c| c.unit);
-            sheet.cells.insert(diacraft_doc::CellName::new("Relationships"), cell);
+            counted.set_cell(&diacraft_doc::CellAddr::direct("Relationships"), cell).map_err(|e| Problem::failed(e.to_string()))?;
         }
     }
     Ok(())

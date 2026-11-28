@@ -404,8 +404,9 @@ fn a_master_is_found_by_id_by_name_and_a_stencil_that_is_not_open_is_refused() {
     assert!(msg.contains("Nope") && msg.contains("file-1"), "{msg}");
     let msg = refusal(&mut s, "shape.drop", json!({"master": "Process", "stencil": "file-7", "page": 1, "x": 1, "y": 1}));
     assert!(msg.contains("file-7") && msg.contains("stencil.open"), "{msg}");
-    // Without `stencil` the built-in stencils are searched, as they were; a built-in stencil can be named.
-    let msg = refusal(&mut s, "shape.drop", json!({"master": "Link", "page": 1, "x": 1, "y": 1}));
+    // Without `stencil` the built-in stencils are searched, as they were (a name that is no built-in master is refused as one of them: Chen's Link is one, so this asks for a name no stencil has); a built-in
+    // stencil can be named.
+    let msg = refusal(&mut s, "shape.drop", json!({"master": "Gizmo", "page": 1, "x": 1, "y": 1}));
     assert!(msg.contains("built-in"), "{msg}");
     run(&mut s, "shape.drop", json!({"master": "Process", "stencil": "flowchart", "page": 1, "x": 1, "y": 1}));
     let msg = refusal(&mut s, "shape.drop", json!({"master": "Process", "stencil": "basic", "page": 1, "x": 1, "y": 1}));

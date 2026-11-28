@@ -8,8 +8,8 @@
 use std::ops::Range;
 
 use crate::bidi::{Edge, edge_of, reset_edges, visual_order};
-use crate::formats::{Decor, RunStyle};
-use crate::laid::{Decoration, DecorationKind, GlyphRun, Line, PlacedGlyph};
+use crate::formats::{Decor, RunStyle, japanese_or_korean};
+use crate::laid::{Decoration, DecorationKind, GlyphRun, Line, PlacedGlyph, RightOf};
 use crate::model::Rgba;
 use crate::place::{LinePlan, ParaPlan};
 use crate::prepare::{Kind, Paragraph};
@@ -31,6 +31,8 @@ pub(crate) struct Env<'a, 'r> {
     pub cells: &'a Paragraph,
     pub entries: &'a [FaceEntry],
     pub styles: &'a [RunStyle<'r>],
+    /// The layout is the one across of vertical text, which is turned afterwards (`vertical.rs`).
+    pub vertical: bool,
 }
 
 /// What makes two clusters one run: everything a renderer sets once for a run of glyphs.
@@ -43,6 +45,8 @@ struct RunKey {
     color: Rgba,
     opacity: u64,
     decor: Decor,
+    /// The run's underline goes on the right of a column of vertical text (see [`on_the_right`]): it parts a run at a change of language, which nothing else does.
+    right: bool,
 }
 
 struct Open {
@@ -53,7 +57,13 @@ struct Open {
     decor: Decor,
 }
 
-fn run_key(c: &Cluster, style: &RunStyle<'_>) -> RunKey {
+/// Does a run's underline go on the right of its column? In vertical text, for a run of Japanese or Korean; every
+/// other run keeps the baseline's side, and text across is never touched.
+fn on_the_right(style: &RunStyle<'_>, vertical: bool) -> bool {
+    vertical && (style.decor.underline || style.decor.double_underline) && japanese_or_korean(style.lang)
+}
+
+fn run_key(c: &Cluster, style: &RunStyle<'_>, vertical: bool) -> RunKey {
     RunKey {
         face: c.face,
         size: c.size.to_bits(),
@@ -62,6 +72,7 @@ fn run_key(c: &Cluster, style: &RunStyle<'_>) -> RunKey {
         color: style.color,
         opacity: style.opacity.to_bits(),
         decor: style.decor,
+        right: on_the_right(style, vertical),
     }
 }
 
@@ -81,11 +92,16 @@ fn glyph_run(entry: &FaceEntry, size: f64, x_scale: f64, color: Rgba, opacity: f
 
 /// One line through or under a run: a rectangle from `x0` to `x1` whose top edge is `top` and which is `thickness` tall.
 fn bar(kind: DecorationKind, span: (f64, f64), top: f64, thickness: f64, run: &GlyphRun) -> Decoration {
-    Decoration { kind, x0: span.0, x1: span.1, top, thickness, color: run.color, opacity: run.opacity, vertical: false }
+    Decoration { kind, x0: span.0, x1: span.1, top, thickness, color: run.color, opacity: run.opacity, vertical: false, right_of: None }
+}
+
+/// An underline, which is put on the right of the column when its run asks for that: `outward` is how far beyond the first line it is.
+fn underline(kind: DecorationKind, span: (f64, f64), top: f64, thickness: f64, run: &GlyphRun, right: Option<f64>) -> Decoration {
+    Decoration { right_of: right.map(|outward| RightOf { em: run.size, outward }), ..bar(kind, span, top, thickness, run) }
 }
 
 /// The lines a run asks for, placed from its face's tables.
-fn decorations(open: &Open, x1: f64, baseline: f64, out: &mut Vec<Decoration>) {
+fn decorations(open: &Open, x1: f64, baseline: f64, right: bool, out: &mut Vec<Decoration>) {
     let (face, size) = (&open.run.face, open.run.size);
     let y = baseline + open.y_off;
     let under = face.underline().map_or(DEFAULT_UNDERLINE, |s| (s.top, s.thickness));
@@ -94,10 +110,11 @@ fn decorations(open: &Open, x1: f64, baseline: f64, out: &mut Vec<Decoration>) {
     // A double line beats the single one: two lines, not three, a thickness apart.
     if d.double_underline {
         for step in [0.0, 2.0] {
-            out.push(bar(DecorationKind::DoubleUnderline, span, y + (under.0 - step * under.1) * size, under.1 * size, run));
+            let outward = right.then_some(step * under.1 * size);
+            out.push(underline(DecorationKind::DoubleUnderline, span, y + (under.0 - step * under.1) * size, under.1 * size, run, outward));
         }
     } else if d.underline {
-        out.push(bar(DecorationKind::Underline, span, y + under.0 * size, under.1 * size, run));
+        out.push(underline(DecorationKind::Underline, span, y + under.0 * size, under.1 * size, run, right.then_some(0.0)));
     }
     if d.overline {
         let t = face.underline().map_or(DEFAULT_THICKNESS, |s| s.thickness);
@@ -125,7 +142,7 @@ impl<'a, 'r> LineBuilder<'a, 'r> {
     fn close(&mut self, x1: f64) {
         if let Some(open) = self.open.take() {
             if open.decor != Decor::default() {
-                decorations(&open, x1, self.baseline, &mut self.decorations);
+                decorations(&open, x1, self.baseline, open.key.right, &mut self.decorations);
             }
             if !open.run.glyphs.is_empty() {
                 self.runs.push(open.run);
@@ -137,7 +154,7 @@ impl<'a, 'r> LineBuilder<'a, 'r> {
     fn run_for(&mut self, c: &Cluster, pen: f64) -> Option<&mut Open> {
         let entry = self.env.entries.get(c.face)?;
         let style = self.env.styles.get(c.run as usize)?;
-        let key = run_key(c, style);
+        let key = run_key(c, style, self.env.vertical);
         if self.open.as_ref().is_none_or(|o| o.key != key) {
             self.close(pen);
             let run = glyph_run(entry, c.size, c.x_scale, style.color, style.opacity, Vec::new());

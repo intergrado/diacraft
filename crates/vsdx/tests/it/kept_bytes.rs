@@ -51,8 +51,14 @@ fn a_small_drawing_that_keeps_unknown_xml_is_written_to_the_bytes_the_writer_wit
     let (a, b) = (fnv(&bytes), fnv(&diacraft_vsdx::write(&drawing(), None).expect("again")));
     assert_eq!(a, b, "a write is deterministic");
     println!("HASH {a:016x} of {} bytes", bytes.len());
-    assert_eq!(a, EXPECTED, "the bytes are not what the writer of main made of this drawing");
+    assert_eq!(a, EXPECTED, "the bytes are not what the writer of this build makes of this drawing");
 }
 
-/// The FNV-1a of the bytes that the writer of main (f57f9b9e) wrote of `drawing()`.
-const EXPECTED: u64 = 0x1bf9679a5fa954ff;
+/// The FNV-1a of the bytes the writer writes of `drawing()` now: the same bytes and the cells of the root style a new drawing holds beyond the ones it held (the root's `DropOnPageScale` 1,
+/// the ruling on F40, and the text cells it states: the whole `Paragraph` row, the rest of the text block and the cells of the first run). **The earlier pin**
+/// (`0xf7244fd8457d98d1`, the bytes with `DropOnPageScale` and none of the text cells) and the one before it (`0x1bf9679a5fa954ff`, the writer of main f57f9b9e) were each checked by writing the
+/// drawing with the cells out of its root (`diacraft_testkit::fixtures::without_root_factor`), and that check cannot be made of this writer any more: **the model writer adds to the root of a
+/// drawing that came from no file the cells a reader would take as another value** (`write::root`), so a drawing with the cells out is written with some of them put back. The encoder is held
+/// as it was by the model's stamp and the `.diacraft` bytes, which no writer of a package touches (`sheetxml`'s `content_stamp_of_the_blank_drawing_is_pinned` and `native`'s
+/// `determinism`), and what the cells moved here is said by `root_style.rs`.
+const EXPECTED: u64 = 0x406c_5fdc_f3cb_3951;

@@ -6,8 +6,8 @@
 //! Properties, Layout and Routing, Alt Text). It works on a **draft**: nothing reaches the drawing until OK, which sends what the person changed as
 //! the page commands (one command, or one `command.batch` that is one undo step), and Cancel or Escape sends nothing. **The Layout and Routing tab**
 //! (`page_setup/routing.rs`, its Spacing dialog `routing_spacing.rs` and its preview `routing_preview.rs`) reads `page.routing` and adds a
-//! `page.set_routing` and a `connector.line_jumps` to what OK sends, always in a batch. The Alt Text tab has no command behind it yet, so it is drawn quiet and
-//! cannot be opened.
+//! `page.set_routing` and a `connector.line_jumps` to what OK sends, always in a batch. **The Alt Text tab** (`page_setup/alt_text.rs`) holds the page's Title and Description and
+//! adds a `page.alt_text` with the text that was changed.
 //!
 //! **What the Print Setup tab cannot change yet** (the engine has no command for any of it: left print margins and centring out and the
 //! printing task reads the cells without writing them): print zoom (`ScaleX`, `OnPage`, `PagesX`, `PagesY`), the four margins, centring and the
@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use crate::app::DiacraftApp;
 use crate::theme::{self, Tokens, size};
 
+mod alt_text;
 mod routing;
 mod routing_preview;
 mod routing_spacing;
@@ -69,18 +70,16 @@ impl DialogTab {
     pub fn from_name(name: &str) -> Option<DialogTab> {
         DialogTab::ALL.into_iter().find(|t| t.name().eq_ignore_ascii_case(name.trim()))
     }
-
-    /// Whether the tab has controls that work: the last has no engine command behind it yet.
-    pub const fn works(self) -> bool {
-        !matches!(self, DialogTab::AltText)
-    }
 }
 
 /// The units a custom drawing scale is given in (the engine's `length_unit`), as the dialog's lists spell them.
 const UNITS: [&str; 8] = ["in", "ft", "yd", "mi", "mm", "cm", "m", "km"];
 
-/// The most characters a typed number or a page name takes in the dialog.
+/// The most characters a typed number takes in the dialog.
 const FIELD_CHARS: usize = 64;
+
+/// The most characters a page's name takes in the dialog: a page name has at most 31 characters (the engine refuses a longer one).
+const NAME_CHARS: usize = diacraft_engine::doc::MAX_PAGE_NAME_CHARS;
 
 /// The most background pages the Background box lists.
 const MAX_BACKGROUNDS_LISTED: usize = 500;
@@ -129,6 +128,8 @@ pub struct Dialog {
     scrolled_for: Option<DialogTab>,
     /// The Layout and Routing tab's draft, read from `page.routing` when the dialog opened (`None`: the engine did not answer).
     routing: Option<routing::Routing>,
+    /// The Alt Text tab's draft, read from the page's alt text when the dialog opened (`alt_text.rs`).
+    alt: alt_text::Alt,
 }
 
 /// The Reorder Pages dialog while it is open.
@@ -280,6 +281,10 @@ impl Dialog {
         if let Some(routing) = &self.routing {
             out.extend(routing.commands(page)?);
         }
+        // The Alt Text tab's: a `page.alt_text` with only the text that was changed.
+        if let Some(params) = self.alt.command(page) {
+            out.push(("page.alt_text", params));
+        }
         Ok(out)
     }
 }
@@ -340,9 +345,6 @@ impl DiacraftApp {
 
     /// Opens the Page Setup dialog on `tab`, for page `page` or the page on view. A dialog that is open changes tab (and keeps what was typed).
     pub(crate) fn open_page_setup(&mut self, tab: DialogTab, page: Option<u32>) -> Result<()> {
-        if !tab.works() {
-            return Err(bad(format!("the {} tab has no controls yet", tab.name())));
-        }
         if let Some(dialog) = self.ui.page_setup.dialog.as_mut()
             && page.is_none_or(|p| p == dialog.page)
         {
@@ -359,6 +361,7 @@ impl DiacraftApp {
         let doc = self.session.document().ok_or_else(|| bad("no document open"))?;
         let print = PrintSetup::of(doc, page);
         let draft = Draft::of(&base);
+        let alt = alt_text::Alt::read(doc, page);
         // The pages the Background box lists: the background pages, but the page itself and those that would make a loop (a background that has this page for its own).
         let backgrounds: Vec<(u32, String)> = doc
             .pages
@@ -369,8 +372,15 @@ impl DiacraftApp {
             .collect();
         let can_be_background = base.background || doc.pages.iter().any(|p| p.id != page && !p.background);
         self.ui.page_setup.dialog =
-            Some(Dialog { tab, page, base, print, draft, backgrounds, can_be_background, error: None, scrolled_for: None, routing });
+            Some(Dialog { tab, page, base, print, draft, backgrounds, can_be_background, error: None, scrolled_for: None, routing, alt });
         Ok(())
+    }
+
+    /// Edit Alt Text for a page: the Title box of the dialog's Alt Text tab takes the keyboard.
+    pub(crate) fn page_setup_focus_alt_title(&mut self) {
+        if let Some(dialog) = self.ui.page_setup.dialog.as_mut() {
+            dialog.alt.focus_title = true;
+        }
     }
 
     /// Closes the Page Setup dialog without sending anything.
@@ -387,6 +397,8 @@ impl DiacraftApp {
         self.ui.shape_data.define = None;
         self.ui.shape_data.ask = None;
         self.ui.zoom_dialog = None;
+        self.ui.offset_dialog = None;
+        self.ui.fit_dialog = None;
         self.ui.colors_dialog = None;
         self.ui.palette = None;
         self.ui.relayout = Default::default();
@@ -455,6 +467,12 @@ impl DiacraftApp {
         if self.ui.zoom_dialog.is_some() {
             self.zoom_dialog(ctx, t);
         }
+        if self.ui.offset_dialog.is_some() {
+            self.offset_dialog(ctx, t);
+        }
+        if self.ui.fit_dialog.is_some() {
+            self.fit_curve_dialog(ctx, t);
+        }
         if self.ui.colors_dialog.is_some() {
             self.colors_dialog(ctx, t);
         }
@@ -480,6 +498,8 @@ impl DiacraftApp {
         if self.ui.insert.symbol.is_some() {
             self.symbol_dialog(ctx, t);
         }
+        // The cards of the ShapeSheet window: Insert Section and Edit Formula (`sheet/cards.rs`).
+        self.sheet_cards(ctx, t);
         if self.ui.licenses.is_some() {
             self.licenses_window(ctx, t);
         }
@@ -521,7 +541,7 @@ impl DiacraftApp {
                         DialogTab::DrawingScale => scale_tab(ui, &t, &mut dialog, list_h, &mut seen),
                         DialogTab::PageProperties => properties_tab(ui, &t, &mut dialog, &mut seen),
                         DialogTab::LayoutAndRouting => routing::tab(ui, &t, &mut dialog, &mut seen),
-                        DialogTab::AltText => {}
+                        DialogTab::AltText => alt_text::tab(ui, &t, &mut dialog, &mut seen),
                     }
                 });
             seen.push(("pagesetup.content".to_owned(), content.inner_rect, true));
@@ -568,19 +588,13 @@ impl DiacraftApp {
     }
 }
 
-/// The row of tabs. The one that has nothing behind it is drawn quiet.
+/// The row of tabs.
 fn tab_strip(ui: &mut Ui, t: &Tokens, dialog: &mut Dialog, seen: &mut Vec<(String, egui::Rect, bool)>) {
     ui.horizontal_wrapped(|ui| {
         for tab in DialogTab::ALL {
             let selected = dialog.tab == tab;
-            let button = ui.add_enabled(
-                tab.works(),
-                egui::Button::selectable(
-                    selected,
-                    RichText::new(tab.name()).font(theme::font(size::LABEL)).color(if tab.works() { t.text } else { t.text_disabled }),
-                ),
-            );
-            seen.push((format!("pagesetup.tab.{}", tab.name()), button.rect, tab.works()));
+            let button = ui.add(egui::Button::selectable(selected, RichText::new(tab.name()).font(theme::font(size::LABEL)).color(t.text)));
+            seen.push((format!("pagesetup.tab.{}", tab.name()), button.rect, true));
             if button.clicked() {
                 dialog.tab = tab;
             }
@@ -886,7 +900,7 @@ fn properties_tab(ui: &mut Ui, t: &Tokens, dialog: &mut Dialog, seen: &mut Vec<(
     ui.horizontal(|ui| {
         label(ui, t, "Name");
         let response =
-            ui.add(egui::TextEdit::singleline(&mut dialog.draft.name).desired_width(220.0).char_limit(FIELD_CHARS).font(theme::font(size::LABEL)));
+            ui.add(egui::TextEdit::singleline(&mut dialog.draft.name).desired_width(220.0).char_limit(NAME_CHARS).font(theme::font(size::LABEL)));
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Page name"));
         seen.push(("pagesetup.name".to_owned(), response.rect, true));
     });

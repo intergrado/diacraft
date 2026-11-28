@@ -67,7 +67,10 @@ fn vsdx_drawing() -> Vec<u8> {
     let layer = r#"<Section N="Layer"><Row IX="0"><Cell N="Name" V="Connector"/><Cell N="Visible" V="1"/></Row></Section>"#;
     VsdxBuilder::new()
         .styles(styles)
-        .face_names(r#"<FaceName NameU="Arial"/><FaceName NameU="Noto Sans"/>"#)
+        // The attributes a VSDX file's faces hold: each face says more than its name, so its loss is a missing font though no cell names it.
+        .face_names(
+            r#"<FaceName NameU="Arial" UnicodeRanges="1 2 3 4" CharSets="1 0"/><FaceName NameU="Noto Sans" UnicodeRanges="5 6 7 8" CharSets="1 0"/>"#,
+        )
         .core(core)
         .master(
             MasterSpec::new(1, "Rect").shapes(r#"<Shape ID="5" Type="Shape"><Cell N="Width" V="1" U="IN"/><Cell N="Height" V="1" U="IN"/></Shape>"#),
@@ -159,6 +162,27 @@ fn the_line_ends_of_a_vsdx_drawing_are_lost_in_an_odg_and_the_save_says_so() {
     let (classes, _) = named(&saved);
     assert_eq!(classes, vec![(Class::LineEnds, 1)], "{saved}");
     assert_eq!(saved["checked"]["classes"][0], json!({ "class": "line-ends", "words": "1 line end differs", "count": 1 }));
+}
+
+/// **A cell the `Theme` style gives through `THEMEVAL()` has no value of its own to differ from** (issue 10 of the demo video): a drawing the app made from the Basic Network Diagram template and gave a theme,
+/// saved as an `.odg`, was told "6 line ends differ" and "13 items differ". The drawing's connectors and devices follow the `Theme` style, whose cells (a line end's size, a connector's rounding) hold
+/// `THEMEVAL()` and the placeholder `Themed`, and the `.odg` writes the value the cell draws with, as a number: the same content, written as values, and no loss.
+#[test]
+fn a_drawing_the_app_made_from_the_network_template_saved_as_an_odg_is_told_no_line_ends_and_no_style_content_differ() {
+    let dir = Dir::new();
+    let mut s = pinned();
+    run(&mut s, "file.new", json!({ "template": "basic_network" }));
+    // The demo's drawing had a theme (the shapes follow the `Theme` style, whose cells are `THEMEVAL()`).
+    run(&mut s, "theme.apply", json!({ "theme": "fernwood" }));
+    for (master, x) in [("network.router", 2.0), ("network.switch", 5.0), ("computers.desktop", 8.0)] {
+        run(&mut s, "shape.drop", json!({ "master": master, "page": 1, "x": x, "y": 5.0 }));
+    }
+    run(&mut s, "connector.add", json!({ "from": { "id": 1 }, "to": { "id": 2 } }));
+    run(&mut s, "connector.add", json!({ "from": { "id": 2 }, "to": { "id": 3 } }));
+    let saved = save_as(&mut s, &dir, "network.odg");
+    let (classes, as_values) = named(&saved);
+    assert!(!classes.iter().any(|(class, _)| matches!(class, Class::LineEnds | Class::StyleContent)), "{saved}");
+    assert!(as_values, "the values a style gave are written on the shapes, and the card says so once: {saved}");
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------- clean

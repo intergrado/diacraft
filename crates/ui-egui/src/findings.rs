@@ -109,7 +109,15 @@ fn describe(kind: SkipKind, n: usize) -> Option<(Group, String)> {
         }
         SkipKind::GlyphsCut => (NotShown, format!("{} cut short", count(n, "long text block", "long text blocks"))),
         SkipKind::MissingGlyphs => (NotShown, format!("{} with letters no installed font can draw", count(n, "text block", "text blocks"))),
-        SkipKind::CustomLineEnd => (NotShown, format!("{} not drawn", count(n, "custom line end", "custom line ends"))),
+        // A custom end is drawn from its master; the renderer notes one only when the master cannot be drawn as a line end and number 4 is drawn instead.
+        SkipKind::CustomLineEnd => {
+            let (noun, why) = if n == 1 {
+                ("custom line end", "its master cannot be drawn as a line end")
+            } else {
+                ("custom line ends", "their masters cannot be drawn as line ends")
+            };
+            (Approximate, format!("{n} {noun} drawn as line end number 4, because {why}"))
+        }
         SkipKind::TooDeep => (NotShown, format!("{} nested too deeply to draw", count(n, "group", "groups"))),
         SkipKind::ViewRefused => (NotShown, "The picture was too large to draw at this zoom".to_owned()),
         SkipKind::NoSuchPage => (NotShown, "The page is not in the drawing".to_owned()),
@@ -118,12 +126,20 @@ fn describe(kind: SkipKind, n: usize) -> Option<(Group, String)> {
         SkipKind::GeometryRow => {
             (Approximate, format!("{} skipped or drawn by a fallback rule", count(n, "piece of an outline", "pieces of outlines")))
         }
-        SkipKind::TextNote => (Approximate, format!("{} drawn in a stand-in font or cut short", count(n, "text block", "text blocks"))),
+        SkipKind::TextNote => (Approximate, format!("{} cut short or laid out approximately", count(n, "text block", "text blocks"))),
+        // The faces are named after the sentence, from the renderer's sample (`from_render`): which the file asks for and what drew it.
+        SkipKind::FaceStandIn => (
+            Approximate,
+            format!("{} drawn in a stand-in font, as the font the file names is not on this machine", count(n, "text block", "text blocks")),
+        ),
         SkipKind::PatternApproximate => (Approximate, format!("{} drawn approximately", count(n, "patterned fill", "patterned fills"))),
         SkipKind::CustomPattern => {
             (Approximate, format!("{} drawn solid where the file uses a custom pattern", count(n, "fill or line", "fills and lines")))
         }
         SkipKind::DashesTooMany => (Approximate, format!("{} drawn solid because the dashes were too fine", count(n, "dashed line", "dashed lines"))),
+        SkipKind::PatternOutsideTable => {
+            (Approximate, format!("{} drawn solid because the pattern's number is not in the list", count(n, "fill or line", "fills and lines")))
+        }
         SkipKind::StrokeClamped => (Approximate, format!("{} wider than DiaCraft draws, drawn at the widest it can", count(n, "line", "lines"))),
         // The kind of end is always drawn as its own art; what is estimated is its size (a box no source measures, or a size class that is none).
         SkipKind::LineEndApproximate => (Approximate, format!("{} drawn at a size DiaCraft had to estimate", count(n, "line end", "line ends"))),
@@ -133,6 +149,10 @@ fn describe(kind: SkipKind, n: usize) -> Option<(Group, String)> {
         SkipKind::GradientApproximate => (Approximate, format!("{} drawn approximately", count(n, "gradient", "gradients"))),
         SkipKind::ShadowApproximate => (Approximate, format!("{} drawn approximately", count(n, "shadow", "shadows"))),
         SkipKind::ThemeUnanswered => (Approximate, format!("{} drawn with plain colours where the file uses a theme", count(n, "shape", "shapes"))),
+        SkipKind::UnsavedUnanswered => (
+            Approximate,
+            format!("{} left at their defaults: the page holds more formulas than DiaCraft works out at once", count(n, "cell", "cells")),
+        ),
         SkipKind::DanglingLink => (Approximate, format!("{} drawn without the master or style the file does not have", count(n, "shape", "shapes"))),
         // Only an export meets this (the window draws letters as outlines always): the sentence is for a list an export's report is shown in.
         SkipKind::TextAsOutlines => {
@@ -147,6 +167,10 @@ pub fn from_render(skipped: &[Skipped]) -> Vec<Finding> {
         .iter()
         .filter_map(|s| {
             let (group, text) = describe(s.kind, s.count)?;
+            // The fonts a stand-in drew are in the line itself: a person reads which font is missing and what the text is drawn in without a tooltip.
+            if s.kind == SkipKind::FaceStandIn && !s.first.is_empty() {
+                return Some(Finding { group, text: shown(&format!("{text}: {}", s.first), LINE_CHARS), detail: None });
+            }
             let detail = (!s.first.is_empty()).then(|| format!("For example: {}", shown(&s.first, DETAIL_CHARS)));
             Some(Finding { group, text, detail })
         })
@@ -183,6 +207,23 @@ mod tests {
         assert_eq!(from_render(&[skip(SkipKind::MetafilePlaceholder, 1)])[0].text, "1 picture not shown yet (EMF or WMF)");
     }
 
+    /// Issue 9: the faces a stand-in drew are in the line itself, the count is of text blocks, and the old catch-all does not say "stand-in font".
+    #[test]
+    fn a_font_a_stand_in_drew_is_named_in_the_line_and_a_cut_is_not_called_a_stand_in() {
+        let named = from_render(&[Skipped { kind: SkipKind::FaceStandIn, count: 7, first: "Liberation Sans (drawn in Ubuntu Light)".to_owned() }]);
+        assert_eq!(named.len(), 1);
+        assert_eq!(
+            named[0].text,
+            "7 text blocks drawn in a stand-in font, as the font the file names is not on this machine: Liberation Sans (drawn in Ubuntu Light)"
+        );
+        assert_eq!((named[0].group, named[0].detail.as_deref()), (Group::Approximate, None));
+        let one = from_render(&[Skipped { kind: SkipKind::FaceStandIn, count: 1, first: String::new() }]);
+        assert_eq!(one[0].text, "1 text block drawn in a stand-in font, as the font the file names is not on this machine");
+        let cut = from_render(&[skip(SkipKind::TextNote, 2)]);
+        assert_eq!(cut[0].text, "2 text blocks cut short or laid out approximately");
+        assert!(cut[0].detail.as_deref().is_some_and(|d| d.starts_with("For example: ")));
+    }
+
     #[test]
     fn a_line_with_no_direction_has_its_own_sentence_and_is_not_a_stand_in() {
         let one = from_render(&[skip(SkipKind::LineEndNoDirection, 1)]);
@@ -195,6 +236,22 @@ mod tests {
         let stand_in = from_render(&[skip(SkipKind::LineEndApproximate, 1)]);
         assert_eq!(stand_in[0].group, Group::Approximate);
         assert!(!stand_in[0].text.contains("no length"), "{stand_in:?}");
+    }
+
+    /// A custom line end (254) is drawn from its master, and the renderer notes one only when the master cannot be drawn as a line end
+    /// (it names no master, is no line end, has no geometry, is past the caps, or has no height) and line end number 4 is drawn in its place. So the sentence says what was
+    /// drawn and why, and it sits among the stand-ins and not among the shapes left out.
+    #[test]
+    fn a_custom_line_end_that_falls_back_says_it_is_drawn_as_number_4_and_is_a_stand_in() {
+        let one = from_render(&[skip(SkipKind::CustomLineEnd, 1)]);
+        assert_eq!(one[0].text, "1 custom line end drawn as line end number 4, because its master cannot be drawn as a line end");
+        assert_eq!(one[0].group, Group::Approximate, "a stand-in is drawn, so it is not among what is not shown");
+        let many = from_render(&[skip(SkipKind::CustomLineEnd, 3)]);
+        assert_eq!(many[0].text, "3 custom line ends drawn as line end number 4, because their masters cannot be drawn as line ends");
+        assert_eq!(many[0].group, Group::Approximate);
+        for line in one.iter().chain(&many) {
+            assert!(!line.text.contains("not drawn"), "the end is drawn: {line:?}");
+        }
     }
 
     /// Every line end from 0 to 45 is drawn as its own art now, so a line end the renderer notes (a size no source measures, or a size
@@ -246,6 +303,7 @@ mod tests {
             SkipKind::TextBudget,
             SkipKind::TextCharBudget,
             SkipKind::TextNote,
+            SkipKind::FaceStandIn,
             SkipKind::MissingGlyphs,
             SkipKind::GlyphsCut,
             SkipKind::TextAsOutlines,
@@ -257,6 +315,7 @@ mod tests {
             SkipKind::PatternApproximate,
             SkipKind::CustomPattern,
             SkipKind::DashesTooMany,
+            SkipKind::PatternOutsideTable,
             SkipKind::StrokeClamped,
             SkipKind::LineEndApproximate,
             SkipKind::LineEndNoDirection,
@@ -265,6 +324,7 @@ mod tests {
             SkipKind::GradientApproximate,
             SkipKind::ShadowApproximate,
             SkipKind::ThemeUnanswered,
+            SkipKind::UnsavedUnanswered,
             SkipKind::TooDeep,
             SkipKind::DanglingLink,
             SkipKind::Recovered,

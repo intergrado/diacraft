@@ -8,11 +8,16 @@
 //!
 //! **Glue**: an end glued to connection point `n` (counting from 1 in formulas, from 0 as
 //! `IX`) of shape `S` has the formula `PAR(PNT(Sheet.S!Connections.Xn,Sheet.S!Connections.Yn))` in both its cells, and a `Connect` row
-//! (`FromPart` 9 for the begin and 12 for the end, `ToPart` 100 plus `IX`). A recalculation then moves the end with the shape.
+//! (`FromPart` 9 for the begin and 12 for the end, `ToPart` 100 plus `IX`). A recalculation then moves the end with the shape. **A shape with no connection point** has none to glue to, and the end is
+//! glued to the whole of it instead (`ToPart` 3, `ToCell` `PinX`, as a file's whole-shape glue is, the `_WALKGLUE` formulas in the end cells and a trigger that names the shape, as a file's
+//! are: `walkglue.rs`): [`EndGlue::Whole`], placed on the shape's box by `glue.rs`, when the connector is made and again whenever the shape changes.
 //!
 //! **The route** is `Geometry` rows of constants in the connector's frame ([`route`]), worked out by [`plan_route`] and written by
 //! [`write_planned`] after each recalculation. The marker `User.DiaCraftRoute` says a connector is ours; a connector read from a file has none, and is routed again only when
 //! a command moves one of its glued ends and its route is not fixed ([`super::reroute`]).
+//!
+//! **A connector the VSDX application routes too** ([`super::routable`]): a connector is made with `ObjType` 2 and `GlueType` 2 of its own, and a connector of ours that
+//! lacks them (an earlier build's; not one an `.odg` file holds) is given them by [`write_planned`] when it is routed again, in the same undo step.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -42,7 +47,8 @@ pub(super) const TO_PART_BASE: u32 = 100;
 /// Where one end of a connector goes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum End {
-    /// Glued to a shape: at the connection point with this `IX`, or at the one nearest the other end when there is none given.
+    /// Glued to a shape: at the connection point with this `IX`, or at the one nearest the other end when there is none given; a shape with no connection point is glued to as a whole
+    /// And a `point` named on it is refused.
     Shape { id: u32, point: Option<u32> },
     /// Free, at this place on the page.
     Point { x: f64, y: f64 },
@@ -79,18 +85,37 @@ impl Which {
     }
 }
 
-/// What an edit of a connector made: its `ID`, and where each end is glued as (shape `ID`, point `IX`), if it is.
+/// What an end of a connector is glued to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndGlue {
+    /// Connection point `index` of shape `shape` (`ToPart` 100 plus the `IX`).
+    Point { shape: u32, index: u32 },
+    /// The whole of shape `shape`, which has no connection point to glue to (`ToPart` 3): the end's cells hold the `_WALKGLUE` formulas with a place as their result, which the
+    /// engine puts on the shape's box.
+    Whole { shape: u32 },
+}
+
+impl EndGlue {
+    /// The `ID` of the shape the end is glued to.
+    pub fn shape(self) -> u32 {
+        match self {
+            EndGlue::Point { shape, .. } | EndGlue::Whole { shape } => shape,
+        }
+    }
+}
+
+/// What an edit of a connector made: its `ID`, and where each end is glued, if it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConnectorInfo {
     pub id: u32,
-    pub begin: Option<(u32, u32)>,
-    pub end: Option<(u32, u32)>,
+    pub begin: Option<EndGlue>,
+    pub end: Option<EndGlue>,
 }
 
 /// An end worked out: where it is, and what it is glued to.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Anchor {
-    glue: Option<(u32, u32)>,
+    glue: Option<EndGlue>,
     at: P,
     /// The way a connector leaves it, snapped to an axis (its side of the shape).
     side: Option<Dir>,
@@ -104,31 +129,77 @@ fn taken_points(doc: &Document, page: u32, id: u32, except: Option<u32>) -> Hash
     p.connects.iter().filter(|c| c.to_sheet == id && Some(c.from_sheet) != except).filter_map(|c| c.to_part?.checked_sub(TO_PART_BASE)).collect()
 }
 
-/// The places an end can be: one for a free end or a named point, all the points of a shape otherwise. `except` is the connector being moved,
-/// whose own place does not count as taken.
-fn candidates(reader: &Reader<'_>, page: u32, end: &End, except: Option<u32>) -> Result<Vec<Anchor>, Problem> {
+/// The places an end can be: one for a free end or a named point, all the points of a shape otherwise, and for a shape that has none the one place on its box that is the whole
+/// of it ([`whole_anchor`]). `except` is the connector being moved, whose own place does not count as taken. `other` is the connector's other end, which a place on a box faces.
+fn candidates(reader: &Reader<'_>, page: u32, end: &End, except: Option<u32>, other: &End) -> Result<Vec<Anchor>, Problem> {
     match *end {
         End::Point { x, y } => Ok(vec![Anchor { glue: None, at: (checked("x", x)?, checked("y", y)?), side: None, taken: false }]),
         End::Shape { id, point } => {
             let at = reader.find(page, id).ok_or_else(|| Problem::bad(format!("page {page} has no shape {id}")))?;
             let taken = taken_points(reader.doc(), page, id, except);
-            shape_anchors(reader, page, id, &at, &taken, point)
+            shape_anchors(reader, page, (id, &at), &taken, point, other)
         }
     }
 }
 
-/// The anchors of the connection points of shape `id`, which is at `at`: all of them, or the one `point` names. `taken` are the points other connectors hold.
-fn shape_anchors(reader: &Reader<'_>, page: u32, id: u32, at: &ShapeRef, taken: &HashSet<u32>, point: Option<u32>) -> Result<Vec<Anchor>, Problem> {
+/// A place to face for the end of a shape that has no connection point: where the connector's other end is when it is free, the middle of the other shape's box otherwise
+/// (the pair: the outline point nearest the middle of the other shape's box). `None` for a shape that is not there or has no box.
+fn aim(reader: &Reader<'_>, page: u32, other: &End) -> Option<P> {
+    let place = match *other {
+        End::Point { x, y } => (x, y),
+        End::Shape { id, .. } => {
+            let corners = reader.corners(&reader.find(page, id)?);
+            ((corners[0].0 + corners[2].0) / 2.0, (corners[0].1 + corners[2].1) / 2.0)
+        }
+    };
+    (place.0.is_finite() && place.1.is_finite()).then_some(place)
+}
+
+/// The end glued to the whole of shape `id`, which has no connection point: the point of its outline nearest what the end faces (`aim`), or nearest its own
+/// middle when there is nothing to face. This is the place the end is made at; the engine puts it again where the placing rule of its connector says once the connector is
+/// there (`glue::place_new_ends`) and whenever the shape changes. The way a route leaves it is the normal of the side it is on.
+fn whole_anchor(reader: &Reader<'_>, id: u32, at: &ShapeRef, aim: Option<P>) -> Result<Anchor, Problem> {
+    let corners = reader.corners(at);
+    let middle = ((corners[0].0 + corners[2].0) / 2.0, (corners[0].1 + corners[2].1) / 2.0);
+    let toward = aim.unwrap_or(middle);
+    let no_box = || Problem::failed(format!("shape {id} has no box to glue to"));
+    let (place, out) = super::glue::outline_nearest(reader, at, toward, toward).ok_or_else(no_box)?;
+    if !(place.0.is_finite() && place.1.is_finite()) {
+        return Err(no_box());
+    }
+    Ok(Anchor { glue: Some(EndGlue::Whole { shape: id }), at: place, side: Dir::from_vector(out.0, out.1), taken: false })
+}
+
+/// The anchors of the connection points of shape `shape.0`, which is at `shape.1`: all of them, or the one `point` names. `taken` are the points other connectors hold. A shape that
+/// has no connection point is glued to as a whole (`ToPart` 3, [`whole_anchor`]), facing `other`, unless a point was named: no point is then glued to, in words.
+fn shape_anchors(
+    reader: &Reader<'_>,
+    page: u32,
+    shape: (u32, &ShapeRef),
+    taken: &HashSet<u32>,
+    point: Option<u32>,
+    other: &End,
+) -> Result<Vec<Anchor>, Problem> {
+    let (id, at) = shape;
     // A shape whose layers allow no glue is glued to by no new end: refused in words, whatever else the end asks.
     if let Some(layer) = reader.doc().shape(at).and_then(|shape| super::layers::glue_barred(reader.doc(), page, shape)) {
         return Err(Problem::bad(super::layers::glue_words(id, &layer)));
     }
     let points = reader.connection_points(at);
     if points.is_empty() {
-        return Err(Problem::failed(format!("shape {id} has no connection points to glue to")));
+        if let Some(wanted) = point {
+            return Err(Problem::bad(format!("shape {id} has no connection point {wanted}")));
+        }
+        // A connector or a line has no box to glue to as a whole: glue to a connector is not built (the checklist's Connector to connector), and it was refused here before.
+        if reader.is_one_d(&diacraft_doc::SheetRef::Shape(at.clone())) {
+            return Err(Problem::bad(format!(
+                "shape {id} is a connector or a line, and no connector is glued to another (it has no connection point to glue to)"
+            )));
+        }
+        return Ok(vec![whole_anchor(reader, id, at, aim(reader, page, other))?]);
     }
     let mut anchors = points.iter().take(MAX_CANDIDATES).map(|p| Anchor {
-        glue: Some((id, p.index)),
+        glue: Some(EndGlue::Point { shape: id, index: p.index }),
         at: (p.x, p.y),
         side: Dir::from_vector(p.dir_x, p.dir_y),
         taken: taken.contains(&p.index),
@@ -136,7 +207,7 @@ fn shape_anchors(reader: &Reader<'_>, page: u32, id: u32, at: &ShapeRef, taken: 
     match point {
         None => Ok(anchors.collect()),
         Some(wanted) => anchors
-            .find(|a| a.glue.is_some_and(|(_, index)| index == wanted))
+            .find(|a| matches!(a.glue, Some(EndGlue::Point { index, .. }) if index == wanted))
             .map(|a| vec![a])
             .ok_or_else(|| Problem::bad(format!("shape {id} has no connection point {wanted}"))),
     }
@@ -201,13 +272,15 @@ fn formula_cell(formula: &str, value: f64) -> Cell {
     Cell::with_formula(formula, Some(Value::from_text(&number_text(value)))).with_unit("IN")
 }
 
-/// The two cells of an end: the glue formula in both if glued, the place as constants if not.
-fn end_cells(anchor: &Anchor) -> (Cell, Cell) {
+/// The two cells of the end `which`: the glue formula in both if glued to a point; for an end glued to the whole of a shape the `_WALKGLUE` formula of the end with the place the engine
+/// put it at as its result (`walkglue.rs`: the application drops the glue of an end whose cells hold no glue formula); the place as constants if the end is free.
+fn end_cells(which: Which, anchor: &Anchor) -> (Cell, Cell) {
     match anchor.glue {
-        Some((target, index)) => {
-            let formula = glue_formula(target, index);
+        Some(EndGlue::Point { shape, index }) => {
+            let formula = glue_formula(shape, index);
             (formula_cell(&formula, anchor.at.0), formula_cell(&formula, anchor.at.1))
         }
+        Some(EndGlue::Whole { .. }) => (super::walkglue::end_cell(which, anchor.at.0), super::walkglue::end_cell(which, anchor.at.1)),
         None => (length(anchor.at.0), length(anchor.at.1)),
     }
 }
@@ -238,12 +311,18 @@ pub(super) fn frame_cells(begin: P, end: P) -> [(&'static str, Cell); 7] {
 fn connector_shape(id: u32, begin: &Anchor, end: &Anchor) -> Shape {
     let mut sheet = diacraft_doc::Sheet { links: Links { line: Some(0), fill: Some(0), text: Some(0) }, ..diacraft_doc::Sheet::default() };
     let cells = &mut sheet.cells;
-    let (bx, by) = end_cells(begin);
-    let (ex, ey) = end_cells(end);
+    let (bx, by) = end_cells(Which::Begin, begin);
+    let (ex, ey) = end_cells(Which::End, end);
     put(cells, "BeginX", bx);
     put(cells, "BeginY", by);
     put(cells, "EndX", ex);
     put(cells, "EndY", ey);
+    // The trigger of an end glued to the whole of a shape names the shape: the application keeps the glue of such an end only with it.
+    for (which, anchor) in [(Which::Begin, begin), (Which::End, end)] {
+        if let Some(EndGlue::Whole { shape }) = anchor.glue {
+            put(cells, super::walkglue::trigger_name(which), super::walkglue::trigger_cell(shape));
+        }
+    }
     let width = distance_squared(begin.at, end.at).sqrt();
     for (name, cell) in frame_cells(begin.at, end.at) {
         put(cells, name, cell);
@@ -257,6 +336,15 @@ fn connector_shape(id: u32, begin: &Anchor, end: &Anchor) -> Shape {
     put(cells, "TxtHeight", formula_cell("Height*1", 0.0));
     // A solid arrowhead at the end (line end 4 of the numbered set) and nothing at the begin.
     put(cells, "EndArrow", Cell::constant(Value::from_text("4")));
+    // **No Fill** (ours, the owner's ruling of 2026-11-26): the inside of a hollow line end takes the shape's fill, and a connector that DiaCraft makes is see-through until a
+    // person picks a fill colour. The cell is the shape's own, so that the root style's solid white (which shapes need) and a theme's connector fill are left as they are. A one-dimensional master
+    // carries the same cell (`ConnectorLook`), and its instance inherits it (`drop_connector` takes this one out).
+    put(cells, "FillPattern", Cell::constant(Value::from_text("0")));
+    // **A connector the VSDX application routes** (`routable.rs`): `ObjType` 2, the routable flag that makes a one-dimensional shape a connector to it,
+    // and `GlueType` 2, dynamic glue allowed. Without them the application left the route as it was when a shape it was glued to moved.
+    for (name, cell) in super::routable::new_cells() {
+        put(cells, name, cell);
+    }
     // The marker of a route that is ours to rewrite.
     let mut user = Section::new("User", None);
     let mut marker = Row { name: Some(Arc::from("DiaCraftRoute")), ..Row::default() };
@@ -270,32 +358,38 @@ fn connector_shape(id: u32, begin: &Anchor, end: &Anchor) -> Shape {
     Shape { name: Some(Arc::clone(&name)), name_u: Some(name), kind: ShapeType::Shape, sheet: Arc::new(sheet), ..Shape::new(id) }
 }
 
-fn connect_row(from: u32, which: Which, to: u32, index: u32) -> Connect {
+/// The `Connect` row of the end `which` of connector `from`, glued as `glue` says: a point has `ToCell` `Connections.X<n>` and `ToPart` 100 plus its `IX`; the whole of a shape has
+/// `ToCell` `PinX` and `ToPart` 3, as a file's does.
+fn connect_row(from: u32, which: Which, glue: EndGlue) -> Connect {
+    let (to, to_cell, to_part) = match glue {
+        EndGlue::Point { shape, index } => (shape, format!("Connections.X{}", u64::from(index) + 1), TO_PART_BASE.saturating_add(index)),
+        EndGlue::Whole { shape } => (shape, "PinX".to_owned(), super::glue::WHOLE_SHAPE),
+    };
     Connect {
         from_sheet: from,
         from_cell: Some(Arc::from(which.x_cell())),
         from_part: Some(which.part_code()),
         to_sheet: to,
-        to_cell: Some(Arc::from(format!("Connections.X{}", u64::from(index) + 1))),
-        to_part: Some(TO_PART_BASE.saturating_add(index)),
+        to_cell: Some(Arc::from(to_cell)),
+        to_part: Some(to_part),
         raw: diacraft_doc::RawAttrs::new(),
         ext: Default::default(),
     }
 }
 
 /// Makes the `Connect` rows of one end of a connector what `glue` says: none for a free end, one for a glued one.
-fn set_glue(doc: &mut Document, page: u32, id: u32, which: Which, glue: Option<(u32, u32)>) -> Result<(), Problem> {
+fn set_glue(doc: &mut Document, page: u32, id: u32, which: Which, glue: Option<EndGlue>) -> Result<(), Problem> {
     let p = page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?;
     let is_this_end = |c: &Connect| c.from_sheet == id && matches!(c.from_cell.as_deref(), Some(n) if n == which.x_cell() || n == which.y_cell());
     let mut list: Vec<Connect> = p.connects.iter().filter(|c| !is_this_end(c)).cloned().collect();
-    if let Some((target, index)) = glue {
-        list.push(connect_row(id, which, target, index));
+    if let Some(glue) = glue {
+        list.push(connect_row(id, which, glue));
     }
     p.connects = Connects::from_vec(list);
     // Owner, 2026-11-25: a shape a connector is glued to is placeable, so a route goes round it: a shape that reads none of `ObjType`'s 1, 2 and 4 gets a local 1, in
     // the same undo step as the glue.
-    if let Some((target, _)) = glue {
-        super::obstacle::make_placeable(doc, page, target)?;
+    if let Some(glue) = glue {
+        super::obstacle::make_placeable(doc, page, glue.shape())?;
     }
     Ok(())
 }
@@ -326,7 +420,7 @@ pub fn attach_connector_above(doc: &mut Document, page: u32, from: &End, to: &En
     require_page(doc, page)?;
     let (begin, end) = {
         let reader = Reader::new(doc);
-        let (a, b) = (candidates(&reader, page, from, None)?, candidates(&reader, page, to, None)?);
+        let (a, b) = (candidates(&reader, page, from, None, to)?, candidates(&reader, page, to, None, from)?);
         let (begin, end) = nearest_pair(&a, &b).ok_or_else(|| Problem::failed("no pair of connection points to join"))?;
         let begin = spread(begin, &a, is_automatic(from), end.at);
         let end = spread(end, &b, is_automatic(to), begin.at);
@@ -337,9 +431,19 @@ pub fn attach_connector_above(doc: &mut Document, page: u32, from: &End, to: &En
         return Err(Problem::failed(format!("a page holds at most {} shapes", diacraft_doc::MAX_SHAPES_PER_PAGE)));
     }
     let id = highest.max(above).checked_add(1).ok_or_else(|| Problem::failed("no shape ids are left on the page"))?;
-    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.push(Arc::new(connector_shape(id, &begin, &end)));
+    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.push_shape(Arc::new(connector_shape(id, &begin, &end)));
     set_glue(doc, page, id, Which::Begin, begin.glue)?;
     set_glue(doc, page, id, Which::End, end.glue)?;
+    // An end glued to the whole of a shape was made at the place nearest what it faces; the engine puts it where its rule says now that the connector is there, as it does
+    // whenever the shape changes, so that the connector made and the connector moved agree (`glue::place_new_ends`).
+    let whole: Vec<Which> = [(Which::Begin, begin.glue), (Which::End, end.glue)]
+        .into_iter()
+        .filter(|(_, glue)| matches!(glue, Some(EndGlue::Whole { .. })))
+        .map(|(which, _)| which)
+        .collect();
+    if !whole.is_empty() {
+        super::glue::place_new_ends(doc, page, id, &whole)?;
+    }
     Ok(ConnectorInfo { id, begin: begin.glue, end: end.glue })
 }
 
@@ -368,21 +472,30 @@ pub(super) fn reconnect_unsettled(doc: &mut Document, page: u32, id: u32, which:
         };
         let other = (reader.number(&sheet, other_x), reader.number(&sheet, other_y));
         let near = [Anchor { glue: None, at: other, side: None, taken: false }];
-        let among = candidates(&reader, page, target, Some(id))?;
+        let among = candidates(&reader, page, target, Some(id), &End::Point { x: other.0, y: other.1 })?;
         let (anchor, _) = nearest_pair(&among, &near).ok_or_else(|| Problem::failed("no connection point to glue to"))?;
         (spread(anchor, &among, is_automatic(target), other), hand_edited)
     };
-    let (x_cell, y_cell) = end_cells(&anchor);
+    let (x_cell, y_cell) = end_cells(which, &anchor);
     let mut writes = vec![
         (sheet.clone(), CellAddr::direct(which.x_cell()), CellEdit::Cell(x_cell)),
         (sheet.clone(), CellAddr::direct(which.y_cell()), CellEdit::Cell(y_cell)),
     ];
+    // An end glued to the whole of a shape names it in its trigger. An end let go of, or glued to a point, leaves its trigger as it is, as the connectors of a file do.
+    if let Some(EndGlue::Whole { shape }) = anchor.glue {
+        writes.push((sheet.clone(), CellAddr::direct(super::walkglue::trigger_name(which)), CellEdit::Cell(super::walkglue::trigger_cell(shape))));
+    }
     // A connector whose path was edited by hand and is glued to another shape takes the route of its new ends: the hand edit is undone.
     if hand_edited {
         writes.push((sheet, CellAddr::direct("ConFixedCode"), CellEdit::Value(Value::from_text("0"))));
     }
     write_cells(doc, writes)?;
-    set_glue(doc, page, id, which, anchor.glue)
+    set_glue(doc, page, id, which, anchor.glue)?;
+    // An end glued to the whole of a shape is put where the engine's rule says, as a new connector's is: only this end, the other keeps where it is (ROTATE-1D-1).
+    if matches!(anchor.glue, Some(EndGlue::Whole { .. })) {
+        super::glue::place_new_ends(doc, page, id, &[which])?;
+    }
+    Ok(())
 }
 
 /// What [`reglue_all`] did: how many connectors were glued again, and how many were left as they are because a shape they go to has no connection points to glue to, its layers allow
@@ -467,7 +580,12 @@ fn reglue_anchors(
         (!read.is_empty()).then(|| {
             read.iter()
                 .take(MAX_CANDIDATES)
-                .map(|p| Anchor { glue: Some((id, p.index)), at: (p.x, p.y), side: Dir::from_vector(p.dir_x, p.dir_y), taken: false })
+                .map(|p| Anchor {
+                    glue: Some(EndGlue::Point { shape: id, index: p.index }),
+                    at: (p.x, p.y),
+                    side: Dir::from_vector(p.dir_x, p.dir_y),
+                    taken: false,
+                })
                 .collect()
         })
     };
@@ -507,7 +625,7 @@ pub(super) fn reglue_all(doc: &mut Document, page: u32, plans: &[Reglue]) -> Res
             };
             // The connector's own points do not count as held while it picks, and the others' do.
             for anchor in a.iter_mut().chain(b.iter_mut()) {
-                anchor.taken = anchor.glue.is_some_and(|(shape, index)| held.held_by_another(shape, index, plan.id));
+                anchor.taken = matches!(anchor.glue, Some(EndGlue::Point { shape, index }) if held.held_by_another(shape, index, plan.id));
             }
             // The sides a layout asked for, if both shapes have a point that faces so.
             if let Some((out, into)) = plan.sides {
@@ -522,7 +640,7 @@ pub(super) fn reglue_all(doc: &mut Document, page: u32, plans: &[Reglue]) -> Res
             let hand_edited = (reader.number(&SheetRef::Shape(plan.at.clone()), "ConFixedCode") - super::hand::HAND_EDITED).abs() < 0.5;
             held.release(plan.id);
             for anchor in [begin, end] {
-                if let Some((shape, index)) = anchor.glue {
+                if let Some(EndGlue::Point { shape, index }) = anchor.glue {
                     held.add(plan.id, shape, index);
                 }
             }
@@ -532,7 +650,7 @@ pub(super) fn reglue_all(doc: &mut Document, page: u32, plans: &[Reglue]) -> Res
     let mut writes: Vec<(SheetRef, CellAddr, CellEdit)> = Vec::new();
     for (plan, begin, end, hand_edited) in &chosen {
         let sheet = SheetRef::Shape(plan.at.clone());
-        let ((bx, by), (ex, ey)) = (end_cells(begin), end_cells(end));
+        let ((bx, by), (ex, ey)) = (end_cells(Which::Begin, begin), end_cells(Which::End, end));
         writes.push((sheet.clone(), CellAddr::direct(Which::Begin.x_cell()), CellEdit::Cell(bx)));
         writes.push((sheet.clone(), CellAddr::direct(Which::Begin.y_cell()), CellEdit::Cell(by)));
         writes.push((sheet.clone(), CellAddr::direct(Which::End.x_cell()), CellEdit::Cell(ex)));
@@ -552,15 +670,15 @@ pub(super) fn reglue_all(doc: &mut Document, page: u32, plans: &[Reglue]) -> Res
     let mut list: Vec<Connect> = p.connects.iter().filter(|c| !is_end(c)).cloned().collect();
     for (plan, begin, end, _) in &chosen {
         for (which, anchor) in [(Which::Begin, begin), (Which::End, end)] {
-            if let Some((target, index)) = anchor.glue {
-                list.push(connect_row(plan.id, which, target, index));
+            if let Some(glue) = anchor.glue {
+                list.push(connect_row(plan.id, which, glue));
             }
         }
     }
     p.connects = Connects::from_vec(list);
     out.glued = chosen.len();
     // The shapes the ends are glued to are placeable (each once, found by the walk above).
-    let targets: BTreeSet<u32> = chosen.iter().flat_map(|(_, begin, end, _)| [begin.glue, end.glue]).flatten().map(|(shape, _)| shape).collect();
+    let targets: BTreeSet<u32> = chosen.iter().flat_map(|(_, begin, end, _)| [begin.glue, end.glue]).flatten().map(EndGlue::shape).collect();
     let at: Vec<ShapeRef> = targets.iter().filter_map(|id| found.get(id).cloned()).collect();
     super::obstacle::make_all_placeable(doc, &at)?;
     Ok(out)
@@ -584,13 +702,27 @@ pub(super) fn release_end(doc: &mut Document, page: u32, id: u32, which: Which) 
 }
 
 /// Where the ends of connector `id` are glued, from the page's `Connect` rows.
+pub fn connector_info(doc: &Document, page: u32, id: u32) -> ConnectorInfo {
+    info(doc, page, id)
+}
+
+/// What a `Connect` row's `ToPart` says an end is glued to, on shape `shape`: the whole of it (`ToPart` 3), the connection point whose `IX` is the part less 100, or nothing a
+/// connector's end is glued to by (any other part: a guide's, say).
+fn glue_of_part(shape: u32, part: u32) -> Option<EndGlue> {
+    if part == super::glue::WHOLE_SHAPE {
+        return Some(EndGlue::Whole { shape });
+    }
+    Some(EndGlue::Point { shape, index: part.checked_sub(TO_PART_BASE)? })
+}
+
+/// Where the ends of connector `id` are glued, from the page's `Connect` rows: a connection point (`ToPart` 100 plus its `IX`) or the whole of a shape (`ToPart` 3).
 fn info(doc: &Document, page: u32, id: u32) -> ConnectorInfo {
     let glue_of = |which: Which| {
         doc.page(page).and_then(|p| {
-            p.connects.iter().find(|c| c.from_sheet == id && c.from_cell.as_deref() == Some(which.x_cell())).and_then(|c| {
-                let index = c.to_part?.checked_sub(TO_PART_BASE)?;
-                Some((c.to_sheet, index))
-            })
+            p.connects
+                .iter()
+                .find(|c| c.from_sheet == id && c.from_cell.as_deref() == Some(which.x_cell()))
+                .and_then(|c| glue_of_part(c.to_sheet, c.to_part?))
         })
     };
     ConnectorInfo { id, begin: glue_of(Which::Begin), end: glue_of(Which::End) }
@@ -612,6 +744,8 @@ pub(crate) struct Planned {
     inherited: Option<Vec<u32>>,
     pub(crate) routed: Routed,
     reset_code: Option<SheetRef>,
+    /// What a connector of ours lacks of the cells that make it one the VSDX application routes, written with the route.
+    routable: Option<(SheetRef, super::routable::Lack)>,
 }
 
 /// Works out the route of connector `id`, at `at`, from where its ends are now: the `Geometry` section 0 rows it is to have (the caller has decided that it is to be
@@ -655,6 +789,7 @@ pub(crate) fn plan_route(
     let ours = reader.is_routed(&sheet);
     // A connector of ours that a command routes again is no longer as a hand edit left it.
     let hand_edited = ours && !keep_setting && (reader.number(&sheet, "ConFixedCode") - super::hand::HAND_EDITED).abs() < 0.5;
+    let routable = super::routable::lack_when_routed(reader, &sheet).map(|lack| (sheet.clone(), lack));
     Ok(Some(Planned {
         id,
         at: at.clone(),
@@ -662,6 +797,7 @@ pub(crate) fn plan_route(
         inherited: inherited_rows(reader, at),
         routed: Routed { points, pose, ours },
         reset_code: hand_edited.then_some(sheet),
+        routable,
     }))
 }
 
@@ -680,6 +816,7 @@ pub(crate) fn plan_squared(reader: &Reader<'_>, id: u32, at: &ShapeRef, corners:
         return None;
     }
     let ours = reader.is_routed(&sheet);
+    let routable = super::routable::lack_when_routed(reader, &sheet).map(|lack| (sheet, lack));
     Some(Planned {
         id,
         at: at.clone(),
@@ -687,20 +824,32 @@ pub(crate) fn plan_squared(reader: &Reader<'_>, id: u32, at: &ShapeRef, corners:
         inherited: inherited_rows(reader, at),
         routed: Routed { points: corners, pose, ours },
         reset_code: None,
+        routable,
     })
 }
 
-/// Writes the routes [`plan_route`] worked out: each connector's `Geometry` section 0 rows, and one batch of the `ConFixedCode` cells taken back to 0 (a cell a `GUARD`
-/// protects is an error, as for any drag).
-pub(crate) fn write_planned(doc: &mut Document, page: u32, plans: &mut [Planned]) -> Result<(), Problem> {
+/// Writes the routes [`plan_route`] worked out: each connector's `Geometry` section 0 rows, one batch of the `ConFixedCode` cells taken back to 0 (a cell a `GUARD`
+/// protects is an error, as for any drag), and one batch of the cells that make a connector of ours that lacks them one the VSDX application routes (`ObjType` and
+/// `GlueType`; a cell a `GUARD` protects is kept, and the route is made all the same). → the cells of that last batch, for the recalculation of what reads them.
+pub(crate) fn write_planned(doc: &mut Document, page: u32, plans: &mut [Planned]) -> Result<Vec<(SheetRef, CellAddr)>, Problem> {
     let mut resets = Vec::new();
+    let mut routable = Vec::new();
     for plan in plans.iter_mut() {
         write_route(doc, page, &plan.at.path, std::mem::take(&mut plan.rows), &plan.inherited)?;
         if let Some(sheet) = plan.reset_code.take() {
             resets.push((sheet, CellAddr::direct("ConFixedCode"), CellEdit::Value(Value::from_text("0"))));
         }
+        if let Some((sheet, lack)) = plan.routable.take() {
+            routable.extend(super::routable::writes(&sheet, lack));
+        }
     }
-    write_cells(doc, resets)
+    write_cells(doc, resets)?;
+    if routable.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cells = routable.iter().map(|(sheet, write)| (sheet.clone(), write.addr.clone())).collect();
+    doc.write_batch(routable)?;
+    Ok(cells)
 }
 
 /// A route written: its points on the page, and the pose of the connector that carries it.
@@ -743,12 +892,27 @@ pub(super) fn route_section_rows(rows: Vec<Arc<Row>>, inherited: &Option<Vec<u32
 /// has them, or inherits them. A section nobody holds is made, with the flags of an open, unfilled line. The rows the master gives the connector
 /// and the route does not use are deleted here, so that they do not stay in the merge.
 pub(super) fn write_route(doc: &mut Document, page: u32, path: &[u32], rows: Vec<Arc<Row>>, inherited: &Option<Vec<u32>>) -> Result<(), Problem> {
+    write_section(doc, page, path, Some(0), rows, inherited)
+}
+
+/// [`write_route`] for the `Geometry` section `ix`: Reverse Ends writes every section of a shape's path (`reverse.rs`).
+pub(super) fn write_section(
+    doc: &mut Document,
+    page: u32,
+    path: &[u32],
+    ix: Option<u32>,
+    rows: Vec<Arc<Row>>,
+    inherited: &Option<Vec<u32>>,
+) -> Result<(), Problem> {
     let shape = shape_mut(doc, page, path).ok_or_else(|| Problem::failed("the connector went away"))?;
-    let sheet = Arc::make_mut(&mut shape.sheet);
-    let at = sheet.sections.iter().position(|s| s.name.as_str() == "Geometry" && s.ix == Some(0));
+    let mut counted = shape.counted_sheet();
+    let sheet = &mut *counted.sheet;
+    let at = sheet.sections.iter().position(|s| s.name.as_str() == "Geometry" && s.ix == ix);
     // The section held, but for its rows, which the route replaces: a copy of them would be a walk of each (ten thousand connectors sharing a route of
-    // 4,000 rows, routed again, copied and let go of forty million pointers).
+    // 4,000 rows, routed again, copied and let go of forty million pointers). **A section that holds an unknown node is copied whole**, since the rows it holds are what the nodes
+    // are counted by, and `replace_rows` keeps each node after the row of the same number that it followed; a section that holds none is the cheap copy.
     let mut section = match at.and_then(|i| sheet.sections.get(i)) {
+        Some(held) if !held.passthrough.is_empty() => Section::clone(held),
         Some(held) => Section {
             name: held.name.clone(),
             ix: held.ix,
@@ -759,16 +923,18 @@ pub(super) fn write_route(doc: &mut Document, page: u32, path: &[u32], rows: Vec
             passthrough: held.passthrough.clone(),
             ext: held.ext.clone(),
         },
-        None => Section::new("Geometry", Some(0)),
+        None => Section::new("Geometry", ix),
     };
     if at.is_none() && inherited.is_none() {
         route_flags(&mut section);
     }
-    section.rows = Rows::from(route_section_rows(rows, inherited));
+    section.replace_rows(Rows::from(route_section_rows(rows, inherited)));
     let section = Arc::new(section);
-    match at.and_then(|i| sheet.sections.get_mut(i)) {
+    match at.and_then(|i| counted.sheet.sections.get_mut(i)) {
         Some(slot) => *slot = section,
-        None => sheet.sections.push(section),
+        None => {
+            counted.push_section(section);
+        }
     }
     Ok(())
 }

@@ -69,6 +69,20 @@ pub const MAX_TEXT_BYTES: usize = 1 << 20;
 /// Used by the write path: a write follows at most this many `SETATREF`s.
 pub const MAX_SETATREF_CHAIN: usize = 10;
 
+/// Documented behaviour wins: the most formulas the `SETF` calls of one commit
+/// write, all rounds together. A project rule, the 64 gives for the effects of one gesture. A write past it is dropped and counted
+/// (`CommitReport::setf_dropped`), so a `SETF` that sets itself off again (a counter, two cells that write each other, a chain of cells that each write the next)
+/// ends at this number and not at the budget.
+pub const MAX_SETF_WRITES: usize = 64;
+
+/// How many times one commit works out again the cells that a round of `SETF` writes changed. A project rule: a write that changes a cell is a round, so this
+/// holds a chain of cells that each write the next, as [`MAX_SETF_WRITES`] holds the formulas, and an effect still queued when it is reached is dropped and counted.
+pub const MAX_SETF_ROUNDS: usize = 16;
+
+/// The most `SETF` calls one working-out queues before the commit makes their writes: a call past it is dropped and counted, as one past [`MAX_SETF_WRITES`]
+/// is. Larger than the writes, because a call whose target holds its text already writes nothing and is no reason to drop the one after it.
+pub const MAX_SETF_QUEUED: usize = 4_096;
+
 /// A string that cannot convert, in `+ - * /`, the unary signs and `%`, gives this
 /// error. **Project rule;** the sources disagree. To flip to About Operators' reading, make [`crate::convert`] read such a string
 /// as 0 in arithmetic, in the two readers of its `Unreadable::Error`: `read_operand` and `read_double_arith`. A function's argument that

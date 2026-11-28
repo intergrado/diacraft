@@ -274,3 +274,229 @@ fn a_write_copies_the_path_to_the_cell_and_the_older_document_keeps_its_value() 
     assert_eq!(value_of(&before, &shape(&[1]), "Width").as_deref(), Some("1"));
     assert_eq!(value_of(&doc, &shape(&[1]), "Width").as_deref(), Some("2"));
 }
+
+// ----: a row an instance makes of its own holds the type of its master's row
+
+/// A master of a box: its `Geometry` 0 has rows `IX` 1 (`MoveTo`) to 5 (`LineTo`), the third and fourth named by `Width` and `Height`, and its `Connection` rows have `T` `Connection`.
+fn box_master() -> MasterBuilder {
+    let mut shape = ShapeBuilder::new(5).cell("Width", "2").cell("Height", "1");
+    for (ix, kind) in [(1, "MoveTo"), (2, "LineTo"), (3, "LineTo"), (4, "LineTo"), (5, "LineTo")] {
+        shape = shape.row_type("Geometry", Some(0), RowKey::Ix(ix), kind).row_cell("Geometry", Some(0), RowKey::Ix(ix), "X", "0").row_cell(
+            "Geometry",
+            Some(0),
+            RowKey::Ix(ix),
+            "Y",
+            "0",
+        );
+    }
+    shape =
+        shape.row_formula("Geometry", Some(0), RowKey::Ix(3), "Y", "Height", "1").row_formula("Geometry", Some(0), RowKey::Ix(4), "Y", "Height", "1");
+    for ix in 0..2 {
+        shape = shape.row_type("Connection", None, RowKey::Ix(ix), "Connection").row_cell("Connection", None, RowKey::Ix(ix), "X", "1");
+    }
+    MasterBuilder::new().shape(shape)
+}
+
+fn geometry() -> diacraft_doc::SectionKey {
+    diacraft_doc::SectionKey::new("Geometry", Some(0))
+}
+
+/// The rows the sheet holds of the section, as `(IX, T)`.
+fn held_rows(doc: &Document, at: &SheetRef, section: &diacraft_doc::SectionKey) -> Vec<(Option<u32>, Option<String>)> {
+    let sheet = Resolver::new(doc).sheet(at).unwrap();
+    sheet.section(section).map(|s| s.rows.iter().map(|r| (r.ix, r.row_type.as_deref().map(str::to_owned))).collect()).unwrap_or_default()
+}
+
+fn cached(text: &str) -> CellEdit {
+    CellEdit::Cached { value: Value::from_text(text), error: None, unit: None }
+}
+
+fn y_of(ix: u32) -> CellAddr {
+    CellAddr::in_row("Geometry", Some(0), RowKey::Ix(ix), "Y")
+}
+
+fn box_doc(instance: ShapeBuilder) -> Document {
+    DocBuilder::new().master(1, box_master()).page(1, PageBuilder::new().shape(instance)).build()
+}
+
+fn row(ix: u32, t: &str) -> (Option<u32>, Option<String>) {
+    (Some(ix), Some(t.to_owned()))
+}
+
+#[test]
+fn a_result_written_to_a_row_the_instance_lacks_makes_the_row_with_the_masters_type() {
+    let mut doc = box_doc(ShapeBuilder::new(10).master(1));
+    let at = shape(&[0]);
+    assert_eq!(held_rows(&doc, &at, &geometry()), []);
+    let writes = vec![
+        (at.clone(), diacraft_doc::CellWrite { addr: y_of(3), edit: cached("3"), origin: WriteOrigin::Evaluation }),
+        (at.clone(), diacraft_doc::CellWrite { addr: y_of(4), edit: cached("3"), origin: WriteOrigin::Evaluation }),
+    ];
+    doc.write_batch(writes).unwrap();
+    assert_eq!(held_rows(&doc, &at, &geometry()), [row(3, "LineTo"), row(4, "LineTo")]);
+    // The cell is the `Inh` cell the commit makes, with the result.
+    let cell = Resolver::new(&doc).sheet(&at).unwrap().lookup(&y_of(3));
+    let diacraft_doc::Lookup::Found(cell) = cell else { panic!("{cell:?}") };
+    assert_eq!((&cell.formula, cell.value.as_ref().map(|v| v.text())), (&FormulaSlot::Inherit, Some("3")));
+}
+
+#[test]
+fn a_value_or_a_formula_written_to_a_row_the_instance_lacks_gives_it_the_type_as_well() {
+    for edit in [CellEdit::Value(Value::from_text("2")), formula("Height*2")] {
+        let mut doc = box_doc(ShapeBuilder::new(10).master(1));
+        let at = shape(&[0]);
+        doc.write_cell(&at, &y_of(2), edit, WriteOrigin::Automation).unwrap();
+        assert_eq!(held_rows(&doc, &at, &geometry()), [row(2, "LineTo")]);
+    }
+}
+
+#[test]
+fn a_row_the_instance_holds_with_no_type_is_given_the_masters_by_the_next_write_to_it() {
+    // A row an older build saved: it has its `IX` and its cell, and no `T`.
+    let mut doc = box_doc(ShapeBuilder::new(10).master(1).row_inh("Geometry", Some(0), RowKey::Ix(3), "Y", Some("3")));
+    let at = shape(&[0]);
+    assert_eq!(held_rows(&doc, &at, &geometry()), [(Some(3), None)]);
+    doc.write_cell(&at, &y_of(3), cached("4"), WriteOrigin::Evaluation).unwrap();
+    assert_eq!(held_rows(&doc, &at, &geometry()), [row(3, "LineTo")]);
+    assert_eq!(value_of_row(&doc, &at, &y_of(3)).as_deref(), Some("4"));
+}
+
+/// The text of the value of the cell the sheet holds at `addr`.
+fn value_of_row(doc: &Document, at: &SheetRef, addr: &CellAddr) -> Option<String> {
+    match Resolver::new(doc).sheet(at)?.lookup(addr) {
+        diacraft_doc::Lookup::Found(cell) => cell.value.as_ref().map(|v| v.text().to_owned()),
+        _ => None,
+    }
+}
+
+#[test]
+fn a_row_with_a_type_of_its_own_keeps_it() {
+    let mut doc = box_doc(ShapeBuilder::new(10).master(1).row_type("Geometry", Some(0), RowKey::Ix(3), "ArcTo").row_inh(
+        "Geometry",
+        Some(0),
+        RowKey::Ix(3),
+        "Y",
+        Some("3"),
+    ));
+    let at = shape(&[0]);
+    doc.write_cell(&at, &y_of(3), cached("4"), WriteOrigin::Evaluation).unwrap();
+    assert_eq!(held_rows(&doc, &at, &geometry()), [row(3, "ArcTo")]);
+}
+
+#[test]
+fn a_row_the_master_does_not_have_is_made_with_no_type_and_so_is_one_of_a_shape_with_no_master() {
+    let mut doc = box_doc(ShapeBuilder::new(10).master(1));
+    let at = shape(&[0]);
+    doc.write_cell(&at, &y_of(9), CellEdit::Value(Value::from_text("1")), WriteOrigin::Automation).unwrap();
+    assert_eq!(held_rows(&doc, &at, &geometry()), [(Some(9), None)], "nothing to inherit it from");
+    let mut plain = doc_with(ShapeBuilder::new(10));
+    plain.write_cell(&at, &y_of(3), CellEdit::Value(Value::from_text("1")), WriteOrigin::Automation).unwrap();
+    assert_eq!(held_rows(&plain, &at, &geometry()), [(Some(3), None)]);
+}
+
+/// `Connection` rows are left as they are: the files hold `T` on some and not on the partial row of an instance.
+#[test]
+fn a_connection_row_the_instance_makes_has_no_type_though_the_masters_has_one() {
+    let mut doc = box_doc(ShapeBuilder::new(10).master(1));
+    let at = shape(&[0]);
+    let x = CellAddr::in_row("Connection", None, RowKey::Ix(1), "X");
+    doc.write_cell(&at, &x, cached("2"), WriteOrigin::Evaluation).unwrap();
+    assert_eq!(held_rows(&doc, &at, &diacraft_doc::SectionKey::new("Connection", None)), [(Some(1), None)]);
+}
+
+#[test]
+fn a_row_deleted_here_is_refused_and_given_nothing() {
+    let mut doc = box_doc(ShapeBuilder::new(10).master(1).del_row("Geometry", Some(0), RowKey::Ix(3)));
+    let at = shape(&[0]);
+    let before = doc.clone();
+    assert!(matches!(doc.write_cell(&at, &y_of(3), cached("4"), WriteOrigin::Evaluation), Err(DocError::Deleted(_))));
+    assert_eq!(doc, before);
+}
+
+/// A member of an instance of a group master, which stands for a shape of the master by `MasterShape`, takes the type of that shape's row.
+#[test]
+fn a_member_of_an_instance_takes_the_type_of_the_row_of_the_master_shape_it_stands_for() {
+    let member = ShapeBuilder::new(6)
+        .row_type("Geometry", Some(0), RowKey::Ix(1), "MoveTo")
+        .row_cell("Geometry", Some(0), RowKey::Ix(1), "X", "0")
+        .row_type("Geometry", Some(0), RowKey::Ix(2), "RelLineTo")
+        .row_cell("Geometry", Some(0), RowKey::Ix(2), "X", "1");
+    let master = MasterBuilder::new().shape(ShapeBuilder::new(5).group().child(member));
+    let instance = ShapeBuilder::new(10).master(1).group().child(ShapeBuilder::new(11).master_shape(6));
+    let mut doc = DocBuilder::new().master(1, master).page(1, PageBuilder::new().shape(instance)).build();
+    let at = shape(&[0, 0]);
+    doc.write_cell(&at, &CellAddr::in_row("Geometry", Some(0), RowKey::Ix(2), "X"), cached("3"), WriteOrigin::Evaluation).unwrap();
+    assert_eq!(held_rows(&doc, &at, &geometry()), [row(2, "RelLineTo")]);
+}
+
+/// `Document::give_row_type`, for a writer that puts a cell in with the sheet's own methods.
+#[test]
+fn giving_a_row_its_type_answers_whether_it_did() {
+    let mut doc = box_doc(
+        ShapeBuilder::new(10)
+            .master(1)
+            .row_inh("Geometry", Some(0), RowKey::Ix(3), "Y", Some("3"))
+            .row_type("Geometry", Some(0), RowKey::Ix(4), "ArcTo")
+            .row_inh("Geometry", Some(0), RowKey::Ix(9), "Y", Some("1")),
+    );
+    let at = shape(&[0]);
+    assert_eq!(doc.give_row_type(&at, &geometry(), &RowKey::Ix(3)), Ok(true));
+    assert_eq!(doc.give_row_type(&at, &geometry(), &RowKey::Ix(3)), Ok(false), "it has one now");
+    assert_eq!(doc.give_row_type(&at, &geometry(), &RowKey::Ix(4)), Ok(false), "its own");
+    assert_eq!(doc.give_row_type(&at, &geometry(), &RowKey::Ix(9)), Ok(false), "the master has no such row");
+    assert_eq!(doc.give_row_type(&at, &geometry(), &RowKey::Ix(2)), Ok(false), "the instance holds no such row, and none is made");
+    assert_eq!(held_rows(&doc, &at, &geometry()), [row(3, "LineTo"), row(4, "ArcTo"), (Some(9), None)]);
+    assert_eq!(doc.give_row_type(&shape(&[7]), &geometry(), &RowKey::Ix(3)), Ok(false), "no such shape");
+    assert_eq!(doc.give_row_type(&SheetRef::Page(1), &geometry(), &RowKey::Ix(3)), Ok(false), "a page is no instance");
+}
+
+/// A row a write makes goes among the rows by its `IX`, which rise through a section: a resize that wrote rows 3 and 4 and then one that writes row 2 give 2, 3, 4.
+#[test]
+fn a_row_a_write_makes_goes_in_the_order_of_the_ix_of_the_rows() {
+    let mut doc = box_doc(ShapeBuilder::new(10).master(1));
+    let at = shape(&[0]);
+    for ix in [3, 4, 2, 5, 1] {
+        doc.write_cell(&at, &y_of(ix), cached("1"), WriteOrigin::Evaluation).unwrap();
+    }
+    let ixs: Vec<Option<u32>> = held_rows(&doc, &at, &geometry()).into_iter().map(|(ix, _)| ix).collect();
+    assert_eq!(ixs, [Some(1), Some(2), Some(3), Some(4), Some(5)]);
+    // A row below all of them goes first, and one above all of them last; the others are where they were.
+    doc.write_cell(&at, &y_of(0), CellEdit::Value(Value::from_text("1")), WriteOrigin::Automation).unwrap();
+    doc.write_cell(&at, &y_of(8), CellEdit::Value(Value::from_text("1")), WriteOrigin::Automation).unwrap();
+    let ixs: Vec<Option<u32>> = held_rows(&doc, &at, &geometry()).into_iter().map(|(ix, _)| ix).collect();
+    assert_eq!(ixs, [Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), Some(8)]);
+}
+
+/// A section whose rows are out of order is not searched without end: a new row goes at the end when more than the scan's rows come after its place.
+#[test]
+fn a_row_goes_at_the_end_of_a_section_that_is_far_out_of_order() {
+    let rows = |count: u32| {
+        let mut shape = ShapeBuilder::new(10);
+        for ix in (100..100 + count).rev() {
+            shape = shape.row_cell("Geometry", Some(0), RowKey::Ix(ix), "X", "0");
+        }
+        shape
+    };
+    let at = shape(&[0]);
+    // 70 rows in falling order: the new row 5 is more than 64 places from where it belongs, and goes last.
+    let mut far = doc_with(rows(70));
+    far.write_cell(&at, &y_of(5), CellEdit::Value(Value::from_text("1")), WriteOrigin::Automation).unwrap();
+    assert_eq!(held_rows(&far, &at, &geometry()).last().map(|r| r.0), Some(Some(5)));
+    // 10 rows in falling order: it goes first, ahead of the ten that are above it.
+    let mut near = doc_with(rows(10));
+    near.write_cell(&at, &y_of(5), CellEdit::Value(Value::from_text("1")), WriteOrigin::Automation).unwrap();
+    assert_eq!(held_rows(&near, &at, &geometry()).first().map(|r| r.0), Some(Some(5)));
+}
+
+/// Only the rows of a `Geometry` section are placed by their `IX`: the order of its rows is the order of its path. A row made in another section goes after the others, as it always did.
+#[test]
+fn a_row_made_in_a_section_other_than_geometry_goes_after_the_others() {
+    let mut doc = box_doc(ShapeBuilder::new(10).master(1));
+    let at = shape(&[0]);
+    for ix in [1, 0] {
+        doc.write_cell(&at, &CellAddr::in_row("Scratch", None, RowKey::Ix(ix), "X"), CellEdit::Value(Value::from_text("1")), WriteOrigin::Automation)
+            .unwrap();
+    }
+    let ixs: Vec<Option<u32>> = held_rows(&doc, &at, &diacraft_doc::SectionKey::new("Scratch", None)).into_iter().map(|(ix, _)| ix).collect();
+    assert_eq!(ixs, [Some(1), Some(0)]);
+}

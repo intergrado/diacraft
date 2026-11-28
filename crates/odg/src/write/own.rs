@@ -197,6 +197,7 @@ pub(crate) const TABLE: &[Row] = &[
             "draw:opacity",
             "draw:opacity-name",
             "draw:stroke",
+            "draw:stroke-dash",
             "svg:stroke-width",
             "svg:stroke-color",
             "svg:stroke-opacity",
@@ -309,6 +310,19 @@ pub(crate) const TABLE: &[Row] = &[
             "style:font-family-asian",
             "style:font-name-complex",
             "style:font-family-complex",
+            // A run's language, into the triplet of its script type.
+            "fo:language",
+            "fo:script",
+            "fo:country",
+            "style:rfc-language-tag",
+            "style:language-asian",
+            "style:script-asian",
+            "style:country-asian",
+            "style:rfc-language-tag-asian",
+            "style:language-complex",
+            "style:script-complex",
+            "style:country-complex",
+            "style:rfc-language-tag-complex",
             "fo:text-align",
             "fo:text-align-last",
             "style:writing-mode",
@@ -332,6 +346,7 @@ pub(crate) const TABLE: &[Row] = &[
             "Font",
             "AsianFont",
             "ComplexScriptFont",
+            "LangID",
             "HorzAlign",
             "Flags",
             "IndLeft",
@@ -346,7 +361,8 @@ pub(crate) const TABLE: &[Row] = &[
     },
     Row {
         family: Family::Outline,
-        attributes: &["draw:points", "draw:enhanced-path", "draw:modifiers"],
+        // The glue points of a custom shape's geometry are written again when the model's connection points changed (CPDOUBLE.ODG, `glue.rs`).
+        attributes: &["draw:points", "draw:enhanced-path", "draw:modifiers", "draw:glue-points", "draw:glue-point-leaving-directions"],
         cells: &["Geometry"],
         action: Action::Regenerate,
         words: "a change of a shape's outline",
@@ -739,6 +755,12 @@ pub(crate) struct Tier2Edit {
     /// The native outputs of the file's markup that the shape's tier-2 items rest on, as the file had them when it was read (`PageShapes::natives`): what a missing
     /// fingerprint is stamped from.
     pub natives: Option<crate::ext::tier3::Natives>,
+    /// Which ends (the begin, the end) lost their glue in this edit: the glue a segment the file holds as a polyline carries in DiaCraft's data goes with it. A connector's
+    /// glue is the element's, and an end taken out of it by the plan's own write.
+    pub unglued: [bool; 2],
+    /// The cells of a connector's ends that the glue the save writes rebuilds when the file is read: nothing of them is carried, and what the style carried of them
+    /// before is let go.
+    pub rebuilt: Vec<&'static str>,
 }
 
 /// What a save writes of a shape's outline.
@@ -750,6 +772,8 @@ pub(crate) enum OutlineWrite {
     Path,
     /// Anything else of it: a polygon's points, a path's `svg:d`, the modifiers.
     Other,
+    /// The whole outline of a polyline or a path, written from the model (a segment the file holds as one), with the fingerprint of what was written.
+    Whole(crate::ext::fingerprint::Fp),
 }
 
 impl OutlineWrite {
@@ -904,8 +928,11 @@ pub(crate) fn sheet_change(old: &Sheet, new_sheet: &std::sync::Arc<Sheet>, route
     if !same_all(&oa, &ob, steps) {
         section_delta_into(&oa, &ob, &mut delta, steps);
     }
+    // The title and the description, in the form the files hold, are the file's own markup (`svg:title`, `svg:desc`): they are no tier 2, and an edit of one is written as its element.
     let (ua, ub) = (of(&ka, &["User"], true), of(&kb, &["User"], true));
-    if !(ua.len() == ub.len() && ua.iter().zip(&ub).all(|(x, y)| user_same_but_values(x, y, steps))) {
+    let (fa, fb) = (super::alt::without_standard_rows(&ua), super::alt::without_standard_rows(&ub));
+    if !(fa.len() == fb.len() && fa.iter().zip(&fb).all(|(x, y)| user_same_but_values(x, y, steps))) {
+        // Carried whole, the title and the description among its rows (the reader reconciles them with their elements).
         section_delta_into(&ua, &ub, &mut delta, steps);
     }
     let (ca, cb) = (of(&ka, &[crate::sections::CONTROL], true), of(&kb, &[crate::sections::CONTROL], true));
@@ -1096,12 +1123,13 @@ pub(crate) fn decide_fill(edit: &mut super::stylemap::StyleEdit, new: &Sheet, mu
     edit.fill_kind = (held("FillPattern") == Some(1.0)).then_some("solid");
 }
 
-/// Sets [`StyleEdit::line`] for an edit that changes a line-end cell: the numbers of the five cells a line end's attributes are worked out from, each the new
-/// sheet's own or, where it holds none, what `resolved` says its line style gives it (`None`: nothing does, and the number is left out).
+/// Sets [`StyleEdit::line`] for an edit that changes a line-end cell, the line's weight, its pattern or its cap: the numbers of the six cells a line end's attributes and a dash's form are
+/// worked out from, each the new sheet's own or, where it holds none, what `resolved` says its line style gives it (`None`: nothing does, and the number is left out).
 pub(crate) fn decide_line_end(edit: &mut super::stylemap::StyleEdit, new: &Sheet, mut resolved: impl FnMut(&str) -> Option<f64>) {
     use super::stylemap::{ARROW_CELLS, LINE_END_CELLS};
-    // A line end's cells, or the line's weight, which the width of a marker of DiaCraft's own is worked out from (the row).
-    if !edit.changes.iter().any(|(c, _)| ARROW_CELLS.contains(c) || *c == "LineWeight") {
+    // A line end's cells, or the line's weight, which the width of a marker of DiaCraft's own is worked out from (the row); the line's pattern or its cap, which the form of its dash follows
+    // (a flat cap draws the form).
+    if !edit.changes.iter().any(|(c, _)| ARROW_CELLS.contains(c) || matches!(*c, "LineWeight" | "LinePattern" | "LineCap")) {
         return;
     }
     edit.line.clear();
@@ -1140,6 +1168,8 @@ pub(crate) enum ShapeChange {
         text: Option<super::text::TextEdit>,
         geo: Option<GeoEdit>,
         delta: Option<Tier2Delta>,
+        /// A change of the title or the description: the elements `svg:title` and `svg:desc` to write.
+        alt: Option<super::alt::AltEdit>,
     },
     /// A change the writer does not write, in words.
     Refuse(&'static str),
@@ -1194,10 +1224,12 @@ pub(crate) fn shape_change(
     if fields {
         delta.get_or_insert_with(Tier2Delta::default).fields = true;
     }
-    if style.is_none() && text.is_none() && geo.is_none() && delta.is_none() {
+    // A group's own rows are DiaCraft's document file's, and the elements of its members are theirs: no element of a group is written from its rows.
+    let alt = if new.children.is_empty() { super::alt::edit_of(&old.sheet, &new.sheet) } else { None };
+    if style.is_none() && text.is_none() && geo.is_none() && delta.is_none() && alt.is_none() {
         ShapeChange::Same
     } else {
-        ShapeChange::Edit { style, text, geo, delta }
+        ShapeChange::Edit { style, text, geo, delta, alt }
     }
 }
 
@@ -1445,7 +1477,9 @@ mod tests {
         assert_eq!(owns("draw:z-index"), Some(Family::Order));
         assert_eq!(owns("svg:d"), Some(Family::Route));
         assert_eq!(owns("draw:enhanced-path"), Some(Family::Outline), "an outline is written");
-        assert_eq!(owns("draw:glue-points"), None, "glue points are not");
+        assert_eq!(owns("draw:glue-points"), Some(Family::Outline), "glue points of a custom shape's geometry are written (CPDOUBLE.ODG)");
+        assert_eq!(owns("draw:glue-point-leaving-directions"), Some(Family::Outline));
+        assert_eq!(owns("draw:glue-point"), None, "an element is no attribute");
         assert_eq!(owns("draw:fill"), Some(Family::Restyle), "a restyle is written");
         assert_eq!(owns("fo:padding-top"), Some(Family::Restyle));
         assert_eq!(owns("draw:engine"), None, "DiaCraft never writes it");
@@ -1458,10 +1492,19 @@ mod tests {
             "style:text-underline-style",
             "style:text-underline-color",
             "style:font-name",
+            // A run's language is written into the triplet of its script type: the three triplets' attributes are owned, each by the `LangID` cell.
+            "fo:language",
+            "fo:country",
+            "fo:script",
+            "style:rfc-language-tag",
+            "style:language-asian",
+            "style:country-asian",
+            "style:language-complex",
+            "style:rfc-language-tag-complex",
         ] {
             assert_eq!(owns(owned), Some(Family::TextStyle), "{owned}");
         }
-        for kept in ["fo:hyphenate", "fo:language", "style:leader-style", "style:tab-stop-distance", "fo:orphans"] {
+        for kept in ["fo:hyphenate", "style:leader-style", "style:tab-stop-distance", "fo:orphans"] {
             assert_eq!(owns(kept), None, "{kept} is kept as the file has it");
         }
         // A fill picture's attributes go with the picture, and a connector's skew goes with its route.
@@ -1867,11 +1910,18 @@ mod tests {
             }
             sheet_change(&Sheet::default(), &std::sync::Arc::new(s), false, &mut 0)
         };
-        // A dashed line cannot be written as an attribute: it is carried, and the margin beside it is written, whole.
-        match change(vec![("LinePattern", plain("2")), ("TopMargin", inches("0.1"))]) {
+        // A line pattern the table has no row for (a custom one, 254) cannot be written as an attribute: it is carried, and the margin beside it is written, whole.
+        match change(vec![("LinePattern", plain("254")), ("TopMargin", inches("0.1"))]) {
             SheetChange::Edit { style: Some(edit), delta: Some(d), .. } => {
                 assert!(d.cells.contains_key("LinePattern") && !d.cells.contains_key("TopMargin"), "{d:?}");
                 assert!(edit.changes.iter().any(|(c, _)| *c == "TopMargin") && !edit.margins.is_empty(), "{edit:?}");
+            }
+            other => panic!("a custom pattern beside a margin: {other:?}"),
+        }
+        // A pattern of the table is a dash of DiaCraft's own, written beside the margin, and nothing of it is carried.
+        match change(vec![("LinePattern", plain("2")), ("TopMargin", inches("0.1"))]) {
+            SheetChange::Edit { style: Some(edit), delta: None, .. } => {
+                assert!(edit.changes.iter().any(|(c, _)| *c == "LinePattern") && edit.changes.iter().any(|(c, _)| *c == "TopMargin"), "{edit:?}");
             }
             other => panic!("a dash beside a margin: {other:?}"),
         }
@@ -1898,6 +1948,48 @@ mod tests {
         }
     }
 
+    /// A shape whose `User` section holds the standard row of the title `title` (the file's own `svg:title`), the `raw` attributes `raw` and, if given, a kept comment.
+    fn titled(title: &str, raw: &[(&str, &str)], comment: Option<&str>) -> Shape {
+        let mut section = diacraft_doc::Section::new("User", None);
+        section.rows.push(std::sync::Arc::new(diacraft_doc::alt_text::standard_row(diacraft_doc::alt_text::TITLE_ROW, title)));
+        section.raw = diacraft_doc::RawAttrs::from_pairs(raw.iter().copied());
+        if let Some(text) = comment {
+            section.passthrough.push(0, diacraft_doc::RawNode::Comment(text.into()));
+        }
+        let mut shape = Shape::new(1);
+        std::sync::Arc::make_mut(&mut shape.sheet).sections.push(std::sync::Arc::new(section));
+        shape
+    }
+
+    /// The review of the public 0.2.4 pull request: a `User` section that holds a standard title row and nothing else is the file's own markup and carries
+    /// nothing, but one that also holds attributes or kept elements carries those: a change of them was no change (both lists of the rows that are not standard came out empty), and a
+    /// save dropped it.
+    #[test]
+    fn a_user_section_with_a_standard_title_row_still_carries_a_change_of_its_attributes_or_kept_elements() {
+        let change = |old: &Shape, new: &Shape| {
+            shape_change(old, new, false, &crate::write::runs::no_palette, &mut 0, &mut crate::write::runs::all_the_room())
+        };
+        let carried = |old: &Shape, new: &Shape, what: &str| match change(old, new) {
+            ShapeChange::Edit { delta: Some(d), alt: None, .. } => assert!(d.sections.iter().any(|s| s.name.as_str() == "User"), "{what}: {d:?}"),
+            other => panic!("{what}: the section is carried whole: {other:?}"),
+        };
+        let plain = titled("Pump", &[], None);
+        carried(&plain, &titled("Pump", &[("Extra", "1")], None), "an attribute added");
+        carried(&titled("Pump", &[("Extra", "1")], None), &titled("Pump", &[("Extra", "2")], None), "an attribute changed");
+        carried(&titled("Pump", &[("Extra", "1")], None), &plain, "an attribute taken off");
+        carried(&plain, &titled("Pump", &[], Some("c")), "a kept element added");
+        carried(&titled("Pump", &[], Some("c")), &titled("Pump", &[], Some("d")), "a kept element changed");
+        carried(&titled("Pump", &[], Some("c")), &plain, "a kept element taken off");
+        // Nothing changed, with them there or not, is no change; and the title alone changing is the element's edit, with nothing carried.
+        for shape in [plain.clone(), titled("Pump", &[("Extra", "1")], Some("c"))] {
+            assert!(matches!(change(&shape, &shape.clone()), ShapeChange::Same), "{shape:?}");
+        }
+        match change(&plain, &titled("Valve", &[], None)) {
+            ShapeChange::Edit { delta: None, alt: Some(edit), .. } => assert_eq!(edit.title.as_deref(), Some("Valve")),
+            other => panic!("a new title alone is an element to write: {other:?}"),
+        }
+    }
+
     /// The names of a shape and its links to a master are the extension's, and each alone makes the change one that has fields.
     #[test]
     fn each_of_the_names_and_links_of_a_shape_alone_is_a_change_of_its_fields() {
@@ -1912,7 +2004,7 @@ mod tests {
         ];
         for (what, new) in edits {
             match change(new) {
-                ShapeChange::Edit { delta: Some(d), style: None, text: None, geo: None } => assert!(d.fields, "{what}: {d:?}"),
+                ShapeChange::Edit { delta: Some(d), style: None, text: None, geo: None, alt: None } => assert!(d.fields, "{what}: {d:?}"),
                 other => panic!("{what}: expected a change of the fields: {other:?}"),
             }
         }

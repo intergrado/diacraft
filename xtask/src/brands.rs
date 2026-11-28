@@ -9,6 +9,9 @@
 //! * every text file under `packaging/`, and under `docs/` except Markdown pages. Markdown docs
 //!   (like `README.md`, `ROADMAP.md` and `docs/*.md`) may name the reference app and compare
 //!   against it, so no Markdown is scanned;
+//! * every file of the help tree, `help/`, and of the help catalogs, `i18n/help/`, Markdown included: it is the program's text. The product's name is a hit there but
+//!   in an exact text of [`PRODUCT_USES`] and in the two site-only fields of a topic's header, `description` and `seo_title` (and the rows of a help catalog whose context is
+//!   one of them), which the site's SEO ruling of 2026-11-25 lets name it; the company's name and the other vendors' are hits everywhere;
 //! * every text file of the website under `site/` (its pages, script, style and data; not its pictures). A page (an `.html` file) may name the
 //!   product anywhere since the owner's ruling of 2026-11-25 ([`SITE_PAGE_NAMES`]); the company's name and the other vendors' are hits there
 //!   as elsewhere, and so is the product's name in the site's other files.
@@ -53,10 +56,11 @@ const ALLOW: &str = "brand-ok";
 
 /// The notice, the same words wherever it is: NOTICE, the About box and the footer of the site's pages. Its first sentence is the trademark line it began with (an allowed use of the
 /// product's name); the sentences after it say that OpenDocument Format is an OASIS Standard, that LibreOffice and OpenOffice are registered trademarks of their owners (owner, 2026-11-23),
-/// whose marks ArchiMate (owner, 2026-11-25), UML and BPMN are (the architecture page names the three), and that DiaCraft is not affiliated with or endorsed by the six owners. None of the
+/// whose marks ArchiMate (owner, 2026-11-25), UML and BPMN are (the architecture page names the three), that draw.io is a registered trademark of draw.io Ltd (0.2.4: the public text says
+/// the files DiaCraft writes are being tested by opening them in draw.io), and that DiaCraft is not affiliated with or endorsed by the seven owners. None of the
 /// names after the first sentence is in [`DENY`]: they pass anywhere, and the notice says whose they are. The whole of it is the allowed text, in one line of each file, so that the export's
 /// allowlist keeps it.
-pub const TRADEMARK: &str = "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.";
+pub const TRADEMARK: &str = "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. draw.io is a registered trademark of draw.io Ltd. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group, the Object Management Group or draw.io Ltd.";
 
 /// The notice of the feature comparison page, in one line of its body beside the footer's: the first sentence of the footer's, the marks of the two other tools compared, and that DiaCraft is
 /// not affiliated with or endorsed by their three owners. It is the one place the page names the company outside the footer, so it is an exact text of [`PRODUCT_USES`] for that page and no other.
@@ -67,7 +71,7 @@ const SAVE_KINDS: &str = "crates/ui-egui/src/save_kinds.rs";
 /// The desktop app's Open dialog.
 const OPEN_DIALOG: &str = "apps/diacraft/src/dialogs.rs";
 /// The command line's help.
-const CLI_HELP: &str = "apps/diacraft-cli/src/args.rs";
+const CLI_HELP: &str = "apps/diacraft-cli/src/help/text.rs";
 /// The About box.
 const ABOUT: &str = "crates/ui-egui/src/splash.rs";
 
@@ -355,6 +359,11 @@ pub fn scan_text_with(path: &str, text: &str, allowed: &[&str]) -> Vec<Hit> {
     let found = match kind {
         Kind::Rust => scan_rust(text, allowed, &denied),
         Kind::Manifest => scan_lines(text, |l| l.trim_start().starts_with("description"), false, allowed, &denied),
+        Kind::Help => {
+            let exempt = help_exempt_lines(path, text);
+            let found = scan_lines(text, |_| true, false, allowed, &denied);
+            found.into_iter().filter(|(line, term, _)| !exempt.contains(line) || !SITE_PAGE_NAMES.contains(term)).collect()
+        }
         Kind::Text => scan_lines(text, |_| true, MARK_ABOVE.contains(&path), allowed, &denied),
     };
     found.into_iter().map(|(line, term, context)| Hit { path: path.to_owned(), line, term, context }).collect()
@@ -367,6 +376,8 @@ pub enum Kind {
     Rust,
     /// `description` lines.
     Manifest,
+    /// Every line, but the site-only fields of a help topic's header and the rows of a help catalog that are for them ([`help_exempt_lines`]).
+    Help,
     /// Every line.
     Text,
 }
@@ -376,7 +387,9 @@ const SITE_TEXT: [&str; 7] = ["html", "css", "js", "json", "txt", "xml", "webman
 
 /// How `path` is scanned, or `None` when it is not (Markdown, tests, pictures, everything else).
 pub fn kind_of(path: &str) -> Option<Kind> {
-    if path.ends_with(".md") {
+    if path.starts_with("help/") || path.starts_with("i18n/help/") {
+        Some(Kind::Help)
+    } else if path.ends_with(".md") {
         None
     } else if path.starts_with("docs/") || path.starts_with("packaging/") {
         Some(Kind::Text)
@@ -391,6 +404,40 @@ pub fn kind_of(path: &str) -> Option<Kind> {
     } else {
         None
     }
+}
+
+/// The lines (1-based) of a help file where the product's name is no hit: the `description:` and `seo_title:` lines of a topic's header (between the first line of three
+/// dashes and the next), the fields only the website reads, and the rows of a help catalog (a `.tsv` under `i18n/help/`) whose first column is `description` or `seo_title`.
+/// Only the names of [`SITE_PAGE_NAMES`] are let through on them: the company's name and the other vendors' are hits there as everywhere.
+pub fn help_exempt_lines(path: &str, text: &str) -> Vec<usize> {
+    let mut found = Vec::new();
+    if path.ends_with(".tsv") {
+        if path.starts_with("i18n/help/") {
+            for (i, line) in text.lines().enumerate() {
+                if matches!(line.split('\t').next(), Some("description" | "seo_title")) {
+                    found.push(i + 1);
+                }
+            }
+        }
+        return found;
+    }
+    let mut in_header = false;
+    for (i, line) in text.lines().enumerate() {
+        if i == 0 {
+            in_header = line.trim_end() == "---";
+            continue;
+        }
+        if !in_header {
+            break;
+        }
+        if line.trim_end() == "---" {
+            break;
+        }
+        if line.starts_with("description:") || line.starts_with("seo_title:") {
+            found.push(i + 1);
+        }
+    }
+    found
 }
 
 /// Whether `path` is test code by its place or name: a `tests.rs`, `tests_*` or `*_tests.rs` file, a Kani harness file (`kani_proofs.rs`,

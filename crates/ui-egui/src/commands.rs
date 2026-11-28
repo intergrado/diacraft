@@ -227,6 +227,25 @@ pub const UI_COMMANDS: &[UiCommand] = &[
                  none or expand or fit (auto_resize)",
     },
     UiCommand {
+        id: "window.connectionPointsDo",
+        label: "Double or Halve Connection Points",
+        menu: &["Home", "Tools"],
+        shortcut: None,
+        params: "action: text, double or halve (the engine's `shape.connection_points`: double puts a new point in the middle of every portion of the edge and moves no old point, and halve takes away the points of \
+                 the newest doubling and never an original point); \
+                 target: text, optional, pointer (the default: the edge under the pointer, else every edge of the shapes selected, as Ctrl+Alt+K and Ctrl+Alt+Shift+K do) or all (every edge of the shapes selected, as \
+                 the ribbon's rows do) or menu (the edge at the right click that opened the menu, else every edge, as the right-click rows do). \
+                 It is refused in words when it would change nothing (the rows are greyed then), and the status bar says what changed",
+    },
+    UiCommand {
+        id: "window.connectionMinGap",
+        label: "Minimum Distance Between Doubled Connection Points",
+        menu: &["File", "Options", "Advanced"],
+        shortcut: None,
+        params: "inches: number, paper inches from 0.01 to 2 (0.254 mm to 50.8 mm), the least distance between the points a doubling makes: an edge whose new points would be closer is not doubled. \
+                 The program-wide setting, 3 mm at first and not saved, sent as `min_gap` with every doubling and read for every enabled state (File, Options, Advanced)",
+    },
+    UiCommand {
         id: "window.swimlaneDo",
         label: "Swimlanes",
         menu: &["Cross-Functional Flowchart"],
@@ -414,6 +433,49 @@ pub const UI_COMMANDS: &[UiCommand] = &[
                  cancel: true, the edit is given up and nothing is sent. \
                  With none of them an edit begins on the formula's own text. What the engine answered is in the answer's sheet.last: a refused text is an answer, with its words and the fault marked, and the edit stays open",
     },
+    UiCommand {
+        id: "window.sheetInsertRow",
+        label: "Insert a ShapeSheet Row",
+        menu: &["ShapeSheet Design", "Rows"],
+        shortcut: None,
+        params: "at: text, after or before, optional: where the new row goes beside the selected row, after it (the default, the ribbon's Insert) or before it (the right-click menu's Insert Row), and with a header or a cell of the \
+                 section's own selected the row goes at the end. It sends one sheet.add_row for the section of the selected cell or row (one undo step), selects the new row and says what it did in the footer, and a refusal is said \
+                 there and in sheet.last",
+    },
+    UiCommand { id: "window.sheetDeleteRow", label: "Delete a ShapeSheet Row", menu: &["ShapeSheet Design", "Rows"], shortcut: None, params: "none" },
+    UiCommand {
+        id: "window.sheetInsertSection",
+        label: "Insert a ShapeSheet Section",
+        menu: &["ShapeSheet Design", "Sections"],
+        shortcut: None,
+        params: "sections: array of text, optional, the labels of the sections to insert as sheet.sections lists them in can_add (Scratch, Shape Data, Geometry, Ellipse, Infinite Line), inserted with no card by one command.batch of \
+                 sheet.add_section (one undo step), and without it the Insert Section card opens, whose OK sends the same batch for the boxes ticked and whose Cancel sends nothing; \
+                 close: true to close the card without sending anything",
+    },
+    UiCommand {
+        id: "window.sheetDeleteSection",
+        label: "Delete a ShapeSheet Section",
+        menu: &["ShapeSheet Design", "Sections"],
+        shortcut: None,
+        params: "none",
+    },
+    UiCommand {
+        id: "window.sheetEditFormula",
+        label: "Edit a ShapeSheet Formula",
+        menu: &["ShapeSheet Design", "Editing"],
+        shortcut: None,
+        params: "text: text, optional, the formula to put in the Edit Formula card, which opens on the selected cell when it is not open; \
+                 commit: true to commit what the card holds as OK does (one sheet.set_cell with force, and a refused text keeps the card open with the fault marked and the engine's words); \
+                 close: true to close the card as Cancel does. With none of them the card opens on the selected cell's formula",
+    },
+    UiCommand {
+        id: "window.sheetAddRow",
+        label: "Add a Row to a ShapeSheet Section",
+        menu: &["ShapeSheet Design", "Editing"],
+        shortcut: None,
+        params: "section: text, Prop or Hyperlink or Actions (or their labels Shape Data and Hyperlinks): a row is added at the end of that section of the sheet on top, as the Editing group's Shape Data, Link and Shape Action do, \
+                 and the section is made first, with its one row, when the sheet has none",
+    },
     UiCommand { id: "page.select", label: "Go to Page", menu: &["Page"], shortcut: None, params: "id: whole number, the id of the page to show" },
     UiCommand { id: "tool.pointer", label: "Pointer Tool", menu: &["Home", "Tools"], shortcut: Some("Cmd+1"), params: "none" },
     UiCommand { id: "tool.connector", label: "Connector Tool", menu: &["Home", "Tools"], shortcut: Some("Cmd+3"), params: "none" },
@@ -422,8 +484,28 @@ pub const UI_COMMANDS: &[UiCommand] = &[
         label: "Task Pane",
         menu: &["View", "Show", "Task Panes"],
         shortcut: None,
-        params: "pane: text, size_position, format_shape, pan_zoom, drawing_explorer, shape_data or comments (or the pane's title, Size & Position and so on): the pane at the right of the drawing area; \
+        params: "pane: text, size_position, format_shape, pan_zoom, drawing_explorer, shape_data, comments or accessibility (or the pane's title, Size & Position and so on): the pane at the right of the drawing area; \
                  shown: true to open it, false to close it, and without it the pane is toggled",
+    },
+    UiCommand {
+        id: "window.altText",
+        label: "Edit Alt Text",
+        menu: &["Home", "Shape Styles"],
+        shortcut: None,
+        params: "of: text, optional, shape (the default) or page. A shape opens the Format Shape pane at its Alt Text section with the Title box ready for typing, and a page opens Page Setup on its Alt Text tab. \
+                 The shape's right-click menu and the Add Alt Text fix of the Accessibility pane run it; \
+                 id: whole number, optional, the shape when of is shape. It is shown and selected on its page. The default is the shapes selected, and with none the command is refused; \
+                 page: whole number, optional, the id of the page (default: the page on view for a page, and the page that holds the shape for a shape)",
+    },
+    UiCommand {
+        id: "window.showFinding",
+        label: "Show Accessibility Finding",
+        menu: &["Review", "Accessibility"],
+        shortcut: None,
+        params: "rule: text, the id of the finding's rule as review.check_accessibility gives it (alt_text_missing_on_shape and the others). The finding's page is shown, its shape selected and the Accessibility pane opened; \
+                 page: whole number, the id of the finding's page; \
+                 shape: whole number, optional, the id of the finding's shape (a finding of a page has none); \
+                 row: optional, the row of a hyperlink finding as the check gives it",
     },
     UiCommand {
         id: "window.newComment",
@@ -601,7 +683,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
         label: "Page Setup",
         menu: &["Design", "Page Setup"],
         shortcut: None,
-        params: "tab: text, Print Setup, Page Size, Drawing Scale, Page Properties or Layout and Routing: the Page Setup dialog opens on it for the page on view (the dialog changes nothing until its OK); \
+        params: "tab: text, Print Setup, Page Size, Drawing Scale, Page Properties, Layout and Routing or Alt Text: the Page Setup dialog opens on it for the page on view (the dialog changes nothing until its OK); \
                  page: whole number, optional, the id of the page to set up instead of the page on view; \
                  close: true to close the dialog without sending anything",
     },
@@ -699,7 +781,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
         label: "Format Options",
         menu: &["Home", "Shape Styles"],
         shortcut: None,
-        params: "tab: text, optional, Fill & Line (the default) or Effects: the Format Shape pane opens on it for the shapes selected (Fill Options, Line Options and More Arrows are this)",
+        params: "tab: text, optional, Fill & Line (the default), Effects or Alt Text (Size & Properties opens it too): the Format Shape pane opens on it for the shapes selected (Fill Options, Line Options and More Arrows are this)",
     },
     UiCommand {
         id: "format.painter",
@@ -758,6 +840,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
         shortcut: None,
         params: "axis: text, horizontal (left to right) or vertical (top to bottom)",
     },
+    UiCommand { id: "arrange.reverseEnds", label: "Reverse Ends of Selected Connectors", menu: &["Home", "Tools"], shortcut: None, params: "none" },
     UiCommand {
         id: "arrange.order",
         label: "Change the Drawing Order of Selected Shapes",
@@ -833,12 +916,58 @@ pub const UI_COMMANDS: &[UiCommand] = &[
         params: "none",
     },
     UiCommand {
+        id: "operations.join",
+        label: "Join the Selected Shapes",
+        menu: &["Developer", "Shape Design", "Operations"],
+        shortcut: None,
+        params: "none",
+    },
+    UiCommand {
+        id: "operations.trim",
+        label: "Trim the Selected Shapes",
+        menu: &["Developer", "Shape Design", "Operations"],
+        shortcut: None,
+        params: "none",
+    },
+    UiCommand {
+        id: "operations.offset",
+        label: "Offset the Selected Shapes",
+        menu: &["Developer", "Shape Design", "Operations"],
+        shortcut: None,
+        params: "distance: number above 0, at least 0.0001, in the cells' own units like the engine's (`shape.offset`): for each path of each shape selected two new shapes, one on each side, \
+                 and the originals stay",
+    },
+    UiCommand {
+        id: "operations.offsetDialog",
+        label: "Offset",
+        menu: &["Developer", "Shape Design", "Operations"],
+        shortcut: None,
+        params: "close: true to close the Offset dialog without changing anything, and without it the dialog opens on the distance of 0.25 inch (6 mm on a metric page) (OK runs `operations.offset` \
+                 with the distance typed in the page's measurement unit, and Cancel changes nothing)",
+    },
+    UiCommand {
+        id: "operations.fitCurve",
+        label: "Fit Curve the Selected Shapes",
+        menu: &["Draw", "Shape Operations", "Operations"],
+        shortcut: None,
+        params: "tolerance: number of 0 or more, in the cells' own units like the engine's (`shape.fit_curve`); flags: whole number, optional, 0 or a sum of 1 (periodic splines), 2 (circular arcs) and \
+                 4 (break at abrupt changes): each shape selected stays the same shape and its paths are made of fewer segments within the tolerance",
+    },
+    UiCommand {
+        id: "operations.fitCurveDialog",
+        label: "Fit Curve",
+        menu: &["Draw", "Shape Operations", "Operations"],
+        shortcut: None,
+        params: "close: true to close the Fit Curve dialog without changing anything, and without it the dialog opens on a tolerance of a hundredth of an inch (a quarter of a millimetre on a metric page) \
+                 with no box ticked (OK runs `operations.fitCurve` with the tolerance typed in the page's measurement unit and the flags the boxes say, and Cancel changes nothing)",
+    },
+    UiCommand {
         id: "window.options",
         label: "Options",
         menu: &["File"],
         shortcut: None,
-        params: "tab: text, Customize Ribbon or Advanced: the Options dialog opens on it with the Developer tab's box and the box Select shapes partially within area as the window has them \
-                 (OK sends `window.developer` and `window.selectPartially` for the boxes that were changed); \
+        params: "tab: text, Customize Ribbon or Advanced: the Options dialog opens on it with the Developer tab's box, the box Select shapes partially within area and the box Minimum distance between doubled \
+                 connection points as the window has them (OK sends `window.developer`, `window.selectPartially` and `window.connectionMinGap` for the boxes that were changed); \
                  close: true to close the dialog without changing anything",
     },
     UiCommand {
@@ -903,6 +1032,8 @@ pub(crate) fn ends_text_edit(id: &str) -> bool {
                 | "window.followLink"
                 | "window.backstage"
                 | "window.pageSetup"
+                | "window.altText"
+                | "window.showFinding"
                 | "window.reorderPages"
                 | "window.snapGlue"
                 | "window.layerProperties"
@@ -911,6 +1042,7 @@ pub(crate) fn ends_text_edit(id: &str) -> bool {
                 | "window.askShapeData"
                 | "window.containerAdd"
                 | "window.containerDo"
+                | "window.connectionPointsDo"
                 | "window.swimlaneDo"
                 | "window.orgChartDo"
                 | "window.zoomDialog"
@@ -920,6 +1052,7 @@ pub(crate) fn ends_text_edit(id: &str) -> bool {
                 | "window.tab"
                 | "arrange.rotate"
                 | "arrange.flip"
+                | "arrange.reverseEnds"
                 | "arrange.order"
                 | "arrange.align"
                 | "arrange.changeShape"
@@ -934,6 +1067,10 @@ pub(crate) fn ends_text_edit(id: &str) -> bool {
                 | "operations.fragment"
                 | "operations.intersect"
                 | "operations.subtract"
+                | "operations.join"
+                | "operations.trim"
+                | "operations.offset"
+                | "operations.fitCurve"
         ),
     }
 }
@@ -962,6 +1099,14 @@ fn text<'a>(cmd: &str, p: &'a Map<String, Value>, key: &str) -> Result<&'a str> 
         Some(Value::String(s)) => Ok(s),
         Some(_) => Err(bad(cmd, format!("`{key}` must be text"))),
         None => Err(bad(cmd, format!("missing `{key}`"))),
+    }
+}
+
+/// A whole number that may be left out.
+fn optional_whole(cmd: &str, p: &Map<String, Value>, key: &str) -> Result<Option<u32>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_u64().and_then(|n| u32::try_from(n).ok()).map(Some).ok_or_else(|| bad(cmd, format!("`{key}` must be a whole number"))),
     }
 }
 
@@ -1012,6 +1157,8 @@ impl DiacraftApp {
                     | "window.askShapeData"
                     | "window.options"
                     | "window.zoomDialog"
+                    | "operations.offsetDialog"
+                    | "operations.fitCurveDialog"
                     | "window.colorsDialog"
                     | "window.relayoutOptions"
                     | "window.spacingOptions"
@@ -1019,6 +1166,8 @@ impl DiacraftApp {
                     | "window.hyperlinks"
                     | "window.field"
                     | "window.symbols"
+                    | "window.sheetInsertSection"
+                    | "window.sheetEditFormula"
                     | "app.about"
                     | "app.licenses"
             );
@@ -1031,7 +1180,7 @@ impl DiacraftApp {
     /// Whether the window command `id` can run now, and if not why.
     pub(crate) fn window_command_enabled(&self, id: &str) -> std::result::Result<(), String> {
         // The shape operations ask the engine, once for each drawing, revision, page and selection (`operations.rs`).
-        if let Some(op) = crate::operations::op_of_command(id) {
+        if let Some(op) = crate::operations::op_of_enabled_command(id) {
             return self.shape_op_verdict(op);
         }
         match id {
@@ -1052,6 +1201,8 @@ impl DiacraftApp {
             | "window.newComment"
             | "window.showComment"
             | "window.stepComment"
+            | "window.altText"
+            | "window.showFinding"
             | "tool.pointer"
             | "tool.connector"
             | "tool.text"
@@ -1122,6 +1273,13 @@ impl DiacraftApp {
             | "window.sheetCollapse"
             | "window.sheetSelect"
             | "window.sheetEdit" => self.sheet_acts_verdict(),
+            // The rows, sections and Editing group: what the selection allows, as the ribbon's controls say it (`sheet/rows.rs`).
+            "window.sheetInsertRow"
+            | "window.sheetDeleteRow"
+            | "window.sheetInsertSection"
+            | "window.sheetDeleteSection"
+            | "window.sheetEditFormula"
+            | "window.sheetAddRow" => self.sheet_command_verdict(id),
             // The Insert tab: a picture needs a document, Link the one shape selected, Field and Symbol a text box that is open or the one shape selected.
             "window.insertPicture" => self.command_enabled("insert.picture"),
             "window.callout" => self.callout_enabled(),
@@ -1151,6 +1309,9 @@ impl DiacraftApp {
             }
             // The containers: one is added anywhere there is a drawing; the rest act on the shapes selected (`container_ui.rs`).
             "window.containerAdd" => self.command_enabled("container.add"),
+            // Doubling and halving connection points (`edit/conn_edges.rs`): a command with no action named can run when a doubling or a halving of every edge of the shapes selected can; the
+            // controls and the keys ask with their action (`connection_verdict_for`).
+            "window.connectionPointsDo" => self.connection_verdict_any(),
             // The swimlanes: the page on view has a structure of lanes (`swimlane_ui.rs`).
             "window.swimlaneDo" => {
                 self.command_enabled("swimlane.info")?;
@@ -1174,6 +1335,8 @@ impl DiacraftApp {
                     self.command_enabled("autoconnect.set")
                 }
             }
+            // Reverse Ends works on the connectors and lines among the shapes selected (`arrange.rs`).
+            "arrange.reverseEnds" => self.reverse_ends_enabled(),
             "arrange.align" => {
                 if self.session().document().is_none() {
                     Err("no document open".to_owned())
@@ -1275,7 +1438,7 @@ impl DiacraftApp {
             }
             // Export from the window needs the app's Save dialog to name the file, as Open does, and one at a time.
             Some(_) if id == "file.export" && !self.export_dialog_available() => {
-                Err("there is no file dialog to name the picture with now".to_owned())
+                Err(self.file_dialog_busy().unwrap_or_else(|| "there is no file dialog to name the picture with now".to_owned()))
             }
             Some(spec) => (spec.enabled)(self.session()),
             None => Err(format!("unknown command `{}`", shown(id, 64))),
@@ -1394,6 +1557,8 @@ impl DiacraftApp {
                 }
             }
             "window.containerAdd" | "window.containerDo" => self.container_window_command(id, p)?,
+            "window.connectionPointsDo" => self.connection_points_window_command(p)?,
+            "window.connectionMinGap" => self.connection_min_gap_command(p)?,
             "window.swimlaneDo" => self.swimlane_window_command(id, p)?,
             "window.orgChartDo" => self.org_window_command(p)?,
             "window.ribbon" => self.ui.ribbon_collapsed = flag(id, p, "collapsed")?.unwrap_or(!self.ui.ribbon_collapsed),
@@ -1493,7 +1658,13 @@ impl DiacraftApp {
             | "window.sheetSections"
             | "window.sheetCollapse"
             | "window.sheetSelect"
-            | "window.sheetEdit" => self.sheet_window_command(id, p)?,
+            | "window.sheetEdit"
+            | "window.sheetInsertRow"
+            | "window.sheetDeleteRow"
+            | "window.sheetInsertSection"
+            | "window.sheetDeleteSection"
+            | "window.sheetEditFormula"
+            | "window.sheetAddRow" => self.sheet_window_command(id, p)?,
             "window.pane" => self.pane_command(text(id, p, "pane")?, flag(id, p, "shown")?)?,
             "window.paneDock" => {
                 let with = match p.get("with") {
@@ -1526,6 +1697,16 @@ impl DiacraftApp {
                 self.show_comment_command(comment)?;
             }
             "window.stepComment" => self.step_comment_command(flag(id, p, "forward")?.unwrap_or(true))?,
+            "window.altText" => {
+                let of = optional_text(id, p, "of")?;
+                self.alt_text_command(of, optional_whole(id, p, "id")?, optional_whole(id, p, "page")?)?;
+            }
+            "window.showFinding" => {
+                let rule = text(id, p, "rule")?;
+                let page = optional_whole(id, p, "page")?.ok_or_else(|| bad(id, "missing `page`"))?;
+                let row = p.get("row").filter(|v| !v.is_null()).cloned();
+                self.show_finding_command(rule, page, optional_whole(id, p, "shape")?, row)?;
+            }
             "tool.area_select" => self.set_tool(crate::edit::Tool::AreaSelect),
             "tool.lasso_select" => self.set_tool(crate::edit::Tool::Lasso),
             "window.selectByType" => {
@@ -1660,6 +1841,7 @@ impl DiacraftApp {
             "format.size" => self.format_size_step(text(id, p, "step")?)?,
             "arrange.rotate" => self.arrange_rotate(number(id, p, "by")?.ok_or_else(|| bad(id, "missing `by`"))?)?,
             "arrange.flip" => self.arrange_flip(text(id, p, "axis")?)?,
+            "arrange.reverseEnds" => self.arrange_reverse_ends()?,
             "arrange.order" => self.arrange_order(text(id, p, "to")?)?,
             "arrange.align" => self.arrange_align(text(id, p, "how")?)?,
             "arrange.changeShape" => self.arrange_change_shape(text(id, p, "master")?, optional_text(id, p, "stencil")?)?,
@@ -1670,6 +1852,34 @@ impl DiacraftApp {
             "operations.fragment" => self.run_shape_op(Op::Fragment)?,
             "operations.intersect" => self.run_shape_op(Op::Intersect)?,
             "operations.subtract" => self.run_shape_op(Op::Subtract)?,
+            "operations.join" => self.run_shape_op(Op::Join)?,
+            "operations.trim" => self.run_shape_op(Op::Trim)?,
+            "operations.offset" => {
+                let distance = number(id, p, "distance")?.ok_or_else(|| bad(id, "missing `distance`"))?;
+                self.run_shape_op_with(Op::Offset, json!({ "distance": distance }))?;
+            }
+            "operations.fitCurve" => {
+                let tolerance = number(id, p, "tolerance")?.ok_or_else(|| bad(id, "missing `tolerance`"))?;
+                let mut args = json!({ "tolerance": tolerance });
+                if let Some(flags) = p.get("flags").filter(|v| !v.is_null()) {
+                    args["flags"] = flags.clone();
+                }
+                self.run_shape_op_with(Op::FitCurve, args)?;
+            }
+            "operations.offsetDialog" => {
+                if flag(id, p, "close")?.unwrap_or(false) {
+                    self.close_offset_dialog();
+                } else {
+                    self.open_offset_dialog();
+                }
+            }
+            "operations.fitCurveDialog" => {
+                if flag(id, p, "close")?.unwrap_or(false) {
+                    self.close_fit_curve_dialog();
+                } else {
+                    self.open_fit_curve_dialog();
+                }
+            }
             "window.options" => {
                 if flag(id, p, "close")?.unwrap_or(false) {
                     self.close_options_dialog();
@@ -1691,7 +1901,8 @@ impl DiacraftApp {
 
     /// The window state a window command answers with.
     pub fn window_state(&self) -> Value {
-        let view = self.ui.page.and_then(|p| self.ui.views.get(&p));
+        // The view as the next frame draws it, so that what a pan or a zoom just did is in the answer (`canvas.rs`, `shown_view`).
+        let view = self.shown_view().map(|(view, _)| view);
         let mut state = json!({
             "tab": self.ui.tab,
             "ribbonCollapsed": self.ui.ribbon_collapsed,
@@ -1713,8 +1924,8 @@ impl DiacraftApp {
             "theme": if self.ui.theme == egui::Theme::Dark { "dark" } else { "light" },
             // Where the page is on the screen, in points (left, top, width, height), and points to a paper inch: what a client needs to aim
             // a drag at a place of the page.
-            "pageRect": self.ui.report.page.map(|r| [r.min.x, r.min.y, r.width(), r.height()]),
-            "pointsPerInch": view.map(crate::canvas::view::View::scale),
+            "pageRect": self.shown_page_rect(),
+            "pointsPerInch": view.map(|v| v.scale()),
             "tool": self.ui.edit.tool.name(),
             "formatPainter": self.format_painter_state(),
             "textBlock": self.text_block_shown().map(|b| json!({"corners": b.corners, "pin": b.pin, "direction": b.direction})),
@@ -1746,6 +1957,12 @@ impl DiacraftApp {
         // Not in the `json!` above: it is at the macro's recursion limit. The splash or About panel while it is up (`start` or `about`), else null.
         if let Some(map) = state.as_object_mut() {
             map.insert("splash".to_owned(), json!(self.splash_kind().map(crate::splash::SplashKind::name)));
+            // The Offset dialog (the distance in its box) and the Fit Curve dialog (the tolerance in its box and the flags the boxes say), `null` when closed (`operations_dialog.rs`).
+            map.insert("offsetDialog".to_owned(), json!(self.offset_dialog_text()));
+            map.insert(
+                "fitCurveDialog".to_owned(),
+                json!(self.fit_curve_dialog_state().map(|(tolerance, flags)| json!({"tolerance": tolerance, "flags": flags}))),
+            );
             // The Third-party licences window while it is open: its rows and where it is scrolled to; else null.
             map.insert("licenses".to_owned(), self.licenses_state());
             map.insert("autoConnect".to_owned(), self.autoconnect_state());
@@ -1753,6 +1970,8 @@ impl DiacraftApp {
             map.insert("shapeSearch".to_owned(), self.shape_search_state());
             // The option "Select shapes partially within area", and the Select by Type dialog (`null` when it is closed, else what is ticked).
             map.insert("selectPartially".to_owned(), json!(self.ui.select_partial));
+            // The least distance between the points a doubling makes, in paper inches (`edit/conn_edges.rs`).
+            map.insert("connectionMinGap".to_owned(), json!(self.connection_min_gap()));
             map.insert("selectByType".to_owned(), self.select_by_type_state());
             // The Colors dialog (`null` when closed), the Recent Colors, and the theme or variant shown on the page under the pointer.
             map.insert("colorsDialog".to_owned(), self.colors_dialog_state());
@@ -1764,6 +1983,8 @@ impl DiacraftApp {
             map.insert("field".to_owned(), self.field_state());
             map.insert("symbols".to_owned(), self.symbol_state());
             map.insert("pictureDialog".to_owned(), json!(self.picture_dialog_open()));
+            // The file dialog that is open now (`open`, `save`, `export`, `picture`, `stencil` or `print`), or null: one at a time (`file_dialog.rs`).
+            map.insert("fileDialog".to_owned(), json!(self.file_dialog().map(crate::FileDialog::word)));
             map.insert("openedUrl".to_owned(), json!(self.ui.insert.last_url));
             // The drag in progress with a drawing tool, and the Freeform tool's smoothing in percent (`edit/draw.rs`).
             map.insert("drawing".to_owned(), self.drawing_state());
@@ -1788,6 +2009,9 @@ impl DiacraftApp {
             map.insert("pageBreaks".to_owned(), json!(self.page_breaks_box()));
             // The ShapeSheet windows: tabs, dock, toggles, focus, the sections and lines of the tab on top (`sheet/mod.rs`).
             map.insert("sheet".to_owned(), self.sheet_state_json());
+            // The Alt Text section of Format Shape and the Accessibility pane, while they are on the screen (`null` otherwise): what the boxes show and why one is quiet; the findings and the one selected.
+            map.insert("altText".to_owned(), self.alt_text_state());
+            map.insert("accessibility".to_owned(), self.accessibility_state());
         }
         state
     }
@@ -1801,7 +2025,7 @@ impl DiacraftApp {
         }
         let name = text(ID, p, "tab")?;
         let tab = crate::page_setup::DialogTab::from_name(name).ok_or_else(|| {
-            let names: Vec<&str> = crate::page_setup::DialogTab::ALL.iter().filter(|t| t.works()).map(|t| t.name()).collect();
+            let names: Vec<&str> = crate::page_setup::DialogTab::ALL.iter().map(|t| t.name()).collect();
             bad(ID, format!("no tab `{}`; the tabs are: {}", shown(name, 32), names.join(", ")))
         })?;
         let page = match number(ID, p, "page")? {

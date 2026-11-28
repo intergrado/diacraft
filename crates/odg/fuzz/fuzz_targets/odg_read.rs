@@ -7,7 +7,10 @@
 //! of 8 makes the rest the children of up to 64 `office:annotation` elements of one page, with numbers, threads and shapes that repeat and loop; a first byte of 9 makes
 //! the rest the attributes and the children of a `draw:gradient` that a common style and a shape fill with (its stand-in, LibreOffice's `loext:gradient-stop` children, and the
 //! rows a shape of fewer deletes); a first byte of 10 makes the rest the master pages of an honest package, after the one its page is on, and the font faces of both parts (
-//! a master page that holds no shape is kept whole, and what the drawing does not hold is counted for the open's note); any other first byte reads the bytes as they are. A read gives a
+//! a master page that holds no shape is kept whole, and what the drawing does not hold is counted for the open's note); a first byte of 11 makes the rest the shapes of a page after a few of
+//! the reader's own; a first byte of 12 makes the rest the language attributes of a text style, of a paragraph style and of the default style, and `dc:language`
+//! (the three triplets, `zxx` and `none`, a script, a full tag), over a text in the three script types, so that every run's language is read from one of them and a
+//! `LangID` that is read is always a language tag or `x-none`; any other first byte reads the bytes as they are. A read gives a
 //! document or an error, and a document holds the model's caps and the
 //! index's promises, **and a read on threads is the read on one**; anything else is a crash the fuzzer reports.
 #![no_main]
@@ -164,6 +167,50 @@ fn package_shapes(rest: &[u8]) -> Option<Vec<u8>> {
     w.finish().ok()
 }
 
+/// An honest package whose language attributes are `rest` (the selector byte 12): they are the text properties of a text style `L1`, of a paragraph style `P9` and of the default
+/// paragraph style, and the first line of them is `dc:language`; the page holds a span of `L1` over a text in the three script types (Latin letters, Japanese ones, Arabic ones, digits), a paragraph
+/// of `P9`, and the same text in a span of a span. `None` for text that is not UTF-8 or that the archive's writer refuses.
+fn package_languages(rest: &[u8]) -> Option<Vec<u8>> {
+    const NS: &str = concat!(
+        r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" "#,
+        r#"xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" "#,
+        r#"xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" "#,
+        r#"xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0""#
+    );
+    const TEXT: &str = "Hello \u{65E5}\u{672C}\u{8A9E} \u{0639}\u{0631}\u{0628}\u{064A} 123 \u{65E5}";
+    let text = std::str::from_utf8(rest).ok()?;
+    let first_line = text.lines().next().unwrap_or_default();
+    let content = format!(
+        concat!(
+            r#"<office:document-content {ns} office:version="1.3"><office:automatic-styles>"#,
+            r#"<style:style style:name="L1" style:family="text"><style:text-properties {attrs}/></style:style>"#,
+            r#"<style:style style:name="P9" style:family="paragraph"><style:text-properties {attrs}/></style:style>"#,
+            r#"</office:automatic-styles><office:body><office:drawing><draw:page draw:name="p" draw:master-page-name="Default">"#,
+            r#"<draw:rect svg:x="1cm" svg:y="1cm" svg:width="4cm" svg:height="2cm"><text:p><text:span text:style-name="L1">{text}</text:span></text:p>"#,
+            r#"<text:p text:style-name="P9">{text}</text:p><text:p><text:span text:style-name="L1">a<text:span text:style-name="L1">{text}</text:span></text:span></text:p></draw:rect>"#,
+            r#"</draw:page></office:drawing></office:body></office:document-content>"#
+        ),
+        ns = NS,
+        attrs = text,
+        text = TEXT
+    );
+    let styles = STYLES.replacen(
+        "</office:styles>",
+        &format!(r#"<style:default-style style:family="paragraph"><style:text-properties {text}/></style:default-style></office:styles>"#),
+        1,
+    );
+    let meta = format!(
+        r#"<office:document-meta {NS} office:version="1.3"><office:meta><dc:language>{first_line}</dc:language></office:meta></office:document-meta>"#
+    );
+    let mut w = ArchiveWriter::new();
+    w.add("mimetype", MEDIA.as_bytes(), Method::Stored).ok()?;
+    w.add("content.xml", content.as_bytes(), Method::Deflated).ok()?;
+    w.add("styles.xml", styles.as_bytes(), Method::Deflated).ok()?;
+    w.add("meta.xml", meta.as_bytes(), Method::Deflated).ok()?;
+    w.add("META-INF/manifest.xml", MANIFEST.as_bytes(), Method::Deflated).ok()?;
+    w.finish().ok()
+}
+
 /// An honest package whose `meta.xml`, `settings.xml`, manifest or font faces hold `rest`, by `kind` (4, 5, 6 or 7), and whose other parts are as plain as they can be; it holds
 /// an entry beside them, and a folder. `None` for text that is not UTF-8 or that the archive's writer refuses.
 fn package_data(kind: u8, rest: &[u8]) -> Option<Vec<u8>> {
@@ -316,6 +363,10 @@ fuzz_target!(|data: &[u8]| {
             Some(bytes) => (bytes, Some(Variant::Drawing)),
             None => return,
         },
+        Some((12, rest)) => match package_languages(rest) {
+            Some(bytes) => (bytes, Some(Variant::Drawing)),
+            None => return,
+        },
         Some((11, rest)) => match package_shapes(rest) {
             Some(bytes) => (bytes, Some(Variant::Drawing)),
             None => return,
@@ -379,6 +430,35 @@ fuzz_target!(|data: &[u8]| {
             assert!(report.variant == Some(sniffed) || report.warned("mimetype_irregular") > 0, "{sniffed:?} {:?}", report.variant);
         }
         assert!(doc.check_limits().is_ok());
+        // **The languages**: a `LangID` the reader makes is a language tag in canonical case or `x-none` (a value of a drawing of DiaCraft's may be any text, so only
+        // the packages that carry no DiaCraft data are held to it), and `DocLangID`, when the read makes it, is the tag `dc:language` says.
+        if data.first() == Some(&12) {
+            let tag_or_none = |text: &str| text == "x-none" || diacraft_doc::lang::parse(text).is_ok_and(|tag| tag.as_str() == text);
+            let mut sheets: Vec<&diacraft_doc::Sheet> = doc.styles.iter().map(|s| &*s.sheet).collect();
+            for page in doc.pages.iter() {
+                let mut stack: Vec<&diacraft_doc::Shape> = page.shapes.iter().map(|s| s.as_ref()).collect();
+                while let Some(shape) = stack.pop() {
+                    sheets.push(&shape.sheet);
+                    stack.extend(shape.children.iter().map(|c| c.as_ref()));
+                }
+            }
+            for sheet in sheets {
+                for section in sheet.sections.iter().filter(|s| s.name.as_str() == "Character") {
+                    for row in section.rows.iter() {
+                        if let Some(value) = row.cells.get("LangID").and_then(|c| c.value.as_ref()) {
+                            assert!(tag_or_none(value.text()), "a LangID of {:?}", value.text());
+                        }
+                    }
+                }
+            }
+            if let Some(id) = doc.sheet.cell("DocLangID").and_then(|c| c.value.as_ref()) {
+                assert!(
+                    diacraft_doc::lang::parse(id.text()).is_ok() && doc.props.language.as_deref() == Some(id.text()),
+                    "DocLangID {:?}",
+                    id.text()
+                );
+            }
+        }
         // The comments: a number once, a reply on the page and the shape of the comment it answers (which has no parent), a text within the cap, and an index that says
         // which of each page's annotation elements were taken: ascending, among the page's annotation children, and as many in all as the comments.
         let mut numbers = std::collections::HashSet::new();

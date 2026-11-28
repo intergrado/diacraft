@@ -3,7 +3,7 @@
 //! **A stencil is read like a drawing** (`file.open`): the path goes through `file::read_file_stamped` (a folder, a device and a pipe are
 //! refused before a byte is read, a pipe swapped in later is opened without waiting and refused, a file past the cap is refused from its size
 //! and from the bytes that came), then `diacraft_vsdx::read` with its default limits. A link is read through to the file it leads to, as
-//! `file.open` reads it (gaps A2: the control channel and MCP have no granted folders, so a program names any path the user can read; unlike a
+//! `file.open` reads it (gaps A2: with the automation roots in force the path must lie in a read root, `file_access`, and with none a program names any path the user can read; unlike a
 //! save, a read changes nothing on the disk). **Macros never run**: a `.vssm`'s project is a part the reader does not take, and nothing here
 //! looks at one. Nothing in an error holds the path.
 //!

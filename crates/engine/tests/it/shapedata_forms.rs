@@ -194,7 +194,8 @@ fn every_form_is_kept_as_written_by_a_vsdx_save_a_diacraft_and_the_after_save_ch
                     ("TypeText" | "LangNumber" | "Cal99", "Label") => *v = Some("relabelled".to_owned()),
                     _ => continue,
                 }
-                if name == "Value" {
+                // A text the engine writes says `STR`: the value entered and the label changed (a file's own cells that nothing edited keep what they had).
+                if name == "Value" || name == "Label" {
                     *u = Some("STR".to_owned());
                 }
             }

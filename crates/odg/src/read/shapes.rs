@@ -23,6 +23,7 @@ use diacraft_doc::{
 };
 
 use super::Reader;
+use super::alt;
 use super::cells::{self, Forms};
 use super::connectors;
 use super::custom;
@@ -711,6 +712,9 @@ pub(crate) struct Scope<'a, 't> {
     ids: connectors::Ids<'t>,
     index: PageShapes,
     connects: Vec<diacraft_doc::Connect>,
+    /// The glue DiaCraft's data carries for segments the file holds as polylines or paths: put among `connects` once the page's shapes are numbered and read, those whose
+    /// target the page holds.
+    glued: Vec<diacraft_doc::Connect>,
     /// How deep in groups the shapes being read are.
     depth: usize,
 }
@@ -753,8 +757,26 @@ pub(crate) fn read_page<'t>(
             }
         }
     }
-    let mut sc = Scope { numbers: &pass.numbers, ids, index: PageShapes::new(source), connects: Vec::new(), depth: 0 };
+    let mut sc = Scope { numbers: &pass.numbers, ids, index: PageShapes::new(source), connects: Vec::new(), glued: Vec::new(), depth: 0 };
     let Level { mut shapes, passthrough } = read_level(r, names, cx, page, pcx, &mut sc, true)?;
+    // The glue DiaCraft's data carries is a `Connect` row of the page when the shape it names is on the page, and none when it is not (a shape of the file the data was made for is gone, or
+    // the data was written by hand): one look in a set of the page's modelled `ID`s for the page, made when there is any glue.
+    if !sc.glued.is_empty() {
+        let held: HashSet<u32> = pass.numbers.values().filter(|n| n.modelled).map(|n| n.id).collect();
+        let mut missing: u64 = 0;
+        for connect in std::mem::take(&mut sc.glued) {
+            if held.contains(&connect.to_sheet) {
+                sc.connects.push(connect);
+            } else {
+                missing = missing.saturating_add(1);
+            }
+        }
+        if missing > 0 {
+            r.warn_counted("diacraft_glue_target_missing", missing, || {
+                "a segment's glue in DiaCraft's data names a shape the page does not hold, and is left out".to_owned()
+            });
+        }
+    }
     // By `draw:z-index` where present, a shape without one at its document position, document order breaking ties.
     let mut order: Vec<(i64, usize)> = shapes.iter().enumerate().map(|(at, b)| (b.z.unwrap_or(at as i64), at)).collect();
     order.sort_unstable();
@@ -1648,7 +1670,10 @@ fn read_shape<'t>(
         (Kindof::Group, _) => Keep::Members,
         _ => Keep::NotText,
     };
-    keep_children(r, names, el, &mut odf_kept.kept, keep)?;
+    // The title and the description are rows of the `User` section, and the elements that became rows are not kept.
+    let alt = alt::find(names, el);
+    alt.put(r, &mut sheet)?;
+    keep_children(r, names, el, &mut odf_kept.kept, keep, &alt)?;
     // Attributes not mapped: kept as the file has them (`keep_attributes`).
     odf_kept.raw = keep_attributes(r, names, &attrs, cx.legacy)?;
     // Tier 2: what the shape's own automatic style carries over what its native markup gave. A copy is read without it
@@ -1671,10 +1696,20 @@ fn read_shape<'t>(
             forget_markup_text(&tier2, &mut text_paragraphs);
             // The glue points the markup gave, whose rows a carried `Connection` section replaces: a row of it that is still what its element gives has the element held again.
             let glue = if tier2.sections.iter().any(|s| s.name.as_str() == "Connection") { connectors::markup_glue_rows(&sheet) } else { Vec::new() };
+            // The glue of a segment the file holds as a polyline: a `Connect` row of the page for each end (the element has none), kept for the page to take once it is numbered.
+            let segment_glue = std::mem::take(&mut tier2.connects);
             crate::ext::payload::apply(tier2, &mut shape, &mut sheet)?;
+            for end in segment_glue {
+                r.take_items(CONNECT_ITEMS)?;
+                sc.glued.push(end.connect(shape.id));
+            }
             connectors::restore_held_glue(r, &mut sheet, &glue)?;
             carries_tier2 = true;
         }
+    }
+    if carries_tier2 {
+        // The elements are what another program edits, and DiaCraft's data may have been kept through an edit: where a carried row says another text, the element's stands.
+        alt.reconcile(r, &mut sheet)?;
     }
     let natives = with_name(kind, &shape, natives);
     // The `.odg` data of the shape: what no field reads, the style it named, the values its styles and its element hold beside their stand-in cells, with the stamps of the cells as
@@ -1762,6 +1797,11 @@ fn judge_tier2<'t>(
         return Ok((Vec::new(), None, None));
     }
     r.take_items(tier2.fps.len().saturating_add(tier2.cells.len().min(16)).saturating_add(needs.count()))?;
+    // A carried segment's geometry is gone over once more, for the box and the points it draws (`tier3::judge`): its rows are charged again.
+    if tier3::carries_segment(tier2) {
+        let rows = tier2.sections.iter().filter(|s| s.name.as_str() == "Geometry").map(|s| s.rows.len()).fold(0, usize::saturating_add);
+        r.take_items(rows)?;
+    }
     let natives = super::outputs::natives(r, names, el, outline_kind(kind), (shape, sheet, other_ends), &needs)?;
     let verdict = tier3::judge(tier2, &natives, sheet);
     if verdict.unreadable > 0 {
@@ -2395,7 +2435,14 @@ enum Keep<'t> {
 /// **A frame's kept child says which side of the child it shows it stood on**: its `after` is 0 for a child before the shown one and 1 for a child after it (the one child the
 /// frame shows is the one typed child it has), so that a writer that puts the frame's picture back writes the images in the order the file had them. A frame of two PNGs shows the first and
 /// keeps the second, and a writer that wrote the kept one first would give the frame the other picture on its next read.
-fn keep_children<'t>(r: &mut Reader, names: &mut Names<'t>, el: &'t El, passthrough: &mut Passthrough, keep: Keep<'t>) -> Result<(), OdgError> {
+fn keep_children<'t>(
+    r: &mut Reader,
+    names: &mut Names<'t>,
+    el: &'t El,
+    passthrough: &mut Passthrough,
+    keep: Keep<'t>,
+    alt: &alt::Alt<'t>,
+) -> Result<(), OdgError> {
     if matches!(keep, Keep::Members) {
         return Ok(());
     }
@@ -2404,11 +2451,12 @@ fn keep_children<'t>(r: &mut Reader, names: &mut Names<'t>, el: &'t El, passthro
         match node {
             Node::El(child) => {
                 let mark = names.enter(child);
-                let skip = match keep {
-                    Keep::NotText => text::is_text(names, child),
-                    Keep::AllBut(shown) => shown.is_some_and(|s| std::ptr::eq(s, child)),
-                    Keep::Members => true,
-                };
+                let skip = alt.took(child)
+                    || match keep {
+                        Keep::NotText => text::is_text(names, child),
+                        Keep::AllBut(shown) => shown.is_some_and(|s| std::ptr::eq(s, child)),
+                        Keep::Members => true,
+                    };
                 if !skip {
                     r.keep(kept_word(names, child, matches!(keep, Keep::AllBut(_))));
                     r.take_items(element_cost(child))?;

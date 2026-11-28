@@ -5,14 +5,14 @@
 
 use serde_json::{Value, json};
 
-use super::params::{optional_range, optional_whole, page_for, required_ids, required_number, units_per_inch};
+use super::params::{optional_bool, optional_range, optional_whole, page_for, required_ids, required_number, units_per_inch};
 use super::snap_params::{self, Ask};
 use super::{CommandSpec, always, has_document, optional_text, required_text, required_u32};
 use crate::Session;
 use crate::draw::{self, Problem};
 use crate::error::{Result, bad, failed};
 use crate::snap::{Axis, OwnFrame, Rect, Subject, Use};
-use crate::stencil;
+use crate::stencil::{self, PartKind};
 
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
@@ -33,12 +33,17 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "master: text, the id or the name of a master of a built-in stencil, or of the stencil named by `stencil` (for a stencil opened from a file the \
              master's id, a whole number or its text, or its name: see stencil.list); \
              stencil: text, optional, the id of a stencil in stencil.list: basic, flowchart, or an opened file's such as file-1 (the built-in stencils \
-             are searched when it is left out); page: whole number, the id of the page; \
+             are searched when it is left out); page: whole number, the id of the page, whose drawing scale is compared with the master's (its page sheet's PageScale over DrawingScale): \
+             within a factor of 8 the shape keeps the master's size in drawing units and nothing is written, and beyond it the shape keeps the master's size on paper, \
+             its Width and Height being the master's times the ratio and its DropOnPageScale the ratio (a one-dimensional master has its length so scaled), and the result adds drop_on_page_scale, \
+             while a ratio that cannot be used drops the master unscaled and the result's notes say why; \
              x: number, where the shape's centre goes, in inches from the page's left edge; y: number, in inches from the page's bottom edge; \
              snap: true or {zoom, view}, optional, snap the dropped shape by the document's Snap & Glue settings (snap.settings), zoom being the screen points to an inch, default 96, \
              and view [x0, y0, x1, y1] the visible part of the page in inches, which a drop has no use for and the window sends with every snapping command, \
              and a shape pulled to a guide with glue to guides on is glued to it and follows it (the result's snap.held). \
-             A position of the orgchart stencil dropped with its centre inside another position becomes that position's report: a connector is made, the chart is laid out again in the same step, and the result adds reports_to and connector",
+             A position of the orgchart stencil dropped with its centre inside another position becomes that position's report: a connector is made, the chart is laid out again in the same step, and the result adds reports_to and connector. \
+             The Pool of the bpmn stencil makes a structure of swimlanes, a frame with its name in a strip on the left and one lane, centred on the point, and answers the frame's id with master null, and its Lane \
+             is put into the pool under the point, before or after the lane it is dropped on (the lane's id with master null), and anywhere else is the shape the Lane master draws",
             has_document,
             drop_command
         ),
@@ -82,7 +87,10 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "Delete Shapes",
             ["Home", "Shape"],
             Some("Delete"),
-            "ids: array of whole numbers, the shapes to delete; page: whole number, optional, the id of the page (default: the first page holding all the shapes)",
+            "ids: array of whole numbers, the shapes to delete; \
+             connectors: true or false, optional (default true), true takes along the connectors glued to the shapes (and to the shapes inside them), as Delete does in the window, and says them in connectors_deleted, \
+             except a connector on a locked layer or on hidden layers only, which stays, and at most 4096 connectors are taken, more is refused. False leaves each connector with the end that was glued a plain point where it was; \
+             page: whole number, optional, the id of the page (default: the first page holding all the shapes)",
             has_document,
             delete
         ),
@@ -93,7 +101,8 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             None,
             "id: whole number, the shape; text: text, the shape's new text (empty takes the text away); \
              start: whole number, optional, and with end: replace only the characters from start up to end of the shape's text, counted in characters from 0 \
-             and not counting its fields, and keep its runs and fields (text is then what goes in their place, and start equal to end inserts it); \
+             and not counting its fields, and keep its runs and fields (text is then what goes in their place, and start equal to end inserts it), \
+             where the shape's text is the text it shows, its master's when it holds none of its own, which the shape then holds as its own with the change made; \
              end: whole number, optional, see start; \
              page: whole number, optional, the id of the page (default: the first page with the shape)",
             has_document,
@@ -144,6 +153,24 @@ fn drop_command(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Ok(done);
     }
+    // BPMN's Pool makes a structure of swimlanes, and its Lane is put into the pool under it (`cmd/swimlane.rs`); a lane dropped anywhere else is the shape its master draws.
+    match spec.part_kind() {
+        Some(PartKind::Pool) => {
+            // The Pool is made by code and not by an instance of its master, so the range of eight of the page's scale (`draw/drop_scale.rs`) is taken here, as the window's
+            // preview takes it (`snap::drop_preview`): a built-in master is drawn at 1:1, and beyond the range of eight the pool keeps its size on paper (the master's times the ratio, which is `k`);
+            // within it, its drawing size.
+            let k = s.document().map_or(1.0, |doc| units_per_inch(doc, page));
+            // The size and the drawing units that one inch of it is in: the least of a lane is held to the size in its own unit.
+            let (size, inch) = draw::drop_scale::built_in_fit(spec.width, spec.height, k);
+            return super::swimlane::drop_pool(s, page, (x, y), size, inch);
+        }
+        Some(PartKind::Lane) => {
+            if let Some(done) = super::swimlane::drop_lane(s, page, x, y)? {
+                return Ok(done);
+            }
+        }
+        _ => {}
+    }
     // The `ID` is above every one the session has given on the page and the file it saved from holds (`Session::id_floor`).
     let above = s.id_floor(page);
     // The page as the session kept it (the window's reader made its shapes' index and its targets there), read before the edit: the shape the drop makes is never a target.
@@ -177,6 +204,12 @@ fn drop_command(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut out =
         json!({ "id": info.id, "master": info.master, "name": info.name, "page": page, "width": info.width / k, "height": info.height / k });
+    // A drop beyond the range of eight of the page's drawing scale says the factor it wrote (`draw/drop_scale.rs`), and one whose ratio could not be used says why.
+    let mut notes = notes;
+    notes.extend(info.note.clone());
+    if let Some(factor) = info.drop_scale {
+        out["drop_on_page_scale"] = json!(factor);
+    }
     if !notes.is_empty() {
         out["notes"] = json!(notes);
     }
@@ -282,8 +315,11 @@ fn drop_from_file(s: &mut Session, stencil_id: &str, key: &str, (page, x, y): (u
         "stencil": opened.id(),
         "master_added": b.added,
         "copied": { "styles": b.styles_added, "colours": b.colours_added, "faces": b.faces_added },
-        "notes": b.notes.iter().chain(&locked).collect::<Vec<_>>(),
+        "notes": b.notes.iter().chain(&locked).chain(&done.info.note).collect::<Vec<_>>(),
     });
+    if let Some(factor) = done.info.drop_scale {
+        out["drop_on_page_scale"] = json!(factor);
+    }
     add_snap(&mut out, snapped.as_ref());
     Ok(out)
 }
@@ -533,16 +569,20 @@ fn snap_resize(
     crate::snap::snap_resize_ext(doc, page, read, id, sized, ask.zoom, ask.extras())
 }
 
-/// Deletes shapes → `{page, deleted}`. A connector glued to one stays, with that end free.
+/// Deletes shapes → `{page, deleted, connectors_deleted}`: `deleted` counts every shape that went (the shapes named, what the containers among them held, and the connectors taken
+/// along), `connectors_deleted` the `ID`s of those taken along. **A connector glued to a shape that goes goes with it** (the Delete of the specifications removes the
+/// connectors attached to the selection), except one on a locked layer or on hidden ones only, which stays with a free end as in the window; `connectors: false` leaves every
+/// connector with that end a plain point where it was.
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     const ID: &str = "shape.delete";
     let ids = required_ids(p, "ids", ID)?;
+    let with_connectors = optional_bool(p, "connectors", ID)?.unwrap_or(true);
     let page = target_page(s, p, &ids, ID)?;
     edit_page(s, ID, "Delete shapes", page, |doc, _| {
         // A member of a locked container is not deleted (but the container is, with all it holds), and a container takes what it holds with it. The containers
         // that held what is deleted are fitted after.
         draw::container::check_delete(doc, page, &ids)?;
-        let all = draw::container::with_contents(doc, page, &ids)?;
+        let mut all = draw::container::with_contents(doc, page, &ids)?;
         // A member on a locked layer is not deleted with its container.
         if all.len() > ids.len() {
             let named: std::collections::HashSet<u32> = ids.iter().copied().collect();
@@ -553,12 +593,18 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // A group that holds a shape on a locked layer is not deleted, named or held by a container deleted.
         draw::layers::refuse_locked_in_group(doc, page, &all, "deleted")?;
+        // The connectors glued to what goes go too: the shapes and what they hold are known, and a connector that is a member of a locked container is refused as one named.
+        let connectors = if with_connectors { draw::glued_connectors(doc, page, &all)? } else { Vec::new() };
+        if !connectors.is_empty() {
+            all.extend(connectors.iter().copied());
+            draw::container::check_delete(doc, page, &all)?;
+        }
         let holders = draw::container::holding(doc, page, &all)?;
         let deleted = draw::delete_shapes(doc, page, &all)?;
         // No container or member keeps a tie to a shape that is gone, so that a new shape given its `ID` after a save is not a member of anything.
         draw::container::release(doc, page, &all.iter().copied().collect())?;
         let fitted = draw::container::fit_after(doc, page, &holders)?;
-        let mut out = json!({ "page": page, "deleted": deleted });
+        let mut out = json!({ "page": page, "deleted": deleted, "connectors_deleted": connectors });
         super::container::note_locked(doc, page, &fitted.locked, &mut out)?;
         Ok(out)
     })

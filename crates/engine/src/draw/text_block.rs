@@ -30,13 +30,14 @@
 //!   label that is moved here stays where it was put until the connector is routed again, when the label rule places it on the middle leg.
 
 use diacraft_calc::Changes;
-use diacraft_doc::{CellAddr, CellEdit, Document, SheetRef};
+use diacraft_doc::{CellAddr, CellEdit, Document, Resolver, SheetRef};
 
 use super::arrange::{MAX_TURN, SAME_PLACE, Turn, same_angle, tidy_angle, write_angle_cell};
 use super::read::{Pose, Reader};
 use super::route::P;
 use super::settle::settle_kept;
 use super::shapes::evaluate_number;
+use super::worked::Worked;
 use super::{Problem, checked, require_shape, write_cells, write_length};
 use crate::stencil::text_transform_cells;
 
@@ -79,22 +80,27 @@ impl Block {
     }
 }
 
-/// What a text-block cell is: the number it holds on the shape, its master or a style, else the printed formula (a cell and a factor,
-/// `Width*0.5`, which names another such cell, three deep at most), as the renderer reads it; 0 when there is none.
-fn number_of(reader: &Reader<'_>, sheet: &SheetRef, name: &str, depth: u8) -> f64 {
-    let Some(found) = reader.resolver().resolve(sheet, &CellAddr::direct(name)) else { return 0.0 };
-    if let Some(n) = found.value.cell.and_then(|cell| cell.value.as_ref()).and_then(|value| value.number()) {
+/// What a text-block cell is: the number it holds on the shape, its master or a style (a cell that holds a formula and no saved value is what the formula works out to),
+/// else the printed formula (a cell and a factor, `Width*0.5`, which names another such cell, three deep at most), as the renderer reads it; 0 when there is none.
+fn number_of(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef, name: &str, depth: u8) -> f64 {
+    let addr = CellAddr::direct(name);
+    let Some(found) = res.resolve(sheet, &addr) else { return 0.0 };
+    if let Some(n) = worked.number_of(sheet, &addr, &found) {
         return n;
     }
     let Some(formula) = found.default.formula.filter(|_| depth < 4) else { return 0.0 };
     let Some((base, factor)) = formula.split_once('*') else { return 0.0 };
     let Ok(factor) = factor.trim().parse::<f64>() else { return 0.0 };
-    let value = number_of(reader, sheet, base.trim(), depth + 1) * factor;
+    let value = number_of(res, worked, sheet, base.trim(), depth + 1) * factor;
     if value.is_finite() { value } else { 0.0 }
 }
 
 fn read_block(reader: &Reader<'_>, sheet: &SheetRef) -> Block {
-    let n = |name: &str| number_of(reader, sheet, name, 0);
+    read_block_with(reader.resolver(), reader.worked(), sheet)
+}
+
+fn read_block_with(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef) -> Block {
+    let n = |name: &str| number_of(res, worked, sheet, name, 0);
     Block {
         width: n("TxtWidth"),
         height: n("TxtHeight"),
@@ -104,6 +110,16 @@ fn read_block(reader: &Reader<'_>, sheet: &SheetRef) -> Block {
     }
 }
 
+/// The four corners of the text block of the shape `sheet` **in the shape's own frame**, in the drawing units of its cells, in the order of the block's own frame: (0, 0), (`width`, 0),
+/// (`width`, `height`), (0, `height`). `shape` is the shape's pose and `groups` the flips of the groups it is in (`Reader::group_flips`: the block takes them as the
+/// renderer's text does). The window's pointer reads a text block with this, through the resolver and the reader of unsaved formulas it already holds, and [`text_block_place`] carries the
+/// same corners to the page: one rule for where a block is.
+pub fn text_block_in_frame(res: &Resolver<'_>, worked: &Worked<'_>, sheet: &SheetRef, shape: &Pose, groups: (bool, bool)) -> [P; 4] {
+    let block = read_block_with(res, worked, sheet);
+    let pose = block.pose(shape, groups);
+    [(0.0, 0.0), (block.width, 0.0), (block.width, block.height), (0.0, block.height)].map(|p| pose.up(p))
+}
+
 /// Where the text block of shape `id` on a page is: `None` for a page or shape that is not there.
 pub fn text_block_place(doc: &Document, page: u32, id: u32) -> Option<BlockPlace> {
     let reader = Reader::new(doc);
@@ -111,7 +127,8 @@ pub fn text_block_place(doc: &Document, page: u32, id: u32) -> Option<BlockPlace
     let sheet = SheetRef::Shape(at.clone());
     let block = read_block(&reader, &sheet);
     let pose = block.pose(&reader.pose(&sheet), reader.group_flips(&at));
-    let corners = [(0.0, 0.0), (block.width, 0.0), (block.width, block.height), (0.0, block.height)].map(|p| reader.to_page(&at, pose.up(p)));
+    let corners = text_block_in_frame(reader.resolver(), reader.worked(), &sheet, &reader.pose(&sheet), reader.group_flips(&at))
+        .map(|p| reader.to_page(&at, p));
     let along = reader.vector_to_page(&at, pose.up_vector((1.0, 0.0)));
     Some(BlockPlace {
         corners,

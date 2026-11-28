@@ -49,13 +49,13 @@ fn odf_markup_goes_to_the_odf_slot_and_the_vsdx_slots_stay_empty() {
     assert_eq!(kept.raw.get("x:cell"), Some("2"));
     assert_eq!(kept.raw.get("xml:id"), Some("idR"));
     assert_eq!(kept.raw.get("draw:id"), Some("idR"));
-    assert_eq!(kept.kept.len(), 2, "the title and the foreign element, and not the text");
+    assert_eq!(kept.kept.len(), 1, "the foreign element, and not the text or the title (a row of the User section)");
     assert!(r.raw.is_empty() && r.passthrough.is_empty(), "the VSDX `raw` and `passthrough` of the shape are empty");
     let data = r.ext.get().expect("the slot");
     assert!(data.vsdx.0.is_empty() && data.native == Kept::default(), "the VSDX and native sides of the slot are empty");
     // The group: its own children are kept in its slot, its member's attribute in the member's.
     let g = the_shape(&doc, "G");
-    assert_eq!(odf_of(&g.ext).kept.len(), 1, "the group's title");
+    assert_eq!(odf_of(&g.ext).kept.len(), 1, "the group's title (which its sheet's rows hold too)");
     assert!(g.passthrough.is_empty() && g.raw.is_empty());
     let member = g.children.get(0).unwrap();
     assert_eq!(odf_of(&member.ext).raw.get("x:own"), Some("m"));

@@ -4,7 +4,7 @@ use egui::{Rect, vec2};
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
-use crate::support::{Rest, click, drag, drawing_window, elements_named, run_command};
+use crate::support::{Rest, click, drag, drawing_window, drawing_window_with_page_name, elements_named, run_command};
 
 fn tab_names(window: &crate::support::Window) -> Vec<String> {
     let mut tabs = elements_named(window, "page-tab.");
@@ -70,13 +70,13 @@ fn the_all_menu_lists_the_pages_and_goes_to_one() {
     assert_eq!(window.state().window_state()["page"], 2);
 }
 
-/// A page with a very long name has a tab of a bounded width, and the row holds.
+/// A page with a very long name (one a file holds: a command that names a page takes 31 characters) has a tab of a bounded width, and the row holds.
 #[test]
 fn a_hostile_page_name_is_shown_safely() {
-    let mut window = drawing_window([800.0, 500.0]);
-    run_command(&mut window, "page.add", json!({"name": "w".repeat(250)}));
+    let mut window = drawing_window_with_page_name([800.0, 500.0], &"w".repeat(250));
+    run_command(&mut window, "page.add", json!({}));
     window.rest();
-    let tab = window.state().element("page-tab.2").unwrap().rect;
+    let tab = window.state().element("page-tab.1").unwrap().rect;
     assert!(tab.width() <= 181.0, "{tab:?}");
     assert_eq!(window.state().ui_panics(), 0);
     let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 500.0));

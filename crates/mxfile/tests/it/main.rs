@@ -7,6 +7,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![forbid(unsafe_code)]
 
+mod door;
 mod file_vectors;
 mod fuzz;
 mod hostile;
@@ -18,6 +19,7 @@ mod steps;
 mod style_hostile;
 mod style_props;
 mod style_vectors;
+mod text_direction;
 
 /// The name of the first page of a drawing.
 pub(crate) fn name0(doc: &diacraft_doc::Document) -> String {

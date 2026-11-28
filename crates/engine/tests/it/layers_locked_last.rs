@@ -294,8 +294,10 @@ fn a_theme_writes_no_cell_into_a_shape_on_a_locked_layer_and_counts_them() {
     let out = run(&mut s, "theme.apply", json!({"theme": "tidepool"}));
     assert_eq!(out["locked"], json!(2), "{out}");
     assert_eq!(out["changed_pages"], json!([1]), "the theme is the page's: {out}");
+    // The master the shapes on the locked layer stand for is not linked, which would change them: the others link the style themselves.
     let style = links(&s, a).1;
     assert!(style.is_some_and(|id| id != 0), "a shape on no layer follows the theme");
+    assert_eq!(crate::theme_master_links::follows(doc(&s), 1, b), (Some(0), Some(0), Some(0)), "the master is on the root, as it was");
     assert_eq!(links(&s, m1), (style, style, style), "a member on no layer follows it");
     assert_eq!(shape_on(&s, 1, b).unwrap().sheet.links, b_was.sheet.links, "no link is written into the shape on the locked layer");
     assert_eq!(shape_on(&s, 1, m2).unwrap().sheet.links, m2_was.sheet.links, "nor into the member on it");
@@ -304,7 +306,12 @@ fn a_theme_writes_no_cell_into_a_shape_on_a_locked_layer_and_counts_them() {
     run(&mut s, "layer.set", json!({"layer": "Frozen", "lock": false}));
     let out = run(&mut s, "theme.apply", json!({"theme": "tidepool"}));
     assert_eq!(out["locked"], json!(0), "{out}");
-    assert_eq!(links(&s, b), (style, style, style), "unlocked, it follows the theme");
+    // Unlocked, it follows the theme, through its master's shape: no instance of the master is held any more, so the master takes the links, and the shapes that linked
+    // the style themselves give theirs up.
+    assert_eq!(crate::theme_master_links::follows(doc(&s), 1, b), (style, style, style), "unlocked, it follows the theme");
+    for id in [a, b, m1, m2] {
+        assert_eq!(links(&s, id), (None, None, None), "shape {id} holds no link of its own");
+    }
 }
 
 // ---------- 1 and 5. `.odg` layer flags ----------

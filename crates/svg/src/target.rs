@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use diacraft_color::Rgba;
 use diacraft_render::export::{ExportError, MAX_EXPORT_BYTES, TextMode, pixmap_png};
-use diacraft_render::{Gradient, GradientKind, Paint, Pixmap, Target};
+use diacraft_render::{Gradient, GradientKind, Paint, Pixmap, ShapeLabel, Target};
 use kurbo::{Affine, BezPath, Cap, Join, PathEl, Rect, Stroke};
 
 use crate::num::{base64, coord, escape, hex, matrix, num, opacity};
@@ -19,6 +19,10 @@ use crate::num::{base64, coord, escape, hex, matrix, num, opacity};
 /// A group opened and not yet closed.
 enum Open {
     Clip,
+    /// A shape's group: `written` says whether a `<g>` was opened for it (a shape with nothing to say of itself has none, and is closed as nothing).
+    Shape {
+        written: bool,
+    },
     /// A blurred layer: what was in the body when it opened (the layer's own content is written in a fresh body), its deviation in
     /// output units, and the box of what has been drawn in it.
     Blur {
@@ -202,6 +206,8 @@ impl SvgTarget {
     fn close_top(&mut self) {
         match self.open.pop() {
             Some(Open::Clip) => self.put("</g>\n"),
+            Some(Open::Shape { written: true }) => self.put("</g>\n"),
+            Some(Open::Shape { written: false }) => {}
             Some(Open::Blur { outer, sigma, bbox }) => {
                 let inner = std::mem::replace(&mut self.body, outer);
                 // Bytes held for the layer were counted when written; the layer's content is put back in the body whole.
@@ -229,7 +235,7 @@ impl SvgTarget {
     }
 
     /// The file, or why there is none.
-    pub(crate) fn finish(mut self, title: Option<&str>) -> Result<String, ExportError> {
+    pub(crate) fn finish(mut self, title: Option<&str>, description: Option<&str>) -> Result<String, ExportError> {
         self.rewind(0);
         if let Some(e) = self.failed.take() {
             return Err(e);
@@ -246,8 +252,12 @@ impl SvgTarget {
             w = coord(w),
             h = coord(h)
         );
-        if let Some(title) = title {
+        // A title or a description with nothing but white space is never written (SVG 2, 5.7).
+        if let Some(title) = title.filter(|t| !is_blank(t)) {
             let _ = writeln!(out, "<title>{}</title>", escape(title));
+        }
+        if let Some(description) = description.filter(|d| !is_blank(d)) {
+            let _ = writeln!(out, "<desc>{}</desc>", escape(description));
         }
         if !self.defs.is_empty() {
             out.push_str("<defs>\n");
@@ -259,6 +269,19 @@ impl SvgTarget {
         Ok(out)
     }
 }
+
+/// Whether a text holds nothing but white space (Unicode's `White_Space`).
+fn is_blank(text: &str) -> bool {
+    text.chars().all(char::is_whitespace)
+}
+
+/// Owner, 2026-11-26: a shape's group in the file carries the SVG standard's own title and description. The group's `<title>` is the alt text's title and its `<desc>` the
+/// description, written as they are; **a shape with no alt text at all gets its name as the `<title>`** (so that every shape has an accessible name, and a file read by a program that knows no
+/// alt text lists the shapes by their names). This departs, which writes no group and no name for a shape with no alt text: to flip it, set this to `false`.
+const NAME_FALLBACK: bool = true;
+
+/// The most characters of a shape's name written as its title.
+const MAX_NAME_CHARS: usize = 1_024;
 
 fn solid_attrs(attr: &str, c: Rgba) -> Option<String> {
     if c.a == 0 {
@@ -376,6 +399,45 @@ impl Target for SvgTarget {
         while self.open.len() > mark {
             self.close_top();
         }
+    }
+
+    fn wants_labels(&self) -> bool {
+        true
+    }
+
+    fn begin_shape(&mut self, label: &ShapeLabel<'_>) {
+        let title = (!is_blank(label.title)).then_some(label.title);
+        let description = (!is_blank(label.description)).then_some(label.description);
+        let name = || {
+            let end = label.name.char_indices().nth(MAX_NAME_CHARS).map_or(label.name.len(), |(at, _)| at);
+            label.name.get(..end).filter(|n| !is_blank(n))
+        };
+        let title = match (title, description) {
+            (None, None) if NAME_FALLBACK => name(),
+            (title, _) => title,
+        };
+        if title.is_none() && description.is_none() {
+            self.open.push(Open::Shape { written: false });
+            return;
+        }
+        let mut head = String::from("<g>\n");
+        if let Some(title) = title {
+            let _ = writeln!(head, "<title>{}</title>", escape(title));
+        }
+        if let Some(description) = description {
+            let _ = writeln!(head, "<desc>{}</desc>", escape(description));
+        }
+        self.put(&head);
+        self.open.push(Open::Shape { written: true });
+    }
+
+    fn end_shape(&mut self) {
+        // The innermost shape's group: a clip or a layer a drawing cut short left above it is closed first.
+        let Some(at) = self.open.iter().rposition(|o| matches!(o, Open::Shape { .. })) else {
+            return;
+        };
+        self.rewind(at + 1);
+        self.close_top();
     }
 
     fn wants_text(&self) -> bool {

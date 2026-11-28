@@ -11,7 +11,9 @@
 //! * **The shapes** ("a new theme rewrites it on the document, its pages and its shapes"). A shape (type `Shape`, to any depth of
 //!   groups) with no style of a family, or the root style, follows the `Theme` style for that family, so that a shape DiaCraft drew takes the
 //!   theme; a shape with a style of its own keeps it, and a cell a person set on a shape stays set ("standard colours stay put").
-//!   A shape that holds its own scheme cell with a plain number (a shape pasted from a drawing with another theme)
+//!   **A shape that stands for a shape of a master follows it through the master** (`masters.rs`): the
+//!   master's shape is linked to the style and the instance keeps no link of its own, unless linking the master would change a shape the pass
+//!   does not theme, and then the instance links the style itself, as every shape did before. A shape that holds its own scheme cell with a plain number (a shape pasted from a drawing with another theme)
 //!   takes the new number, unless the matching `Lock...` cell of the Protection section is set (`LockThemeIndex` keeps a new theme from
 //!   changing the theme number, and so for colours, effects, connectors and fonts).
 //! * **A shape on a locked layer** (a shape on a locked layer is not edited, and the specifications say nothing of a theme and one):
@@ -25,17 +27,18 @@
 //! **Bounded.** The walk of a page is one iterative pass over at most `MAX_SHAPES_PER_PAGE` shapes, no deeper than the model allows; a page
 //! with more than [`MAX_THEMED_SHAPES`] shapes to change is refused whole, with the document as it was.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use diacraft_calc::{Budget, Changes, Since};
 use diacraft_doc::{
-    CellAddr, CellEdit, CellWrite, Document, FormulaSlot, Links, MAX_SHAPE_DEPTH, MAX_SHAPES_PER_PAGE, Owner, RawAttrs, Resolver, Shape, ShapeList,
-    ShapeRef, ShapeType, SheetRef, Value, WriteOrigin,
+    CellAddr, CellEdit, CellWrite, Document, FormulaSlot, Links, MAX_SHAPE_DEPTH, MAX_SHAPES_PER_PAGE, Owner, Resolver, Shape, ShapeList, ShapeRef,
+    ShapeType, SheetRef, Value, WriteOrigin,
 };
 use diacraft_vsdx::{MAX_THEME_BYTES, MAX_THEMES};
 
 use super::catalogue::CatalogueTheme;
+use super::masters::{Census, Families, MasterShape, Masters, can_follow, drop_raw_links, family, family_mut, from_odg};
 use super::style::{Base, ensure_theme_style, theme_style_id};
 use crate::calc_index::commit_changed;
 use crate::draw::{Problem, require_page, shape_mut};
@@ -49,16 +52,18 @@ pub const MAX_FOLLOWED_SHAPES: usize = 10_000;
 
 thread_local! {
     /// What the passes that make shapes follow the page's theme did on this thread, counted so that a test holds a cost without a clock ([`follow_work`]).
-    static FOLLOW_WORK: std::cell::Cell<FollowWork> = const { std::cell::Cell::new(FollowWork { page_walks: 0, shapes_planned: 0 }) };
+    static FOLLOW_WORK: std::cell::Cell<FollowWork> = const { std::cell::Cell::new(FollowWork { page_walks: 0, shapes_planned: 0, master_walks: 0 }) };
 }
 
 /// What the passes that make shapes follow the page's theme did since [`reset_follow_work`], on this thread: the walks of a whole page they made to find a shape by its `ID`, and the shapes
 /// they planned an edit for. **A pass for a set of shapes the caller has the places of makes no walk of the page** (`follow_page_theme_refs`); a pass for one shape by its `ID`
-/// (`follow_page_theme`, for a shape that a command has just put on the page) makes one.
+/// (`follow_page_theme`, for a shape that a command has just put on the page) makes one. **A walk of the drawing for the other shapes of the masters** (`master_walks`) is
+/// made only when a master's shape is still to follow the style: a shape dropped from a master the theme reaches already makes none.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FollowWork {
     pub page_walks: u64,
     pub shapes_planned: u64,
+    pub master_walks: u64,
 }
 
 /// What the theme-following passes did on this thread since the last [`reset_follow_work`].
@@ -77,7 +82,15 @@ fn note_follow(walks: u64, planned: usize) {
         c.set(FollowWork {
             page_walks: was.page_walks.saturating_add(walks),
             shapes_planned: was.shapes_planned.saturating_add(u64::try_from(planned).unwrap_or(u64::MAX)),
+            master_walks: was.master_walks,
         });
+    });
+}
+
+fn note_master_walk() {
+    FOLLOW_WORK.with(|c| {
+        let was = c.get();
+        c.set(FollowWork { master_walks: was.master_walks.saturating_add(1), ..was });
     });
 }
 
@@ -86,13 +99,19 @@ fn note_follow(walks: u64, planned: usize) {
 pub const SELECTORS: [&str; 7] =
     ["ThemeIndex", "ColorSchemeIndex", "EffectSchemeIndex", "ConnectorSchemeIndex", "FontSchemeIndex", "VariationColorIndex", "VariationStyleIndex"];
 
-/// The `Lock...` cell of the Protection section that keeps a new theme from changing each of [`SELECTORS`]. The variants follow the colours and the
-/// effects they pick among (our reading: no document says which lock a variant answers to).
-const LOCKS: [&str; 7] =
-    ["LockThemeIndex", "LockThemeColors", "LockThemeEffects", "LockThemeConnectors", "LockThemeFonts", "LockThemeColors", "LockThemeEffects"];
-
-/// The attributes of a sheet's element that hold its style links: a link written must not leave the text of the old one behind (raw wins on a write).
-const LINK_ATTRS: [&str; 3] = ["LineStyle", "FillStyle", "TextStyle"];
+/// The `Lock...` cells of the Protection section that keep a new theme from changing each of [`SELECTORS`]; a shape holds a cell when any of its locks is on. The
+/// variants follow the colours and the effects they pick among (our reading: no document says which of those locks a variant answers to) **and `LockVariation`**
+/// (it bars the theme variant from being changed, so a variant chosen for the page skips a shape that
+/// holds it even when the two theme locks are off).
+const LOCKS: [&[&str]; 7] = [
+    &["LockThemeIndex"],
+    &["LockThemeColors"],
+    &["LockThemeEffects"],
+    &["LockThemeConnectors"],
+    &["LockThemeFonts"],
+    &["LockThemeColors", "LockVariation"],
+    &["LockThemeEffects", "LockVariation"],
+];
 
 /// What a page's sheet selects: the seven cells of [`SELECTORS`], 0 where the page holds none or one that is not a whole number.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -170,12 +189,43 @@ impl Applied {
     }
 }
 
+/// What a family (line, fill, text) of a shape is to do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Follow {
+    /// Nothing: it follows the style already, or a style of its own.
+    #[default]
+    Nothing,
+    /// The shape links the `Theme` style itself: it stands for no shape of a master.
+    Own,
+    /// The master's shape the shape stands for follows the `Theme` style, and the shape keeps no link of its own: a link to the root or to the style it holds is taken off
+    /// Where the master's shape cannot follow (`masters.rs`), the shape links the style itself, as [`Follow::Own`]. `starts`: the shape did not follow the
+    /// style before (it held no link, or the root), which is what the answer counts; a shape that linked the style itself already only gives its link to the master.
+    Master { starts: bool },
+}
+
+/// What a family of a shape does, from its own link and, for a shape that stands for a shape of a master, that shape's link (`theirs`); `theme` is the `Theme` style. A family with
+/// no style or the root, of its own and from the master's shape, follows the style (a master that links a style of its own, or the style already, gives the shape that style: the
+/// shape's own link would outrank the master's); a shape that links the style itself over a master's shape that does not, or does, gives the master the link.
+fn decide(own: Option<u32>, theirs: Option<Option<u32>>, theme: u32) -> Follow {
+    let root = |link: Option<u32>| matches!(link, None | Some(0));
+    match theirs {
+        None if root(own) => Follow::Own,
+        None => Follow::Nothing,
+        Some(theirs) if root(own) && root(theirs) => Follow::Master { starts: true },
+        Some(theirs) if own == Some(theme) && (root(theirs) || theirs == Some(theme)) => Follow::Master { starts: false },
+        Some(_) => Follow::Nothing,
+    }
+}
+
 /// What to do to one shape.
 #[derive(Debug, Default)]
 struct ShapeEdit {
     path: Vec<u32>,
-    /// The families (line, fill, text) that follow the `Theme` style from now on.
-    link: [bool; 3],
+    /// What each family (line, fill, text) does.
+    families: [Follow; 3],
+    /// The shape of a master the shape stands for, and that shape's links as the plan found them.
+    stands: Option<MasterShape>,
+    theirs: Links,
     /// The scheme cells to give a number, as (place in [`SELECTORS`], the number).
     selectors: Vec<(usize, u32)>,
 }
@@ -212,43 +262,6 @@ fn locked(resolver: &Resolver<'_>, at: &ShapeRef, lock: &str) -> bool {
         .is_some_and(|n| n != 0.0)
 }
 
-/// Whether a family follows the style from now on: the shape has no style of its own for it, or the root style, and the master shape it stands for has
-/// none either (a master that links a style of its own, or the file's own `Theme` style, is a style the shape already has: the shape's own link would
-/// outrank the master's).
-fn wants(link: Option<u32>, inherited: Option<u32>, style: Option<u32>) -> bool {
-    style.is_some_and(|id| id != 0) && matches!(link, None | Some(0)) && matches!(inherited, None | Some(0))
-}
-
-/// The style links of the shapes of one master, found by `ID`: what an instance, or a member of one, inherits.
-#[derive(Default)]
-struct MasterLinks {
-    /// The links of the first top-level shape that is not deleted: what an instance of the master inherits.
-    first: Links,
-    by_id: HashMap<u32, Links>,
-}
-
-/// The links of a master's shapes, one pass over them with a stack (a master past the cap of shapes is indexed as far as the cap).
-fn index_master(doc: &Document, id: u32) -> MasterLinks {
-    let mut index = MasterLinks::default();
-    let Some(master) = doc.master(id) else { return index };
-    index.first = master.shapes.iter().find(|s| !s.del).map(|s| s.sheet.links).unwrap_or_default();
-    let mut seen = 0_usize;
-    let mut stack: Vec<&ShapeList> = vec![&master.shapes];
-    while let Some(list) = stack.pop() {
-        for shape in list.iter() {
-            seen = seen.saturating_add(1);
-            if seen > MAX_SHAPES_PER_PAGE {
-                return index;
-            }
-            index.by_id.entry(shape.id).or_insert(shape.sheet.links);
-            if !shape.children.is_empty() {
-                stack.push(&shape.children);
-            }
-        }
-    }
-    index
-}
-
 /// What planning the edits of a page, or of one shape and its members, holds.
 struct Planner<'a> {
     doc: &'a Document,
@@ -259,9 +272,11 @@ struct Planner<'a> {
     style: Option<u32>,
     /// Made when a shape has a number of its own to change, once.
     resolver: Option<Resolver<'a>>,
-    /// The links of the masters the shapes name, each indexed when first needed.
-    masters: HashMap<u32, MasterLinks>,
+    /// The masters the shapes stand for, each indexed when first needed.
+    masters: Masters,
     plan: Vec<ShapeEdit>,
+    /// The masters' shapes and families that a shape on a locked layer reads through (it holds no link of its own for the family): linked, they would change it.
+    held: Families,
     /// The shapes walked.
     seen: usize,
     /// The page's locked layers and what reading the shapes' lists cost, and how many shapes on them were passed over.
@@ -277,26 +292,12 @@ impl<'a> Planner<'a> {
             target,
             style,
             resolver: None,
-            masters: HashMap::new(),
+            masters: Masters::default(),
             plan: Vec::new(),
+            held: Families::new(),
             seen: 0,
             locks: crate::draw::layers::Locks::default(),
             locked: 0,
-        }
-    }
-
-    /// The links a shape inherits from the master shape it stands for. `master` is the master of the nearest ancestor that has one.
-    fn inherited(&mut self, shape: &Shape, master: Option<u32>) -> Links {
-        let (m, id) = match (shape.master, shape.master_shape, master) {
-            (Some(m), _, _) => (m, None),
-            (None, Some(id), Some(m)) => (m, Some(id)),
-            _ => return Links::default(),
-        };
-        let doc = self.doc;
-        let index = self.masters.entry(m).or_insert_with(|| index_master(doc, m));
-        match id {
-            None => index.first,
-            Some(id) => index.by_id.get(&id).copied().unwrap_or_default(),
         }
     }
 
@@ -312,13 +313,22 @@ impl<'a> Planner<'a> {
         if !draws {
             return Ok(());
         }
-        let (links, inherited) = (shape.sheet.links, self.inherited(shape, master));
-        let style = self.style;
-        let mut edit = ShapeEdit {
-            path: path.to_vec(),
-            link: [wants(links.line, inherited.line, style), wants(links.fill, inherited.fill, style), wants(links.text, inherited.text, style)],
-            ..ShapeEdit::default()
+        let own = shape.sheet.links;
+        let stood = self.masters.stands_for(self.doc, shape, master);
+        // A shape read from an `.odg` follows the theme by links of its own (`masters::from_odg`): its file says the style it follows as its automatic style's parent.
+        let through = if from_odg(shape) { None } else { stood.clone() };
+        let families = match self.style {
+            Some(theme) if theme != 0 => {
+                let theirs = through.as_ref().map(|(_, links)| *links);
+                [0, 1, 2].map(|f| decide(family(own, f), theirs.map(|links| family(links, f)), theme))
+            }
+            _ => [Follow::Nothing; 3],
         };
+        let (stands, theirs) = match through {
+            Some((at, links)) => (Some(at), links),
+            None => (None, Links::default()),
+        };
+        let mut edit = ShapeEdit { path: path.to_vec(), families, stands, theirs, ..ShapeEdit::default() };
         for (i, name) in SELECTORS.iter().enumerate() {
             let Some(cell) = shape.sheet.cell(name) else { continue };
             let Some(now) = cell.value.as_ref().and_then(whole) else { continue };
@@ -341,12 +351,19 @@ impl<'a> Planner<'a> {
                 Resolver::new(doc)
             });
             let at = ShapeRef { owner: Owner::Page(self.page), path: path.to_vec() };
-            edit.selectors.retain(|(i, _)| LOCKS.get(*i).is_none_or(|lock| !locked(resolver, &at, lock)));
+            edit.selectors.retain(|(i, _)| LOCKS.get(*i).is_none_or(|locks| !locks.iter().any(|lock| locked(resolver, &at, lock))));
         }
-        if edit.link.iter().any(|l| *l) || !edit.selectors.is_empty() {
-            // A shape on a locked layer is not written into: passed over, and counted. Its list is read only when it has something to change.
+        if edit.families.iter().any(|f| *f != Follow::Nothing) || !edit.selectors.is_empty() {
+            // A shape on a locked layer is not written into: passed over, and counted. Its list is read only when it has something to change. **The master's
+            // shape it reads a family through is held as it is**: linked, it would change the look of the shape the theme passes over.
             if self.locks.of(self.doc, self.page, shape)?.is_some() {
                 self.locked = self.locked.saturating_add(1);
+                if let Some((at, _)) = &stood {
+                    let held = self.held.entry(at.clone()).or_default();
+                    for (f, h) in held.iter_mut().enumerate() {
+                        *h |= family(own, f).is_none();
+                    }
+                }
                 return Ok(());
             }
             if self.plan.len() >= MAX_THEMED_SHAPES {
@@ -386,12 +403,60 @@ impl<'a> Planner<'a> {
     }
 }
 
-/// The shapes of page `page` that need an edit, in document order, and how many shapes on a locked layer it passed over.
-fn plan_page(doc: &Document, page: u32, target: [u32; 7], style: Option<u32>) -> Result<(Vec<ShapeEdit>, usize), Problem> {
+/// What planning a page found: the shapes that need an edit, in document order, how many shapes on a locked layer it passed over, and the masters' shapes those
+/// read through.
+struct PagePlan {
+    page: u32,
+    plan: Vec<ShapeEdit>,
+    locked: usize,
+    held: Families,
+}
+
+/// The shapes of page `page` that need an edit ([`PagePlan`]).
+fn plan_page(doc: &Document, page: u32, target: [u32; 7], style: Option<u32>) -> Result<PagePlan, Problem> {
     let top = &doc.page(page).ok_or_else(|| Problem::bad(format!("there is no page {page}")))?.shapes;
     let mut planner = Planner::new(doc, page, target, style);
     planner.walk(top, &[], None)?;
-    Ok((planner.plan, planner.locked))
+    Ok(PagePlan { page, plan: planner.plan, locked: planner.locked, held: planner.held })
+}
+
+/// **Which masters' shapes follow the `Theme` style `theme` for a family** (`masters.rs`): those the plans have a shape follow the style through, that do not link it
+/// already, and that can follow it without changing a shape the plans do not theme. `covered` are the pages whose every shape was planned (a theme's pages): their shapes that the
+/// plans pass over are the plans' `held`, and the other pages are walked once, only when a master's shape is still to be linked.
+fn through_masters(doc: &Document, plans: &[PagePlan], covered: &[u32], theme: u32) -> Families {
+    let mut wanted = Families::new();
+    let mut themed: HashSet<(u32, Vec<u32>)> = HashSet::new();
+    let mut held = Families::new();
+    for plan in plans {
+        for (at, families) in &plan.held {
+            let all = held.entry(at.clone()).or_default();
+            for (a, h) in all.iter_mut().zip(families) {
+                *a |= *h;
+            }
+        }
+        for edit in &plan.plan {
+            let Some(at) = &edit.stands else { continue };
+            let mut through = false;
+            for (f, follow) in edit.families.iter().enumerate() {
+                if matches!(follow, Follow::Master { .. }) {
+                    through = true;
+                    if family(edit.theirs, f) != Some(theme)
+                        && let Some(w) = wanted.entry(at.clone()).or_default().get_mut(f)
+                    {
+                        *w = true;
+                    }
+                }
+            }
+            if through && !covered.contains(&plan.page) {
+                themed.insert((plan.page, edit.path.clone()));
+            }
+        }
+    }
+    if wanted.is_empty() {
+        return wanted;
+    }
+    note_master_walk();
+    can_follow(doc, Census { wanted, covered, held: &held, themed })
 }
 
 /// Makes the shape `id` that a command has just put on `page`, and the shapes inside it, follow the page's theme ("Apply theme to new
@@ -412,10 +477,13 @@ pub fn follow_page_theme(doc: &mut Document, page: u32, id: u32) -> Result<(), P
         planner.shape(&at.path, shape, None)?;
         planner.walk(&shape.children, &at.path, shape.master)?;
         note_follow(0, planner.seen.saturating_add(1));
-        planner.plan
+        PagePlan { page, plan: planner.plan, locked: planner.locked, held: planner.held }
     };
-    carry_out(doc, page, &plan, Some(style))?;
-    Ok(())
+    let follows = through_masters(doc, std::slice::from_ref(&plan), &[], style);
+    super::masters::link(doc, &follows, style)?;
+    carry_out(doc, page, &plan.plan, Some(style), &follows)?;
+    // A colour the shape's master gives by a formula of `THEMEVAL` is the theme's now (`new_colours.rs`).
+    super::new_colours::settle(doc, page, id)
 }
 
 /// The master of the nearest ancestor of the shape at `path` that has one, found by going down the path once (`None` for a shape at the top of the page): what [`Planner::shape`] needs to find the
@@ -455,33 +523,46 @@ pub fn follow_page_theme_refs(doc: &mut Document, page: u32, refs: &[ShapeRef]) 
             planner.shape(&at.path, shape, ancestor_master(doc, page, &at.path))?;
         }
         note_follow(0, planner.seen);
-        planner.plan
+        PagePlan { page, plan: planner.plan, locked: planner.locked, held: planner.held }
     };
-    carry_out(doc, page, &plan, Some(style))?;
+    let follows = through_masters(doc, std::slice::from_ref(&plan), &[], style);
+    super::masters::link(doc, &follows, style)?;
+    carry_out(doc, page, &plan.plan, Some(style), &follows)?;
     Ok(())
 }
 
-/// Carries out the edits: the links and the scheme cells of each shape. Returns how many links were made and how many cells were rewritten.
-fn carry_out(doc: &mut Document, page: u32, plan: &[ShapeEdit], style: Option<u32>) -> Result<(usize, usize), Problem> {
+/// Carries out the edits: the links and the scheme cells of each shape. `follows` are the masters' shapes [`through_masters`] has follow the style, which [`super::masters::link`]
+/// linked before. Returns how many times a shape began to follow the style (through its master or by a link of its own) and how many cells were rewritten.
+fn carry_out(doc: &mut Document, page: u32, plan: &[ShapeEdit], style: Option<u32>, follows: &Families) -> Result<(usize, usize), Problem> {
     let (mut links, mut cells) = (0_usize, 0_usize);
     for edit in plan {
         let shape = shape_mut(doc, page, &edit.path).ok_or_else(|| Problem::failed("a shape of the page is not there"))?;
         let sheet = Arc::make_mut(&mut shape.sheet);
         if let Some(id) = style {
-            for (family, follows) in edit.link.iter().enumerate() {
-                if !*follows {
-                    continue;
-                }
-                let link = match family {
-                    0 => &mut sheet.links.line,
-                    1 => &mut sheet.links.fill,
-                    _ => &mut sheet.links.text,
+            let mut relinked = false;
+            let linked_now = edit.stands.as_ref().and_then(|at| follows.get(at));
+            for (f, follow) in edit.families.iter().enumerate() {
+                let through = family(edit.theirs, f) == Some(id) || linked_now.is_some_and(|fs| fs.get(f).copied().unwrap_or(false));
+                let (wanted, starts) = match follow {
+                    Follow::Nothing => continue,
+                    Follow::Own => (Some(id), true),
+                    // The master's shape follows the style: the shape keeps no link of its own.
+                    Follow::Master { starts } if through => (None, *starts),
+                    // It cannot: the shape links the style itself, as before, or keeps the link it has.
+                    Follow::Master { starts: true } => (Some(id), true),
+                    Follow::Master { starts: false } => continue,
                 };
-                *link = Some(id);
-                links = links.saturating_add(1);
+                let link = family_mut(&mut sheet.links, f);
+                if *link != wanted {
+                    *link = wanted;
+                    relinked = true;
+                }
+                if starts {
+                    links = links.saturating_add(1);
+                }
             }
-            if edit.link.iter().any(|l| *l) && sheet.raw.iter().any(|(name, _)| LINK_ATTRS.contains(&name)) {
-                sheet.raw = RawAttrs::from_pairs(sheet.raw.iter().filter(|(name, _)| !LINK_ATTRS.contains(name)));
+            if relinked {
+                drop_raw_links(sheet);
             }
         }
         for (place, number) in &edit.selectors {
@@ -508,6 +589,17 @@ fn recalculate(doc: &mut Document, before: &Since, page: u32, budget: &Budget) -
         return Err(Problem::failed("the page is too large to recalculate"));
     }
     Ok(())
+}
+
+/// **The connectors glued to the shapes that the theme resized are routed again**, on the `pages` it changed, once each has been worked out: a theme
+/// gives the text another face and a compartment wraps in it or a shape that is sized to its text changes, and the connection points a connector is glued to move with the shape; its ends
+/// follow them by their formulas and the legs between them stay where they were unless they are routed. `before` is the drawing as the command found it. **The pages share one budget of
+/// steps, the steps of `budget`** (a preview has a tenth of an application's): a drawing of many pages that each cost just under it was routed in as many budgets. When it is spent the theme
+/// is refused, in the words of a recalculation that passes its budget, with the drawing as it was.
+fn route_changed(doc: &mut Document, before: &Since, pages: &[u32], budget: &Budget) -> Result<(), Problem> {
+    let Some(was) = before.document() else { return Ok(()) };
+    let mut steps = budget.steps;
+    crate::draw::route_recalculated_on_within(doc, was, pages, &mut steps)
 }
 
 /// Writes the page's seven selector cells where they differ from `target`. Returns whether any was written.
@@ -572,20 +664,38 @@ pub fn apply_within(doc: &mut Document, pages: &[u32], choice: Choice, base: Bas
         // Shapes that follow the style already stay as they are: with every selector at 0 they draw as the root style does.
         Choice::None => theme_style_id(doc),
     };
+    let target = target_of(&choice);
+    let follow = if matches!(choice, Choice::None) { None } else { style };
+    // The pages' cells first, then the plans: which master's shape can follow the style is decided for all the pages at once, from what every page selects after the command
+    // And the masters are linked before any shape is carried out and any page is worked out again.
+    let mut wrote = Vec::with_capacity(pages.len());
     for &page in pages {
-        let target = target_of(&choice);
-        let follow = if matches!(choice, Choice::None) { None } else { style };
-        let wrote = write_page_cells(doc, page, target)?;
-        let (plan, locked) = plan_page(doc, page, target, follow)?;
-        let (links, cells) = carry_out(doc, page, &plan, follow)?;
+        wrote.push(write_page_cells(doc, page, target)?);
+    }
+    let mut plans = Vec::with_capacity(pages.len());
+    for &page in pages {
+        plans.push(plan_page(doc, page, target, follow)?);
+    }
+    let follows = match follow {
+        Some(theme) => through_masters(doc, &plans, pages, theme),
+        None => Families::new(),
+    };
+    if let Some(theme) = follow {
+        super::masters::link(doc, &follows, theme)?;
+    }
+    for (plan, wrote) in plans.iter().zip(wrote) {
+        let (links, cells) = carry_out(doc, plan.page, &plan.plan, follow, &follows)?;
         applied.links_made = applied.links_made.saturating_add(links);
         applied.cells_rewritten = applied.cells_rewritten.saturating_add(cells);
-        applied.locked = applied.locked.saturating_add(locked);
-        if wrote || !plan.is_empty() {
-            recalculate(doc, &before, page, budget)?;
-            applied.changed_pages.push(page);
+        applied.locked = applied.locked.saturating_add(plan.locked);
+        if (wrote || !plan.plan.is_empty()) && !applied.changed_pages.contains(&plan.page) {
+            applied.changed_pages.push(plan.page);
         }
     }
+    for &page in &applied.changed_pages {
+        recalculate(doc, &before, page, budget)?;
+    }
+    route_changed(doc, &before, &applied.changed_pages, budget)?;
     Ok(applied)
 }
 
@@ -615,8 +725,8 @@ pub fn set_variants_within(doc: &mut Document, pages: &[u32], colours: Option<u8
             target[6] = u32::from(s);
         }
         let wrote = write_page_cells(doc, page, target)?;
-        let (plan, locked) = plan_page(doc, page, target, None)?;
-        let (_, cells) = carry_out(doc, page, &plan, None)?;
+        let PagePlan { plan, locked, .. } = plan_page(doc, page, target, None)?;
+        let (_, cells) = carry_out(doc, page, &plan, None, &Families::new())?;
         applied.cells_rewritten = applied.cells_rewritten.saturating_add(cells);
         applied.locked = applied.locked.saturating_add(locked);
         if wrote || !plan.is_empty() {
@@ -624,6 +734,7 @@ pub fn set_variants_within(doc: &mut Document, pages: &[u32], colours: Option<u8
             applied.changed_pages.push(page);
         }
     }
+    route_changed(doc, &before, &applied.changed_pages, budget)?;
     Ok(applied)
 }
 
@@ -661,7 +772,7 @@ mod tests {
         page.shapes = ShapeList::from_vec((1..=2_000).map(|id| Arc::new(shape_with_own_cells(id))).collect());
         doc.pages.push(Arc::new(page));
         RESOLVERS_MADE.with(|c| c.set(0));
-        let (plan, _) = plan_page(&doc, 1, [1001, 1001, 1001, 1001, 1001, 0, 0], None).unwrap();
+        let plan = plan_page(&doc, 1, [1001, 1001, 1001, 1001, 1001, 0, 0], None).unwrap().plan;
         assert_eq!(plan.len(), 2_000, "every shape has a number of its own to change");
         assert_eq!(RESOLVERS_MADE.with(Cell::get), 1, "one resolver for the page, and not one for each shape");
     }

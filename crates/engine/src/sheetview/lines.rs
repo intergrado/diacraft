@@ -142,7 +142,8 @@ fn column_places(section: &SectionInfo) -> HashMap<&str, usize> {
 pub fn read_lines(res: &Resolver<'_>, sheet: &SheetRef, outline: &Outline, from: u64, count: usize) -> (Lines, Counts) {
     let mut counts = Counts::default();
     let mut out = Lines::default();
-    let ctx = Ctx { res, sheet };
+    let mut eval = super::read_eval_ctx();
+    let ctx = Ctx::new(res, sheet, &mut eval);
     let local = res.sheet(sheet);
     let mut places: HashMap<usize, HashMap<&str, usize>> = HashMap::new();
     let mut line = from;

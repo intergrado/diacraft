@@ -269,8 +269,8 @@ const SIX_SIZES: [([f32; 2], f32); 6] =
     [([1280.0, 800.0], 1.0), ([900.0, 600.0], 1.0), ([480.0, 320.0], 1.0), ([1280.0, 800.0], 2.0), ([640.0, 400.0], 1.5), ([800.0, 300.0], 1.0)];
 
 /// The notice (owner, 2026-11-23): the first sentence is the one the notice has always had; the others say that OpenDocument is an OASIS Standard, whose
-/// marks LibreOffice and OpenOffice are, whose marks ArchiMate (owner, 2026-11-25), UML and BPMN are (the site names the three), and that DiaCraft is not
-/// affiliated with or endorsed by any of the six owners.
+/// marks LibreOffice and OpenOffice are, whose marks ArchiMate (owner, 2026-11-25), UML and BPMN are (the site names the three), whose mark draw.io is (0.2.4: the
+/// public text says the files DiaCraft writes are being tested by opening them in draw.io), and that DiaCraft is not affiliated with or endorsed by any of the seven owners.
 #[test]
 fn the_notice_keeps_its_first_sentence_and_names_the_owners_of_the_other_marks() {
     assert!(TRADEMARK.starts_with("Visio is a trademark of the Microsoft group of companies. "), "{TRADEMARK}");
@@ -278,9 +278,35 @@ fn the_notice_keeps_its_first_sentence_and_names_the_owners_of_the_other_marks()
         TRADEMARK,
         "Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The \
          Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark \
-         of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The \
-         Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group."
+         of The Open Group. UML and BPMN are trademarks of the Object Management Group. draw.io is a registered trademark of draw.io Ltd. DiaCraft is not \
+         affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group, the Object Management \
+         Group or draw.io Ltd."
     );
+}
+
+/// The notice is legible: with the window's faces it is laid out two steps of the fit under its usual size at the most (9.93 of the picture's pixels, where the other rows of
+/// the panel are 12 and 16), and never at the least size the fit allows a face too wide for the corner. Measured when it gained draw.io's sentence (0.2.4): 120 of the picture's
+/// pixels tall at 10.45 (it was 108, and 130 at 11), in a corner of 112, so it is laid out at 9.93 (99 tall) at five of the six sizes, and at 10.45 at 480 by 320 points, where
+/// the smaller panel's whole pixels leave it 112. A longer notice that would take it smaller still fails here: its corner needs another layout, not a smaller type.
+#[test]
+fn the_notice_is_two_steps_under_its_usual_size_at_the_most_with_the_windows_faces() {
+    for (size, ppp) in SIX_SIZES {
+        let mut w = splash_window_at(size, ppp, app());
+        run_command(&mut w, "app.about", json!({}));
+        let panel = rect_of(&w, "splash.panel");
+        let k = panel.width() / ART_SIZE.x;
+        let (width, height) = ((LEGAL_ZONE[2] - LEGAL_ZONE[0]) * k, (LEGAL_ZONE[3] - LEGAL_ZONE[1]) * k);
+        let tall = |w: &mut Window, s: f32| {
+            w.ctx.fonts_mut(|f| f.layout(TRADEMARK.to_owned(), egui::FontId::proportional(s * k), egui::Color32::BLACK, width).size().y)
+        };
+        // The fit's first step under 11 is 10.45 and its second 9.9275: the first at which the notice fits its corner is the size it is drawn at.
+        let two_steps = 11.0 * 0.95 * 0.95;
+        let at_two = tall(&mut w, two_steps);
+        assert!(at_two <= height, "{size:?} at {ppp}: {at_two} tall at two steps under 11 (9.93), in a corner of {height}");
+        let shown = rect_of(&w, "splash.trademark").height();
+        assert!(shown <= height + 0.6, "{size:?} at {ppp}: the notice shown is {shown} tall, in a corner of {height}");
+        assert_eq!(w.state().ui_panics(), 0);
+    }
 }
 
 /// About DiaCraft says the notice (owner, 2026-11-23: in NOTICE, the About box and the site), in the clear corner of the picture over its title,

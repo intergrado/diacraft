@@ -34,7 +34,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
              x: number, optional, inches from the page's left edge to the middle of a callout tied to nothing (default: the middle of the page, with y); \
              y: number, optional, inches from the page's bottom edge; \
              text: text, optional, what the callout says (default: Text); \
-             page: whole number, optional, the id of the page (default: the first page holding all the shapes of ids, else the first page). \
+             page: whole number, optional, the id of the page (default: the first page holding all the shapes of ids, else the first page that is not a background). \
              The callouts are shapes with no master that take the page's theme, on the active layers and in front, and are one undo step. A callout tied to a shape moves, is copied and is deleted with it",
             has_document,
             insert
@@ -176,6 +176,8 @@ fn detach(s: &mut Session, p: &Value) -> Result<Value> {
         if changed {
             draw::settle(doc, &before, page, &[id], &[]).map_err(|problem| problem.into_engine(ID))?;
         }
+        // The end of the leader put at the place it is at, on a callout tied to nothing, wrote the cells it holds: the drawing is as it was, and the answer says so.
+        let changed = changed && *doc != before;
         Ok((json!({ "page": page, "id": id, "changed": changed }), changed))
     })
 }

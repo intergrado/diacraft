@@ -366,8 +366,14 @@ fn a_json_lines_line_takes_at_most_16_mib() {
 fn run_stops_reading_standard_input_at_the_byte_limit() {
     // Standard input is a stream: a program that keeps sending must be cut off at the limit and not read to its end.
     // Up to 256 MiB are offered; a run that stopped reading at 64 MiB leaves the writer with a broken pipe soon after.
-    let mut child =
-        Command::new(BIN).args(["run", "--commands", "-"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let mut child = Command::new(BIN)
+        .args(["run", "--commands", "-"])
+        .env("DIACRAFT_NO_PREFS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
     let mut stdin = child.stdin.take().unwrap();
     let writer = std::thread::spawn(move || {
         let mut block = vec![b' '; 1024 * 1024 - 1];
@@ -439,8 +445,14 @@ fn version_and_help_print_on_stdout_and_win_over_everything() {
 
 #[test]
 fn a_closed_stdout_ends_the_run_quietly() {
-    let mut child =
-        Command::new(BIN).args(["run", "--commands", "-"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let mut child = Command::new(BIN)
+        .args(["run", "--commands", "-"])
+        .env("DIACRAFT_NO_PREFS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
     // The reader goes away at once, as in `diacraft-cli run ... | head -0`.
     drop(child.stdout.take());
     let mut stdin = child.stdin.take().unwrap();
@@ -1061,4 +1073,94 @@ fn the_comment_commands_run_as_steps() {
     assert_eq!(lines[9]["result"]["deleted"], 2);
     assert_eq!(lines[10]["result"]["comments"], serde_json::json!([]));
     assert!(text(&out.stderr).is_empty(), "stderr: {}", text(&out.stderr));
+}
+
+/// `shape.drop` as a step follows the range of eight: on a page at 1:100 a master drawn at 1:1 keeps its size on paper (its `Width`,
+/// `Height` and `DropOnPageScale` are written, and the answer says the factor), on a page at 1:4 it keeps its drawing size and nothing is written.
+#[test]
+fn a_drop_on_a_page_of_another_drawing_scale_follows_the_range_of_eight() {
+    let steps = [
+        r#"{"command":"file.new"}"#,
+        r#"{"command":"page.scale","params":{"paper":1.0,"drawing":100.0}}"#,
+        r#"{"command":"shape.drop","params":{"master":"rectangle","page":1,"x":5.0,"y":4.0}}"#,
+        r#"{"command":"sheet.cell","params":{"id":1,"page":1,"cell":"DropOnPageScale"}}"#,
+        r#"{"command":"sheet.cell","params":{"id":1,"page":1,"cell":"Width"}}"#,
+        r#"{"command":"page.scale","params":{"paper":1.0,"drawing":4.0}}"#,
+        r#"{"command":"shape.drop","params":{"master":"rectangle","page":1,"x":5.0,"y":4.0}}"#,
+        r#"{"command":"sheet.cell","params":{"id":2,"page":1,"cell":"Width"}}"#,
+        r#"{"command":"edit.undo"}"#,
+        r#"{"command":"edit.undo"}"#,
+        r#"{"command":"edit.undo"}"#,
+    ]
+    .join("\n");
+    let out = cli(&["run", "--commands", "-"], Some(steps.as_bytes()));
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let lines = json_lines(&out.stdout);
+    assert_eq!(lines.len(), 11, "{lines:?}");
+    let first = &lines[2]["result"];
+    assert!((first["drop_on_page_scale"].as_f64().unwrap() - 100.0).abs() < 1e-9, "{first}");
+    let (w, h) = (first["width"].as_f64().unwrap(), first["height"].as_f64().unwrap());
+    let master = diacraft_engine::stencil::find_master("rectangle").unwrap();
+    assert!((w - master.width).abs() < 1e-9 && (h - master.height).abs() < 1e-9, "the master's size on paper: {first}");
+    assert_eq!(lines[3]["result"]["origin"], "local", "the factor is the shape's own: {}", lines[3]);
+    assert_eq!(lines[4]["result"]["origin"], "local", "so is the width: {}", lines[4]);
+    let second = &lines[6]["result"];
+    assert!(second.get("drop_on_page_scale").is_none(), "within the range nothing is written: {second}");
+    assert!((second["width"].as_f64().unwrap() - master.width / 4.0).abs() < 1e-9, "the drawing size is kept: {second}");
+    assert_eq!(lines[7]["result"]["origin"], "inherited", "{}", lines[7]);
+    // Each step is one undo step, the drops and the changes of scale alike, and each undo answers.
+    for line in &lines[8..] {
+        assert!(line.get("result").is_some(), "{line}");
+    }
+    assert!(text(&out.stderr).is_empty(), "stderr: {}", text(&out.stderr));
+}
+
+/// `connector.reverse_ends` is a step of a run like any command; its answer says what it did, and a shape with no ends stops the run in words.
+#[test]
+fn run_reverses_the_ends_of_a_connector_and_refuses_a_box_in_words() {
+    let drop = |x: u32| format!(r#"{{"master":"rectangle","page":1,"x":{x},"y":3}}"#);
+    let (first, second) = (drop(2), drop(8));
+    let args = |last_params: &str| {
+        vec![
+            "run".to_owned(),
+            "--cmd".to_owned(),
+            "file.new".to_owned(),
+            "--cmd".to_owned(),
+            "shape.drop".to_owned(),
+            "--params".to_owned(),
+            first.clone(),
+            "--cmd".to_owned(),
+            "shape.drop".to_owned(),
+            "--params".to_owned(),
+            second.clone(),
+            "--cmd".to_owned(),
+            "connector.add".to_owned(),
+            "--params".to_owned(),
+            r#"{"from":{"id":1,"point":3},"to":{"id":2,"point":1}}"#.to_owned(),
+            "--cmd".to_owned(),
+            "connector.reverse_ends".to_owned(),
+            "--params".to_owned(),
+            last_params.to_owned(),
+        ]
+    };
+    let ok_args = args(r#"{"id":3}"#);
+    let out = cli(&ok_args.iter().map(String::as_str).collect::<Vec<_>>(), None);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let lines = json_lines(&out.stdout);
+    let done = &lines[4]["result"];
+    assert_eq!(lines[4]["command"], "connector.reverse_ends");
+    assert_eq!(
+        (&done["reversed"], &done["ids"], &done["begin"], &done["end"]),
+        (&json!(1), &json!([3]), &json!({"id": 2, "point": 1}), &json!({"id": 1, "point": 3})),
+        "{done}"
+    );
+    // A box has no begin and end: the run stops there, with the engine's words.
+    let refused_args = args(r#"{"id":1}"#);
+    let out = cli(&refused_args.iter().map(String::as_str).collect::<Vec<_>>(), None);
+    assert!(!out.status.success());
+    assert!(
+        text(&out.stderr).contains("step 4 (connector.reverse_ends)") && text(&out.stderr).contains("is not a connector or a line"),
+        "{}",
+        text(&out.stderr)
+    );
 }

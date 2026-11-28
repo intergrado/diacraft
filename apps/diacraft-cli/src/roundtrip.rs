@@ -10,7 +10,7 @@
 //! its role), page and shape `ID`s (numbers), the spec's own spelling of a cell name (any other is `(unlisted)`) and the 17 predefined sections.
 //! **No formula, no cell value, no text, no name a person made up** (a row's name, a page's name, a part's name that is not package structure).
 //! **No word the engine or the writer said is copied, cleaned or cut:** an error is told by its class (`error`, a fixed word for the kind of
-//! `EngineError`, and `problem` for the kind of trouble opening was) and a warning by its class (a fixed word from a table here, `other` for a
+//! `EngineError`, and `problem` for the kind of trouble opening was) and a warning by its class (a fixed word from the table of `warning_class.rs`, `other` for a
 //! text it does not know). A part's name can hold a person's words and a message names parts; taking the names out of a message cannot be made
 //! sure of (a name inside a name, a name that is a word of the message, the escaped forms), so no text of a message reaches the line at all.
 //!
@@ -42,31 +42,13 @@ use serde_json::{Value, json};
 
 use crate::args::{CompareArgs, RoundtripArgs, Via};
 use crate::oracle::{cell_word, section_word, sha256_hex};
+use crate::warning_class::warning_class;
 use crate::{Failure, write_line};
 
 /// The most entries a list in the report holds; a count says how many there were.
 const MOST_LISTED: usize = 50;
 /// The deepest group nesting the cell comparison walks (the model's own cap is 200).
 const MOST_DEPTH: usize = 256;
-
-/// The class of each warning the writer gives, found by a phrase that is in the warning and cannot be in a part's name: a name is told as a
-/// `part_label`, which holds no space, and every phrase here has one. The first phrase found decides, and a warning with none of them is `other`.
-/// A test looks for every phrase in the writer's source, so that a warning reworded there is noticed here.
-const WARNING_CLASSES: [(&str, &str); 8] = [
-    ("saved as a stencil", "stencil_keeps_pages"),
-    ("the stencil has no masters", "stencil_without_masters"),
-    ("the macro project was left out", "macro_project_dropped"),
-    ("a page or master was removed", "page_or_master_removed"),
-    ("the file was digitally signed", "signature_no_longer_holds"),
-    ("the list of page names in docProps/app.xml was not found", "page_name_list_not_found"),
-    ("was kept as it was", "property_part_kept"),
-    ("parts had no content type", "parts_without_content_type"),
-];
-
-/// A fixed word for a warning: its class from [`WARNING_CLASSES`], and never a word of the warning.
-pub(crate) fn warning_class(warning: &str) -> &'static str {
-    WARNING_CLASSES.iter().find(|(phrase, _)| warning.contains(phrase)).map_or("other", |(_, class)| class)
-}
 
 /// A fixed word for the kind of error a command ended with, and for the kind of trouble when it was a file that would not open. Nothing of the
 /// error's message is used: it may hold a part's name, a part's name can hold a person's words, and no way of taking names out of a text is sure
@@ -474,55 +456,6 @@ mod tests {
     use diacraft_engine::OpenProblem;
 
     use super::*;
-
-    /// The writer's own source: the places that give a warning (`write/mod.rs`, and `write/props.rs` for the page names of `app.xml`).
-    const WRITER: [&str; 2] = [include_str!("../../../crates/vsdx/src/write/mod.rs"), include_str!("../../../crates/vsdx/src/write/props.rs")];
-
-    #[test]
-    fn every_phrase_the_warnings_are_known_by_is_in_the_writers_source() {
-        for (phrase, class) in WARNING_CLASSES {
-            assert!(WRITER.iter().any(|source| source.contains(phrase)), "`{phrase}` ({class}) is in no warning of the writer: was one reworded?");
-            assert!(phrase.contains(' '), "`{phrase}` could be spelled by a part's label, which holds no space");
-        }
-        let classes: std::collections::BTreeSet<&str> = WARNING_CLASSES.iter().map(|(_, class)| *class).collect();
-        assert_eq!(classes.len(), WARNING_CLASSES.len(), "a class is given twice");
-        assert!(!classes.contains("other"));
-    }
-
-    #[test]
-    fn a_warning_is_told_by_its_class_whatever_part_it_names() {
-        // The writer's warnings as it words them, with the labels it gives parts (`part_label`: structure by its name, anything else by its role).
-        for (warning, class) in [
-            (
-                "saved as a stencil: the 2 pages with shapes stay in the file, but a stencil offers its masters to other drawings, not its pages",
-                "stencil_keeps_pages",
-            ),
-            ("the stencil has no masters, so it offers no shapes to other drawings", "stencil_without_masters"),
-            (
-                "the macro project was left out of the new file, because a drawing cannot hold one: 2 parts removed (2 named by their owner)",
-                "macro_project_dropped",
-            ),
-            (
-                "the macro project was left out of the new file, because a drawing cannot hold one: 3 parts removed (/visio/vbaProject.bin and 2 more)",
-                "macro_project_dropped",
-            ),
-            (
-                "a page or master was removed; comments, published-page lists and data recordsets that name it are not edited",
-                "page_or_master_removed",
-            ),
-            ("the file was digitally signed, and the signature no longer holds", "signature_no_longer_holds"),
-            ("the list of page names in docProps/app.xml was not found, and is left as it was", "page_name_list_not_found"),
-            ("a property part was kept as it was: it is not usable XML (syntax)", "property_part_kept"),
-            ("/docProps/app.xml was kept as it was: its root is not the one a property part has", "property_part_kept"),
-            ("3 parts had no content type and were given application/octet-stream", "parts_without_content_type"),
-        ] {
-            assert_eq!(warning_class(warning), class, "{warning}");
-        }
-        // A text that is none of them, or that is a name only, or that holds the words of the table cut by a name, is `other`, and tells nothing.
-        for text in ["", "Secret(story)~", "/a~/b~cd was left out", "saved as a", "a stencil parts had", "someone's words: was kept"] {
-            assert_eq!(warning_class(text), "other", "{text}");
-        }
-    }
 
     #[test]
     fn an_error_is_told_by_its_kind_and_nothing_of_its_message_is_used() {

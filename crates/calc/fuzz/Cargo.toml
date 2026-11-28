@@ -28,3 +28,10 @@ path = "fuzz_targets/cell_reference.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "row_refs"
+path = "fuzz_targets/row_refs.rs"
+test = false
+doc = false
+bench = false

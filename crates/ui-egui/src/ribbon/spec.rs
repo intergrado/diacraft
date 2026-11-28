@@ -661,12 +661,15 @@ const EFFECT_ITEMS: &[Ctl] = &[
     c("BevelShapeGallery", i(Base::Shadow)).g("Bevel"),
     c("_3DRotationGallery", i(Base::Shadow)).g("3-D Rotation"),
 ];
-/// The items of Rotate Shapes. **Their ids and captions are ours**: the map names the gallery and says nothing of what is in it.
+/// The items of Rotate Shapes. **Their ids and captions are ours**: the map names the gallery and says nothing of what is in it. **Reverse Ends** is the last: the
+/// reference application keeps the command off its ribbon, and older versions of it kept it in this menu, which the project follows (
+/// "Reverse Ends"). It acts on the connectors and lines selected and is greyed for any other shape.
 const ROTATE_ITEMS: &[Ctl] = &[
     c("ShapesRotateRight", i(Base::TurnRight)).g("Rotate Right 90\u{b0}").cmd_with("arrange.rotate", r#"{"by":-90}"#),
     c("ShapesRotateLeft", i(Base::TurnLeft)).g("Rotate Left 90\u{b0}").cmd_with("arrange.rotate", r#"{"by":90}"#),
     c("ShapesFlipVertical", i(Base::FlipV)).g("Flip Vertical").cmd_with("arrange.flip", r#"{"axis":"vertical"}"#),
     c("ShapesFlipHorizontal", i(Base::FlipH)).g("Flip Horizontal").cmd_with("arrange.flip", r#"{"axis":"horizontal"}"#),
+    c("ShapesReverseEnds", i(Base::Swap)).g("Reverse Ends").cmd("arrange.reverseEnds"),
 ];
 /// The items of Position: the space commands first, as the menu's pages list them, then the page breaks, then the rotations. The ids and captions of
 /// the first four are ours, as the map lists none for them.
@@ -758,8 +761,32 @@ const SWIMLANE_ORIENTATION_ITEMS: &[Ctl] = &[
         .mark(Mark::SwimlaneOrientation("vertical")),
 ];
 
+/// The rows of the menu of Home, Tools, Connection Point. **Their ids are ours**, and so are the words: a DiaCraft extra beyond the reference app. They act
+/// on every edge of the shapes selected, and are greyed when that would change nothing (`edit/conn_edges.rs`). The control has no command of its own, since the Connection Point tool is not built;
+/// when it is, the control becomes a split button, the tool on its face and these rows on its arrow.
+const CONNECTION_POINT_ITEMS: &[Ctl] = &[
+    c("ConnectionPointsDouble", i(Base::Dot).with(PLUS))
+        .g("Double Connection Points")
+        .cmd_with("window.connectionPointsDo", r#"{"action":"double","target":"all"}"#),
+    c("ConnectionPointsHalve", i(Base::Dot).with(Badge::Minus))
+        .g("Halve Connection Points")
+        .cmd_with("window.connectionPointsDo", r#"{"action":"halve","target":"all"}"#),
+];
+
+/// The rows of the Connection Points submenu of the shape's right-click menu. **Their ids and words are ours.** They act on
+/// the edge at the click that opened the menu, and on every edge of the shapes selected when the click is on none, and are greyed when that would change nothing.
+const CANVAS_CONNECTION_POINT_ITEMS: &[Ctl] = &[
+    c("CanvasConnectionPointsDouble", i(Base::Dot).with(PLUS))
+        .g("Double Connection Points")
+        .cmd_with("window.connectionPointsDo", r#"{"action":"double","target":"menu"}"#),
+    c("CanvasConnectionPointsHalve", i(Base::Dot).with(Badge::Minus))
+        .g("Halve Connection Points")
+        .cmd_with("window.connectionPointsDo", r#"{"action":"halve","target":"menu"}"#),
+];
+
 /// The rows of the menu a right click on the drawing area opens. **Their ids are ours**; the words are the map's (and its note that
-/// "Cut" and "Copy" are the words of a right-click menu), except Duplicate, which is ours.
+/// "Cut" and "Copy" are the words of a right-click menu), except Duplicate, which is ours, **Connection Points**, after Container and before Format Shape, and **Edit Alt Text...**, whose place after Format Shape is ours too: the shape's
+/// menu of has no such row, and the specification's route to the section is Format Shape, then the Alt Text section.
 pub const CANVAS_MENU: &[Ctl] = &[
     c("CanvasCut", i(Base::Scissors)).l("Cut").cmd("clipboard.cut"),
     c("CanvasCopy", i(Base::Pages)).l("Copy").cmd("clipboard.copy"),
@@ -768,7 +795,9 @@ pub const CANVAS_MENU: &[Ctl] = &[
     c("CanvasGroup", i(Base::Group)).l("Group").cmd("arrange.group"),
     c("CanvasUngroup", i(Base::Group).with(Badge::Cross)).l("Ungroup").cmd("arrange.ungroup"),
     c("CanvasContainer", i(Base::Container)).l("Container").cmd("window.containerDo").menu(CONTAINER_MENU_ITEMS),
+    c("CanvasConnectionPoints", i(Base::Dot)).g("Connection Points").menu(CANVAS_CONNECTION_POINT_ITEMS),
     c("CanvasFormatShape", i(Base::Swatches)).g("Format Shape").cmd_with("window.pane", r#"{"pane":"format_shape","shown":true}"#),
+    c("CanvasAltText", i(Base::Eye)).g("Edit Alt Text...").cmd("window.altText"),
     c("CanvasData", i(Base::Table)).l("Data").menu(CANVAS_DATA_ITEMS),
 ];
 
@@ -783,6 +812,7 @@ pub const LANE_MENU: &[Ctl] = &[
     c("CanvasSwimlane", i(Base::Table)).g("Swimlane").cmd("window.swimlaneDo").menu(SWIMLANE_MENU_ITEMS),
     c("CanvasContainer", i(Base::Container)).l("Container").cmd("window.containerDo").menu(CONTAINER_MENU_ITEMS),
     c("CanvasFormatShape", i(Base::Swatches)).g("Format Shape").cmd_with("window.pane", r#"{"pane":"format_shape","shown":true}"#),
+    c("CanvasAltText", i(Base::Eye)).g("Edit Alt Text...").cmd("window.altText"),
     c("CanvasData", i(Base::Table)).l("Data").menu(CANVAS_DATA_ITEMS),
 ];
 
@@ -820,8 +850,19 @@ pub const CONNECTOR_MENU: &[Ctl] = &[
     c("ConnectorRightAngleConnector", i(Base::Connector)).g("Right-Angle Connector").cmd_with("connector.style", r#"{"style":"right_angle"}"#),
     c("ConnectorStraightConnector", i(Base::Line)).g("Straight Connector").cmd_with("connector.style", r#"{"style":"straight"}"#),
     c("ConnectorCurvedConnector", i(Base::Arc)).g("Curved Connector").cmd_with("connector.style", r#"{"style":"curved"}"#),
+    c("ConnectorReverseEnds", i(Base::Swap)).g("Reverse Ends").cmd("arrange.reverseEnds"),
     c("ConnectorResetConnector", i(Base::Refresh)).l("Reset Connector").cmd("connector.reset"),
     c("ConnectorReroute", i(Base::Connector)).g("Reroute").menu(REROUTE_ITEMS),
+];
+
+/// The rows of the menu at the right of the Connector button of Home, Tools: the three routing styles for the connectors selected, as the connector's right-click menu
+/// has them (`connector.style`), and **Reverse Ends**. **Their ids and captions are ours**: the map gives the button no menu, and the
+/// button itself still picks the Connector tool.
+const CONNECTOR_TOOL_ITEMS: &[Ctl] = &[
+    c("ConnectorToolRightAngle", i(Base::Connector)).g("Right-Angle Connector").cmd_with("connector.style", r#"{"style":"right_angle"}"#),
+    c("ConnectorToolStraight", i(Base::Line)).g("Straight Connector").cmd_with("connector.style", r#"{"style":"straight"}"#),
+    c("ConnectorToolCurved", i(Base::Arc)).g("Curved Connector").cmd_with("connector.style", r#"{"style":"curved"}"#),
+    c("ConnectorToolReverseEnds", i(Base::Swap)).g("Reverse Ends").cmd("arrange.reverseEnds"),
 ];
 
 static HOME: Tab = Tab {
@@ -919,12 +960,12 @@ static HOME: Tab = Tab {
             &[
                 Slot::Stack(&[
                     c("PointerTool", i(Base::Pointer)).l("Pointer Tool").cmd("tool.pointer"),
-                    c("ConnectorTool", i(Base::Connector)).l("Connector").cmd("tool.connector"),
+                    c("ConnectorTool", i(Base::Connector)).l("Connector").split(CONNECTOR_TOOL_ITEMS).cmd("tool.connector"),
                     c("TextTool", i(Base::TextA)).l("Text").cmd("tool.text"),
                 ]),
                 Slot::Stack(&[
                     c("DrawingToolsMenu", i(Base::Rect)).l("Drawing Tools").menu(DRAWING_TOOLS),
-                    c("ConnectionPointTool", i(Base::Dot)).l("Connection Point"),
+                    c("ConnectionPointTool", i(Base::Dot)).l("Connection Point").menu(CONNECTION_POINT_ITEMS),
                     c("TextBlockTool", i(Base::TextBlock)).l("Text Block").cmd("tool.text_block"),
                 ]),
             ],
@@ -1119,14 +1160,14 @@ static DRAW: Tab = Tab {
             &[Slot::Big(c("DrawConvertInkToText", i(Base::TextA).with(Badge::Arrow)).g("Ink to Text"))],
         ),
         // **A DiaCraft extra beyond the map** (owner, 2026-11-25): the shape operations are hard to find under Developer, Shape Design, so the Draw tab has a
-        // menu of the very same items ([`OPERATIONS`]), in a group of its own after Convert: it is the last group, so the row gives it up first when the
+        // menu of the same items ([`DRAW_OPERATIONS`]: the Developer menu's and Fit Curve), in a group of its own after Convert: it is the last group, so the row gives it up first when the
         // window is narrow. The control has an id of its own (`DrawShapeOperations`); Developer keeps `OperationsMenu`, as the map has it.
         g(
             "GroupDrawShapeOperations",
             "Shape Operations",
             false,
             i(Base::Rect),
-            &[Slot::Big(c("DrawShapeOperations", i(Base::Rect)).g("Operations").menu(OPERATIONS))],
+            &[Slot::Big(c("DrawShapeOperations", i(Base::Rect)).g("Operations").menu(DRAW_OPERATIONS))],
         ),
     ],
 };
@@ -1428,7 +1469,11 @@ static REVIEW: Tab = Tab {
             "Accessibility",
             true,
             i(Base::Eye),
-            &[Slot::Big(c("AccessibilityChecker", i(Base::Eye).with(Badge::Check)).g("Check Accessibility"))],
+            &[Slot::Big(
+                c("AccessibilityChecker", i(Base::Eye).with(Badge::Check))
+                    .g("Check Accessibility")
+                    .cmd_with("window.pane", r#"{"pane":"accessibility","shown":true}"#),
+            )],
         ),
         g(
             "GroupLanguage",
@@ -1583,19 +1628,35 @@ const SHEET_ITEMS: &[Ctl] = &[
 /// The first row of the right-click menus of a shape and of the page while the Developer tab is on: the sheet of the shape under the
 /// pointer, or the page's when the click was on no shape. **The id is ours.**
 pub const CANVAS_SHOW_SHEET: Ctl = c("CanvasShowShapeSheet", i(Base::Table)).l("Show ShapeSheet").cmd_with("window.shapesheet", "{}");
-/// The Operations menu. The first five run the window's `operations.*` commands on the shapes selected and are enabled when the engine
-/// says the operation can run on them (`operations.rs`); the other four are the (and the alignment box's) and have no command, so they are drawn
-/// quiet, with the tooltip "(not available yet)". **Two menus hold these items**, so that they run the same commands and are enabled alike: Developer's
-/// `OperationsMenu` (the map's) and the Draw tab's `DrawShapeOperations` (ours).
+/// The Operations menu: Union, Combine, Fragment, Intersect, Subtract, Join, Trim and Offset run the window's `operations.*` commands on the shapes selected
+/// (Offset's row opens its dialog, `operations.offsetDialog`) and are enabled when the engine says the operation can run on them (`operations.rs`); Update Alignment Box has no
+/// command, so it is drawn quiet, with the tooltip "(not available yet)". **The Developer tab's menu has the nine items the map lists** (`OperationsMenu`): Fit Curve is not among
+/// them (R200 lists `FitCurve` and `FitCurveDialog` as commands that are not on the ribbon), so the tab that is ours, Draw, is where it is ([`DRAW_OPERATIONS`]).
 const OPERATIONS: &[Ctl] = &[
     c("ShapesObjectUnion", i(Base::Rect)).g("Union").cmd("operations.union"),
     c("ShapesObjectCombine", i(Base::Rect)).g("Combine").cmd("operations.combine"),
     c("ShapesObjectFragment", i(Base::Rect)).g("Fragment").cmd("operations.fragment"),
     c("ShapesObjectIntersect", i(Base::Rect)).g("Intersect").cmd("operations.intersect"),
     c("ShapesObjectSubtract", i(Base::Rect)).g("Subtract").cmd("operations.subtract"),
-    c("ShapesObjectJoin", i(Base::Rect)).g("Join"),
-    c("ShapesObjectTrim", i(Base::Rect)).l("Trim"),
-    c("ShapesObjectOffset", i(Base::Rect)).g("Offset"),
+    c("ShapesObjectJoin", i(Base::Rect)).g("Join").cmd("operations.join"),
+    c("ShapesObjectTrim", i(Base::Rect)).l("Trim").cmd("operations.trim"),
+    c("ShapesObjectOffset", i(Base::Rect)).g("Offset").cmd("operations.offsetDialog"),
+    c("ShapesObjectUpdateAlignmentBox", i(Base::Rect)).g("Update Alignment Box"),
+];
+
+/// The Draw tab's Shape Operations menu (ours): the items of [`OPERATIONS`] and **Fit Curve** (`FitCurveDialog`, the command's id, which opens
+/// the dialog, `operations.fitCurveDialog`), a DiaCraft extra beyond the reference app's ribbon, which lists it among the commands that are not on it. Both menus run the same
+/// commands and are enabled alike.
+const DRAW_OPERATIONS: &[Ctl] = &[
+    c("ShapesObjectUnion", i(Base::Rect)).g("Union").cmd("operations.union"),
+    c("ShapesObjectCombine", i(Base::Rect)).g("Combine").cmd("operations.combine"),
+    c("ShapesObjectFragment", i(Base::Rect)).g("Fragment").cmd("operations.fragment"),
+    c("ShapesObjectIntersect", i(Base::Rect)).g("Intersect").cmd("operations.intersect"),
+    c("ShapesObjectSubtract", i(Base::Rect)).g("Subtract").cmd("operations.subtract"),
+    c("ShapesObjectJoin", i(Base::Rect)).g("Join").cmd("operations.join"),
+    c("ShapesObjectTrim", i(Base::Rect)).l("Trim").cmd("operations.trim"),
+    c("ShapesObjectOffset", i(Base::Rect)).g("Offset").cmd("operations.offsetDialog"),
+    c("FitCurveDialog", i(Base::Rect)).g("Fit Curve").cmd("operations.fitCurveDialog"),
     c("ShapesObjectUpdateAlignmentBox", i(Base::Rect)).g("Update Alignment Box"),
 ];
 
@@ -2007,8 +2068,8 @@ pub const SHEET_DESIGN_TAB: &str = "ShapeSheet Design";
 
 /// The contextual tab of the ShapeSheet window: View, Sections, Rows, Editing and
 /// Formula Tracing. It shows while the sheet has the focus. **The ids and the labels are the map's and the spec's** (the April 2025 image names Link and Style Explorer). In this
-/// feature View's Formulas, Values and Sections work; the Sections, Rows and Editing groups wait, and Style Explorer and Formula Tracing are later work
-/// (design 2): they are drawn quiet, with the tooltip "(not available yet)".
+/// feature View's Formulas, Values and Sections work, and so do the Sections, Rows and Editing groups (Insert and Delete Section and Row, Edit Formula, and Shape
+/// Data, Link and Shape Action, which add a row to the sheet); Style Explorer and Formula Tracing are later work (design 2): they are drawn quiet, with the tooltip "(not available yet)".
 static SHEET_DESIGN: Tab = Tab {
     id: "TabShapeSheetDesign",
     label: SHEET_DESIGN_TAB,
@@ -2033,8 +2094,8 @@ static SHEET_DESIGN: Tab = Tab {
             true,
             i(Base::Layers),
             &[Slot::Stack(&[
-                c("ShapeSheetInsertSection", i(Base::Layers).with(PLUS)).l("Insert"),
-                c("ShapeSheetDeleteSection", i(Base::Layers).with(Badge::Cross)).l("Delete"),
+                c("ShapeSheetInsertSection", i(Base::Layers).with(PLUS)).l("Insert").cmd("window.sheetInsertSection"),
+                c("ShapeSheetDeleteSection", i(Base::Layers).with(Badge::Cross)).l("Delete").cmd("window.sheetDeleteSection"),
             ])],
         ),
         g(
@@ -2043,8 +2104,8 @@ static SHEET_DESIGN: Tab = Tab {
             true,
             i(Base::Table),
             &[Slot::Stack(&[
-                c("ShapeSheetInsertRow", i(Base::Table).with(PLUS)).l("Insert"),
-                c("ShapeSheetDeleteRow", i(Base::Table).with(Badge::Cross)).l("Delete"),
+                c("ShapeSheetInsertRow", i(Base::Table).with(PLUS)).l("Insert").cmd_with("window.sheetInsertRow", r#"{"at":"after"}"#),
+                c("ShapeSheetDeleteRow", i(Base::Table).with(Badge::Cross)).l("Delete").cmd("window.sheetDeleteRow"),
             ])],
         ),
         g(
@@ -2053,11 +2114,11 @@ static SHEET_DESIGN: Tab = Tab {
             true,
             i(Base::TextA),
             &[
-                Slot::Big(c("ShapeSheetEditFormula", i(Base::TextA)).l("Edit Formula")),
+                Slot::Big(c("ShapeSheetEditFormula", i(Base::TextA)).l("Edit Formula").cmd("window.sheetEditFormula")),
                 Slot::Stack(&[
-                    c("ShapeData", i(Base::Database)).l("Shape Data"),
-                    c("HyperlinkInsert", i(Base::Link)).l("Link"),
-                    c("ShapeSheetShapeAction", i(Base::Gear)).l("Shape Action"),
+                    c("ShapeData", i(Base::Database)).l("Shape Data").cmd_with("window.sheetAddRow", r#"{"section":"Prop"}"#),
+                    c("HyperlinkInsert", i(Base::Link)).l("Link").cmd_with("window.sheetAddRow", r#"{"section":"Hyperlink"}"#),
+                    c("ShapeSheetShapeAction", i(Base::Gear)).l("Shape Action").cmd_with("window.sheetAddRow", r#"{"section":"Actions"}"#),
                 ]),
             ],
         ),

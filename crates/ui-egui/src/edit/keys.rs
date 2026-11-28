@@ -33,6 +33,8 @@ impl DiacraftApp {
         if !visible {
             self.ui.edit.tile = None;
             self.ui.edit.tile_landing = None;
+            self.ui.edit.tile_ghost = None;
+            self.ui.edit.tile_shape = None;
         }
     }
 
@@ -181,8 +183,8 @@ impl DiacraftApp {
     }
 
     /// Delete: removes the selected shapes and the connectors glued to them (it removes the selection
-    /// along with connectors attached to it). The engine's `shape.delete` would leave such a connector with a free end, so
-    /// the window names them too.
+    /// along with connectors attached to it). The engine's `shape.delete` takes those connectors itself, except one on a locked
+    /// layer or on hidden ones only, which the pointer cannot pick and which stays with a free end.
     pub(crate) fn delete_selection(&mut self) {
         let Some(page) = self.current_page() else { return };
         // A guide selected is deleted as a guide (`guide.delete`), which refuses one that shapes are glued to.
@@ -190,13 +192,10 @@ impl DiacraftApp {
             self.delete_guide(page, guide);
             return;
         }
-        self.ensure_scene(page);
-        let Some(scene) = &self.ui.edit.scene else { return };
-        let mut ids = self.ui.edit.selection.clone();
+        let ids = self.ui.edit.selection.clone();
         if ids.is_empty() {
             return;
         }
-        ids.extend(scene.connectors_glued_to(&ids));
         let params = json!({"ids": ids, "page": page});
         if self.run_edit("shape.delete", &params).is_some() {
             self.ui.edit.selection.clear();
@@ -214,10 +213,13 @@ impl DiacraftApp {
     }
 }
 
-/// The text typed this frame that should start editing a shape's text: printable characters with no Ctrl or Alt held.
+/// The text typed this frame that should start editing a shape's text: printable characters that a person typed ([`crate::shortcuts::types_text`]): with no Ctrl or Alt held, **with AltGr** (€, @, ł, ś:
+/// Ctrl and Alt together off a Mac) and, on a Mac, with Option (å); not the text a Ctrl or Command chord leaves behind.
 fn typed_text(ctx: &Context) -> Option<String> {
+    // Before the input is borrowed: `Context::os` reads the context, which `input` holds.
+    let os = ctx.os();
     ctx.input(|i| {
-        if i.modifiers.ctrl || i.modifiers.alt || i.modifiers.command || i.modifiers.mac_cmd {
+        if !crate::shortcuts::types_text(os, &i.modifiers) {
             return None;
         }
         i.events.iter().find_map(|e| match e {

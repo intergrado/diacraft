@@ -240,9 +240,10 @@ fn lengths_follow_the_pages_drawing_scale() {
     drag_tile_to(&mut w, "Rectangle", 4.0, 5.0);
     let id = shape_ids(&w)[0];
     open(&mut w, "size_position");
-    // 4 paper inches at 1/4 inch to a foot are 16 feet; the master is dropped at the size it has, 1.5 drawing inches.
+    // 4 paper inches at 1/4 inch to a foot are 16 feet; the scale is 48 times the master's, beyond the range of eight, so the master is dropped at the size it has on paper:
+    // 1.5 inches, which are 72 drawing inches, 6 feet.
     assert_eq!(shown_in(&w, "pane.size.x"), "16 ft");
-    assert_eq!(shown_in(&w, "pane.size.width"), "0.125 ft");
+    assert_eq!(shown_in(&w, "pane.size.width"), "6 ft");
     type_in(&mut w, "pane.size.x", "20 ft");
     // The engine's frame is in the page's drawing units, inches of the drawing: 20 feet are 240 of them (and 5 inches on the paper).
     let (px, _) = pin_of(&w, id);

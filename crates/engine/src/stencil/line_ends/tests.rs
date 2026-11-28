@@ -45,7 +45,8 @@ fn the_filled_diamond_is_a_hidden_line_end_master_of_series_22_that_is_in_no_ste
     let (_, master) = built();
     assert_eq!((master.name.as_deref(), master.name_u.as_deref()), (Some("Filled Diamond"), Some("Filled Diamond")));
     assert_eq!(master.raw.get("Hidden"), Some("1"));
-    assert_eq!(master.unique_id.as_deref(), Some("{D1AC0016-0000-4000-8000-000000000001}"));
+    assert_eq!(master.raw.get("BaseID"), Some("{D1AC0016-0000-4000-8000-000000000001}"), "the BaseID is the fixed identity");
+    assert_eq!(master.unique_id.as_deref(), Some(spec.unique_id().as_str()), "and the UniqueID is the one of its own");
 }
 
 #[test]

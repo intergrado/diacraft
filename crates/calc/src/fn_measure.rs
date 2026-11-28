@@ -37,13 +37,20 @@
 //! it turned. Two files of the sample files saved this for empty text: a block sized by the measure of the text's height across and of its
 //! width down was one line wide and nothing tall, where a measure of the turned layout gave the other way round.
 //!
+//! **The language of a run** is the one it is drawn in, so that a text box sized by its measure is as wide as the text it shows (`Case` turns `i` into the capital of
+//! the run's language, and a face has forms of its own for a language). The cell is found and read by `diacraft_doc::lang::saved_value` and what the layout is handed is
+//! `lang::shaping_tag`, the two functions the renderer takes the language of a run from (design 5.1 of the language-proofing design): a run with no `LangID` anywhere is in
+//! the drawing's language (`lang::document_language`), an empty value, `x-none`, `zxx`, `none` and 0 are no language, and a number or a text that is no tag is the
+//! drawing's. The saved text of the cell is read and no formula is worked out, as the renderer reads it.
+//!
 //! **Cost.** The text is charged by its bytes before any of it is read (`UNITS_PER_STEP`), and each cell of each format row is a step. What the
-//! formats copy is memory held until the measure is done: a face name, a language, a bullet font and a bullet string are cut at
-//! [`MAX_NAME_BYTES`] before they are copied, and the formats, the stops and the tab table are held at their size.
+//! formats copy is memory held until the measure is done: a face name, a bullet font and a bullet string are cut at [`MAX_NAME_BYTES`] before they are copied (a
+//! language is a tag of at most 255 bytes, whatever the cell holds), and the formats, the stops and the tab table are held at their size.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
+use diacraft_doc::lang::{self, Tag};
 use diacraft_doc::{CellAddr, CellName, Owner, RowKey, SectionKey, ShapeRef, SheetRef, Text, TextPart};
 use diacraft_fonts::{FontDb, FontStyle, MatchKind, standin};
 use diacraft_text::{BlockFormat, CharFormat, Laid, Note, ParaFormat, Run, TabStop, lay_out, limits};
@@ -133,7 +140,7 @@ const MAX_FORMAT_ROWS: usize = 65_536;
 /// The most tab stops read from a `Tabs` row.
 const MAX_TAB_STOPS: usize = 64;
 
-/// The most bytes of a face name, a language or a bullet string a format keeps (`diacraft_fonts::standin::key` reads no more of a name than a
+/// The most bytes of a face name or a bullet string a format keeps (`diacraft_fonts::standin::key` reads no more of a name than a
 /// real one holds, and a bullet is a glyph or two): a cell may hold a megabyte, and a text names up to [`MAX_FORMAT_ROWS`] rows.
 const MAX_NAME_BYTES: usize = 256;
 
@@ -254,6 +261,27 @@ impl Evaluator<'_, '_> {
         Ok(if name == "0" { String::new() } else { name })
     }
 
+    /// The drawing's language, which a run with no `LangID` anywhere is in: found the first time a run needs it, once for the evaluator.
+    fn document_language(&self) -> &Tag {
+        self.document_language.get_or_init(|| lang::document_language(self.doc, None))
+    }
+
+    /// The language the run of `Character` row `ix` is measured in, as the text the layout reads (empty for no language): the language it is drawn in, found by
+    /// the two functions the renderer reads it by. The text of a cell is charged by its length before it is read, as a cell's `V` is, and what the format keeps is
+    /// the tag of that language, at most [`lang::MAX_TAG_BYTES`] bytes, whatever the cell holds.
+    fn run_language(&mut self, sheet: &SheetRef, ix: u32) -> Result<String, Value> {
+        if !self.steps(1) {
+            return Err(Value::Error(LOOP_ERROR));
+        }
+        let saved = lang::saved_value(&self.res, sheet, &row_cell("Character", ix, "LangID"));
+        if let Some(text) = saved
+            && !self.work(text.len())
+        {
+            return Err(Value::Error(LOOP_ERROR));
+        }
+        Ok(lang::shaping_tag(saved, self.document_language()))
+    }
+
     fn char_format(&mut self, sheet: &SheetRef, ix: u32) -> Result<CharFormat, Value> {
         let cell = |name: &str| row_cell("Character", ix, name);
         let mut font = self.face_name(sheet, &cell("Font"))?;
@@ -283,7 +311,7 @@ impl Evaluator<'_, '_> {
             overline: self.format_flag(sheet, &cell("Overline"))?,
             strikethrough: self.format_flag(sheet, &cell("Strikethru"))?,
             double_strikethrough: self.format_flag(sheet, &cell("DoubleStrikethrough"))?,
-            lang: Some(self.format_text(sheet, &cell("LangID"))?).filter(|t| !t.is_empty()).unwrap_or(d.lang),
+            lang: self.run_language(sheet, ix)?,
             ..d
         })
     }

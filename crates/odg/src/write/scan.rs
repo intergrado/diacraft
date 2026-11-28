@@ -542,6 +542,12 @@ pub(crate) enum Kid {
     /// The outermost `text:list` of a shape's text: a paragraph in a list of any depth is inside it, and the place outside it is where a paragraph that is not
     /// the list's goes.
     List { lead: usize, end: usize },
+    /// `svg:title` or `svg:desc`, a direct child of the shape: `desc` says which, `lead` is where its unit starts (the white space before it) and `end` where the
+    /// element ends, and `content` is what is between its tags. `plain` is whether the reader reads it as a row: character data and some of it, and no attribute but a declaration.
+    Alt { desc: bool, plain: bool, lead: usize, end: usize, content: (usize, usize) },
+    /// `draw:glue-point`, a direct child of the shape (CPDOUBLE.ODG): a glue point the file declares as an element. `open` is its start tag, `lead` where its unit starts (the white space
+    /// before it) and `end` where the element ends.
+    Glue { open: (usize, usize), lead: usize, end: usize, scope: u32 },
 }
 
 /// An `href` attribute: which page and shape element it is in (the nearest that is numbered; 0 for none), what element holds it, and its
@@ -1034,7 +1040,7 @@ impl Scanner<'_> {
             (_, Role::PageLayerSet, Ns::Draw, "layer") => Role::PageLayer,
             (PartKind::Styles, Role::Root, Ns::Office, "styles") => Role::Common,
             // A line end's marker, and the gradients and hatches of `office:styles`: each is held by its name, to be told from the ones DiaCraft writes and to be taken out.
-            (PartKind::Styles, Role::Common, Ns::Draw, "marker" | "gradient" | "hatch") => Role::Marker,
+            (PartKind::Styles, Role::Common, Ns::Draw, "marker" | "gradient" | "hatch" | "stroke-dash") => Role::Marker,
             (PartKind::Styles, Role::Common, Ns::Style, "style") => Role::CommonStyle,
             (_, Role::Root, Ns::Office, "font-face-decls") if self.ask.styles => Role::FontFaces,
             (_, Role::FontFaces, Ns::Style, "font-face") => Role::Face,
@@ -1251,8 +1257,8 @@ impl Scanner<'_> {
     /// Notes the markers of DiaCraft's own name that the tag being scanned names, by `draw:marker-start` or `draw:marker-end`. The values are
     /// matched as the reader reads a name, references resolved; at most 45 times 100 are kept.
     fn note_marker_refs(&mut self) {
-        // The line ends, and the gradient and the hatch a fill names: each of DiaCraft's own name is a definition a style may be the last to name.
-        for local in ["marker-start", "marker-end", "fill-gradient-name", "fill-hatch-name"] {
+        // The line ends, the gradient and the hatch a fill names, and the dash a line names: each of DiaCraft's own name is a definition a style may be the last to name.
+        for local in ["marker-start", "marker-end", "fill-gradient-name", "fill-hatch-name", "stroke-dash"] {
             let Some((_, value)) = self.attr(Ns::Draw, local) else { continue };
             if let Some(key) = super::markers::Def::of_name(&value) {
                 self.scan.marker_refs.insert(key);
@@ -1397,6 +1403,12 @@ impl Scanner<'_> {
         {
             *children = children.saturating_add(1);
         }
+        // An element inside a title or a description: the reader does not read it as a row.
+        if let Some(at) = self.stack.last().and_then(|f| f.kid)
+            && let Some(Kid::Alt { plain, .. }) = self.scan.kids.get_mut(at)
+        {
+            *plain = false;
+        }
         let kid = match (ns, local) {
             (Ns::Draw, "enhanced-geometry") => {
                 let scope = self.take_scope()?;
@@ -1407,6 +1419,20 @@ impl Scanner<'_> {
                 let lead = self.lead_of(tag);
                 let item = self.stack.last().and_then(|f| f.kid).filter(|at| matches!(self.scan.kids.get(*at), Some(Kid::Item { .. })));
                 Kid::Para { open: (tag.start, tag.end), empty: false, close_start: tag.end, end: tag.end, scope, lead, item, list: frame.list }
+            }
+            (Ns::Svg, "title" | "desc") => {
+                if !self.stack.last().is_some_and(|f| matches!(f.role, Role::Shape(_))) {
+                    return Ok(());
+                }
+                let declared_only = self.spans.iter().all(|a| self.bytes.get(a.name.0..a.name.1).is_some_and(|name| name.starts_with(b"xmlns")));
+                Kid::Alt { desc: local == "desc", plain: declared_only, lead: self.lead_of(tag), end: tag.end, content: (tag.end, tag.end) }
+            }
+            (Ns::Draw, "glue-point") => {
+                if !self.stack.last().is_some_and(|f| matches!(f.role, Role::Shape(_))) {
+                    return Ok(());
+                }
+                let scope = self.take_scope()?;
+                Kid::Glue { open: (tag.start, tag.end), lead: self.lead_of(tag), end: tag.end, scope }
             }
             (Ns::Text, "soft-page-break") => {
                 if !self.stack.last().is_some_and(|f| matches!(f.role, Role::Shape(_)) || f.text_box) {
@@ -1599,7 +1625,13 @@ impl Scanner<'_> {
         match frame.kid.and_then(|at| self.scan.kids.get_mut(at)) {
             Some(Kid::Geometry { empty: e, end: en, .. }) => (*e, *en) = (empty, end),
             Some(Kid::Para { empty: e, close_start: cs, end: en, .. }) => (*e, *cs, *en) = (empty, close_start, end),
-            Some(Kid::Item { end: en, .. } | Kid::List { end: en, .. } | Kid::Break { end: en, .. }) => *en = end,
+            Some(Kid::Item { end: en, .. } | Kid::List { end: en, .. } | Kid::Break { end: en, .. } | Kid::Glue { end: en, .. }) => *en = end,
+            Some(Kid::Alt { plain, end: en, content, .. }) => {
+                *en = end;
+                content.1 = close_start;
+                // An element written empty has no text, and is no row.
+                *plain &= !empty;
+            }
             None => {}
         }
     }

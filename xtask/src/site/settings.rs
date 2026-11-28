@@ -5,12 +5,14 @@ use std::path::Path;
 
 /// The downloads a page can link, as `data-download` names them: a system, a CPU and a kind of file. Each has a setting of its own in `site.json`, the name of its file in the
 /// release (`.github/workflows/release.yml` makes them, and `cargo xtask site --release` refuses a draft that leaves one without a name).
-pub(super) const DOWNLOADS: [&str; 14] = [
+pub(super) const DOWNLOADS: [&str; 16] = [
     "linux-x86_64-appimage",
     "linux-x86_64-deb",
+    "linux-x86_64-rpm",
     "linux-x86_64-targz",
     "linux-arm64-appimage",
     "linux-arm64-deb",
+    "linux-arm64-rpm",
     "linux-arm64-targz",
     "windows-x86_64-msi",
     "windows-x86_64-zip",
@@ -246,8 +248,11 @@ fn render_page(mut source: String, settings: &Settings, name: &str, url: &str) -
                     "download links must be marked `data-repo=\"{DOWNLOAD_SUFFIX}\"` and name one of the downloads (found {download:?} and {suffix:?})"
                 ));
             };
-            // The link is the file of the release the pages are made for; the percent signs and the letters of the address need no escape in the attribute.
-            href = direct_address(settings, asset);
+            // The link is the file of the release the pages are made for; the percent signs and the letters of the address need no escape in the attribute. A file that
+            // came with a later release than the pages' own (the `.rpm`, with 0.2.4) is no file of this one: the link is the page of the release, as a draft's is, and `data-asset`
+            // names the file for `download.js`, which links it once a release that has it is out.
+            href =
+                if xtask::version::release_has(&settings.version, download) { direct_address(settings, asset) } else { direct_address(settings, "") };
             let asset = asset.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;");
             set_value(&mut extra, r#" data-asset=""#, &asset)?;
         }
@@ -493,6 +498,45 @@ mod tests {
         }
     }
 
+    /// A download that came with a later release (`xtask::version::DOWNLOAD_SINCE`: the `.rpm`, with 0.2.4) is the file of the release only in the pages made for that release or a later one:
+    /// a page made for an older release links the page of that release, as a draft does, so that no link names a file the release never had. `data-asset` keeps the name, which
+    /// `download.js` looks for in a newer release.
+    #[test]
+    fn a_page_made_for_a_release_before_a_download_links_the_page_of_the_release_and_not_a_file_it_never_had() {
+        let site = Site::new("since");
+        let page = r#"<!DOCTYPE html>
+<html lang="en"><head>
+<title>Drawing</title><meta name="description" content="A drawing." />
+<link rel="canonical" href="old" /><meta property="og:url" content="old" />
+<meta property="og:title" content="Drawing" /><meta property="og:description" content="A drawing." />
+<meta property="og:image" content="old" />
+</head><body>
+<a data-repo="/releases/download" href="old" data-download="linux-x86_64-deb" data-asset="">deb</a>
+<a data-repo="/releases/download" href="old" data-download="linux-x86_64-rpm" data-asset="">rpm</a>
+<a data-repo="/releases/download" href="old" data-download="linux-arm64-rpm" data-asset="">rpm</a>
+</body></html>"#;
+        for (version, has_rpm) in [("0.2.3", false), ("0.2.4-rc.1", true), ("0.2.4", true)] {
+            fs::write(site.0.join("index.html"), page).unwrap();
+            let settings = Settings { version: version.into(), ..configured() };
+            apply(&site.0, &settings, true).unwrap();
+            let home = fs::read_to_string(site.0.join("index.html")).unwrap();
+            // Every other download is the file of the release, whatever the version.
+            let deb = format!(
+                r#"href="https://github.com/owner/drawing/releases/download/v{version}/linux-x86_64-deb-v{version}.bin" data-download="linux-x86_64-deb""#
+            );
+            assert!(home.contains(&deb), "{version}: {home}");
+            for id in ["linux-x86_64-rpm", "linux-arm64-rpm"] {
+                let href = if has_rpm {
+                    format!("https://github.com/owner/drawing/releases/download/v{version}/{id}-v{version}.bin")
+                } else {
+                    format!("https://github.com/owner/drawing/releases/tag/v{version}")
+                };
+                let wanted = format!(r#"href="{href}" data-download="{id}" data-asset="{id}-{{tag}}.bin""#);
+                assert!(home.contains(&wanted), "{version} {id}: {home}");
+            }
+        }
+    }
+
     #[test]
     fn config_accepts_draft_and_rejects_malformed_values() {
         let site = Site::new("config");
@@ -525,14 +569,14 @@ mod tests {
         };
         assert_eq!(
             DOWNLOADS.len(),
-            14,
-            "three systems: six Linux files, four Windows files, four macOS files (Apple silicon and Intel, no universal build)"
+            16,
+            "three systems: eight Linux files (the .rpm beside the .deb), four Windows files, four macOS files (Apple silicon and Intel, no universal build)"
         );
         let loaded = load_assets(&assets_json(|id| format!("x-{id}.{{tag}}"))).unwrap();
         for id in DOWNLOADS {
             assert_eq!(loaded.asset(id), Some(format!("x-{id}.{{tag}}").as_str()), "{id}");
         }
-        assert_eq!(loaded.asset("freebsd-x86_64-tgz"), None);
+        assert_eq!(loaded.asset("other-x86_64-tgz"), None);
         // A download that has no setting, one that is not a download, a setting that is not a name, and no `assets` at all.
         for missing in DOWNLOADS {
             let without: BTreeMap<&str, String> = DOWNLOADS.iter().filter(|id| **id != missing).map(|id| (*id, "a".to_owned())).collect();
@@ -540,8 +584,8 @@ mod tests {
             let error = load_assets(&format!(r#""assets":{{{}}}"#, entries.join(","))).unwrap_err();
             assert!(error.contains(missing), "{error}");
         }
-        let extra = assets_json(|_| "a".into()).replace(r#""assets":{"#, r#""assets":{"freebsd-x86_64-tgz":"a","#);
-        assert!(load_assets(&extra).unwrap_err().contains("freebsd-x86_64-tgz"));
+        let extra = assets_json(|_| "a".into()).replace(r#""assets":{"#, r#""assets":{"other-x86_64-tgz":"a","#);
+        assert!(load_assets(&extra).unwrap_err().contains("other-x86_64-tgz"));
         let bad = assets_json(|id| if id == "windows-arm64-msi" { "w/{tag}.msi".into() } else { "a".into() });
         assert!(load_assets(&bad).unwrap_err().contains("windows-arm64-msi"));
         let not_text = assets_json(|_| "a".into()).replace(r#""macos-arm64-dmg":"a""#, r#""macos-arm64-dmg":7"#);
@@ -572,7 +616,7 @@ mod tests {
     fn a_download_link_for_an_unknown_download_or_another_page_is_refused() {
         let site = Site::new("cards");
         for bad in [
-            r#"<a data-repo="/releases/download" href="old" data-download="freebsd-x86_64-tgz" data-asset="">x</a>"#,
+            r#"<a data-repo="/releases/download" href="old" data-download="other-x86_64-tgz" data-asset="">x</a>"#,
             r#"<a data-repo="/releases/download" href="old" data-download="linux" data-asset="">x</a>"#,
             r#"<a data-repo="/issues" href="old" data-download="linux-x86_64-appimage" data-asset="">x</a>"#,
             // The page of the latest release was the link before a change: a click on it opened a page and not a download.

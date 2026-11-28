@@ -24,6 +24,12 @@
 //!
 //! Another writer's solutions are never read or changed: the index gains a row and nothing else, and its rows keep their names, attributes and order
 //! (the index is written from its tree, which R9 allows).
+//!
+//! **The part is written with no XML declaration**, by every writer that makes or patches it (here, and `model.rs` for the model writer): the solution parts of the files the VSDX application
+//! writes have none, and it logs an invalid parameter for one that starts with a declaration. A part a build before 0.2.4 wrote, which has one, is
+//! written without it when a save writes the part again, and **by any save that writes the file again, though DiaCraft's data did not change** (`drop_old_declaration`: an edit of anything, or a
+//! Save As; a save with no edit leaves the part's bytes as they are); what else stands before the root, a byte order mark or a comment, stays. The reader takes the part with the declaration
+//! or without it. Another program's solution part is never written here.
 
 use std::sync::Arc;
 
@@ -34,7 +40,7 @@ use crate::carry::{BLOB_REL_TYPE, Built};
 use crate::report::Variant;
 
 use super::build::element;
-use super::parts::{Tree, VIS, folder_of, rel_type, relative_target};
+use super::parts::{Tree, VIS, declaration_span, folder_of, rel_type, relative_target, without_declaration};
 use super::{Plan, R, WriteError};
 use crate::limits::Limits;
 use crate::ns::{NS_REL, Scope, ScopeExt};
@@ -105,6 +111,33 @@ impl Plan<'_> {
                 Ok(())
             }
         }
+    }
+
+    /// **A save that writes the file again takes the XML declaration out of DiaCraft's part, though DiaCraft's data did not change.** A part a build before 0.2.4 wrote starts with one, which the
+    /// VSDX application logs as an invalid parameter before it drops the part; a file of those builds would keep losing its data to it when it is edited, as it would if only a change of the
+    /// data wrote the part again. The save is one that writes the file again when something was edited (the other steps of the plan say so in `edited`, this one runs after them) or when a
+    /// type is asked for (a Save As: `WriteOptions::variant`); **a save with no edit leaves the part's bytes as they are**. **The part is DiaCraft's by what it is**: the solution named `DiaCraft`
+    /// in the index, whose part is a `SolutionXML` named `DiaCraft` that reads as XML; what else it holds is not looked at. The declaration and the line end after it are cut from the file's own
+    /// bytes, and nothing else of the part changes (the part is not written from its tree). A part that is not that is left as it is, and so is another program's solution part, which is
+    /// never opened. Nothing here fails or warns: a part this does not take the declaration from is the file's, as before.
+    pub(super) fn drop_old_declaration(&mut self) -> R<()> {
+        if self.new_file || !(self.edited || self.opts.variant.is_some()) {
+            return Ok(());
+        }
+        let Held::Part { part, .. } = self.held_diacraft() else { return Ok(()) };
+        let Some(bytes) = self.bytes_of(&part) else { return Ok(()) };
+        // The cheap look first: a part with no declaration (every part these builds write) is neither parsed nor copied.
+        if declaration_span(bytes).is_none() || bytes.len() as u64 > Limits::default().max_solution_part_bytes {
+            return Ok(());
+        }
+        let Ok(tree) = Tree::parse(&part, bytes) else { return Ok(()) };
+        if !Scope::empty().enter(&tree.root).is(&tree.root, "SolutionXML") || tree.root.attr("Name") != Some("DiaCraft") {
+            return Ok(());
+        }
+        drop(tree);
+        let out = without_declaration(bytes);
+        self.set_part(&part, out, None);
+        Ok(())
     }
 
     /// Says in a warning that the model's DiaCraft data was not written, and why.
@@ -310,6 +343,9 @@ impl Plan<'_> {
         if !wanted && holds_nothing(&tree.root) {
             return self.remove_diacraft(index, rel_id, part);
         }
+        // The part is written with no XML declaration, as the solution parts of the files the VSDX application writes are; one the file had with a declaration (a build before 0.2.4 wrote it so)
+        // loses it here, since the part is written again.
+        tree.drop_declaration();
         let out = tree.bytes(part)?;
         if out.len() as u64 > limit {
             return Err(WriteError::Limit("the DiaCraft data would make a part larger than DiaCraft reads"));
@@ -360,7 +396,7 @@ impl Plan<'_> {
         let (data, _) = crate::carry::data_element(self.doc.diacraft.as_deref(), &built)?;
         let Some(data) = data else { return Ok(()) };
         let part_root = element("SolutionXML", vec![("Name".to_owned(), "DiaCraft".to_owned())], vec![Node::El(data)]);
-        let part_bytes = Tree::new(part_root).bytes("the DiaCraft part")?;
+        let part_bytes = Tree::bare(part_root).bytes("the DiaCraft part")?;
         if part_bytes.len() as u64 > Limits::default().max_solution_part_bytes {
             return Err(WriteError::Limit("the DiaCraft data would make a part larger than DiaCraft reads"));
         }

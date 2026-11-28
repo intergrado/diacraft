@@ -17,17 +17,26 @@ Install
   DiaCraft.app to your Applications folder. To use the command line from any terminal, copy diacraft-cli to
   /usr/local/bin (sudo cp diacraft-cli /usr/local/bin/).
 
+Uninstall
+  Drag DiaCraft.app from Applications to the Bin. If you copied diacraft-cli to /usr/local/bin, remove it
+  (sudo rm /usr/local/bin/diacraft-cli). DiaCraft's settings and logs stay behind in
+  ~/Library/Application Support/diacraft: delete that folder to remove them too.
+
 Opening an app that is not signed
   This download is not signed or notarised by Apple yet, so macOS asks you to confirm the first time you open it.
   Either of these works. Do it once for the app, and once more for diacraft-cli if you use it.
 
-  1. Open DiaCraft.app. macOS says it cannot verify it. Choose Done (or OK), then open System Settings, Privacy &
-     Security, scroll down to the line about DiaCraft and choose "Open Anyway", then confirm with your password.
+  1. Open DiaCraft.app. macOS says it cannot verify it. Choose Done. Then open System Settings, Privacy & Security,
+     scroll down to the line about DiaCraft and choose "Open Anyway". In the box that follows, choose "Open Anyway"
+     again, then confirm with an administrator's Touch ID or password.
      On macOS 14 and older, instead Control-click DiaCraft.app, choose Open, then choose Open in the box.
 
   2. In Terminal, remove the quarantine mark that your browser put on the download:
        xattr -dr com.apple.quarantine /Applications/DiaCraft.app
        xattr -d com.apple.quarantine /usr/local/bin/diacraft-cli
+     If Terminal says "Operation not permitted" for the app in Applications, it lacks the App Management permission:
+     run the command on DiaCraft.app before you move it to Applications, or give Terminal App Management in System
+     Settings, Privacy & Security.
 
   To check the file you downloaded is the one that was released, compare it with SHA256SUMS.txt on the release page:
        shasum -a 256 diacraft-@NAME@-macos-@ARCH@.dmg     (or the .zip)
@@ -41,6 +50,10 @@ Which download is for your Mac
 
 The command line
   diacraft-cli --help lists what it does. diacraft-cli --version prints the version.
+  diacraft-cli writes the completion script of your shell (zsh is the Mac's own; bash, fish, powershell and elvish too) to standard output:
+    diacraft-cli completions zsh > ~/.zfunc/_diacraft-cli      (put ~/.zfunc on your fpath, before compinit, in ~/.zshrc)
+  Add --program diacraft for the completions of the app's own options. Manual pages: diacraft-cli man | man -l -
 
-If the window does not open, attach the log file to a bug report:
+If the window does not open, DiaCraft says why in a message box ("DiaCraft could not start") with the place of the log, when it was started from the Finder or the Dock (and in the
+terminal, when it was started from one). Updating macOS is the first thing to try. Attach the log file to a bug report:
   ~/Library/Application Support/diacraft/logs/diacraft.log

@@ -24,12 +24,9 @@
 //! **Hostile input.** A section of more rows than [`MAX_ROWS`] is refused before any row is read, and the text a call reads is charged to a budget of [`MAX_READ_BYTES`], each text cut at
 //! [`MAX_TEXT_CHARS`] characters when it is read.
 
-use std::sync::Arc;
+use diacraft_doc::{CellAddr, CellEdit, Document, Owner, Resolver, Row, RowKey, SectionKey, ShapeList, ShapeRef, SheetRef, Value};
 
-use diacraft_doc::{
-    CellAddr, CellEdit, CellName, Document, Owner, Resolved, Resolver, Row, RowKey, SectionKey, ShapeList, ShapeRef, SheetRef, Value,
-};
-
+use super::worked::{RowView, Worked};
 use super::{Problem, require_shape, shape_mut, write_cells};
 
 /// The most links one shape lists or is given, and the most rows of the section that are read.
@@ -91,11 +88,12 @@ fn too_many(n: usize) -> Problem {
     Problem::failed(format!("the shape's Hyperlink section has {n} rows, and at most {MAX_ROWS} are read"))
 }
 
-fn text_of(cells: &[(CellName, Resolved<'_>)], name: &str, spent: &mut usize) -> Result<String, Problem> {
-    let Some(value) = cells.iter().find(|(n, _)| n.as_str() == name).and_then(|(_, r)| r.value.cell?.value.as_ref()) else {
+/// The text of cell `name` of a link's row, as the picture reads it: a cell that holds a formula and no saved value is what the formula works out to.
+fn text_of(row: &RowView<'_, '_>, name: &str, spent: &mut usize) -> Result<String, Problem> {
+    let Some(text) = row.text(name) else {
         return Ok(String::new());
     };
-    let text = value.text();
+    let text = text.as_str();
     // The length is charged before a byte is copied; a text past the cap is cut where a character ends.
     let take = text.char_indices().nth(MAX_TEXT_CHARS).map_or(text.len(), |(at, _)| at);
     *spent = spent.saturating_add(take);
@@ -105,12 +103,8 @@ fn text_of(cells: &[(CellName, Resolved<'_>)], name: &str, spent: &mut usize) ->
     Ok(text.get(..take).unwrap_or_default().to_owned())
 }
 
-fn flag_of(cells: &[(CellName, Resolved<'_>)], name: &str) -> bool {
-    cells
-        .iter()
-        .find(|(n, _)| n.as_str() == name)
-        .and_then(|(_, r)| r.value.cell?.value.as_ref()?.number())
-        .is_some_and(|n| n.is_finite() && n != 0.0)
+fn flag_of(row: &RowView<'_, '_>, name: &str) -> bool {
+    row.number(name).is_some_and(|n| n.is_finite() && n != 0.0)
 }
 
 /// The links of shape `id` on a page, in row order (the shape's own rows, and those it takes from its master). Refused, in words, past [`MAX_ROWS`] rows or [`MAX_READ_BYTES`] of text.
@@ -128,22 +122,26 @@ fn read_links_at(doc: &Document, at: &ShapeRef) -> Result<Vec<Link>, Problem> {
     };
     let mut spent = 0usize;
     let mut out = Vec::with_capacity(rows.len().min(MAX_LINKS));
-    for row in &rows {
-        let RowKey::Name(name) = &row.key else { continue };
+    // One reader for the shape's rows: the cells that hold a formula and no saved value are worked out once each.
+    let worked = Worked::new(doc);
+    let sheet = SheetRef::Shape(at.clone());
+    let section = key();
+    for effective in &rows {
+        let RowKey::Name(name) = &effective.key else { continue };
         if out.len() >= MAX_LINKS {
             return Err(Problem::failed(format!("the shape has more than {MAX_LINKS} hyperlinks, and at most {MAX_LINKS} are read")));
         }
-        let cells = &row.cells;
+        let row = worked.row(&sheet, &section, effective);
         out.push(Link {
             name: name.to_string(),
-            description: text_of(cells, "Description", &mut spent)?,
-            address: text_of(cells, "Address", &mut spent)?,
-            sub_address: text_of(cells, "SubAddress", &mut spent)?,
-            extra_info: text_of(cells, "ExtraInfo", &mut spent)?,
-            frame: text_of(cells, "Frame", &mut spent)?,
-            new_window: flag_of(cells, "NewWindow"),
-            default: flag_of(cells, "Default"),
-            invisible: flag_of(cells, "Invisible"),
+            description: text_of(&row, "Description", &mut spent)?,
+            address: text_of(&row, "Address", &mut spent)?,
+            sub_address: text_of(&row, "SubAddress", &mut spent)?,
+            extra_info: text_of(&row, "ExtraInfo", &mut spent)?,
+            frame: text_of(&row, "Frame", &mut spent)?,
+            new_window: flag_of(&row, "NewWindow"),
+            default: flag_of(&row, "Default"),
+            invisible: flag_of(&row, "Invisible"),
         });
     }
     Ok(out)
@@ -291,14 +289,15 @@ pub fn set_links(doc: &mut Document, page: u32, id: u32, specs: &[LinkSpec]) -> 
     if !gone.is_empty() {
         let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
         if shape.sheet.section(&key()).is_some() {
-            let sheet = Arc::make_mut(&mut shape.sheet);
-            let section = sheet.section_mut(&key()).map_err(|e| Problem::failed(e.to_string()))?;
-            section.rows.retain(|row| !row.name.as_deref().is_some_and(|n| gone.iter().any(|g| g.as_str() == n)));
+            let mut counted = shape.counted_sheet();
+            let section = counted.section_mut(&key()).map_err(|e| Problem::failed(e.to_string()))?;
+            section.retain_rows(|row| !row.name.as_deref().is_some_and(|n| gone.iter().any(|g| g.as_str() == n)));
         }
         let still: Vec<String> = read_links_at(doc, &at)?.into_iter().map(|l| l.name).collect();
         for name in gone.iter().filter(|g| still.contains(g)) {
             let shape = shape_mut(doc, page, &at.path).ok_or_else(|| Problem::failed("the shape went away"))?;
-            let row: &mut Row = Arc::make_mut(&mut shape.sheet).row_mut(&key(), &RowKey::name(name)).map_err(|e| Problem::failed(e.to_string()))?;
+            let mut counted = shape.counted_sheet();
+            let row: &mut Row = counted.row_mut(&key(), &RowKey::name(name)).map_err(|e| Problem::failed(e.to_string()))?;
             row.del = true;
         }
     }
@@ -308,7 +307,7 @@ pub fn set_links(doc: &mut Document, page: u32, id: u32, specs: &[LinkSpec]) -> 
     if let Some(shape) = shape_mut(doc, page, &at.path)
         && shape.sheet.section(&key()).is_some_and(|s| s.rows.is_empty() && s.cells.is_empty())
     {
-        Arc::make_mut(&mut shape.sheet).sections.retain(|s| s.name.as_str() != "Hyperlink");
+        shape.counted_sheet().retain_sections(|s| s.name.as_str() != "Hyperlink");
     }
     super::settle::settle_cells(doc, page, cells)?;
     Ok(SetOutcome { changed: true })

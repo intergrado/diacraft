@@ -21,6 +21,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use diacraft_color::Rgba;
+use diacraft_doc::lang;
 use diacraft_doc::{CellAddr, RowKey, SectionKey, SheetRef, Text, TextPart};
 use diacraft_fonts::Face;
 use diacraft_text::{BlockFormat, CharFormat, GlyphRun, Laid, Note, ParaFormat, Run, TabStop, lay_out};
@@ -146,8 +147,15 @@ fn char_format(cx: &Cx<'_, '_>, at: &SheetRef, ix: u32, layer: Option<&LayerColo
         overline: cx.flag_at(at, &cell("Overline"), false),
         strikethrough: cx.flag_at(at, &cell("Strikethru"), false),
         double_strikethrough: cx.flag_at(at, &cell("DoubleStrikethrough"), false),
-        lang: cx.text_at(at, &cell("LangID")).map(|t| t.to_string()).filter(|t| !t.is_empty()).unwrap_or(defaults.lang),
+        lang: run_language(cx, at, &cell("LangID")),
     }
+}
+
+/// The language a run is drawn in: what its `LangID` means in this drawing (`lang::effective`, design 5.1), as the tag the shaper and `Case` read, and empty for no
+/// language. A run with no cell anywhere on its chain is in the document's language, and a value that says none (`x-none`, `zxx`, empty, 0) is in none. The text measure
+/// (`diacraft_calc`, `TEXTWIDTH` and `TEXTHEIGHT`) reads a run's language by the same two functions, so that a text measured is the text drawn.
+fn run_language(cx: &Cx<'_, '_>, at: &SheetRef, addr: &CellAddr) -> String {
+    lang::shaping_tag(lang::saved_value(&cx.res, at, addr), cx.document_language())
 }
 
 fn para_format(cx: &Cx<'_, '_>, at: &SheetRef, ix: u32, tabs: Vec<TabStop>) -> ParaFormat {
@@ -378,6 +386,9 @@ impl<T: Target> Frame<'_, '_, '_, T> {
                 Note::MissingGlyphs { clusters } => {
                     self.cx.note_n(SkipKind::MissingGlyphs, *clusters, || format!("{}: letters no face draws", who()))
                 }
+                // A face the file names that the machine lacks: the faces are named in the list the window shows (`SkipKind::FaceStandIn`).
+                Note::StandIn { requested, used } => self.cx.note_face(requested, used),
+                Note::StandInsOmitted { .. } => self.cx.note_faces_unnamed(),
                 other => self.cx.note(SkipKind::TextNote, || format!("{}: {other:?}", who())),
             }
         }

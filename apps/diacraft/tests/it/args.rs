@@ -140,9 +140,37 @@ fn version_and_help_win_over_a_file() {
     assert!(matches!(run(&["a.vsdx", "b.vsdx", "--help"], None), Ok(Action::Help)));
 }
 
+/// After `--` every word is a file, `--help`, `-h` and `--version` included: `diacraft -- --help` opens a drawing named `--help`.
+#[test]
+fn after_two_dashes_help_and_version_are_the_names_of_files() {
+    for name in ["--help", "--version", "-h"] {
+        assert_eq!(file(&["--", name]), Some(name.to_owned()), "`{name}` after the two dashes is a file");
+        assert_eq!(file(&["--control", "7997", "--", name]), Some(name.to_owned()), "`{name}` after a port and the two dashes is a file");
+    }
+    // Before the two dashes they still win, over a help or a version after them as over everything else.
+    assert!(matches!(run(&["--help", "--", "--version"], None), Ok(Action::Help)));
+    assert!(matches!(run(&["--version", "--", "--help"], None), Ok(Action::Version)));
+    assert!(matches!(run(&["--bogus", "-h", "--", "a.vsdx"], None), Ok(Action::Help)));
+    // Two such words after the two dashes are two files, and no help.
+    let error = run(&["--", "--help", "--version"], None).unwrap_err();
+    assert!(error.contains("only one file") && error.contains("--version"), "{error}");
+}
+
 #[test]
 fn the_usage_text_names_every_option_and_the_variables() {
-    for needle in ["FILE", "--control", "--version", "--help", "DIACRAFT_CONTROL_PORT", "DIACRAFT_NO_PREFS", "DIACRAFT_NO_SPLASH", "7997"] {
+    for needle in [
+        "FILE",
+        "--control",
+        "--version",
+        "--help",
+        "DIACRAFT_CONTROL_PORT",
+        "DIACRAFT_NO_PREFS",
+        "DIACRAFT_CONFIG_DIR",
+        "DIACRAFT_NO_SPLASH",
+        "DIACRAFT_NO_ERROR_BOX",
+        "WGPU_BACKEND",
+        "7997",
+    ] {
         assert!(USAGE.contains(needle), "{needle} missing from the usage text");
     }
 }
@@ -158,4 +186,136 @@ fn the_splash_shows_unless_no_splash_is_set() {
     assert!(!splash_enabled_with(&env(&[("DIACRAFT_NO_SPLASH", "1")])));
     assert!(!splash_enabled_with(&env(&[("DIACRAFT_NO_SPLASH", "")])), "set at all, whatever it holds");
     assert!(splash_enabled_with(&env(&[("DIACRAFT_NO_PREFS", "1"), ("DIACRAFT_CONTROL_PORT", "7997")])), "no other variable turns it off");
+}
+
+// ---- the automation roots (gaps A2 and A5) ------------------------------------------------------------------------------------------------------
+
+use diacraft_desktop::args::{Environment, parse_with};
+
+fn roots(args: &[&str], environment: Environment) -> Result<(Vec<String>, Vec<String>), String> {
+    match parse_with(args.iter().map(|a| (*a).to_owned()), environment)? {
+        Action::Run(Options { roots, .. }) => {
+            let words = |list: &[std::path::PathBuf]| list.iter().map(|p| p.to_str().unwrap().to_owned()).collect::<Vec<_>>();
+            Ok((words(roots.read()), words(roots.write())))
+        }
+        other => panic!("expected to run, got {other:?}"),
+    }
+}
+
+fn variables(read: Option<&str>, write: Option<&str>) -> Environment {
+    Environment { control_port: None, read_roots: read.map(OsString::from), write_roots: write.map(OsString::from) }
+}
+
+#[test]
+fn the_root_flags_name_folders_in_either_spelling_and_may_be_repeated() {
+    let (read, write) = roots(
+        &[
+            "--control",
+            "7997",
+            "--automation-read-root",
+            "/a",
+            "--automation-read-root=/b",
+            "--automation-write-root",
+            "/w",
+            "--automation-write-root=/x",
+        ],
+        Environment::default(),
+    )
+    .unwrap();
+    assert_eq!((read, write), (vec!["/a".to_owned(), "/b".to_owned()], vec!["/w".to_owned(), "/x".to_owned()]));
+    // With no flag there is no root, and so nothing is kept to a folder: what the program did before.
+    assert_eq!(roots(&["--control", "7997"], Environment::default()).unwrap(), (vec![], vec![]));
+}
+
+/// The roots keep the control channel to folders, so a program started with no control channel and with a root flag would be one that was asked for something it does
+/// not do: nothing is ignored.
+#[test]
+fn a_root_flag_with_no_control_channel_is_an_error() {
+    let error = roots(&["--automation-read-root", "/a"], Environment::default()).unwrap_err();
+    assert!(error.contains("--automation-read-root") && error.contains("--control"), "{error}");
+    let error = roots(&["--automation-write-root=/w"], Environment::default()).unwrap_err();
+    assert!(error.contains("--automation-write-root") && error.contains("--control"), "{error}");
+    // A port from the environment is a control channel too.
+    assert!(roots(&["--automation-read-root", "/a"], Environment { control_port: Some("7001".into()), ..Environment::default() }).is_ok());
+}
+
+#[test]
+fn a_root_flag_needs_a_folder() {
+    for args in [&["--control", "7997", "--automation-read-root"][..], &["--control", "7997", "--automation-write-root="][..]] {
+        let error = roots(args, Environment::default()).unwrap_err();
+        assert!(error.contains("needs a folder"), "{args:?}: {error}");
+    }
+}
+
+#[test]
+fn the_environment_names_roots_when_the_flags_do_not() {
+    let list = |names: &[&str]| std::env::join_paths(names).unwrap().into_string().unwrap();
+    let (read_env, write_env) = (list(&["/e1", "/e2"]), list(&["/w1"]));
+    let (read, write) = roots(&["--control", "7997"], variables(Some(&read_env), Some(&write_env))).unwrap();
+    assert_eq!((read, write), (vec!["/e1".to_owned(), "/e2".to_owned()], vec!["/w1".to_owned()]));
+    // A flag of a kind wins over the environment for that kind, and the other kind keeps the environment's.
+    let (read, write) = roots(&["--control", "7997", "--automation-read-root", "/f"], variables(Some(&read_env), Some(&write_env))).unwrap();
+    assert_eq!((read, write), (vec!["/f".to_owned()], vec!["/w1".to_owned()]));
+    // The environment on its own, with no control channel, asks nothing of the program: a person who sets it for every start is not stopped for the starts that have none.
+    assert!(roots(&[], variables(Some(&read_env), None)).is_ok());
+}
+
+#[test]
+fn a_file_named_like_a_root_flag_after_two_dashes_is_a_file() {
+    assert_eq!(file(&["--", "--automation-read-root"]), Some("--automation-read-root".to_owned()));
+}
+
+#[test]
+fn the_help_says_what_the_roots_are_and_how_to_give_them() {
+    for word in ["--automation-read-root", "--automation-write-root", "DIACRAFT_AUTOMATION_READ_ROOT", "DIACRAFT_AUTOMATION_WRITE_ROOT", "folder"] {
+        assert!(USAGE.contains(word), "the help does not say {word}");
+    }
+}
+
+#[test]
+fn version_and_help_come_before_a_bad_root_flag() {
+    assert!(matches!(parse_with(["--automation-read-root".to_owned(), "--version".to_owned()], Environment::default()), Ok(Action::Version)));
+    assert!(matches!(parse_with(["--automation-write-root".to_owned(), "-h".to_owned()], Environment::default()), Ok(Action::Help)));
+}
+
+// ---- --reset-graphics ----
+
+fn resets(args: &[&str]) -> Result<bool, String> {
+    match run(args, None)? {
+        Action::Run(Options { reset_graphics, .. }) => Ok(reset_graphics),
+        other => panic!("expected to run, got {other:?}"),
+    }
+}
+
+#[test]
+fn reset_graphics_is_an_option_of_the_start_and_opens_the_window_as_usual() {
+    assert_eq!(resets(&[]), Ok(false), "the adapters left out stay left out unless it is asked for");
+    assert_eq!(resets(&["--reset-graphics"]), Ok(true));
+    assert_eq!(resets(&["--reset-graphics", "--reset-graphics"]), Ok(true), "said twice is said once");
+    // It leaves the file and the control channel as they were.
+    match run(&["--reset-graphics", "--control", "7997", "drawing.vsdx"], None).unwrap() {
+        Action::Run(Options { reset_graphics, control_port, path, .. }) => {
+            assert!(reset_graphics);
+            assert_eq!(control_port, Some(7997));
+            assert_eq!(path.as_deref(), Some("drawing.vsdx"));
+        }
+        other => panic!("{other:?}"),
+    }
+    // After the two dashes it is a file's name.
+    match run(&["--", "--reset-graphics"], None).unwrap() {
+        Action::Run(Options { reset_graphics, path, .. }) => assert_eq!((reset_graphics, path.as_deref()), (false, Some("--reset-graphics"))),
+        other => panic!("{other:?}"),
+    }
+    // Only the whole word is the option.
+    assert!(run(&["--reset-graphic"], None).unwrap_err().contains("unknown argument"));
+}
+
+#[test]
+fn the_usage_text_documents_reset_graphics_and_the_probe_fault_diagnostic() {
+    for needle in ["--reset-graphics", "DIACRAFT_GPU_PROBE_FAIL", ":abort", ":hang", "DirectX 12 before Vulkan"] {
+        assert!(USAGE.contains(needle), "{needle} missing from the usage text");
+    }
+    let seconds = diacraft_desktop::graphics::PROBE_GIVE_UP.as_secs();
+    assert!(USAGE.contains(&format!("gives up after {seconds} s")), "the usage text names the time the start waits for a test ({seconds} s)");
+    assert_eq!(seconds, 12);
 }

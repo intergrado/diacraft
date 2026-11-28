@@ -460,8 +460,8 @@ impl DiacraftApp {
     /// **The document's Glue settings decide, as they do for the engine's `snap`**: with the Glue switch off nothing is glued (the
     /// end is free, and is snapped as a free end is); a connection point is taken only with glue to connection points on (`glue_connection_points`, flag
     /// 8 of `GlueSettings`, the option `snap` glues a free end to a point by); and **the whole of a shape only with the same option on**, since the engine
-    /// puts an end glued to the whole of a shape at that shape's connection point nearest the other end, and `connector.add` refuses a shape
-    /// that has none (ours: no specification says which option governs glue to the whole of a shape).
+    /// puts an end glued to the whole of a shape at that shape's connection point nearest the other end, and glues a shape that has none as a whole,
+    /// at its box (ours, no specification says which option governs glue to the whole of a shape).
     pub(super) fn target_at(&self, cx: &Cx, p: P) -> Target {
         if !self.snap_settings_now().is_some_and(|s| s.glue && s.glue_connection_points) {
             return Target::Free(p);
@@ -491,7 +491,7 @@ impl DiacraftApp {
         if let Some((_, target)) = best {
             return target;
         }
-        let under = scene.items.iter().rev().filter(takes).find(|i| i.hit(p, cx.reach(HIT_REACH)));
+        let under = scene.hit_where(p, cx.reach(HIT_REACH), |i| takes(&i));
         under.map_or(Target::Free(p), |item| Target::Shape(item.id))
     }
 
@@ -1346,6 +1346,9 @@ mod tests {
             parent: None,
             degrees: 0.0,
             outline: vec![vec![(0.0, 0.0), (4.0, 0.0)]],
+            painted: vec![true],
+            hidden: false,
+            text_blocks: Vec::new(),
             ends: Some(((0.0, 0.0), (4.0, 0.0))),
             glue: [None, None],
             bounds: ((0.0, 0.0), (4.0, 0.0)),

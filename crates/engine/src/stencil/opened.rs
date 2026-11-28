@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 
 use super::bring::{Identity, guid_key};
 use super::icon::{self, IconInfo, IconProblem};
+use crate::draw::worked::Worked;
 use crate::memory::Hold;
 use crate::text::shown;
 
@@ -162,6 +163,8 @@ impl OpenedStencil {
     pub fn new(id: String, name: String, canonical: Option<PathBuf>, file_bytes: u64, cost: ModelCost, doc: Document) -> OpenedStencil {
         let (entries, by_id, ignored) = {
             let res = Resolver::new(&doc);
+            // A master's size and kind are read as the picture reads them: a cell that holds a formula and no saved value is what the formula works out to.
+            let worked = Worked::new(&doc);
             let mut entries = Vec::with_capacity(doc.masters.len().min(4_096));
             let mut by_id: HashMap<u32, usize> = HashMap::new();
             let mut ignored = 0_usize;
@@ -174,7 +177,7 @@ impl OpenedStencil {
                     continue;
                 }
                 by_id.insert(master.id, entries.len());
-                entries.push(entry_of(&res, position, master, &mut icon_text_left, &mut sized_left));
+                entries.push(entry_of(&res, &worked, position, master, &mut icon_text_left, &mut sized_left));
             }
             (entries, by_id, ignored)
         };
@@ -320,7 +323,14 @@ pub enum IconError {
 }
 
 /// A master's entry: read from the master shape's cells by inheritance (a size may come from a style).
-fn entry_of(res: &Resolver<'_>, position: usize, master: &Master, icon_text_left: &mut usize, sized_left: &mut usize) -> MasterEntry {
+fn entry_of(
+    res: &Resolver<'_>,
+    worked: &Worked<'_>,
+    position: usize,
+    master: &Master,
+    icon_text_left: &mut usize,
+    sized_left: &mut usize,
+) -> MasterEntry {
     // The shapes a master holds at its top level that are not deleted (`Del`): the count the resolver gives a master, and what an instance
     // of it is made of. Positions of the first few are kept, for the size.
     let top_shapes = master.shapes.iter().filter(|s| !s.del).count();
@@ -332,9 +342,7 @@ fn entry_of(res: &Resolver<'_>, position: usize, master: &Master, icon_text_left
         *sized_left -= live.len();
     }
     let live = if sized { live } else { Vec::new() };
-    let number = |sheet: &SheetRef, name: &str| -> Option<f64> {
-        res.resolve(sheet, &CellAddr::direct(name)).and_then(|f| f.value.cell?.value.as_ref()?.number()).filter(|n| n.is_finite())
-    };
+    let number = |sheet: &SheetRef, name: &str| -> Option<f64> { worked.number_named(sheet, name).filter(|n| n.is_finite()) };
     let is_set = |sheet: &SheetRef, name: &str| {
         res.resolve(sheet, &CellAddr::direct(name)).is_some_and(|f| f.formula.cell.is_some() || f.value.cell.is_some())
     };
@@ -349,7 +357,7 @@ fn entry_of(res: &Resolver<'_>, position: usize, master: &Master, icon_text_left
         let typed = CellAddr::in_row("User", None, diacraft_doc::RowKey::name("msvStructureType"), "Value");
         part = res
             .resolve(&sheet, &typed)
-            .and_then(|f| f.value.cell?.value.as_ref().map(|v| matches!(v.text().trim(), "Container" | "List")))
+            .and_then(|f| worked.text_of(&sheet, &typed, &f).map(|text| matches!(text.trim(), "Container" | "List")))
             .unwrap_or(false);
     } else if top_shapes > 1 && !live.is_empty() {
         // The box that holds the shapes, from their pins and sizes (turns are not followed: this is for a tile's proportions). Only the first

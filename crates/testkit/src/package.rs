@@ -337,6 +337,12 @@ impl Pkg {
         self
     }
 
+    /// The package without the relationships of type `ty` from `source`: a part a file lists in its content types and no relationship names.
+    pub fn without_rels_of_type(mut self, source: &str, ty: &str) -> Pkg {
+        self.rels.retain(|r| !(r.source == source && r.ty == ty));
+        self
+    }
+
     /// An external relationship (a URL), which is kept and never followed.
     pub fn rel_external(mut self, source: &str, id: &str, ty: &str, url: &str) -> Pkg {
         self.rels.push(RelSpec { source: source.to_owned(), id: id.to_owned(), ty: ty.to_owned(), target: url.to_owned(), external: true });

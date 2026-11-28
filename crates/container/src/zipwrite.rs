@@ -65,6 +65,7 @@ use flate2::Compression;
 use flate2::write::DeflateEncoder;
 
 use crate::ContainerError;
+use crate::limits::MAX_RATIO;
 use crate::par::{self, Failed, Lane};
 use crate::work::Work;
 use crate::zipdir::{self, FLAG_UTF8_NAME, ROW_OFFSET_FIELD};
@@ -256,25 +257,28 @@ impl ArchiveWriter {
     }
 
     /// Writes the file `name` with `data` deflated at `level` (0 to 9), **at that level whatever the size of the entry**, and as deflate even where that
-    /// is no smaller (a package of the same model gives the same bytes, the design's 1.6). [`ArchiveWriter::add`] deflates an entry over
-    /// 4 MiB at the fast level, which makes the bytes depend on a size; this does not. A level past 9 is refused as `unsupported_compression`, and
-    /// nothing is written then, nor for a name this writer would refuse.
+    /// is no smaller (a package of the same model gives the same bytes, the design's 1.6), **but stored where the level would make the entry a thousand times smaller and
+    /// more** ([`readable_ratio`]: this crate's reader refuses such an entry, so the package would be one it cannot read back; the same data gives the same bytes still).
+    /// [`ArchiveWriter::add`] deflates an entry over 4 MiB at the fast level, which makes the bytes depend on a size; this does not. A level past 9 is refused as
+    /// `unsupported_compression`, and nothing is written then, nor for a name this writer would refuse.
     pub fn add_at_level(&mut self, name: &str, data: &[u8], level: u32) -> Result<(), ContainerError> {
         level_is_deflate(name, level)?;
         self.check(name, data.len(), false)?;
-        let body = Body::Deflated(deflate_at(data, Compression::new(level), usize::try_from(u32::MAX).unwrap_or(usize::MAX))?);
+        let bytes = deflate_at(data, Compression::new(level), usize::try_from(u32::MAX).unwrap_or(usize::MAX))?;
+        let body = if readable_ratio(data.len(), bytes.len()) { Body::Deflated(bytes) } else { Body::Stored(data) };
         self.put(name, crc32fast::hash(data), data.len(), &body, false)
     }
 
-    /// Writes the file `name` with `data` deflated, or stored when deflate does not make it smaller (an empty entry is stored). Gives the
-    /// method written.
+    /// Writes the file `name` with `data` deflated, or stored when deflate does not make it smaller (an empty entry is stored) **or would make it a thousand times smaller and more**
+    /// ([`readable_ratio`]: this crate's reader refuses an entry that inflates to more than [`MAX_RATIO`] times its size, so the package would be one the writer's caller cannot read
+    /// back). Gives the method written.
     pub fn add_smallest(&mut self, name: &str, data: &[u8]) -> Result<Method, ContainerError> {
         self.check(name, data.len(), false)?;
         let body = if data.is_empty() {
             Body::Stored(data)
         } else {
             let bytes = deflate(data)?;
-            if bytes.len() < data.len() { Body::Deflated(bytes) } else { Body::Stored(data) }
+            if bytes.len() < data.len() && readable_ratio(data.len(), bytes.len()) { Body::Deflated(bytes) } else { Body::Stored(data) }
         };
         self.put(name, crc32fast::hash(data), data.len(), &body, false)?;
         Ok(body.method())
@@ -830,9 +834,9 @@ pub enum Pack {
     Stored,
     /// Deflated, even where that is larger, at the default level and the fast one past 4 MiB, as [`ArchiveWriter::add`] with [`Method::Deflated`].
     Deflated,
-    /// Deflated, or stored when deflate does not make it smaller, as [`ArchiveWriter::add_smallest`].
+    /// Deflated, or stored when deflate does not make it smaller or would pass the ratio the reader reads, as [`ArchiveWriter::add_smallest`].
     Smallest,
-    /// Deflated at this level (0 to 9) whatever the size, as [`ArchiveWriter::add_at_level`].
+    /// Deflated at this level (0 to 9) whatever the size, as [`ArchiveWriter::add_at_level`] (stored where the level would pass the ratio the reader reads).
     Level(u32),
     /// A hook of the unit tests: an entry whose compression panics.
     #[cfg(test)]
@@ -937,14 +941,24 @@ pub fn pack(name: &str, data: &[u8], how: Pack) -> Result<Packed, ContainerError
         Pack::Smallest if data.is_empty() => PackedBody::Stored,
         Pack::Smallest => {
             let bytes = deflate(data)?;
-            if bytes.len() < data.len() { PackedBody::Deflated(bytes) } else { PackedBody::Stored }
+            if bytes.len() < data.len() && readable_ratio(data.len(), bytes.len()) { PackedBody::Deflated(bytes) } else { PackedBody::Stored }
         }
-        Pack::Level(level) => PackedBody::Deflated(deflate_at(data, Compression::new(level), whole)?),
+        Pack::Level(level) => {
+            let bytes = deflate_at(data, Compression::new(level), whole)?;
+            if readable_ratio(data.len(), bytes.len()) { PackedBody::Deflated(bytes) } else { PackedBody::Stored }
+        }
         #[cfg(test)]
         #[allow(clippy::panic)] // the hook of a unit test of a worker that panics
         Pack::Panics => panic!("an entry of a test that panics"),
     };
     Ok(Packed { body, crc: crc32fast::hash(data), size: data.len() })
+}
+
+/// Whether an entry of `size` bytes that deflates to `compressed` is one this crate's reader reads: its size is at most [`MAX_RATIO`] times what it is compressed to (the reader's own
+/// rule, which refuses `size > MAX_RATIO * compressed` as `zip_ratio_exceeded`, before a byte is inflated). Deflate cannot go past a ratio of about 1,032, so only an entry of one
+/// pattern repeated a megabyte over is not.
+pub(crate) fn readable_ratio(size: usize, compressed: usize) -> bool {
+    u128::try_from(size).is_ok_and(|size| size <= u128::from(MAX_RATIO).saturating_mul(u128::try_from(compressed).unwrap_or(u128::MAX)))
 }
 
 /// APPNOTE 4.4.3.2: 2.0 for deflate and for a folder, 1.0 for a stored file.
@@ -1080,6 +1094,21 @@ mod tests {
                 (state >> 33) as u8
             })
             .collect()
+    }
+
+    /// The reader's rule at its edge: an entry of `MAX_RATIO` times what it is compressed to is read, one byte more is not (and nothing overflows).
+    #[test]
+    fn the_ratio_the_reader_reads_is_the_one_the_writer_keeps_to_at_its_edge() {
+        let ratio = usize::try_from(MAX_RATIO).unwrap_or(usize::MAX);
+        for compressed in [1usize, 2, 17, 1_000, 65_536] {
+            assert!(readable_ratio(ratio * compressed, compressed), "exactly {MAX_RATIO} times {compressed}");
+            assert!(!readable_ratio(ratio * compressed + 1, compressed), "one byte more than {MAX_RATIO} times {compressed}");
+            assert!(readable_ratio(compressed, compressed), "stored: a ratio of one");
+        }
+        assert!(readable_ratio(0, 0), "nothing from nothing");
+        assert!(!readable_ratio(1, 0), "something from nothing is no ratio");
+        assert!(readable_ratio(usize::MAX, usize::MAX));
+        assert!(!readable_ratio(usize::MAX, 1));
     }
 
     #[test]

@@ -27,6 +27,7 @@
 
 use std::path::{Path, PathBuf};
 
+use diacraft_engine::file_access::ScopeHandle;
 use egui::{Context, CornerRadius, Frame, Id, Margin, Rect, Stroke, vec2};
 
 use crate::app::DiacraftApp;
@@ -100,6 +101,8 @@ impl DiacraftApp {
             || self.ui.shape_data.define.is_some()
             || self.ui.shape_data.ask.is_some()
             || self.ui.zoom_dialog.is_some()
+            || self.ui.offset_dialog.is_some()
+            || self.ui.fit_dialog.is_some()
             || self.ui.colors_dialog.is_some()
             || self.ui.relayout.dialog.is_some()
             || self.ui.relayout.spacing.is_some()
@@ -108,6 +111,7 @@ impl DiacraftApp {
             || self.ui.insert.links.is_some()
             || self.ui.insert.field.is_some()
             || self.ui.insert.symbol.is_some()
+            || self.sheet_card_open()
             || self.ui.licenses.is_some()
             || self.ui.splash.is_some()
     }
@@ -175,6 +179,23 @@ impl DiacraftApp {
 
     /// The cards over the drawing: at most one, the question that came last first.
     pub(crate) fn questions(&mut self, ctx: &Context, t: Tokens) {
+        // The card is answered under the roots it was raised under, whoever answers it, and never under fewer than the frame that answers it is under. Each card has its own
+        // (the one shown is the one that came last, in the order below).
+        let scope = if self.name_card_open() {
+            ScopeHandle::default()
+        } else if self.saving.macros.is_some() {
+            self.saving.macros_scope.clone()
+        } else if self.saving.changed.is_some() {
+            self.saving.changed_scope.clone()
+        } else if self.saving.replacing.is_some() {
+            self.saving.replacing_scope.clone()
+        } else {
+            self.saving.asking_scope.clone()
+        };
+        scope.run_beneath(|| self.questions_in_scope(ctx, t));
+    }
+
+    fn questions_in_scope(&mut self, ctx: &Context, t: Tokens) {
         if self.name_card_open() {
             self.name_card(ctx, t);
         } else if self.saving.macros.is_some() {

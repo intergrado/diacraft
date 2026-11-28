@@ -94,21 +94,21 @@
           <figure class="console">
             <figcaption class="console-bar">Terminal</figcaption>
             <pre class="term"><code><i>$ </i><b>diacraft-cli</b> export review.diacraft <span class="nowrap">--out</span> review.png <span class="nowrap">--dpi</span> 144
-<span class="out">{"bytes":63748,<wbr />"format":"png",<wbr />"height":1224,<wbr />"out":"review.png",<wbr />"page":{"id":1,<wbr />"name":"Page-1"},<wbr />"skipped":[],<wbr />"width":1584}</span>
+<span class="out">{"bytes":63738,<wbr />"format":"png",<wbr />"height":1224,<wbr />"out":"review.png",<wbr />"page":{"id":1,<wbr />"name":"Page-1"},<wbr />"skipped":[],<wbr />"width":1584}</span>
 <i>$ </i><b>diacraft-cli</b> export review.diacraft <span class="nowrap">--out</span> review.svg <span class="nowrap">--page</span> 1
-<span class="out">{"bytes":16595,<wbr />"format":"svg",<wbr />"height":816,<wbr />"out":"review.svg",<wbr />"page":{"id":1,<wbr />"name":"Page-1"},<wbr />"skipped":[],<wbr />"width":1056}</span></code></pre>
+<span class="out">{"bytes":17035,<wbr />"format":"svg",<wbr />"height":816,<wbr />"out":"review.svg",<wbr />"page":{"id":1,<wbr />"name":"Page-1"},<wbr />"skipped":[],<wbr />"width":1056}</span></code></pre>
           </figure>
-          <p>Page numbers start at 1, and the first page is the default. Use <code>--dpi</code> to control the size of a PNG. Choose an output name ending in <code>.svg</code> or <code>.pdf</code> for vector output.</p>
+          <p>Page numbers start at 1, and the first page that is not a background page is the default. Use <code>--dpi</code> to control the size of a PNG. Choose an output name ending in <code>.svg</code> or <code>.pdf</code> for vector output.</p>
         </section>
         <section id="read-the-result">
           <h2>Read the result</h2>
-          <p>A successful command prints a JSON object. For a conversion, check <code>warning_count</code> and <code>warnings</code>. For an export, <code>skipped</code> lists features that were omitted or approximated. This is what the two conversions above printed for the drawing on the home page.</p>
+          <p>A successful command prints a JSON object. For a conversion, check <code>warning_count</code> and <code>warnings</code>, each a class and what it means in words. For an export, <code>skipped</code> lists features that were omitted or approximated. This is what the two conversions above printed for the drawing on the home page.</p>
           <figure class="console">
             <figcaption class="console-bar">Terminal</figcaption>
             <pre class="term"><code><i>$ </i><b>diacraft-cli</b> convert review.vsdx <span class="nowrap">--out</span> review.diacraft
-<span class="out">{"bytes":21777,<wbr />"carried":{"classes":[],<wbr />"document_level":false,<wbr />"macros":false,<wbr />"objects":false,<wbr />"signatures_stale":0},<wbr />"checked":{"as_values":false,<wbr />"classes":[],<wbr />"done":true,<wbr />"reason":null},<wbr />"copied":0,<wbr />"format":"diacraft",<wbr />"in":"vsdx",<wbr />"macros_dropped":0,<wbr />"out":"review.diacraft",<wbr />"parts":null,<wbr />"variant":"diacraft",<wbr />"warning_count":0,<wbr />"warnings":[]}</span>
+<span class="out">{"bytes":21685,<wbr />"carried":{"classes":[],<wbr />"document_level":false,<wbr />"macros":false,<wbr />"objects":false,<wbr />"signatures_stale":0},<wbr />"checked":{"as_values":false,<wbr />"classes":[],<wbr />"done":true,<wbr />"reason":null},<wbr />"copied":0,<wbr />"format":"diacraft",<wbr />"in":"vsdx",<wbr />"macros_dropped":0,<wbr />"out":"review.diacraft",<wbr />"parts":null,<wbr />"variant":"diacraft",<wbr />"warning_count":0,<wbr />"warnings":[]}</span>
 <i>$ </i><b>diacraft-cli</b> convert review.diacraft <span class="nowrap">--out</span> handoff.odg
-<span class="out">{"bytes":13125,<wbr />"carried":{"classes":["window settings",<wbr />"unknown parts",<wbr />"page data",<wbr />"document data"],<wbr />"document_level":true,<wbr />"macros":false,<wbr />"objects":false,<wbr />"signatures_stale":0},<wbr />"checked":{"as_values":true,<wbr />"classes":[{"class":"fonts",<wbr />"count":1,<wbr />"words":"1 font is missing"},{"class":"line-ends",<wbr />"count":6,<wbr />"words":"6 line ends differ"},{"class":"style-content",<wbr />"count":21,<wbr />"words":"21 items differ"}],<wbr />"done":true,<wbr />"reason":null},<wbr />"copied":null,<wbr />"format":"odg",<wbr />"in":"diacraft",<wbr />"macros_dropped":0,<wbr />"out":"handoff.odg",<wbr />"parts":null,<wbr />"variant":"odg",<wbr />"warning_count":5,<wbr />"warnings":["other",<wbr />"other",<wbr />"other",<wbr />"other",<wbr />"other"]}</span></code></pre>
+<span class="out">{"bytes":13291,<wbr />"carried":{"classes":["window settings",<wbr />"unknown parts",<wbr />"page data",<wbr />"document data"],<wbr />"document_level":true,<wbr />"macros":false,<wbr />"objects":false,<wbr />"signatures_stale":0},<wbr />"checked":{"as_values":true,<wbr />"classes":[],<wbr />"done":true,<wbr />"reason":null},<wbr />"copied":null,<wbr />"format":"odg",<wbr />"in":"diacraft",<wbr />"macros_dropped":0,<wbr />"out":"handoff.odg",<wbr />"parts":null,<wbr />"variant":"odg",<wbr />"warning_count":2,<wbr />"warnings":[{"class":"text_format_not_written",<wbr />"words":"text formatting (the character and paragraph settings a style sheet gives the text) of 21 new shapes were not written to the file, which will be missing when it is opened again (the first is shape 1 on page 1): the .odg save has no attribute for it yet"},{"class":"style_links_not_written",<wbr />"words":"21 shapes of the drawing follow the style sheets of the drawing: the .odg holds their own values and not the links, so they follow no style sheet when the file is opened again (the drawing keeps them; save it as .diacraft to keep them in a file)"}]}</span></code></pre>
           </figure>
           <p>Exit status <code>1</code> means the operation failed. Status <code>2</code> means the command line needs correcting. Read standard error for the reason.</p>
           <div class="table-scroll" tabindex="0" role="group" aria-label="Exit statuses">
@@ -124,6 +124,16 @@
             </table>
           </div>
         </section>
+        <section id="completions">
+          <h2>Complete commands in your shell</h2>
+          <p>Press Tab to complete a command, an option, a value or a drawing’s name. The <code>.deb</code> and the <code>.rpm</code> install the completions of bash, zsh and fish and the manual pages for you. Elsewhere, have <code>diacraft-cli</code> write the script of your shell and load it, as here for bash.</p>
+          <figure class="console">
+            <figcaption class="console-bar">Terminal</figcaption>
+            <pre class="term"><code><i>$ </i><b>diacraft-cli</b> completions bash &gt; ~/.local/share/bash-completion/completions/diacraft-cli
+<i>$ </i><b>diacraft-cli</b> man diacraft-cli-export | man -l -</code></pre>
+          </figure>
+          <p>The shells are <code>bash</code>, <code>zsh</code>, <code>fish</code>, <code>powershell</code> and <code>elvish</code>, and <code>--program diacraft</code> writes the script of the app’s own options. At a terminal, <code>diacraft-cli --help</code> is in colour; add <code>--color never</code>, or set <code>NO_COLOR</code>, for plain text.</p>
+        </section>
       </article>
       <aside class="rail">
         <nav class="toc" aria-label="On this page">
@@ -132,6 +142,7 @@
             <li><a href="#editable-copy"><span>Make an editable copy</span></a></li>
             <li><a href="#export-a-page"><span>Export a page for sharing</span></a></li>
             <li><a href="#read-the-result"><span>Read the result</span></a></li>
+            <li><a href="#completions"><span>Complete commands in your shell</span></a></li>
           </ol>
         </nav>
       </aside>
@@ -166,7 +177,7 @@
         <div><p class="label">Guides</p><a href="/guides/">All guides</a><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
         <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
       </nav>
-      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.</p>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. draw.io is a registered trademark of draw.io Ltd. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group, the Object Management Group or draw.io Ltd.</p>
     </div>
   </footer>
 </body>

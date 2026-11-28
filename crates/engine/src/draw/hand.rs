@@ -27,7 +27,7 @@ use super::read::{Pose, Reader};
 use super::route::{self, P};
 use super::rows;
 use super::scan;
-use super::settle::settle_forced;
+use super::settle::{self, settle_forced};
 use super::style::{PathStyle, path_style};
 use super::{Problem, checked, jumps, label, write_cells};
 use crate::snap::Axis;
@@ -54,7 +54,7 @@ pub(crate) fn base_route(reader: &Reader<'_>, sheet: &SheetRef, pose: &Pose) -> 
     if rows.len() > MAX_ROWS {
         return None;
     }
-    route_of_rows(&rows, pose)
+    route_of_rows(reader, sheet, &rows, pose)
 }
 
 /// [`base_route`] of a connector whose route has at most `max_rows` rows (and [`MAX_ROWS`] at the most), counted over the connector and its master before any is
@@ -64,21 +64,23 @@ pub(crate) fn base_route_within(reader: &Reader<'_>, sheet: &SheetRef, pose: &Po
     match reader.resolver().effective_rows_within(sheet, &diacraft_doc::SectionKey::new("Geometry", Some(0)), max_rows.min(MAX_ROWS)) {
         None => Ok(None),
         Some(Err(rows)) => Err(rows),
-        Some(Ok(rows)) => Ok(route_of_rows(&rows, pose)),
+        Some(Ok(rows)) => Ok(route_of_rows(reader, sheet, &rows, pose)),
     }
 }
 
-/// The points of a route's rows, as [`base_route`] gives them, from the first [`MAX_ROWS`] (its callers have refused more).
-pub(crate) fn route_of_rows(rows: &[diacraft_doc::EffectiveRow<'_>], pose: &Pose) -> Option<Vec<P>> {
+/// The points of a route's rows, as [`base_route`] gives them, from the first [`MAX_ROWS`] (its callers have refused more). A row's `X` and `Y` that hold a formula and no saved value are
+/// what the formula works out to, as the picture draws them: a route a file leaves the values out of is a route, and not a connector with no path to edit.
+pub(crate) fn route_of_rows<'a>(reader: &Reader<'a>, sheet: &SheetRef, rows: &[diacraft_doc::EffectiveRow<'a>], pose: &Pose) -> Option<Vec<P>> {
     let mut points: Vec<P> = Vec::with_capacity(rows.len().min(MAX_ROWS));
-    for (i, row) in rows.iter().take(MAX_ROWS).enumerate() {
+    let section = diacraft_doc::SectionKey::new("Geometry", Some(0));
+    for (i, effective) in rows.iter().take(MAX_ROWS).enumerate() {
+        let row = reader.worked().row(sheet, &section, effective);
         // A `MoveTo` after the first row is the gap of a line jump: a point on the leg, which the collinear points dropped below take away.
-        let kind = row.row_type.as_deref()?;
+        let kind = effective.row_type.as_deref()?;
         if !matches!(kind, "MoveTo" | "LineTo" | "ArcTo" | "PolylineTo") || (i == 0 && kind != "MoveTo") {
             return None;
         }
-        let cell = |name: &str| row.cells.iter().find(|(n, _)| n.as_str() == name).and_then(|(_, found)| found.value.cell?.value.as_ref()?.number());
-        points.push(pose.up((cell("X")?, cell("Y")?)));
+        points.push(pose.up((row.number("X")?, row.number("Y")?)));
     }
     let tidy = route::tidy_all(snapped(points));
     (tidy.len() >= 2 && tidy.iter().all(|p| p.0.is_finite() && p.1.is_finite())).then_some(tidy)
@@ -349,13 +351,26 @@ pub fn edit_leg(doc: &mut Document, page: u32, id: u32, leg: usize, to: f64) -> 
     let (path, inherited, ours) = (at.path.clone(), inherited_rows(&reader, &at), reader.is_routed(&sheet));
     let segs = rows::polyline(&local);
     let held = (reader.number(&sheet, "ConFixedCode") - HAND_EDITED).abs() < 0.5;
+    let routable = super::routable::lack_when_routed(&reader, &sheet);
     drop(reader);
     write_route(doc, page, &path, rows::rows(&segs, true), &inherited)?;
+    // The cells written besides the route, which what reads the route is worked out with below.
+    let mut written: Vec<(SheetRef, CellAddr)> = Vec::new();
     if !held {
         write_cells(doc, vec![(sheet.clone(), CellAddr::direct("ConFixedCode"), CellEdit::Value(Value::from_text(&number_text(HAND_EDITED))))])?;
+        written.push((sheet.clone(), CellAddr::direct("ConFixedCode")));
     }
-    label::place(doc, page, id, &Routed { points: moved, pose, ours }, ours)?;
+    // A connector of ours that lacks the cells that make it one the VSDX application routes is given them with its route; a cell a `GUARD` protects is kept.
+    if let Some(lack) = routable {
+        let writes = super::routable::writes(&sheet, lack);
+        written.extend(writes.iter().map(|(sheet, write)| (sheet.clone(), write.addr.clone())));
+        doc.write_batch(writes)?;
+    }
+    written.extend(label::place(doc, page, id, &Routed { points: moved, pose, ours }, ours)?);
     jumps::refresh(doc, &before, page, &[id], false)?;
+    // A path is written after the recalculation, which no command here makes, so what reads the route (a shape tied to it by `POINTALONGPATH`) or a cell written with it is worked
+    // out now, as it is for the routes an edit makes again (`settle`). Past its budget the edit stands and what reads the route holds what it held.
+    let _ = settle::recalculate_written(doc, page, std::slice::from_ref(&at), written);
     Ok(*doc != before)
 }
 

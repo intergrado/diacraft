@@ -45,7 +45,7 @@ js-sys = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 # The asset fetch is `Response` and its body, `ReadableStream`, read in pieces (the response comes from `Window::fetch_with_str` of the page's own folder). The file features are `Blob` and `File` (a chosen file, read in pieces and made into a download), `FileList`, `DataTransfer` and `DragEvent` (a file dropped on the page), `HtmlInputElement`
-# (the file chooser of a browser with no File System Access API), `HtmlAnchorElement` and `Url` (a download), and `Event` for the listeners. The keys are `KeyboardEvent`, and the browser's name in its user agent `Navigator`. The question before the page is left is `BeforeUnloadEvent`. No feature here sends anything anywhere.
+# (the file chooser of a browser with no File System Access API), `HtmlAnchorElement` and `Url` (a download), and `Event` for the listeners. The keys are `KeyboardEvent`, and the browser's name in its user agent `Navigator`. The question before the page is left is `BeforeUnloadEvent`. The person's settings are the page's `localStorage`: `Storage`. No feature here sends anything anywhere.
 web-sys = { workspace = true, features = [
     "BeforeUnloadEvent",
     "Blob",
@@ -66,9 +66,12 @@ web-sys = { workspace = true, features = [
     "Navigator",
     "ReadableStream",
     "Response",
+    "Storage",
     "Url",
     "Window",
 ] }
+# The browser's languages, for the first editing language of a profile (`sys-locale` is read by the engine on every target; its `js` feature is what makes it read the browser).
+sys-locale = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 egui = { workspace = true }

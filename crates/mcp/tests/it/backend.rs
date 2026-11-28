@@ -67,7 +67,7 @@ impl FakeApp {
             while !stop.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        // On macOS (and the BSDs) an accepted socket keeps the listener's non-blocking mode, where on Linux it does not: the reads
+                        // On macOS an accepted socket keeps the listener's non-blocking mode, where on Linux it does not: the reads
                         // below wait for the request, so the connection is put back to blocking.
                         stream.set_nonblocking(false).unwrap();
                         connections.fetch_add(1, Ordering::SeqCst);

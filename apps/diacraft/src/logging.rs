@@ -6,8 +6,8 @@
 //! `<config>` is the platform's settings folder (`$XDG_CONFIG_HOME` or `~/.config`; `~/Library/Application
 //! Support`; `%APPDATA%`). Each start moves the previous log to `diacraft.1.log` (and that one to `.2`), so the
 //! log of a run that crashed survives the next two starts, and the file stops growing at [`MAX_FILE_BYTES`].
-//! A run with `DIACRAFT_NO_PREFS` set keeps no file: it logs to standard error only, so a test run does not
-//! rotate away the logs of the person's own runs.
+//! A run with `DIACRAFT_NO_PREFS` set, or with an empty `DIACRAFT_CONFIG_DIR`, keeps no file: it logs to standard error only, so a test run does not
+//! rotate away the logs of the person's own runs. A `DIACRAFT_CONFIG_DIR` that names a folder moves the settings there, and the log goes to its `logs` folder.
 //!
 //! Levels: `info` for DiaCraft's own crates and `warn` for everything else (wgpu and naga are chatty).
 //! `RUST_LOG` replaces that with env_logger-style directives: `debug`, `warn,diacraft_engine=trace`. A
@@ -15,6 +15,10 @@
 //!
 //! Records logged before the log folder is known are kept (up to [`MAX_PENDING`]) and written once the file
 //! is attached. Writing never panics: a file that cannot be made or written leaves standard error the only sink.
+//!
+//! A record is handed to the system as it is logged, so a program that crashes leaves its log up to the last record. `log::logger().flush()` ([`AppLogger::flush`]) also has the system write
+//! the file to the disk, which is what a machine that goes down (a graphics driver's reset that ends in a blue screen) needs: the start calls it before it tests a graphics adapter
+//! So that the next report shows which one the start died on.
 
 use std::ffi::OsString;
 use std::fs::File;
@@ -218,6 +222,13 @@ impl Sink {
         self.capped = true;
     }
 
+    /// Has the system write what the file holds to the disk. A file that cannot be flushed is no reason to stop: the lines are in the system's hands already.
+    pub fn sync(&mut self) {
+        if let Some(file) = self.file.as_ref() {
+            let _ = file.sync_data();
+        }
+    }
+
     fn append(&mut self, line: &str) {
         if self.capped {
             return;
@@ -244,11 +255,18 @@ pub struct AppLogger {
     filter: Filter,
     stderr: bool,
     sink: Mutex<Sink>,
+    /// The log file this run made, for the message of a start that failed (`failure`).
+    file: Mutex<Option<PathBuf>>,
 }
 
 impl AppLogger {
     pub fn new(filter: Filter, stderr: bool) -> AppLogger {
-        AppLogger { filter, stderr, sink: Mutex::new(Sink::new(MAX_FILE_BYTES)) }
+        AppLogger { filter, stderr, sink: Mutex::new(Sink::new(MAX_FILE_BYTES)), file: Mutex::new(None) }
+    }
+
+    /// The log file [`AppLogger::attach_dir`] made; `None` before it, after an error, and when the run keeps no file.
+    pub fn file(&self) -> Option<PathBuf> {
+        self.file.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     /// Rotates the logs in `dir` and sends records to the fresh file; returns its path. On an error, standard
@@ -259,10 +277,12 @@ impl AppLogger {
         match rotate(dir) {
             Ok((path, file)) => {
                 sink.attach(file);
+                *self.file.lock().unwrap_or_else(PoisonError::into_inner) = Some(path.clone());
                 Ok(path)
             }
             Err(e) => {
                 sink.no_file();
+                *self.file.lock().unwrap_or_else(PoisonError::into_inner) = None;
                 Err(format!("{}: {e}", dir.display()))
             }
         }
@@ -271,6 +291,7 @@ impl AppLogger {
     /// No log file for this run: standard error only.
     pub fn no_file(&self) {
         self.sink.lock().unwrap_or_else(PoisonError::into_inner).no_file();
+        *self.file.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 }
 
@@ -294,13 +315,14 @@ impl log::Log for AppLogger {
         self.sink.lock().unwrap_or_else(PoisonError::into_inner).write(&line);
     }
 
-    fn flush(&self) {}
+    fn flush(&self) {
+        self.sink.lock().unwrap_or_else(PoisonError::into_inner).sync();
+    }
 }
 
 /// Installs the logger (filter from `RUST_LOG`, else [`DEFAULT_FILTER`]). `None` when another logger was
 /// installed first. Call [`AppLogger::attach_dir`] once the log folder is known.
 pub fn install() -> Option<&'static AppLogger> {
-    static LOGGER: OnceLock<AppLogger> = OnceLock::new();
     let spec = std::env::var("RUST_LOG").ok().filter(|s| !s.trim().is_empty());
     let filter = Filter::parse(spec.as_deref().unwrap_or(DEFAULT_FILTER));
     let max = filter.max();
@@ -310,9 +332,12 @@ pub fn install() -> Option<&'static AppLogger> {
     Some(logger)
 }
 
-/// Where the logs go on `os` (as `std::env::consts::OS` names it), given the environment: `<config>/diacraft/logs`.
-/// `None` without a home to put them in.
+/// Where the logs go on `os` (as `std::env::consts::OS` names it), given the environment: `<config>/diacraft/logs`, or `<dir>/logs` when `DIACRAFT_CONFIG_DIR` names the settings'
+/// folder (craft-settings' variable: the settings and the log are in one folder). `None` without a home to put them in.
 pub fn log_dir_with(os: &str, env: &dyn Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    if let Some(dir) = env("DIACRAFT_CONFIG_DIR").filter(|dir| !dir.is_empty()) {
+        return Some(PathBuf::from(dir).join("logs"));
+    }
     let config = match os {
         "macos" => env("HOME").map(|home| PathBuf::from(home).join("Library").join("Application Support")),
         "windows" => env("APPDATA").map(PathBuf::from),
@@ -325,15 +350,23 @@ pub fn log_dir_with(os: &str, env: &dyn Fn(&str) -> Option<OsString>) -> Option<
     config.map(|c| c.join("diacraft").join("logs"))
 }
 
+/// The installed logger ([`install`]); `None` before it.
+static LOGGER: OnceLock<AppLogger> = OnceLock::new();
+
+/// The log file this run's logger made, for the message of a start that failed (`failure`): `None` before the logger is installed and attached, and when the run keeps no file.
+pub fn log_file() -> Option<PathBuf> {
+    LOGGER.get()?.file()
+}
+
 /// Where this run's logs go.
 pub fn log_dir() -> Option<PathBuf> {
     log_dir_with(std::env::consts::OS, &|key| std::env::var_os(key))
 }
 
-/// Whether this run may read and write preferences and keep a log file: not when `DIACRAFT_NO_PREFS` is set,
-/// whatever it holds.
+/// Whether this run may read and write preferences and keep a log file: not when `DIACRAFT_NO_PREFS` is set, whatever it holds, and not when `DIACRAFT_CONFIG_DIR` is set and empty
+/// (craft-settings' way of saying the same: nothing is read or written).
 pub fn prefs_enabled_with(env: &dyn Fn(&str) -> Option<OsString>) -> bool {
-    env("DIACRAFT_NO_PREFS").is_none()
+    env("DIACRAFT_NO_PREFS").is_none() && env("DIACRAFT_CONFIG_DIR").is_none_or(|dir| !dir.is_empty())
 }
 
 /// [`prefs_enabled_with`] for this process's environment.

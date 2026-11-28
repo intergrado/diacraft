@@ -35,6 +35,7 @@
 //! background page, the members of a group (a group is one box), and layers' own snap settings (`docs/gaps.md`).
 
 mod adapter;
+pub mod dropped;
 #[cfg(test)]
 mod equal;
 mod geometry;
@@ -57,6 +58,7 @@ pub mod subject;
 
 use diacraft_doc::Document;
 
+pub use dropped::{DropMaster, DropPreview, drop_preview, dropped_points, dropped_points_of_file, size_on_paper};
 pub(crate) use geometry::{Budget, Purpose, outline_for};
 pub use geometry::{
     MAX_BOX_MEMBERS, MAX_BUILD_ELEMENTS, MAX_BUILD_POINTS, MAX_BUILD_WORK, MAX_CONSTRUCTOR_BYTES, OutlineWork, PAGE_BUILD_BYTES, PAGE_BUILD_ELEMENTS,
@@ -71,9 +73,8 @@ pub use settings::{
     Home, OPTIONS, OptionDef, STRENGTH_MAX, STRENGTHS, SnapSettings, Strength, StrengthDef, Word, WordChange, blank_drawing, strength_pixels,
 };
 pub use subject::{
-    BoxAt, EachBounds, MAX_OWN_SHAPES, MAX_SNAPPED_SHAPES, SubjectBounds, bounds_each, bounds_of, box_of, dropped_points, dropped_points_of_file,
-    frame_of_shapes, is_square, moved_edges, own_points, own_points_each, pin_of, resized_by, snap_resize, snap_resize_ext, snap_resize_set,
-    snaps_in_its_own_axes,
+    BoxAt, EachBounds, MAX_OWN_SHAPES, MAX_SNAPPED_SHAPES, SubjectBounds, bounds_each, bounds_of, box_of, frame_of_shapes, is_square, moved_edges,
+    own_points, own_points_each, pin_of, resized_by, snap_resize, snap_resize_ext, snap_resize_set, snaps_in_its_own_axes,
 };
 
 /// The most shapes near a subject that a snap looks into.

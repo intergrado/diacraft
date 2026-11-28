@@ -21,14 +21,22 @@
 //! * its formula names it: unqualified (`Width`, `Geometry1.X2`: a cell of the cell's own sheet), or qualified (`Sheet.12!PinX`, `ThePage!User.Row`),
 //!   found as the evaluator finds it ([`Evaluator::locate`]), so a name in a formula found on a master is read for the instance
 //!   A row is told by its key; where a section's rows may be keyed by name or by place the key is dropped, and a name
-//!   that reaches any row of that section reads every row of it: more cells are worked out than needed and none fewer;
+//!   that reaches any row of that section reads every row of it: more cells are worked out than needed and none fewer. **A reference that is the argument
+//!   of `GETREF` or `GETVAL` is not one of these** (it names a cell and is no link): a change to the
+//!   cell it names does not work the formula out again, so a person's write to the target of a `SETF` does not make the call write its own text over it
+//!   ([`crate::facts::Facts::links`] leaves it out, and [`crate::facts::Facts::named`], which orders the evaluation, keeps it);
 //! * its formula calls a function that carries a point or an angle from one frame to another (`PAR`, `LOC`, `LOCTOLOC`, `LOCTOPAR`,
 //!   `ANGLETOLOC`, `ANGLETOPAR`), which reads the pose cells (`PinX`, `PinY`, `LocPinX`, `LocPinY`, `Angle`, `FlipX`, `FlipY`) of its own shape and
 //!   its groups, and of every shape its references name and their groups. This is how a connector glued by `PAR(PNT(Sheet.4!Connections.X1, ...))`
 //!   follows the shape it is glued to;
 //! * a `Connect` row says its end is glued to a shape: the end's cells read the pose of that shape, whatever their formulas are;
+//! * a section was **written whole** ([`Changes::sections`]: a route replaces the rows of its connector's first `Geometry` section): every cell that reads any cell of it, by its
+//!   own name or through a function that reads the whole section, reads the change. A reference to a `Geometry` cell is listed under the section's own place as well as the cell's
+//!   (`written_whole`), so that the change finds it whichever cell it names, the ones the rows lost and the ones they gained included; no other section is listed twice;
 //! * it inherits a formula that reads the cell: an instance's `Inh` cell, or a cell it does not hold at all and gets from its master, with the
-//!   master's references read on the instance.
+//!   master's references read on the instance, and a cell a sheet holds as `Inh` whose formula the chain finds on a style, read on the sheet itself
+//!   ([`crate::pages::style_given`]: asked only of a sheet whose links name a style that holds a formula that reads beyond its sheet);
+//! * it names a sheet no page holds (`TheDoc!`, `Styles!`, `Masters[..]!`), found for any page through the listing of `pages.rs` when the cell it names is one a commit worked out.
 //!
 //! **What is always worked out.** A cell that reads what its text does not name: a reference with a call before it (`LISTSHEETREF()!Width`),
 //! or a function that reads the members of a list, a container or a callout, or a string as a formula ([`crate::facts::Facts::dynamic`]), is
@@ -56,6 +64,7 @@ use crate::changes::{Changes, SectionFormulas, each_cell, each_formula};
 use crate::eval::{Env, Evaluator};
 use crate::facts::{PATH_FUNCTIONS, TEXT_MEASURES, TextRead, reach};
 use crate::index::{Graph, ReaderIndex, walk_ord};
+use crate::pages::{CrossMap, Target};
 use crate::refs::address_of;
 use crate::rules::KEY_BYTES;
 
@@ -84,10 +93,29 @@ const POSE_GROUP: &str = "\u{0}pose";
 /// The name a wildcard is kept under in the place of a cell: "any cell of this section". No cell has it.
 const ANY_CELL: &str = "\u{0}any";
 
+/// The name a reader of one cell of a section is kept under besides the cell: "some cell of this section is read here". No cell has it.
+const SOME_CELL: &str = "\u{0}some";
+
 /// The place that stands for every cell of a section (`Geometry1.*`, `Char.*`): a function that reads a whole section is listed under it, and a
 /// change to any cell of the section finds it.
 fn any_of(section: &SectionKey) -> KeyCell {
     (Some(section.clone()), None, CellName::new(ANY_CELL))
+}
+
+/// The place a reader of one cell of a section is also listed under, for a change that is to the section as a whole ([`Changes::sections`]): "some cell of this section is read
+/// here". A change to the place finds it, and finds what [`any_of`] holds as well.
+fn some_of(section: &SectionKey) -> KeyCell {
+    (Some(section.clone()), None, CellName::new(SOME_CELL))
+}
+
+/// The place a reader of the cell `named` is listed under besides the cell, when the cell is one of a section whose rows a command writes whole: a `Geometry` section, which a route
+/// replaces (`Changes::sections`). Not every section: a reference to a cell of `Connections` or `User` is found by the cell, and listing each twice would double what a page of
+/// glued connectors holds (every glued end reads `Sheet.<id>!Connections.X1`).
+fn written_whole(named: &CellAddr) -> Option<KeyCell> {
+    match &named.section {
+        Some(section) if section.name.as_str() == "Geometry" => Some(some_of(section)),
+        _ => None,
+    }
 }
 
 /// A cell directly under a sheet, as a place.
@@ -206,15 +234,35 @@ impl Found {
     }
 }
 
+/// The page a sheet is on: a page's own sheet, or a shape of its part. `None` for the sheets no page holds (the document's, a style's, a master's and its shapes').
+pub(crate) fn page_of(sheet: &SheetRef) -> Option<u32> {
+    match sheet {
+        SheetRef::Page(id) => Some(*id),
+        SheetRef::Shape(at) => match at.owner {
+            Owner::Page(id) => Some(id),
+            Owner::Master(_) => None,
+        },
+        SheetRef::Document | SheetRef::Style(_) | SheetRef::Master(_) => None,
+    }
+}
+
 /// The cells to work out for an edit, found as they are worked out (of the M3 review). The edit's own cells ([`Changes`]) and the cells
 /// that are always worked out are there from the start; **the readers of a cell are noted when the cell changed**: for a cell the edit wrote, or
 /// that is new, at once; for any other, when working it out ([`crate::commit_changed`]) planned a write ([`Affected::changed`]). A reader that comes
 /// out as it was ends the chain, and so does a cell this evaluator cannot work out (a function it does not know): what reads those keeps the
 /// value the file saved, whatever this evaluator would give for it. A connector end glued by a function that `calc` cannot work out, and
 /// so left as it was, does not pass a move on to the width and the pin that read it, which would come out a rounding away from the file's own.
+///
+/// **Across pages** (F40): the cells that read a cell of another page through `Pages[..]` are readers of it as any are
+/// ([`Affected::readers_of`] asks `pages.rs` which sheets name the page and [`CrossMap`] says what they read of it), and a cell of another page that changed passes the change on through
+/// that page's own graph, kept in the index beside the page the commit is for. The chain goes on from page to page in the one commit, on the one evaluator.
 pub(crate) struct Affected<'i> {
-    /// The readers of other sheets, from the index: kept from the edits before, and put right for this one. `None` when the budget ran out in doing it.
-    graph: Option<&'i Graph>,
+    /// The graph of the commit's page and of the pages a change has reached, and the listing of the sheets that name a page.
+    index: &'i mut ReaderIndex,
+    /// The page the commit is for: its graph also answers the cells no page holds (a master's, a style's, the document's).
+    page: u32,
+    /// The pages whose graph is up to date for this commit.
+    ready: HashSet<u32>,
     /// What this commit finds as it goes and does not keep.
     scratch: Scratch,
     /// Every cell noted, once.
@@ -223,6 +271,10 @@ pub(crate) struct Affected<'i> {
     todo: VecDeque<Reader>,
     /// The cells whose readers have been noted.
     followed: HashSet<Key>,
+    /// The pages a change reached whose cells that read what their text does not name have been noted: a change to a page works them out, as it does for the commit's page.
+    dynamic_noted: HashSet<u32>,
+    /// Whether the cells of the sheets that read every page (a text worked out as a formula) have been noted: a change to a cell of any page works them out, once.
+    wild_noted: bool,
 }
 
 /// What a commit finds out as it goes and lets go of at its end.
@@ -234,6 +286,43 @@ struct Scratch {
     master_intra: HashMap<SheetRef, Intra>,
     /// The cells of the sections those sheets hold that hold a formula or inherit one, listed once for a section however many sheets share it.
     formulas: SectionFormulas,
+    /// What the sheets that name a page, the document's sheet, the styles or the masters read of it, for each a change has reached (`None`: no sheet names it).
+    cross: HashMap<Target, Option<Rc<CrossMap>>>,
+    /// The cells of the sheets that read every page, which read what their text does not name: found when first asked.
+    wild: Option<Rc<Vec<Reader>>>,
+}
+
+/// The readers of the cell `key` in a graph: through a qualified reference, a frame function or a `Connect` row, and the readers of the whole section it is in, and of the frame it is part of.
+fn across_in(graph: Option<&Graph>, key: &Key, out: &mut Vec<Reader>) {
+    let Some(graph) = graph else { return };
+    let (sheet, place) = key;
+    out.extend(graph.cross.get(key).into_iter().flatten().map(|e| e.reader.clone()));
+    // A function that reads a whole section is listed under the section's wildcard, and reads every cell of it.
+    if let Some(any) = place.0.as_ref().map(any_of) {
+        out.extend(graph.cross.get(&(sheet.clone(), any)).into_iter().flatten().map(|e| e.reader.clone()));
+    }
+    if is_pose_cell(place) {
+        let group = (sheet.clone(), (None, None, CellName::new(POSE_GROUP)));
+        out.extend(graph.cross.get(&group).into_iter().flatten().map(|e| e.reader.clone()));
+    }
+}
+
+/// [`across_in`] for what the sheets that name a page read of it.
+fn across_map(map: &CrossMap, key: &Key, out: &mut Vec<Reader>) {
+    let (sheet, place) = key;
+    out.extend(map.cross.get(key).into_iter().flatten().cloned());
+    if let Some(any) = place.0.as_ref().map(any_of) {
+        out.extend(map.cross.get(&(sheet.clone(), any)).into_iter().flatten().cloned());
+    }
+    if is_pose_cell(place) {
+        let group = (sheet.clone(), (None, None, CellName::new(POSE_GROUP)));
+        out.extend(map.cross.get(&group).into_iter().flatten().cloned());
+    }
+}
+
+/// Whether the place is one of the seven cells that set a shape's frame.
+fn is_pose_cell(place: &KeyCell) -> bool {
+    place.0.is_none() && place.1.is_none() && POSE.contains(&place.2.as_str())
 }
 
 impl<'i> Affected<'i> {
@@ -241,13 +330,35 @@ impl<'i> Affected<'i> {
     /// that was taken out, and the cells that are always worked out. The readers of other sheets are those `index` keeps, brought up to date with
     /// the page.
     pub(crate) fn new(ev: &mut Evaluator<'_, '_>, doc: &Document, page: u32, changes: &Changes, index: &'i mut ReaderIndex) -> Affected<'i> {
-        let graph = index.sync(ev, doc, page);
-        let mut work = Affected { graph, scratch: Scratch::default(), seen: HashSet::new(), todo: VecDeque::new(), followed: HashSet::new() };
+        let kept = index.sync(ev, doc, page).is_some();
+        index.sync_links(ev, doc);
+        let mut ready: HashSet<u32> = HashSet::new();
+        if kept {
+            ready.insert(page);
+        }
+        let mut work = Affected {
+            index,
+            page,
+            ready,
+            scratch: Scratch::default(),
+            seen: HashSet::new(),
+            todo: VecDeque::new(),
+            followed: HashSet::new(),
+            dynamic_noted: HashSet::new(),
+            wild_noted: false,
+        };
         // What the edit changed is changed whatever working it out gives: its readers are noted below.
         let mut changed: Vec<Key> = Vec::with_capacity(changes.cells.len());
         for (sheet, addr) in &changes.cells {
-            work.add(ev, (sheet.clone(), addr.clone()));
+            // A commit that is only for the readers of what was written (`Changes::only_if_read`) is told the cells hold their values: they are not worked out, and their readers are.
+            if !changes.only_if_read {
+                work.add(ev, (sheet.clone(), addr.clone()));
+            }
             changed.push(key_of(sheet, addr));
+        }
+        // The cells to work out that nothing says changed (the cells that name the pages an edit gave another reading): their readers follow only if they are written.
+        for (sheet, addr) in &changes.reread {
+            work.add(ev, (sheet.clone(), addr.clone()));
         }
         // A row or a section that appeared, went or took another type changed what a function that reads the whole section reads, though no cell
         // of it was written: it counts as a change to "any cell" of the section.
@@ -255,25 +366,54 @@ impl<'i> Affected<'i> {
             let any = CellAddr { section: Some(section.clone()), row: row.clone(), cell: CellName::new(ANY_CELL) };
             changed.push(key_of(sheet, &any));
         }
+        // A section written whole changed every cell it holds, and the rows it held and has not: what reads one cell of it is found under the section's own place
+        // (`written_whole`), and what reads the whole of it under `any_of`, which `readers_of` finds beside it.
+        for (sheet, section) in &changes.sections {
+            changed.push((sheet.clone(), some_of(section)));
+        }
         for sheet in &changes.fresh {
             work.add_fresh(ev, sheet, &mut changed);
         }
-        if let Some(graph) = work.graph {
-            // **A reference that finds no sheet is worked out when a shape it may have named was taken out**: a `Sheet.<id>` of the page found nothing before
-            // the edit unless the shape of that `ID` was one of those taken out, so one that names another `ID` is left with the value the file saved (writing its
-            // error would change a cell the edit did not reach). Any other spelling (a name, a qualifier of a part, one found on a master) is worked out as before.
-            if !changes.removed.is_empty() {
-                let removed: HashSet<u32> = changes.removed.iter().copied().collect();
-                graph.dangling.iter().filter(|e| e.named.is_none_or(|id| removed.contains(&id))).for_each(|e| work.add(ev, e.reader.clone()));
-            }
-            if !changes.cells.is_empty() || !changes.rows.is_empty() || !changes.fresh.is_empty() || !changes.removed.is_empty() {
-                graph.dynamic.iter().for_each(|e| work.add(ev, e.reader.clone()));
-            }
+        if kept {
+            work.add_always(ev, changes);
         }
         for key in changed {
             work.follow(ev, key);
         }
         work
+    }
+
+    /// The cells that are worked out after any edit that changed something on the page: those whose reads their text does not name, and the cells with a reference that finds no sheet when a
+    /// shape it may have named was taken out.
+    fn add_always(&mut self, ev: &mut Evaluator<'_, '_>, changes: &Changes) {
+        // **A reference that finds no sheet is worked out when a shape it may have named was taken out**: a `Sheet.<id>` of the page found nothing before
+        // the edit unless the shape of that `ID` was one of those taken out, so one that names another `ID` is left with the value the file saved (writing its
+        // error would change a cell the edit did not reach). Any other spelling (a name, a qualifier of a part, one found on a master) is worked out as before.
+        let mut readers: Vec<Reader> = Vec::new();
+        if let Some(graph) = self.index.graph_of(self.page) {
+            if !changes.removed.is_empty() {
+                let removed: HashSet<u32> = changes.removed.iter().copied().collect();
+                readers.extend(graph.dangling.iter().filter(|e| e.named.is_none_or(|id| removed.contains(&id))).map(|e| e.reader.clone()));
+            }
+            if !changes.cells.is_empty()
+                || !changes.rows.is_empty()
+                || !changes.sections.is_empty()
+                || !changes.fresh.is_empty()
+                || !changes.removed.is_empty()
+                || !changes.reread.is_empty()
+            {
+                readers.extend(graph.dynamic.iter().map(|e| e.reader.clone()));
+            }
+        }
+        // The cells of other pages that named a shape that was taken out from this one read nothing now.
+        if !changes.removed.is_empty()
+            && let Some(map) = self.cross_map(ev, Target::Page(self.page))
+        {
+            readers.extend(map.dangling.iter().cloned());
+        }
+        for reader in readers {
+            self.add(ev, reader);
+        }
     }
 
     /// The next cell to work out, if any is left.
@@ -321,22 +461,82 @@ impl<'i> Affected<'i> {
         });
     }
 
+    /// The graph of `page` for this commit: brought up to date when first asked. Whether it is kept.
+    fn reach(&mut self, ev: &mut Evaluator<'_, '_>, page: u32) -> bool {
+        if self.ready.contains(&page) {
+            return true;
+        }
+        let doc = ev.doc;
+        let kept = self.index.sync_page(ev, doc, page);
+        if kept {
+            self.ready.insert(page);
+        }
+        kept
+    }
+
+    /// What the sheets that name `target` (a page, the document's sheet, the styles or the masters) read of it, worked out when first asked, for this commit. `None` when no sheet names it that
+    /// the commit's own page's graph does not answer: the sheets of another page, and the sheets no page holds.
+    fn cross_map(&mut self, ev: &mut Evaluator<'_, '_>, target: Target) -> Option<Rc<CrossMap>> {
+        if let Some(known) = self.scratch.cross.get(&target) {
+            return known.clone();
+        }
+        let sheets = match target {
+            Target::Page(page) => ev.doc.page(page).map(|p| self.index.links.naming(p)).unwrap_or_default(),
+            other => self.index.links.naming_unpaged(other, self.page),
+        };
+        let made = if sheets.is_empty() { None } else { Some(Rc::new(CrossMap::make(ev, &sheets, target, &mut self.scratch.formulas))) };
+        self.scratch.cross.insert(target, made.clone());
+        made
+    }
+
+    /// The cells of the sheets that read every page that read at run time, found when first asked for this commit.
+    fn wild_readers(&mut self, ev: &mut Evaluator<'_, '_>) -> Rc<Vec<Reader>> {
+        if let Some(known) = &self.scratch.wild {
+            return Rc::clone(known);
+        }
+        let found = Rc::new(self.index.links.wild_readers(ev, &mut self.scratch.formulas));
+        self.scratch.wild = Some(Rc::clone(&found));
+        found
+    }
+
     /// The cells that read the cell `key`: through other sheets, in its own sheet, and in an instance of its sheet's master shape.
     fn readers_of(&mut self, ev: &mut Evaluator<'_, '_>, key: &Key) -> Vec<Reader> {
-        let graph = self.graph;
-        let across = |at: &Key| graph.and_then(|g| g.cross.get(at)).into_iter().flatten().map(|e| e.reader.clone());
-        let mut out: Vec<Reader> = across(key).collect();
+        let mut out: Vec<Reader> = Vec::new();
         let (sheet, place) = key;
+        // The readers through other sheets: those the commit's page holds, and, for a cell of another page, the page's own and those of the pages that name it. **A cell of a sheet no page holds**
+        // (the document's, a style's, a master's and its shapes') is read by the sheets that name it on every page (`TheDoc!`, `Styles!`, `Masters[..]!`), which the listing says
+        // The commit's page's graph answers its own.
+        across_in(self.index.graph_of(self.page), key, &mut out);
+        let target = Target::of(sheet);
+        if let Target::Page(home) = target
+            && home != self.page
+            && self.reach(ev, home)
+        {
+            across_in(self.index.graph_of(home), key, &mut out);
+            // A page a change has reached is a page that changed: its cells that read what their text does not name are worked out, as those of the commit's page are.
+            if self.dynamic_noted.insert(home)
+                && let Some(graph) = self.index.graph_of(home)
+                && ev.steps(graph.dynamic.len())
+            {
+                out.extend(graph.dynamic.iter().map(|e| e.reader.clone()));
+            }
+        }
+        if let Some(map) = self.cross_map(ev, target) {
+            across_map(&map, key, &mut out);
+        }
+        // The cells that read at run time, in the sheets that read every page, are worked out after a change to a cell of any sheet, once.
+        if !self.wild_noted {
+            self.wild_noted = true;
+            let wild = self.wild_readers(ev);
+            if ev.steps(wild.len()) {
+                out.extend(wild.iter().cloned());
+            }
+        }
         // A function that reads a whole section is listed under the section's wildcard, and reads every cell of it.
         let wildcard = place.0.as_ref().map(any_of);
-        if let Some(any) = &wildcard {
-            out.extend(across(&(sheet.clone(), any.clone())));
-        }
-        if place.0.is_none() && place.1.is_none() && POSE.contains(&place.2.as_str()) {
-            let group = (sheet.clone(), (None, None, CellName::new(POSE_GROUP)));
-            out.extend(across(&group));
-        }
-        if matches!(sheet, SheetRef::Shape(_) | SheetRef::Page(_)) {
+        // The sheets no page holds too (the document's, a style's, a master's page sheet): a cell written there is read by the cells of its own sheet that name it,
+        // and an edit that works them out (`sheet.set_cell`) follows them.
+        if matches!(sheet, SheetRef::Shape(_) | SheetRef::Page(_) | SheetRef::Document | SheetRef::Style(_) | SheetRef::Master(_)) {
             let own = self.scratch.intra_of(ev, sheet);
             out.extend(own.get(place).into_iter().flatten().map(|addr| (sheet.clone(), addr.clone())));
             if let Some(any) = &wildcard {
@@ -358,7 +558,7 @@ impl<'i> Affected<'i> {
 }
 
 /// Whether a formula reads anything but unqualified cells of its own sheet ([`crate::facts::Reach`]); each node is a step.
-fn reaches_beyond_own_sheet(ev: &mut Evaluator<'_, '_>, formula: &Formula) -> bool {
+pub(crate) fn reaches_beyond_own_sheet(ev: &mut Evaluator<'_, '_>, formula: &Formula) -> bool {
     crate::work::asked();
     let Ok(expr) = &formula.ast else { return false };
     let (found, nodes) = reach(expr);
@@ -385,6 +585,12 @@ pub(crate) fn classify_sheet(
             ordinal = ordinal.saturating_add(1);
         }
     });
+    // **The formulas the sheet gets from a style** for the cells it holds as `Inh`, worked out on the sheet itself: a sheet none of whose links names a style that holds a formula that reads
+    // beyond its sheet is not asked for them.
+    for (addr, formula) in crate::pages::style_given(ev, sheet, data, formulas) {
+        classify(ev, found, sheet, &addr, &formula, &own, walk_ord(ordinal));
+        ordinal = ordinal.saturating_add(1);
+    }
     let SheetRef::Shape(at) = sheet else { return };
     let Ok(Some(step)) = ev.res.master_step(at) else { return };
     let inherited = master_cross_of(ev, memo, &step.shape);
@@ -451,7 +657,7 @@ fn classify(ev: &mut Evaluator<'_, '_>, found: &mut Found, sheet: &SheetRef, add
         frames.extend(if facts.frame_own { Some(sheet.clone()) } else { parent_of(sheet) });
     }
     let reads_path = calls_any(&facts.functions, &PATH_FUNCTIONS);
-    for r in facts.refs.iter().filter(|r| !r.qualifiers.is_empty()) {
+    for r in facts.links().filter(|r| !r.qualifiers.is_empty()) {
         if !ev.steps(1) || !found.charge(ev, 2 * KEY_BYTES) {
             return;
         }
@@ -466,6 +672,12 @@ fn classify(ev: &mut Evaluator<'_, '_>, found: &mut Found, sheet: &SheetRef, add
                         }
                         found.cross.push(((target.clone(), place), reader.clone(), ord));
                     }
+                } else if let Some(place) = written_whole(&at) {
+                    // A cell of a section a command writes whole is read by this formula too when the section is written (`Changes::sections`).
+                    if !found.charge(ev, 2 * KEY_BYTES) {
+                        return;
+                    }
+                    found.cross.push(((target.clone(), place), reader.clone(), ord));
                 }
                 if facts.frame {
                     frames.push(target);
@@ -560,7 +772,7 @@ fn build_intra(ev: &mut Evaluator<'_, '_>, sheet: &SheetRef, local_only: bool, f
         }
         let Some(facts) = ev.facts_of(&formula) else { continue };
         let reads_path = calls_any(&facts.functions, &PATH_FUNCTIONS);
-        for r in facts.refs.iter().filter(|r| r.qualifiers.is_empty()) {
+        for r in facts.links().filter(|r| r.qualifiers.is_empty()) {
             if let Some(named) = address_of(&r.path) {
                 if !ev.ctx.hold_bytes(KEY_BYTES) {
                     return map;
@@ -574,6 +786,12 @@ fn build_intra(ev: &mut Evaluator<'_, '_>, sheet: &SheetRef, local_only: bool, f
                         }
                         map.entry(place).or_default().push(addr.clone());
                     }
+                } else if let Some(place) = written_whole(&named) {
+                    // A cell of a section a command writes whole is read by this formula too when the section is written (`Changes::sections`).
+                    if !ev.ctx.hold_bytes(KEY_BYTES) {
+                        return map;
+                    }
+                    map.entry(place).or_default().push(addr.clone());
                 }
             }
         }

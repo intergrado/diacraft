@@ -14,7 +14,7 @@ use std::sync::Arc;
 use diacraft_doc::{Cell, CellAddr, FormulaSlot, Lookup, Resolved, SheetRef, Source};
 use diacraft_units::Unit;
 
-use crate::eval::{CellAddress, Env, Evaluator, OperandMode};
+use crate::eval::{CellAddress, Env, EvalCtx, Evaluator, OperandMode};
 use crate::rules::{CELL_HOP_DEPTH, KEY_BYTES, LOOP_ERROR, MEMO_ENTRY_BYTES};
 use crate::store::decode;
 use crate::value::{CellError, Point, Rgb, Value};
@@ -84,6 +84,12 @@ pub struct CellEval {
     pub typed: bool,
     /// How many times the native depth limit was reached while the cell was worked out (the cells it read included).
     pub depth_limit_hits: u64,
+    /// The writes the `SETF` calls of this working-out ask for, in the order they were reached: the cell's own formula's, and those of an `EVALCELL` or a string
+    /// read as a formula in it, and none of the cells it read (each holds its own). **They are asked for only when the cell is worked out as itself**
+    /// ([`Evaluator::evaluate_cell`]); a cell read as an operand gives its value and asks for nothing (`setf.rs`).
+    pub(crate) setf: Vec<crate::setf::SetfEffect>,
+    /// The calls of this working-out that were past the most one cell keeps, counted when the cell asks.
+    pub(crate) setf_over: u64,
 }
 
 impl CellEval {
@@ -107,6 +113,8 @@ impl CellEval {
             default_formula: false,
             typed: false,
             depth_limit_hits: 0,
+            setf: Vec::new(),
+            setf_over: 0,
         }
     }
 
@@ -205,18 +213,21 @@ impl Evaluator<'_, '_> {
     /// A cell worked out once and remembered, a cycle being an error.
     fn live_cell(&mut self, sheet: &SheetRef, addr: &CellAddr) -> Arc<CellEval> {
         let key: CellKey = (sheet.clone(), addr.clone());
-        if let Some(known) = self.ctx.memo.get(&key) {
+        // The context's own fields are borrowed one at a time through this one reference: the context may be the evaluator's own (`Evaluator::owning`), reached by a
+        // dereference that the borrow checker does not split by field.
+        let ctx: &mut EvalCtx = &mut self.ctx;
+        if let Some(known) = ctx.memo.get(&key) {
             if known.tainted {
-                self.ctx.clock_touched = true;
+                ctx.clock_touched = true;
             }
             if known.stand_in {
-                self.ctx.stand_in_touched = true;
+                ctx.stand_in_touched = true;
             }
             if known.no_shadow {
-                self.ctx.no_shadow_touched = true;
+                ctx.no_shadow_touched = true;
             }
             // A cell that was cut short by the depth limit is cut short for each cell that reads it, as the clock is carried above.
-            self.ctx.depth_seen += known.depth_limit_hits;
+            ctx.depth_seen += known.depth_limit_hits;
             return Arc::clone(known);
         }
         if self.ctx.in_progress.contains(&key) {
@@ -281,6 +292,8 @@ impl Evaluator<'_, '_> {
             default_formula: false,
             typed,
             depth_limit_hits: 0,
+            setf: Vec::new(),
+            setf_over: 0,
         };
         if is_action_cell(addr) {
             return base(CellKind::Action, stored_view(self));
@@ -314,6 +327,8 @@ impl Evaluator<'_, '_> {
         let outer_shadow = std::mem::take(&mut self.ctx.no_shadow_touched);
         let depth_before = self.ctx.depth_seen;
         self.ctx.stats.cells_worked = self.ctx.stats.cells_worked.saturating_add(1);
+        // The `SETF` calls this run reaches are this cell's, whoever read the cell: they go with its result (`setf.rs`).
+        let outer_calls = crate::setf::open_calls(&mut self.ctx);
         // Reading a cell in place weighs [`CELL_HOP_DEPTH`] levels of the native depth.
         let raw = if self.enter_n(CELL_HOP_DEPTH) {
             let raw = self.eval(expr, &env);
@@ -322,6 +337,7 @@ impl Evaluator<'_, '_> {
         } else {
             Value::Error(LOOP_ERROR)
         };
+        let (setf, setf_over) = crate::setf::close_calls(&mut self.ctx, outer_calls);
         let depth_limit_hits = self.ctx.depth_seen - depth_before;
         let tainted = self.ctx.clock_touched;
         self.ctx.clock_touched = outer_clock || tainted;
@@ -357,6 +373,8 @@ impl Evaluator<'_, '_> {
             default_formula: is_default_formula,
             typed,
             depth_limit_hits,
+            setf,
+            setf_over,
         }
     }
 
@@ -391,7 +409,17 @@ impl Evaluator<'_, '_> {
 
     /// Works one cell out and says what it is: the entry point of the oracle and of a recalculation. In `Live` mode the cells it reads
     /// are worked out first, a chain of them with an explicit stack and not by recursion, and remembered.
+    ///
+    /// **This is a cell worked out as itself**, and the only place a `SETF` asks for its write: the calls the working-out reached are put in the queue
+    /// here, once for the cell however many times it is asked for in one pass ([`crate::setf::ask`]). A cell that is read as an operand of another formula is worked out
+    /// in place for its value and asks for nothing, so a formula that reads a `SETF` cell's value (0) does not make the call write.
     pub fn evaluate_cell(&mut self, at: &CellAddress) -> Arc<CellEval> {
+        let out = self.worked_out_as_itself(at);
+        crate::setf::ask(self, at, &out);
+        out
+    }
+
+    fn worked_out_as_itself(&mut self, at: &CellAddress) -> Arc<CellEval> {
         match self.ctx.opts.operands {
             OperandMode::Cached => Arc::new(self.compute_cell(&at.sheet, &at.addr, true)),
             OperandMode::Live => {
@@ -415,6 +443,35 @@ impl Evaluator<'_, '_> {
     /// and an action cell give their saved value.
     pub fn evaluate(&mut self, at: &CellAddress) -> Value {
         self.evaluate_cell(at).raw.clone()
+    }
+
+    /// As [`Evaluator::evaluate`], with the cells the formula reads **worked out as well** ([`OperandMode::Live`]), whatever the options say, and the options as they
+    /// were afterwards. For a cell the file saved no value for, which a viewer that draws what was saved works out and nothing else: its formula is the only word of
+    /// what it holds, and a cell it reads may have no saved value either, which read as saved would be 0. A chain of such cells is walked with an
+    /// explicit stack, a cycle is [`crate::rules::LOOP_ERROR`], and the steps and the memory of the context's budget bound the work, as in any Live run.
+    ///
+    /// `None` when the formula did not run: a formula that does not parse, a cell with no formula to run. What is then in the cell's place is a stand-in (the default of
+    /// its kind) and no result, and a caller that drew it would draw a value nobody wrote.
+    pub fn evaluate_worked_out(&mut self, at: &CellAddress) -> Option<Value> {
+        let operands = std::mem::replace(&mut self.ctx.opts.operands, OperandMode::Live);
+        let worked = self.evaluate_cell(at);
+        self.ctx.opts.operands = operands;
+        (worked.kind == CellKind::Formula).then(|| worked.raw.clone())
+    }
+
+    /// As [`Evaluator::evaluate_worked_out`], **worked out in `own`**, a context that is not the evaluator's: for the time of the call `own` is the evaluator's context, so
+    /// the steps, the memory and the memo of the cells worked out are `own`'s, and the evaluator's are as they were after. A frame that draws a page
+    /// works the cells it has a marker for out in its context and the cells it has no value for in another, so that neither spends the other's steps, and a budget that
+    /// runs out (`own.stats.budget_exhausted`, which a caller reads afterwards) is the end of the one and not of the other. Whatever the evaluator keeps of the document
+    /// itself (its lists of shapes, its names) is shared, as it does not depend on the context.
+    ///
+    /// The two are swapped back before this returns, whatever the formula gave. (A panic inside leaves them swapped, which is no worse than the panic: the frame that met
+    /// it is thrown away.)
+    pub fn evaluate_worked_out_in(&mut self, own: &mut EvalCtx, at: &CellAddress) -> Option<Value> {
+        std::mem::swap(&mut *self.ctx, own);
+        let worked = self.evaluate_worked_out(at);
+        std::mem::swap(&mut *self.ctx, own);
+        worked
     }
 }
 

@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
+use diacraft_engine::file_access::ScopeHandle;
 use egui::{Context, Id, Key, Modifiers, vec2};
 
 use crate::app::DiacraftApp;
@@ -261,7 +262,12 @@ impl DiacraftApp {
 
     /// Runs `body` where the window runs its slow work: **on a thread of its own on the desktop**, and **on the page's thread, once the window has drawn what it is doing, with a host** (a browser has no
     /// thread to give). `name` is the thread's. A body that cannot be started is an error, as a thread that will not start is.
+    ///
+    /// **The automation roots in force where the work is asked for go with it** (`file_access::ScopeHandle`): a file a control request has read, an export or a print it asks for
+    /// is read or written under the roots the request had, on the thread it is given or on the page's, and the work the person starts is under none.
     pub(crate) fn run_in_background(&mut self, name: &str, body: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
+        let scope = ScopeHandle::capture();
+        let body = move || scope.run(body);
         if self.hosting.host.is_none() {
             return std::thread::Builder::new().name(name.to_owned()).spawn(body).map(|_| ());
         }

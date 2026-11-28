@@ -1,11 +1,13 @@
 //! Reading a drawing for an edit: cell numbers found by inheritance, the pose of a shape, where its connection points are on the page.
 //!
-//! Values are the saved ones; an edit command has recalculated the page before it reads what a formula gave.
-//! Everything is in the page's drawing units; the commands convert paper inches at their edge.
+//! Values are the saved ones; an edit command has recalculated the page before it reads what a formula gave. **A cell that holds a formula and no value
+//! saved anywhere on the way to it is read by what its formula works out to**, as the picture draws it ([`super::worked`]): a shape pinned at `=1+1` with no
+//! `V` is at 2, and is picked, moved, snapped to and shown there, and not at the origin. Everything is in the page's drawing units; the commands convert paper inches at their edge.
 
-use diacraft_doc::{CellAddr, Document, Owner, Resolved, Resolver, RowKey, SectionKey, ShapeRef, SheetRef};
+use diacraft_doc::{CellAddr, Document, Owner, Resolver, RowKey, SectionKey, ShapeRef, SheetRef};
 
 use super::route::P;
+use super::worked::Worked;
 
 // How many times a shape was looked for by its `ID` from the top of a page, for the tests that hold a command to doing it once for all the shapes it names.
 #[cfg(test)]
@@ -92,37 +94,40 @@ pub struct ConnectionPoint {
     pub dir_y: f64,
 }
 
-/// Reads cells of a document through its resolver.
+/// Reads cells of a document through its resolver, and works out the cells that hold a formula and no saved value ([`Worked`]).
 pub(crate) struct Reader<'a> {
     doc: &'a Document,
     res: Resolver<'a>,
-}
-
-fn value_of(found: &Resolved<'_>) -> f64 {
-    found.value.cell.and_then(|c| c.value.as_ref()).and_then(|v| v.number()).unwrap_or(0.0)
+    worked: Worked<'a>,
 }
 
 impl<'a> Reader<'a> {
     pub fn new(doc: &'a Document) -> Reader<'a> {
-        Reader { doc, res: Resolver::new(doc) }
+        Reader { doc, res: Resolver::new(doc), worked: Worked::new(doc) }
     }
 
     pub fn resolver(&self) -> &Resolver<'a> {
         &self.res
     }
 
+    /// The reader of the cells that hold a formula and no saved value, for a caller that reads cells through [`Reader::resolver`] and wants them as [`Reader::number`] gives them.
+    pub fn worked(&self) -> &Worked<'a> {
+        &self.worked
+    }
+
     pub fn doc(&self) -> &'a Document {
         self.doc
     }
 
-    /// The number a cell directly under `sheet` holds (0 when it holds none, as a cell found nowhere reads).
+    /// The number a cell directly under `sheet` holds (0 when it holds none, as a cell found nowhere reads). A cell that holds a formula and no saved value
+    /// is the number the formula works out to (0 when it gives none).
     pub fn number(&self, sheet: &SheetRef, name: &str) -> f64 {
         self.addr_number(sheet, &CellAddr::direct(name))
     }
 
     /// As [`Reader::number`], for any address.
     pub fn addr_number(&self, sheet: &SheetRef, addr: &CellAddr) -> f64 {
-        self.res.resolve(sheet, addr).map_or(0.0, |found| value_of(&found))
+        self.res.resolve(sheet, addr).map_or(0.0, |found| self.worked.number_of(sheet, addr, &found).unwrap_or(0.0))
     }
 
     /// Whether some sheet on the way (the shape, its master) holds the cell: a formula or a value.
@@ -248,10 +253,11 @@ impl<'a> Reader<'a> {
     /// The connection points of a shape on the page, in row order.
     pub fn connection_points(&self, at: &ShapeRef) -> Vec<ConnectionPoint> {
         let sheet = SheetRef::Shape(at.clone());
-        let Some(rows) = self.res.effective_rows(&sheet, &SectionKey::new("Connection", None)) else {
+        let section = SectionKey::new("Connection", None);
+        let Some(rows) = self.res.effective_rows(&sheet, &section) else {
             return Vec::new();
         };
-        self.points_of_rows(at, &rows)
+        self.points_of_rows(at, &section, &rows)
     }
 
     /// [`Reader::connection_points`] for a shape whose `Connection` section has at most `max_rows` rows, counted over the shape, its master and the styles
@@ -259,9 +265,10 @@ impl<'a> Reader<'a> {
     /// for each instance). `None` for a section with more, which is then not read at all.
     pub fn connection_points_within(&self, at: &ShapeRef, max_rows: usize) -> Option<Vec<ConnectionPoint>> {
         let sheet = SheetRef::Shape(at.clone());
-        match self.res.effective_rows_within(&sheet, &SectionKey::new("Connection", None), max_rows) {
+        let section = SectionKey::new("Connection", None);
+        match self.res.effective_rows_within(&sheet, &section, max_rows) {
             None => Some(Vec::new()),
-            Some(Ok(rows)) => Some(self.points_of_rows(at, &rows)),
+            Some(Ok(rows)) => Some(self.points_of_rows(at, &section, &rows)),
             Some(Err(_)) => None,
         }
     }
@@ -272,7 +279,8 @@ impl<'a> Reader<'a> {
         self.res.rows_held(&SheetRef::Shape(at.clone()), &SectionKey::new("Connection", None)).unwrap_or(0)
     }
 
-    fn points_of_rows(&self, at: &ShapeRef, rows: &[diacraft_doc::EffectiveRow<'_>]) -> Vec<ConnectionPoint> {
+    fn points_of_rows(&self, at: &ShapeRef, section: &SectionKey, rows: &[diacraft_doc::EffectiveRow<'_>]) -> Vec<ConnectionPoint> {
+        let sheet = SheetRef::Shape(at.clone());
         rows.iter()
             .enumerate()
             .map(|(position, row)| {
@@ -280,7 +288,13 @@ impl<'a> Reader<'a> {
                     RowKey::Ix(ix) => *ix,
                     RowKey::Name(_) => u32::try_from(position).unwrap_or(u32::MAX),
                 };
-                let cell = |name: &str| row.cells.iter().find(|(n, _)| n.as_str() == name).map_or(0.0, |(_, found)| value_of(found));
+                // A cell that holds a formula and no saved value is what the formula works out to, on the row of the section it is in.
+                let cell = |name: &str| {
+                    row.cells.iter().find(|(n, _)| n.as_str() == name).map_or(0.0, |(n, found)| {
+                        let addr = CellAddr { section: Some(section.clone()), row: Some(row.key.clone()), cell: n.clone() };
+                        self.worked.number_of(&sheet, &addr, found).unwrap_or(0.0)
+                    })
+                };
                 let (x, y) = self.to_page(at, (cell("X"), cell("Y")));
                 let (dir_x, dir_y) = self.vector_to_page(at, (cell("DirX"), cell("DirY")));
                 ConnectionPoint { index, x, y, dir_x, dir_y }

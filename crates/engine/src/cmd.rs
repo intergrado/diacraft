@@ -43,6 +43,7 @@ macro_rules! cmd {
     };
 }
 
+mod alt_text;
 mod app;
 mod arrange;
 mod autoconnect;
@@ -226,6 +227,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         specs.extend(swimlane::specs());
         specs.extend(insert::specs());
         specs.extend(shapedata::specs());
+        specs.extend(alt_text::specs());
         specs.extend(sheet::specs());
         specs.extend(sheet_rows::specs());
         specs.extend(callout::specs());
@@ -359,9 +361,14 @@ pub(crate) fn from_doc(cmd: &str, error: diacraft_doc::DocError) -> EngineError 
     use diacraft_doc::DocError;
     match error {
         // The caller asked for something that cannot be.
-        DocError::EmptyName | DocError::NameTooLong | DocError::ControlCharacter | DocError::NoSuchPage(_) | DocError::BadName(_) => {
-            bad(cmd, error.to_string())
-        }
+        DocError::EmptyName
+        | DocError::NameTooLong
+        | DocError::PageNameTooLong
+        | DocError::PageNameReserved
+        | DocError::PageNameTaken
+        | DocError::ControlCharacter
+        | DocError::NoSuchPage(_)
+        | DocError::BadName(_) => bad(cmd, error.to_string()),
         // The request was fine; the document cannot take it.
         DocError::TooManyPages
         | DocError::IdsExhausted

@@ -33,7 +33,10 @@ fn take_object_type(master: &mut Master) -> Option<f64> {
 
 /// The 58 masters of 629feee1 and the stamp of the part each one built **there**, taken before the catalogue grew and pinned here. A change that makes any of them build another cell, formula,
 /// value, unit or GUID changes its stamp: the drawings that hold these masters (and match them by their GUIDs) would find them changed. **One cell was added on purpose** (owner
-/// 2026-11-25): `ObjType` 1 on the masters people join; the test takes it out before it stamps, and asks for it on exactly those masters.
+/// 2026-11-25, item 2): `ObjType` 1 on the masters people join and 4 on the Swimlane and the Separator; the test takes it out before it stamps, and asks for it on
+/// exactly those masters. **The six positions of the Organization Chart Shapes build other cells on purpose**: a text a cell holds says `STR`, so the label, the prompt, the format and the sort key of
+/// each Shape Data row say it, and the `Format` of a field row is `@`, the picture of a text (an empty one shows nothing); and the title's `Character` row, past the first, is whole
+/// It holds the 12 cells of the root's table, `FontScale` 1 among them, which a reader of the file reads as 0 where the row lacks them. Their stamps are those of the new build.
 const PINNED: [(&str, &str); 58] = [
     ("rectangle", "61b003904aab6621"),
     ("square", "8d0c6ed881317e8b"),
@@ -87,22 +90,34 @@ const PINNED: [(&str, &str); 58] = [
     ("gane-sarson.data-flow", "ace24d0fcad75f3d"),
     ("xfunc.swimlane", "27873e0b7b6c14dc"),
     ("xfunc.separator", "d839527f2d3aa92b"),
-    ("orgchart.executive", "4b7075d5cda5a784"),
-    ("orgchart.manager", "4fc81cf037dc7faf"),
-    ("orgchart.position", "b0161993bdcfae56"),
-    ("orgchart.assistant", "20d6016cf193f854"),
-    ("orgchart.consultant", "8e3f81c04fe94e93"),
-    ("orgchart.vacancy", "fa5e3610e58b6680"),
+    ("orgchart.executive", "2d2187621cd2c379"),
+    ("orgchart.manager", "70d11feeb3deff0e"),
+    ("orgchart.position", "059a27c45e3b7c9f"),
+    ("orgchart.assistant", "8d02b8eb1c667b87"),
+    ("orgchart.consultant", "45b4e5fe511be9a0"),
+    ("orgchart.vacancy", "5e4d96883fb7d807"),
 ];
 
 /// The masters that hold `ObjType` 1 (owner 2026-11-25), said by the stencils: every two-dimensional master of Basic Shapes (series 1), the Basic Flowchart (2), the Gane-Sarson
-/// shapes (6) and the Organization Chart Shapes (8). The decorative shapes (4), the arrows (5) and the Cross-Functional Flowchart's parts (7) hold none, and nor does a connector.
+/// shapes (6) and the Organization Chart Shapes (8). The decorative shapes (4) and the arrows (5) hold none, and nor does a connector.
 fn people_join(m: &MasterSpec) -> bool {
     !m.is_connector() && matches!(m.identity.0, 1 | 2 | 6 | 8)
 }
 
+/// The `ObjType` a master holds: 1 where people join it, 4 for the Cross-Functional Flowchart's two parts, a swimlane and a separator (7: neither placeable nor routable, item 2), none for
+/// the rest.
+fn object_type_of(m: &MasterSpec) -> Option<f64> {
+    if people_join(m) {
+        Some(1.0)
+    } else if m.identity.0 == 7 {
+        Some(4.0)
+    } else {
+        None
+    }
+}
+
 #[test]
-fn the_58_masters_of_629feee1_build_to_the_cells_they_built_before_and_hold_objtype_1_where_people_join_them() {
+fn the_58_masters_of_629feee1_build_to_the_cells_they_built_before_and_hold_objtype_1_where_people_join_them_and_4_for_the_cross_functional_parts() {
     let first: Vec<&MasterSpec> = all_masters().filter(|m| m.identity.0 <= 8).collect();
     assert_eq!(first.len(), 58);
     let mut joined = 0;
@@ -110,11 +125,19 @@ fn the_58_masters_of_629feee1_build_to_the_cells_they_built_before_and_hold_objt
         assert_eq!(m.id, *want_id, "the order of the catalogue");
         let mut master = build_master(m, 1);
         let object_type = take_object_type(&mut master);
-        assert_eq!(object_type, people_join(m).then_some(1.0), "{}: the master's ObjType", m.id);
+        assert_eq!(object_type, object_type_of(m), "{}: the master's ObjType", m.id);
         joined += usize::from(object_type.is_some());
+        // **The `UniqueID` is the other thing that changed on purpose**: at 629feee1 it was the `BaseID`'s text, and now it is a GUID of its own whose first three groups no other master
+        // shares (`unique.rs`). The stamps stay those of the part as it was, so that they still say nothing else changed: the text it had goes back before the stamp is taken.
+        assert_eq!(master.raw.get("BaseID"), Some(m.guid().as_str()), "{}: the BaseID is the text it was", m.id);
+        assert_ne!(master.unique_id.as_deref(), Some(m.guid().as_str()), "{}: the UniqueID is no longer the BaseID's text", m.id);
+        master.unique_id = Some(Arc::from(m.guid().as_str()));
         assert_eq!(stamp_of(&master), *want, "{} builds other cells than it built at 629feee1", m.id);
     }
-    assert_eq!(joined, 39, "twelve of Basic Shapes, eighteen of the flowchart, three of Gane-Sarson, six positions");
+    assert_eq!(
+        joined, 41,
+        "twelve of Basic Shapes, eighteen of the flowchart, three of Gane-Sarson, six positions, and the swimlane and the separator"
+    );
 }
 
 // ---- the GUID form -------------------------------------------------------------------------------------------------------------------
@@ -297,7 +320,10 @@ fn every_stencil_has_one_series_of_its_own_and_every_master_of_it_holds_that_ser
             assert_eq!(m.identity.0, series, "{}: its series", m.id);
         }
     }
-    assert!(!used.contains(&LINE_END_SERIES) && !used.contains(&3), "22 is the hidden line ends' and 3 the GUID a copied master is given");
+    assert!(
+        !used.contains(&LINE_END_SERIES) && !used.contains(&3),
+        "22 is the hidden line ends' and 3 the BaseID text the first copies of a master were given (a copy is now given a GUID of its own, `bring::unique_id_for`)"
+    );
     for m in line_ends::MASTERS.iter() {
         assert_eq!(m.identity.0, LINE_END_SERIES, "{}: a hidden line end", m.id);
         assert!(m.is_hidden(), "{}", m.id);
@@ -840,6 +866,7 @@ static TEST_DRESS: Dress = Dress {
         FieldText { formula: "Prop.Kind", shown: "Box", char_row: 1, line_after: false },
     ]),
     chars: &[CharRow { size_pt: 11.0, style: 1, color: None }, CharRow { size_pt: 8.0, style: 0, color: Some("RGB(100,100,100)") }],
+    rows: &[],
     data: &[
         FieldDef { row: "Name", label: "Name", kind: FieldKind::String, value: "Name", prompt: "The name" },
         FieldDef { row: "Kind", label: "Kind", kind: FieldKind::FixedList("Box;Ring"), value: "Box", prompt: "The kind" },
@@ -851,6 +878,7 @@ static TEST_DRESS: Dress = Dress {
     select_mode: Some(1),
     text_edit_target: Some(false),
     obj_type: Some(1),
+    no_rounding: false,
     role: Role::Container { heading: Side::Left, margin_in: 0.3 },
 };
 static DRESSED_MORE: More = More { dress: Some(&TEST_DRESS), hidden: false, brings: &[] };
@@ -988,9 +1016,13 @@ fn a_dress_with_an_object_type_writes_it_into_the_master_and_a_dress_without_one
     let instance = doc.shape(&doc.find_shape(Owner::Page(page), id).unwrap()).unwrap().clone();
     assert!(instance.sheet.cell("ObjType").is_none(), "the shape holds no cell of its own for it");
     assert_eq!(effective(&doc, &sheet_of(&doc, page, id), "ObjType"), Some(1.0), "and reads the master's");
-    // A dress that gives none (`Dress::NONE`, a plain master) writes no cell: the shape reads none until a connector is glued to it.
+    // A dress that gives none (`Dress::NONE`, a plain master) writes no cell into the master: the plain master here is a connector, which reads the routable 2 it is made with, of
+    // its own, and the master holds none.
     let (doc, page, id) = dropped(&SOLID_PLAIN, 4.0, 4.0);
-    assert_eq!(effective(&doc, &sheet_of(&doc, page, id), "ObjType"), None);
+    let master_id = doc.shape(&doc.find_shape(Owner::Page(page), id).unwrap()).unwrap().master.unwrap();
+    assert!(doc.master(master_id).unwrap().shapes.get(0).unwrap().sheet.cell("ObjType").is_none(), "the master holds no ObjType");
+    let instance = doc.shape(&doc.find_shape(Owner::Page(page), id).unwrap()).unwrap().clone();
+    assert_eq!(instance.sheet.cell("ObjType").and_then(|c| c.value.as_ref()?.number()), Some(2.0), "the connector's own routable flag");
 }
 
 #[test]

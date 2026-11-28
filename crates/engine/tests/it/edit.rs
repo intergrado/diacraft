@@ -443,11 +443,12 @@ fn a_resize_that_cannot_be_made_is_refused_and_changes_nothing() {
     }
 }
 
+/// With `connectors: false` the connector stays with its end where it was (by default it goes with the shape, `delete_connectors.rs`).
 #[test]
-fn deleting_a_shape_frees_the_end_of_the_connector_glued_to_it() {
+fn deleting_a_shape_with_connectors_false_frees_the_end_of_the_connector_glued_to_it() {
     let mut s = two_joined();
     let steps = s.history().unwrap().undo_len();
-    let r = run(&mut s, "shape.delete", json!({"ids": [2]}));
+    let r = run(&mut s, "shape.delete", json!({"ids": [2], "connectors": false}));
     assert_eq!(r["deleted"], 1);
     assert_eq!(s.history().unwrap().undo_len(), steps + 1);
     let d = doc(&s);
@@ -483,9 +484,9 @@ fn deleting_the_connector_takes_its_connect_rows_and_deleting_everything_empties
     run(&mut s, "shape.delete", json!({"ids": [1, 2, 3, 3]}));
     assert!(doc(&s).page(1).unwrap().shapes.is_empty());
     assert!(connects(doc(&s)).is_empty());
-    // Both shapes deleted and the connector kept: both ends are free where they were.
+    // Both shapes deleted and the connector kept (`connectors: false`): both ends are free where they were.
     let mut s = two_joined();
-    run(&mut s, "shape.delete", json!({"ids": [1, 2]}));
+    run(&mut s, "shape.delete", json!({"ids": [1, 2], "connectors": false}));
     assert!(connects(doc(&s)).is_empty());
     assert_near("BeginX", num(doc(&s), 3, "BeginX"), 2.75);
     assert_near("EndX", num(doc(&s), 3, "EndX"), 5.25);

@@ -2,9 +2,9 @@
 //! gives the root style's cell of the host's name; a call that names one gives MS-VSDX's no-theme table. ,
 //! With the vectors.
 
-use diacraft_calc::{Budget, EvalCtx, EvalOptions, Evaluator, commit};
+use diacraft_calc::{Budget, EvalCtx, EvalOptions, Evaluator, commit, recalc_all};
 use diacraft_doc::{CellAddr, Document, Lookup, Owner, RowKey, ShapeRef, SheetRef};
-use diacraft_testkit::build::{DocBuilder, PageBuilder, ShapeBuilder};
+use diacraft_testkit::build::{DocBuilder, PageBuilder, ShapeBuilder, StyleBuilder};
 use diacraft_testkit::theme::ThemeXml;
 
 use crate::{E, mismatch};
@@ -47,6 +47,135 @@ fn marker(root: &[(&str, &str)], n: &str, themes: usize, name: &str, formula: &s
 }
 
 const ROOT: [(&str, &str); 5] = [("FillForegnd", "1"), ("FillBkgnd", "0"), ("LineColor", "0"), ("ShdwForegnd", "0"), ("LineCap", "0")];
+
+#[test]
+fn a_bare_call_with_no_theme_over_a_root_that_holds_no_such_cell_gives_no_value() {
+    // A root that is not whole (a new drawing's holds no `BeginArrowSize` or `EndArrowSize`) gives `#N/A`, which each reader takes as a cell it finds nowhere, so that a shape
+    // that follows the `Theme` style on a page with no theme reads what a shape that follows no style reads: the medium line end, and not the 0, the smallest.
+    for name in ["EndArrowSize", "BeginArrowSize", "Rounding", "ShdwPattern"] {
+        expect(name, marker(&ROOT, "0", 0, name, "THEMEVAL()"), E::Err(diacraft_calc::CellError::Na));
+        expect(&format!("{name}, no scheme cells"), marker(&ROOT, "-", 1, name, "THEMEVAL()"), E::Err(diacraft_calc::CellError::Na));
+    }
+    // A root that holds the cell gives it, as before; a call that names its property gives the root's cell or the default, and a `default` is the default.
+    expect("EndArrowSize held", marker(&[("EndArrowSize", "2")], "0", 0, "EndArrowSize", "THEMEVAL()"), E::N(2.0));
+    expect("ConnectorEndSize", marker(&ROOT, "0", 0, "EndArrowSize", r#"THEMEVAL("ConnectorEndSize")"#), E::N(0.0));
+    expect("a default", marker(&ROOT, "0", 0, "EndArrowSize", r#"THEMEVAL("ConnectorEndSize",3)"#), E::N(3.0));
+    // The colour cells of `ROOT` are held: the calls give them.
+    expect("held colour", marker(&ROOT, "0", 0, "LineColor", "THEMEVAL()"), c("#000000"));
+}
+
+/// A document of one shape holding `rows` (`THEMEVAL()` with the saved value 0, whatever the cell's own kind) in the stop rows `rows` of `section`,
+/// no scheme cell and no theme part, over a root style that holds `root` as it is built.
+fn stops(section: &str, rows: &[u32], cells: &[&str], root: impl FnOnce(StyleBuilder) -> StyleBuilder) -> Document {
+    let shape = rows
+        .iter()
+        .fold(ShapeBuilder::new(1), |s, ix| cells.iter().fold(s, |s, name| s.row_formula(section, None, RowKey::Ix(*ix), name, "THEMEVAL()", "0")));
+    DocBuilder::new().root(root).page(1, PageBuilder::new().shape(shape)).build()
+}
+
+fn at_row(doc: &Document, section: &str, ix: u32, name: &str) -> diacraft_calc::Value {
+    eval_at(doc, CellAddr::in_row(section, None, RowKey::Ix(ix), name))
+}
+
+/// A root style that holds row `IX` 0 of `section` only, as the root of every file does: white, 0 and 0.
+fn first_row_only(section: &'static str) -> impl FnOnce(StyleBuilder) -> StyleBuilder {
+    move |r| {
+        r.row_cell(section, None, RowKey::Ix(0), "GradientStopColor", "1")
+            .row_cell(section, None, RowKey::Ix(0), "GradientStopColorTrans", "0.25")
+            .row_cell(section, None, RowKey::Ix(0), "GradientStopPosition", "0.5")
+    }
+}
+
+const STOP_CELLS: [&str; 3] = ["GradientStopColor", "GradientStopColorTrans", "GradientStopPosition"];
+
+#[test]
+fn a_stop_row_past_the_first_with_no_theme_takes_its_default_where_the_root_holds_only_row_0() {
+    // The corpus' own shape (R1 of the gate vector): the root style holds row `IX` 0 only, and a shape's rows 0 and 1 hold a bare call with the saved value 0.
+    // Row 0 reads the root's; a row past it has no root value, and takes the cell's own default:
+    // 0, 0, and black. The root's row 0 is not the row's default (0.25, 0.5 and the
+    // index 1, which a colour cell holds as the root's own cells do, here).
+    for section in ["FillGradient", "LineGradient"] {
+        let doc = stops(section, &[0, 1, 2], &STOP_CELLS, first_row_only(section));
+        expect(&format!("{section} row 0, trans"), at_row(&doc, section, 0, "GradientStopColorTrans"), E::Any(0.25));
+        expect(&format!("{section} row 0, position"), at_row(&doc, section, 0, "GradientStopPosition"), E::Any(0.5));
+        expect(&format!("{section} row 0, colour"), at_row(&doc, section, 0, "GradientStopColor"), E::Any(1.0));
+        for ix in [1, 2] {
+            expect(&format!("{section} row {ix}, trans"), at_row(&doc, section, ix, "GradientStopColorTrans"), E::Any(0.0));
+            expect(&format!("{section} row {ix}, position"), at_row(&doc, section, ix, "GradientStopPosition"), E::Any(0.0));
+            expect(&format!("{section} row {ix}, colour"), at_row(&doc, section, ix, "GradientStopColor"), c("#000000"));
+        }
+    }
+}
+
+#[test]
+fn the_oracle_agrees_with_the_saved_zero_of_both_rows_of_the_gate_vector() {
+    // The gate's vector as the oracle takes it: the root holds row `IX` 0 (white, 0, 0), a rectangle's rows 0 and 1 hold `THEMEVAL()` in `GradientStopColorTrans`
+    // with the saved value 0, and the page selects no theme and the file holds no part. Both rows compute 0: agreed 2, differed 0 (row 1 was `#N/A`).
+    for section in ["FillGradient", "LineGradient"] {
+        let doc = stops(section, &[0, 1], &["GradientStopColorTrans"], |r| {
+            r.row_cell(section, None, RowKey::Ix(0), "GradientStopColor", "1")
+                .row_cell(section, None, RowKey::Ix(0), "GradientStopColorTrans", "0")
+                .row_cell(section, None, RowKey::Ix(0), "GradientStopPosition", "0")
+        });
+        let r = recalc_all(&doc, &Budget::default());
+        assert_eq!((r.agreed, r.differed.len()), (2, 0), "{section}: {r:?}");
+    }
+}
+
+#[test]
+fn a_stop_row_the_root_holds_reads_the_roots_row() {
+    // The control of the gate vector: the root holds rows 0 and 1, and each row reads its own.
+    for section in ["FillGradient", "LineGradient"] {
+        let doc = stops(section, &[0, 1], &STOP_CELLS, |r| {
+            first_row_only(section)(r)
+                .row_cell(section, None, RowKey::Ix(1), "GradientStopColor", "2")
+                .row_cell(section, None, RowKey::Ix(1), "GradientStopColorTrans", "0.75")
+                .row_cell(section, None, RowKey::Ix(1), "GradientStopPosition", "1")
+        });
+        expect(&format!("{section} row 0"), at_row(&doc, section, 0, "GradientStopColorTrans"), E::Any(0.25));
+        expect(&format!("{section} row 1, trans"), at_row(&doc, section, 1, "GradientStopColorTrans"), E::Any(0.75));
+        expect(&format!("{section} row 1, position"), at_row(&doc, section, 1, "GradientStopPosition"), E::Any(1.0));
+        expect(&format!("{section} row 1, colour"), at_row(&doc, section, 1, "GradientStopColor"), E::Any(2.0));
+    }
+}
+
+#[test]
+fn a_root_that_holds_no_stop_section_gives_no_value_for_row_0_and_the_default_past_it() {
+    // The third variant of the gate vector. Every root holds row `IX` 0 ("the root holds 1, `IX` 0", in every file), so a root without it is not whole,
+    // like one that lacks a cell directly under the sheet: row 0 gives no value (`#N/A`). A row past the first has no root value in any root
+    // So with the section or without it the cell takes its own default.
+    for section in ["FillGradient", "LineGradient"] {
+        let doc = stops(section, &[0, 1, 2], &STOP_CELLS, |r| r.cell("FillForegnd", "1"));
+        for name in STOP_CELLS {
+            expect(&format!("{section} row 0, {name}"), at_row(&doc, section, 0, name), E::Err(diacraft_calc::CellError::Na));
+        }
+        for ix in [1, 2] {
+            expect(&format!("{section} row {ix}, trans"), at_row(&doc, section, ix, "GradientStopColorTrans"), E::Any(0.0));
+            expect(&format!("{section} row {ix}, position"), at_row(&doc, section, ix, "GradientStopPosition"), E::Any(0.0));
+            expect(&format!("{section} row {ix}, colour"), at_row(&doc, section, ix, "GradientStopColor"), c("#000000"));
+        }
+    }
+}
+
+#[test]
+fn a_colour_function_over_a_bare_call_in_a_stop_row_past_the_first_is_a_colour() {
+    // The gate's three files with a `GradientStopColor` of `SHADE`, `HSL`, `HUE`, `SAT` or `LUM` over the call: a function of the default colour, not the `#N/A`
+    // carried through. Each is compared with the same function over black written out, which is what the default is.
+    let over = |call: &str| {
+        let shape = ShapeBuilder::new(1).row_formula("FillGradient", None, RowKey::Ix(1), "GradientStopColor", call, "#000000");
+        let doc = DocBuilder::new().root(first_row_only("FillGradient")).page(1, PageBuilder::new().shape(shape)).build();
+        at_row(&doc, "FillGradient", 1, "GradientStopColor")
+    };
+    for (call, black) in [
+        ("SHADE(THEMEVAL(),20)", "SHADE(RGB(0,0,0),20)"),
+        ("TINT(THEMEVAL(),50)", "TINT(RGB(0,0,0),50)"),
+        ("HSL(HUE(THEMEVAL()),SAT(THEMEVAL()),LUM(THEMEVAL())+40)", "HSL(HUE(RGB(0,0,0)),SAT(RGB(0,0,0)),LUM(RGB(0,0,0))+40)"),
+    ] {
+        let (got, want) = (over(call), over(black));
+        assert!(matches!(got, diacraft_calc::Value::Color(_)), "{call}: {got:?}");
+        assert_eq!(got, want, "{call}");
+    }
+}
 
 #[test]
 fn a_bare_call_with_no_theme_gives_the_root_styles_cell_of_the_hosts_name() {

@@ -15,6 +15,7 @@ mod grammar;
 mod limits;
 mod literals;
 mod names;
+mod page_refs;
 mod print;
 mod props;
 mod refs;

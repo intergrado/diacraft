@@ -77,6 +77,32 @@ enum Val {
     Colour(Spec),
 }
 
+/// The direction of a label's paragraphs (S-R40, of the language design): right to left where the style says `textDirection=rtl`, and left to right for every other value
+/// or none: `ltr`, `auto` and `default` (our reading: nothing says what `default` is for a label), and the vertical values, which no specification maps to a direction of the paragraph.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextDirection {
+    /// Left to right: a paragraph with `Flags` 0.
+    #[default]
+    Ltr,
+    /// Right to left: a paragraph with `Flags` 1.
+    Rtl,
+}
+
+impl TextDirection {
+    /// The direction a `textDirection` value says (case counts, as it does in a style): `rtl` is right to left, anything else left to right.
+    pub fn of(value: Option<&str>) -> TextDirection {
+        if value == Some("rtl") { TextDirection::Rtl } else { TextDirection::Ltr }
+    }
+
+    /// The `Flags` of the `Paragraph` row a paragraph of this direction has: 1 for right to left, else 0.
+    pub fn flags(self) -> u8 {
+        match self {
+            TextDirection::Ltr => 0,
+            TextDirection::Rtl => 1,
+        }
+    }
+}
+
 /// A value of a key, as a [`Style`] gives it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Value<'a> {
@@ -240,6 +266,11 @@ impl Style {
     /// `imageVerticalAlign` (S-R35): the middle unless set.
     pub fn image_vertical_align(&self) -> VAlign {
         VAlign::of(self.text(Key::ImageVerticalAlign), VAlign::Middle)
+    }
+
+    /// `textDirection` (S-R40): the direction of the label's paragraphs, left to right unless the style says `rtl`.
+    pub fn text_direction(&self) -> TextDirection {
+        TextDirection::of(self.text(Key::TextDirection))
     }
 
     /// `direction` (S-R20): east unless set.

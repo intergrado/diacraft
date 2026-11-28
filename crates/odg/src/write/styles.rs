@@ -719,6 +719,9 @@ impl Editor<'_, '_> {
         if let Some(i) = held {
             let widths = self.marker_widths_after_weight(i, edit)?;
             ops.extend(widths);
+            // The same for the form of a dash of DiaCraft's own, which follows the cap.
+            let dash = self.dash_after_cap(i, edit)?;
+            ops.extend(dash);
         }
         // The markers the style names after the edit (those of the cells that changed, and those the weight wrote again) are the save's to put in `office:styles`.
         self.note_markers(&ops);
@@ -861,7 +864,15 @@ impl Editor<'_, '_> {
         let (put, taken) = (d.cells.len().saturating_add(d.removed_cells.len()), d.sections.len().saturating_add(d.removed_sections.len()));
         self.work.charge_steps(put.saturating_add(taken).saturating_add(t1.sections.len()).saturating_add(t1.gone.len().saturating_mul(2)))?;
         add_edit(&mut t1, d);
+        // The cells of a connector's ends that the file's glue rebuilds are carried by nothing: the model's copy `follow_model` made of one the style held is let go.
+        if !t.rebuilt.is_empty() {
+            self.work.charge_steps(t1.cells.len().saturating_add(t1.gone.len()))?;
+            t1.cells.retain(|name, _| !t.rebuilt.contains(&name.as_str()));
+            t1.gone.retain(|g| !matches!(g, crate::ext::names::Gone::Cell(n) if t.rebuilt.contains(&n.as_str())));
+        }
         follow_fields(&mut t1, m, d.fields);
+        // The ends that lost their glue lose it in the data that carries it, too (a segment the file holds as a polyline).
+        t1.connects.retain(|glue| !t.unglued[usize::from(!glue.begin)]);
         self.work.charge_steps(t1.gone.len())?;
         t1.gone.sort_by_cached_key(crate::ext::names::Gone::token);
         t1.gone.dedup();
@@ -893,6 +904,7 @@ impl Editor<'_, '_> {
         match t.outline {
             super::own::OutlineWrite::No => Ok(OutlineNow::File),
             super::own::OutlineWrite::Other => Ok(OutlineNow::Unknown),
+            super::own::OutlineWrite::Whole(fp) => Ok(OutlineNow::Whole(fp)),
             super::own::OutlineWrite::Path => {
                 // Only a custom shape's path is made from the sheet by this function; any other kind of element is written in another way.
                 if !t.natives.as_ref().and_then(|n| n.outline).is_some_and(|o| o.kind == crate::ext::fingerprint::OutlineKind::Custom) {
@@ -942,11 +954,35 @@ impl Editor<'_, '_> {
         Ok(out)
     }
 
+    /// The dash of DiaCraft's own that the automatic style at `i` names (`draw:stroke-dash`), named again for the cap `edit` sets: the form of a dash follows the cap, a flat
+    /// cap drawing each mark a weight longer and each gap a weight shorter, so a cap that changes beside a dash the edit does not write again renames it. Nothing for an edit that sets the
+    /// pattern too (its own ops name the dash), a style that names no dash of DiaCraft's own (another make's lengths are the file's, and the pattern is worked out from them as they are),
+    /// and a cap that leaves the form as it was.
+    fn dash_after_cap(&mut self, i: usize, edit: &StyleEdit) -> Result<Vec<Op>, WriteError> {
+        let mut out: Vec<Op> = Vec::new();
+        let sets = |name: &str| edit.changes.iter().any(|(c, _)| *c == name);
+        if !sets("LineCap") || sets("LinePattern") {
+            return Ok(out);
+        }
+        let def = self.def_of(i)?;
+        let Some(props) = def.props.first().copied().flatten() else { return Ok(out) };
+        let tag = TagEdit::untracked(self.bytes, props.open, props.scope, self.work)?;
+        let Some(at) = tag.find(&mut self.scopes, Ns::Draw, "stroke-dash", self.work) else { return Ok(out) };
+        let Some(own) = super::dash::DashKey::of_name(&tag.text(at)) else { return Ok(out) };
+        let now = super::dash::DashKey { flat: edit.cap_is_flat(), ..own };
+        if now != own {
+            out.try_reserve(1).map_err(|_| starved("the dash of a style", 0))?;
+            out.push(Op { prop: GRAPHIC, ns: Ns::Draw, local: "stroke-dash", val: Val::Text(now.name()) });
+        }
+        Ok(out)
+    }
+
     /// Notes the line ends the `ops` name a marker of DiaCraft's own for: their elements are added to `office:styles` (`markers.rs`).
     pub(crate) fn note_markers(&mut self, ops: &[Op]) {
         for o in ops {
-            // The line ends, and the gradient and the hatch a fill names: each of DiaCraft's own name is added to `office:styles` when the file lacks it.
-            if let (Ns::Draw, "marker-start" | "marker-end" | "fill-gradient-name" | "fill-hatch-name", Val::Text(t)) = (o.ns, o.local, &o.val)
+            // The line ends, the gradient and the hatch a fill names and the dash a line names: each of DiaCraft's own name is added to `office:styles` when the file lacks it.
+            if let (Ns::Draw, "marker-start" | "marker-end" | "fill-gradient-name" | "fill-hatch-name" | "stroke-dash", Val::Text(t)) =
+                (o.ns, o.local, &o.val)
                 && let Some(def) = super::markers::Def::of_name(t)
             {
                 self.markers.insert(def);
@@ -1440,7 +1476,21 @@ fn follow_model(t1: &mut crate::ext::payload::Tier2, m: &diacraft_doc::Shape) {
                 t1.gone.push(Gone::Text);
             }
         }
+    } else if let Some(text) = m.text.as_ref().filter(|text| shows_nothing(text) && (m.master.is_some() || m.master_shape.is_some())) {
+        // A shape of a master whose text was taken away holds a text of its own with nothing in it, which says that its master's plays no part. The markup says no text, which reads
+        // back as none, and a shape with a master that holds none shows the master's: the text is carried as the model writer carries it (`ext::native::tier2`), and is no longer said to be gone.
+        t1.text = Some((**text).clone());
+        t1.gone.retain(|g| *g != Gone::Text);
     }
+}
+
+/// Whether a text has nothing in it to show: no character, no field and no markup kept whole (its markers say how the next characters are formatted, and show nothing).
+fn shows_nothing(text: &diacraft_doc::Text) -> bool {
+    text.parts.iter().all(|part| match part {
+        diacraft_doc::TextPart::Chars(s) => s.is_empty(),
+        diacraft_doc::TextPart::Cp(_) | diacraft_doc::TextPart::Pp(_) | diacraft_doc::TextPart::Tp(_) => true,
+        _ => false,
+    })
 }
 
 /// Adds what an edit carries to what a style carries: the cells put and the removals that name them taken out in one pass, then the cells it removes; the
@@ -1794,6 +1844,42 @@ mod tests {
         let mut taken = Names::default();
         taken.add_all([(Fam::Graphic, "gr1"), (Fam::Graphic, "gr3")].into_iter());
         assert_eq!(taken.next(Fam::Graphic), "gr4");
+    }
+
+    /// A shape of a master that holds a text of its own with nothing in it carries that text, because the markup says no text and a shape with a master reads none as its
+    /// master's; a shape with no master, and a text with something in it, are as they were.
+    #[test]
+    fn an_empty_text_of_a_shape_with_a_master_is_carried_and_no_longer_said_to_be_gone() {
+        use crate::ext::names::Gone;
+        use diacraft_doc::{Shape, Text, TextPart};
+        use std::sync::Arc;
+        let text = |parts: Vec<TextPart>| Some(Arc::new(Text { parts, ..Default::default() }));
+        let carried = |model: &Shape, gone: Vec<Gone>| {
+            let mut t1 = crate::ext::payload::Tier2 { gone, ..Default::default() };
+            follow_model(&mut t1, model);
+            t1
+        };
+        for (what, parts) in
+            [("no part", vec![]), ("empty characters and markers", vec![TextPart::Cp(0), TextPart::Chars(Arc::from("")), TextPart::Pp(0)])]
+        {
+            for link in [Shape { master: Some(3), ..Shape::new(1) }, Shape { master_shape: Some(4), ..Shape::new(1) }] {
+                let model = Shape { text: text(parts.clone()), ..link };
+                let t1 = carried(&model, vec![Gone::Text, Gone::Name]);
+                assert_eq!(t1.text.as_ref().map(|t| t.parts.clone()), Some(parts.clone()), "{what}: the text is carried");
+                assert_eq!(t1.gone, [Gone::Name], "{what}: the text is not gone, and the other removals stay");
+            }
+        }
+        // Nothing to override: no master.
+        let plain = Shape { text: text(vec![]), ..Shape::new(1) };
+        assert!(carried(&plain, vec![]).text.is_none(), "a shape with no master shows nothing for none or for an empty text");
+        // A shape with a master and no text of its own is read as its master's, which is what the model says.
+        let none = Shape { master: Some(3), ..Shape::new(1) };
+        assert!(carried(&none, vec![]).text.is_none());
+        // A text with a character in it is the markup's to say.
+        let said = Shape { master_shape: Some(4), text: text(vec![TextPart::Chars(Arc::from("x"))]), ..Shape::new(1) };
+        assert!(carried(&said, vec![]).text.is_none());
+        let field = Shape { master_shape: Some(4), text: text(vec![TextPart::Fld { ix: 0, text: Arc::from("") }]), ..Shape::new(1) };
+        assert!(carried(&field, vec![]).text.is_none(), "a field shows its result: it is no empty text");
     }
 
     #[test]

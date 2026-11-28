@@ -13,6 +13,9 @@
 //! nothing. The dialog opens from the File view's Options (the File view closes behind it, as the Office
 //! apps' does) and from `window.options`.
 //!
+//! **The minimum distance between doubled connection points** is a box on the Advanced page, under Editing options: a length with a unit, in millimetres
+//! at first (3 mm, the owner's default), refused in words outside 0.254 mm to 50.8 mm (0.01 in to 2 in); OK sends one `window.connectionMinGap` when it was changed, and a distance that is refused keeps the dialog open.
+//!
 //! **The window setting is not saved** (a tab shown is the window's, as the View tab's toggles are: `state.rs`); a new window starts with the tab off. The
 //! captions are ours, from the words of no source read gives the dialog's own. **Ours:** the dialog's layout, and that the other tabs are listed
 //! at all (R32 says only that the Options dialog's list orders the tabs as the row does).
@@ -20,7 +23,11 @@
 use egui::{Context, CornerRadius, Id, Key, Modifiers, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
 use serde_json::json;
 
+use diacraft_engine::draw::conn_points::{MAX_MIN_GAP, MIN_MIN_GAP};
+use diacraft_units::Unit;
+
 use crate::app::DiacraftApp;
+use crate::measure::{length_text, parse_length};
 use crate::theme::{self, Tokens, size};
 use crate::widgets::tip;
 
@@ -64,6 +71,11 @@ pub struct OptionsDialog {
     /// Whether "Select shapes partially within area" was on when the dialog opened, and what its box shows now.
     partial_start: bool,
     partial: bool,
+    /// The minimum distance between doubled connection points as the box showed it when the dialog opened, and as it shows now (a length with a unit, millimetres at first).
+    min_gap_start: String,
+    min_gap: String,
+    /// Why OK was refused: the box holds no distance in the range. Said under the box, and the dialog stays open.
+    error: Option<String>,
 }
 
 /// What a press in the dialog chose, taken after the card is drawn.
@@ -89,6 +101,16 @@ impl DiacraftApp {
         self.ui.options_dialog.as_ref().map(|d| d.partial)
     }
 
+    /// What the dialog's box "Minimum distance between doubled connection points" shows now (`None`: the dialog is closed). For tests and agents.
+    pub fn options_dialog_min_gap_text(&self) -> Option<String> {
+        self.ui.options_dialog.as_ref().map(|d| d.min_gap.clone())
+    }
+
+    /// The words OK was refused with, if it was (`None`: it was not, or the dialog is closed). For tests and agents.
+    pub fn options_dialog_error(&self) -> Option<&str> {
+        self.ui.options_dialog.as_ref().and_then(|d| d.error.as_deref())
+    }
+
     /// Opens the dialog on `tab`, with the boxes as the window has them. One that is open keeps what was chosen. The File view closes behind it.
     pub(crate) fn open_options_dialog(&mut self, tab: OptionsTab) {
         self.ui.backstage = None;
@@ -96,7 +118,17 @@ impl DiacraftApp {
             Some(dialog) => dialog.tab = tab,
             None => {
                 let (on, partial) = (self.ui.developer_tab, self.ui.select_partial);
-                self.ui.options_dialog = Some(OptionsDialog { tab, start: on, developer: on, partial_start: partial, partial });
+                let gap = length_text(self.connection_min_gap(), Unit::Millimetre);
+                self.ui.options_dialog = Some(OptionsDialog {
+                    tab,
+                    start: on,
+                    developer: on,
+                    partial_start: partial,
+                    partial,
+                    min_gap_start: gap.clone(),
+                    min_gap: gap,
+                    error: None,
+                });
             }
         }
     }
@@ -105,11 +137,23 @@ impl DiacraftApp {
         self.ui.options_dialog = None;
     }
 
-    /// OK: one `window.developer` if the Developer box was changed and one `window.selectPartially` if the Advanced box was, and the dialog closes.
+    /// OK: one `window.developer` if the Developer box was changed, one `window.selectPartially` if the Advanced box was and one `window.connectionMinGap` if the distance was, and the dialog closes. **A
+    /// distance that is no length in the range keeps the dialog open** with the words under the box, and sends nothing.
     fn apply_options_dialog(&mut self) {
         let Some((start, now, partial_start, partial)) = self.ui.options_dialog.as_ref().map(|d| (d.start, d.developer, d.partial_start, d.partial))
         else {
             return;
+        };
+        let typed = self.ui.options_dialog.as_ref().filter(|d| d.min_gap.trim() != d.min_gap_start.trim()).map(|d| parse_min_gap(&d.min_gap));
+        let gap = match typed {
+            Some(Err(words)) => {
+                if let Some(dialog) = self.ui.options_dialog.as_mut() {
+                    dialog.error = Some(words);
+                }
+                return;
+            }
+            Some(Ok(inches)) => Some(inches),
+            None => None,
         };
         self.close_options_dialog();
         if start != now
@@ -119,6 +163,11 @@ impl DiacraftApp {
         }
         if partial_start != partial
             && let Err(e) = self.execute("window.selectPartially", &json!({"on": partial}))
+        {
+            self.set_notice(&e.to_string());
+        }
+        if let Some(inches) = gap
+            && let Err(e) = self.execute("window.connectionMinGap", &json!({"inches": inches}))
         {
             self.set_notice(&e.to_string());
         }
@@ -262,10 +311,46 @@ fn advanced_page(ui: &mut Ui, t: &Tokens, dialog: &mut OptionsDialog, seen: &mut
     if check_row(ui, t, "Select shapes partially within area", dialog.partial, true, "options.partial".to_owned(), "", seen) {
         dialog.partial = !dialog.partial;
     }
+    ui.add_space(6.0);
+    min_gap_row(ui, t, dialog, seen);
     ui.add_space(8.0);
-    let words = "On, a net, Area Select and Lasso Select also select the shapes they touch, and not only the shapes wholly inside them. The choice is for this window only and is not saved. The rest of this page is not built yet.";
+    let words = "On, a net, Area Select and Lasso Select also select the shapes they touch, and not only the shapes wholly inside them. Doubling connection points (Ctrl+Alt+K) puts no point closer to another than the distance in the box, and leaves an edge with no room as it is. The choices are for this window only and are not saved. The rest of this page is not built yet.";
     let said = ui.add(egui::Label::new(RichText::new(words).font(theme::font(size::LABEL)).color(t.text_dim)).wrap());
     seen.push(("options.note".to_owned(), said.rect, true));
+}
+
+/// The longest text the box of the minimum distance takes, in characters.
+const MIN_GAP_CHARS: usize = 32;
+
+/// The row "Minimum distance between doubled connection points": a box that takes a length with a unit (a plain number is in millimetres, the unit the box
+/// shows), and the words that refused it. **Ours:** the box's place under Editing options and its caption; the box shows millimetres at first, since the dialog has no choice of units yet.
+fn min_gap_row(ui: &mut Ui, t: &Tokens, dialog: &mut OptionsDialog, seen: &mut Vec<(String, egui::Rect, bool)>) {
+    const CAPTION: &str = "Minimum distance between doubled connection points";
+    ui.label(RichText::new(CAPTION).font(theme::font(size::LABEL)).color(t.text));
+    let edit = ui.add(egui::TextEdit::singleline(&mut dialog.min_gap).desired_width(120.0).char_limit(MIN_GAP_CHARS).font(theme::font(size::LABEL)));
+    edit.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, CAPTION));
+    seen.push(("options.min_gap".to_owned(), edit.rect, true));
+    if edit.changed() {
+        dialog.error = None;
+    }
+    if let Some(error) = &dialog.error {
+        let said = ui.add(egui::Label::new(RichText::new(error).font(theme::font(size::LABEL)).color(t.notice_text)).wrap());
+        seen.push(("options.error".to_owned(), said.rect, true));
+    }
+}
+
+/// The distance the box holds, in paper inches: a length in the range of the setting (a plain number is in millimetres), else the words that say what the box takes.
+fn parse_min_gap(text: &str) -> Result<f64, String> {
+    let range = format!("Type a distance {}.", crate::edit::min_gap_range());
+    // A hair of room at both ends: 0.254 mm typed is the least distance, and its inches come out a rounding away from 0.01.
+    const SLACK: f64 = 1.0e-9;
+    match parse_length(text, Unit::Millimetre) {
+        Ok(inches) if inches.is_finite() && (MIN_MIN_GAP - SLACK..=MAX_MIN_GAP + SLACK).contains(&inches) => {
+            Ok(inches.clamp(MIN_MIN_GAP, MAX_MIN_GAP))
+        }
+        Ok(_) => Err(range),
+        Err(words) => Err(format!("{words} {range}")),
+    }
 }
 
 /// The page of Customize Ribbon: the Main Tabs, with the Developer tab's box.

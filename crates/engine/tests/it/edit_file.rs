@@ -140,8 +140,8 @@ fn our_shapes_and_connectors_join_a_drawing_from_a_file() {
     let d = s.document().unwrap();
     // Instance 11 is three wide with its pin at its middle: its right edge, point 0, is at x 7.5, and the new connector starts there.
     assert!((num(d, 14, "BeginX") - 7.5).abs() < 1e-9 && (num(d, 14, "BeginY") - 2.0).abs() < 1e-9);
-    // Deleting instance 10 frees the file connector's begin where it was.
-    run(&mut s, "shape.delete", json!({"ids": [10]}));
+    // Deleting instance 10 with `connectors: false` frees the file connector's begin where it was; by default the connector goes with it.
+    run(&mut s, "shape.delete", json!({"ids": [10], "connectors": false}));
     let d = s.document().unwrap();
     assert!(d.find_shape(Owner::Page(1), 10).is_none());
     assert_eq!(num(d, 12, "BeginX"), 3.0);

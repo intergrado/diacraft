@@ -144,9 +144,10 @@ fn a_save_from_the_model_into_another_format_writes_the_current_namespace_only_a
                 "{name} as {target}: a file of before costs the check nothing a file of now does not"
             );
             assert_eq!(saved_old["checked"]["done"], json!(true), "{name} as {target}: {}", saved_old["checked"]);
-            // What the check names is what it names of the drawing and not of the namespace: a font the machine lacks, and nothing that is DiaCraft's own data.
+            // The check names nothing: nothing that is DiaCraft's own data, and no font (the one row of a new drawing's font table, which no cell names and no `.odg` declares, is no
+            // missing font).
             let named: Vec<&str> = saved_old["checked"]["classes"].as_array().unwrap().iter().filter_map(|c| c["class"].as_str()).collect();
-            assert!(named.iter().all(|class| *class == "fonts"), "{name} as {target}: {named:?}");
+            assert!(named.is_empty(), "{name} as {target}: {named:?}");
             // And what was written is the drawing again.
             let mut again = opened(&out_old);
             assert_eq!(drawing_of(&mut again), drawing_of(&mut before), "{name} as {target}");
@@ -244,18 +245,22 @@ fn an_odg_file_of_the_old_namespace_that_an_edit_touches_keeps_the_rest_and_stil
 }
 
 #[test]
-fn a_save_of_a_vsdx_file_of_the_old_namespace_that_changed_nothing_of_the_data_writes_what_it_read_and_the_file_reads_as_before() {
+fn a_save_of_a_vsdx_file_of_the_old_namespace_that_changed_nothing_of_the_data_writes_the_part_as_it_read_it_but_for_the_declaration_and_the_file_reads_as_before()
+ {
     let dir = Dir::new();
     for name in [DRAWING_VSDX, ODG_AS_VSDX] {
         let mut s = open_bytes(&dir, "old.vsdx", &file(name));
         let before = drawing_of(&mut s);
         run(&mut s, "file.save_as", json!({ "path": dir.path("same.vsdx") }));
         let written = dir.read("same.vsdx");
-        assert_eq!(
-            texts(&written).into_iter().find(|(n, _)| n.ends_with("solution1.xml")).map(|(_, t)| t),
-            texts(&file(name)).into_iter().find(|(n, _)| n.ends_with("solution1.xml")).map(|(_, t)| t),
-            "{name}: the part is the file's"
-        );
+        // A Save As writes the file again, so the part of a build before 0.2.4, which starts with an XML declaration, is written without it; nothing else of it changes, and the namespace stays the
+        // old one (the data did not change).
+        let part_of = |bytes: &[u8]| texts(bytes).into_iter().find(|(n, _)| n.ends_with("solution1.xml")).map(|(_, t)| t);
+        let read = part_of(&file(name)).map(|text| match text.split_once("?>\r\n") {
+            Some((head, rest)) if head.starts_with("<?xml") => rest.to_owned(),
+            _ => text,
+        });
+        assert_eq!(part_of(&written), read, "{name}: the part is the file's, with no declaration");
         let mut again = opened(&dir.path("same.vsdx"));
         assert_eq!(drawing_of(&mut again), before, "{name}");
     }

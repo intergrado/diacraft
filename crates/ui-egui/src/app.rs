@@ -5,8 +5,10 @@
 //! panic guard, so a bug that panics while drawing costs one frame and shows an error, not the app.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::time::Duration;
 
+use diacraft_engine::file_access::{self, AutomationRoots};
 use diacraft_engine::{EngineError, Session, guard, shown};
 use egui::{CursorIcon, Margin, Pos2, Rect, ResizeDirection, Role, Sense, Stroke, Ui, Vec2, ViewportCommand, WidgetInfo};
 use serde_json::Value;
@@ -112,6 +114,9 @@ pub struct DiacraftApp {
     /// The page of the browser the window is in: its host, and what the window asked of it (`page_host.rs`).
     pub(crate) page: crate::page_host::Page,
     pub(crate) control: Option<ControlInbox>,
+    /// The folders the control channel's requests may read and write (`--automation-read-root`, `--automation-write-root`; `diacraft_engine::file_access`): `None`, anywhere
+    /// the person can. What the person does in the window is never confined by them.
+    pub(crate) automation_roots: Option<Arc<AutomationRoots>>,
     /// The status bar's notice, with its kind and when it was first shown (`notice.rs`).
     pub(crate) notice: Option<crate::notice::Notice>,
     pub(crate) frames: u64,
@@ -140,6 +145,11 @@ pub struct DiacraftApp {
     last_elements: Vec<Element>,
     /// Input events from the control channel, handed to egui at the start of the next frame.
     pub(crate) synthetic: Vec<egui::Event>,
+    /// The person's settings, when the program that made the window opened them (`prefs_host.rs`): saved after a quiet period and when the window closes.
+    pub(crate) prefs: Option<crate::prefs_host::Profile<crate::prefs_host::WindowPrefs>>,
+    /// The frame now being drawn was handed input from the control channel ([`DiacraftApp::next_input_frame`]), so it runs under the automation roots, and so does everything
+    /// it does (a save, an export, a card answered, a thread started). Set when the input is handed over, and put down when the pass that draws with it has ended.
+    pub(crate) synthetic_frame: bool,
 }
 
 impl DiacraftApp {
@@ -160,6 +170,7 @@ impl DiacraftApp {
             hosting: crate::file_host::Hosting::default(),
             page: crate::page_host::Page::default(),
             control,
+            automation_roots: None,
             notice: None,
             frames: 0,
             ui_panics: 0,
@@ -178,6 +189,8 @@ impl DiacraftApp {
             drawn: Vec::new(),
             last_elements: Vec::new(),
             synthetic: Vec::new(),
+            prefs: None,
+            synthetic_frame: false,
         };
         // The View settings of the drawing the window starts on are the drawing's.
         app.showed_drawings_window_settings();
@@ -216,6 +229,19 @@ impl DiacraftApp {
             {
                 self.set_notice(&note);
             }
+            // So does what a doubling or a halving of connection points did (`edit/conn_edges.rs`).
+            if id == "window.connectionPointsDo"
+                && let Some(note) = self.ui.points_note.take()
+            {
+                self.set_notice(&note);
+            }
+        }
+        // The `SETF` calls an edit dropped past the caps ("dropped with a note") are said in the status bar, in the words the engine puts in the answer's notes: a person
+        // who typed a call that sets itself off sees that it stopped, and why.
+        if let Ok(value) = &result
+            && let Some(dropped) = value.get("setf_dropped").and_then(Value::as_u64)
+        {
+            self.set_notice(&diacraft_engine::setf_dropped_words(dropped));
         }
         if let (Ok(_), Some(growth)) = (&result, growth) {
             self.settle_growth(growth);
@@ -321,6 +347,19 @@ impl DiacraftApp {
     pub fn with_notice(mut self, notice: impl AsRef<str>) -> DiacraftApp {
         self.set_notice(notice.as_ref());
         self
+    }
+
+    /// Keeps the files the control channel's requests reach to `roots` (the flags `--automation-read-root` and `--automation-write-root`): a request that names a file to read
+    /// or write runs with them in force, on the thread it runs on and on any thread it starts, and what the person does in the window (its dialogs, a file named on the command
+    /// line, a drop) does not. `None`: no roots, so any path the person can reach, as it has been.
+    pub fn with_automation_roots(mut self, roots: Option<Arc<AutomationRoots>>) -> DiacraftApp {
+        self.automation_roots = roots;
+        self
+    }
+
+    /// The roots the control channel is kept to, if any.
+    pub fn automation_roots(&self) -> Option<&Arc<AutomationRoots>> {
+        self.automation_roots.as_ref()
     }
 
     /// How long a `ui.screenshot` waits for a frame to be presented before it is an error.
@@ -504,8 +543,14 @@ impl DiacraftApp {
     /// The input events the control channel queued for the next frame: up to and including the first press, release or key, so
     /// the events after it meet a frame that has seen the pointer where it was. The desktop app hands them to egui from
     /// `raw_input_hook`; a test that drives the window by hand does the same.
+    ///
+    /// **A frame that is handed any of it is under the automation roots** (`synthetic_frame`): the input is the control channel's, so what it presses, types or answers is a
+    /// request's, and a key that saves or a button that replaces a file is kept to the folders granted as the request that queued it was.
     pub fn next_input_frame(&mut self) -> Vec<egui::Event> {
         let n = self.synthetic_frame_len();
+        if n > 0 {
+            self.synthetic_frame = true;
+        }
         self.synthetic.drain(..n).collect()
     }
 
@@ -560,6 +605,8 @@ impl DiacraftApp {
         if let Some(page) = self.ui.backstage {
             self.backstage(ui, tokens, page);
         } else {
+            // The ShapeSheet's controls in the ribbon ask what the selection allows: the sheet is read before they do (`sheet/mod.rs`).
+            self.sheet_prepare();
             self.ribbon_panel(ui);
             // The formula bar, directly under the ribbon body while a ShapeSheet is open (`sheet/area.rs`).
             self.sheet_bar_panel(ui, tokens);
@@ -630,10 +677,16 @@ impl eframe::App for DiacraftApp {
             app.advance_print(ctx);
             app.advance_stencil_dialog(ctx);
             app.advance_insert(ctx);
+            app.advance_prefs(ctx);
             app.drain_control(ctx);
             app.advance_screenshot(ctx);
             app.advance_quit(ctx);
         });
+    }
+
+    /// The window closes: the settings are saved now, whatever the quiet period says.
+    fn on_exit(&mut self) {
+        self.flush_prefs();
     }
 
     /// Hands the input the control channel queued to egui, as if the pointer or keyboard had made it.
@@ -648,32 +701,47 @@ impl eframe::App for DiacraftApp {
         self.frames += 1;
         let ctx = ui.ctx().clone();
         let tokens = Tokens::for_theme(ctx.theme());
+        // A frame that was handed the control channel's input is drawn under the roots: what that input does is a request's (gaps A2 and A5).
+        let roots = if self.synthetic_frame { self.automation_roots.clone() } else { None };
         self.guarded(&ctx, "window", |app| {
-            app.run_probe(Stage::Frame);
-            // A value typed in a field of a pane is sent before the title bar, the ribbon or the File view act on a click that leaves the field: a Save,
-            // an Undo or an Open that the click makes finds the value in the drawing (`panes/fields.rs`).
-            app.flush_edits(&ctx);
-            app.watch_fonts(&ctx);
-            app.prepare_shape_filter_keys(&ctx);
-            // Escape dismisses the splash before anything else can take it (`splash.rs`).
-            app.splash_keys(&ctx);
-            // The ShapeSheet's keys while it has the focus: before the shortcuts and the drawing's keys, which then stand aside (`sheet/keys.rs`).
-            app.run_sheet_keys(&ctx);
-            app.run_shortcuts(&ctx);
-            app.run_edit_keys(&ctx);
-            // A notice whose time is up is not drawn; one the frame shows starts its time, and the frame asks for the next at the moment it ends.
-            app.expire_notice();
-            app.draw(ui, tokens);
-            app.time_notice(&ctx);
-            // What this frame did to the drawing (an edit, a save, a new drawing) is known to the browser now, which asks before the page is left while there are changes.
-            app.sync_leave_guard();
-            // What a copy or a cut put aside for the system clipboard (`clipboard.rs`): the text of the labels, where egui carries text or an image.
-            if let Some(text) = app.take_system_copy() {
-                ctx.copy_text(text);
-            }
+            file_access::confine(roots.as_ref(), || app.draw_frame(ui, &ctx, tokens));
         });
+        // A pass that is to be drawn again with the same input (egui's `request_discard`) is still the frame that was handed it.
+        if !ctx.will_discard() {
+            self.synthetic_frame = false;
+        }
         if !self.synthetic.is_empty() {
             ctx.request_repaint();
+        }
+    }
+}
+
+impl DiacraftApp {
+    /// What a frame does, in the order it does it (the window's `ui`, run under the automation roots when the frame was handed the control channel's input).
+    fn draw_frame(&mut self, ui: &mut Ui, ctx: &egui::Context, tokens: Tokens) {
+        self.run_probe(Stage::Frame);
+        // A key press that typed a character (AltGr's) is the text's: out of the frame before any key, field or text box reads it (`shortcuts.rs`).
+        crate::shortcuts::let_typed_text_win(ctx);
+        // A value typed in a field of a pane is sent before the title bar, the ribbon or the File view act on a click that leaves the field: a Save,
+        // an Undo or an Open that the click makes finds the value in the drawing (`panes/fields.rs`).
+        self.flush_edits(ctx);
+        self.watch_fonts(ctx);
+        self.prepare_shape_filter_keys(ctx);
+        // Escape dismisses the splash before anything else can take it (`splash.rs`).
+        self.splash_keys(ctx);
+        // The ShapeSheet's keys while it has the focus: before the shortcuts and the drawing's keys, which then stand aside (`sheet/keys.rs`).
+        self.run_sheet_keys(ctx);
+        self.run_shortcuts(ctx);
+        self.run_edit_keys(ctx);
+        // A notice whose time is up is not drawn; one the frame shows starts its time, and the frame asks for the next at the moment it ends.
+        self.expire_notice();
+        self.draw(ui, tokens);
+        self.time_notice(ctx);
+        // What this frame did to the drawing (an edit, a save, a new drawing) is known to the browser now, which asks before the page is left while there are changes.
+        self.sync_leave_guard();
+        // What a copy or a cut put aside for the system clipboard (`clipboard.rs`): the text of the labels, where egui carries text or an image.
+        if let Some(text) = self.take_system_copy() {
+            ctx.copy_text(text);
         }
     }
 }

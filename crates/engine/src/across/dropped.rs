@@ -262,6 +262,45 @@ mod tests {
         assert!(restore(back, &original, left, &[]).is_none(), "one shape was left out and none was found to put back");
     }
 
+    /// **A list a Save As rebuilds keeps its shapes one for one**: the unknown nodes among the shapes of a page and of a group are counted by the shapes before them, and a
+    /// rebuild that gave each shape back as itself or as the shape it was, in its place, leaves every count right. The rebuild is held to that here: no shape comes or goes, whichever
+    /// shapes it changes, and the nodes it does not touch are the very nodes.
+    #[test]
+    fn a_rebuilt_list_holds_the_same_shapes_in_the_same_places_so_the_nodes_among_them_stay_after_the_shapes_they_followed() {
+        use diacraft_doc::{Kept, Passthrough, Placed, RawNode};
+
+        use super::super::hold::rewrite_shapes;
+
+        let held = |after: &[u32]| {
+            Passthrough::from_nodes(after.iter().map(|a| Placed { after: *a, node: RawNode::Comment(Arc::from(format!("after {a}"))) }).collect())
+        };
+        let mut group = Shape::new(3);
+        for id in [31, 32, 33] {
+            group.children.push(Arc::new(Shape::new(id)));
+        }
+        group.ext.make_mut().vsdx.0.push((Arc::from("Shapes"), Kept { kept: held(&[0, 1, 3]), ..Kept::default() }));
+        let mut page = Page::new(1, "Page-1");
+        for shape in [Shape::new(1), Shape::new(2), group, Shape::new(4), Shape::new(5)] {
+            page.shapes.push(Arc::new(shape));
+        }
+        page.ext.make_mut().vsdx.0.push((Arc::from("Shapes"), Kept { kept: held(&[0, 2, 5]), ..Kept::default() }));
+        let mut doc = Document::new_blank();
+        doc.pages.set(0, Arc::new(page)).unwrap();
+        // The change replaces shapes 2 and 4 and the second member of the group, and leaves the rest as they are.
+        let mut steps = 0u64;
+        let mut change = |shape: &Shape| matches!(shape.id, 2 | 4 | 32).then(|| Shape { name: Some(Arc::from("changed")), ..Shape::clone(shape) });
+        let rebuilt = rewrite_shapes(&doc, true, &mut change, &mut steps).unwrap().expect("shapes were changed");
+        let ids = |list: &ShapeList| list.iter().map(|s| s.id).collect::<Vec<_>>();
+        let (before, after) = (doc.pages.get(0).unwrap(), rebuilt.pages.get(0).unwrap());
+        assert_eq!(ids(&after.shapes), ids(&before.shapes), "no shape comes or goes");
+        assert_eq!(after.shapes.get(1).unwrap().name.as_deref(), Some("changed"));
+        let (was, now) = (before.shapes.get(2).unwrap(), after.shapes.get(2).unwrap());
+        assert_eq!(ids(&now.children), ids(&was.children), "nor a member of a group");
+        assert_eq!(now.children.get(1).unwrap().name.as_deref(), Some("changed"));
+        assert_eq!(after.ext, before.ext, "the nodes among the shapes of the page are the very nodes");
+        assert_eq!(now.ext, was.ext, "and those among the members of the group");
+    }
+
     #[test]
     fn keep_parts_puts_back_only_what_the_asked_options_left_out_and_the_file_lacks() {
         let before = SharedVec::from_vec(vec![

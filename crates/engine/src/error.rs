@@ -60,11 +60,13 @@ pub enum OpenProblem {
     TooBig,
     /// It is a package that is damaged, or has XML the reader refuses.
     Damaged,
+    /// The automation roots keep this command from reading the path: it is outside the folders the person granted for reading, or none was granted (gaps A2, `file_access`).
+    NotGranted,
 }
 
 impl OpenProblem {
     /// A fixed word for the problem, as it is written in a reply: `not_found`, `denied`, `not_a_file`, `file_too_large`, `out_of_memory`,
-    /// `unreadable`, `not_a_package`, `too_big`, `damaged`.
+    /// `unreadable`, `not_a_package`, `too_big`, `damaged`, `not_granted`.
     pub fn word(self) -> &'static str {
         match self {
             OpenProblem::NotFound => "not_found",
@@ -76,6 +78,7 @@ impl OpenProblem {
             OpenProblem::NotAPackage => "not_a_package",
             OpenProblem::TooBig => "too_big",
             OpenProblem::Damaged => "damaged",
+            OpenProblem::NotGranted => "not_granted",
         }
     }
 }

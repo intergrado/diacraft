@@ -175,3 +175,65 @@ fn effective_rows_and_a_resolve_over_a_section_of_320_000_stay_near_linear() {
     // Counted: the section holds its own table, so the 2,000 resolvers (and the rows read before them) built it once.
     assert_eq!(diacraft_doc::work::row_tables_built(), 1, "a table of the rows for each resolver");
 }
+
+/// A row a write makes goes among the `Geometry` rows by its `IX` (they rise through the section, and a program that draws the rows in the file's order draws the path in it),
+/// and **the table of the rows is kept as it goes**: 20,000 writes that each put a row just ahead of the last row of 50,000 are not 20,000 rebuilds of a table of 50,000 keys.
+#[test]
+fn twenty_thousand_writes_that_each_make_a_row_ahead_of_the_last_of_50_000_do_not_rebuild_the_table_for_each() {
+    let mut section = Section::new("Geometry", Some(0));
+    let mut rows: Vec<Arc<Row>> = (0..49_999u32).map(|i| Arc::new(row(i * 10, "1"))).collect();
+    rows.push(Arc::new(row(4_000_000_000, "1")));
+    section.rows = rows.into_iter().collect();
+    let mut sheet = Sheet::default();
+    sheet.sections.push(Arc::new(section));
+    let key = SectionKey::new("Geometry", Some(0));
+    let write = |sheet: &mut Sheet, ix: u32| {
+        let addr = CellAddr { section: Some(key.clone()), row: Some(RowKey::Ix(ix)), cell: CellName::new("X") };
+        sheet.set_cell(&addr, Cell::constant(Value::from_text("w"))).unwrap();
+    };
+    // The table is built by the first lookup of a section of more than 32 rows, and by no write after it.
+    assert_eq!(x_of(&sheet, 10).as_deref(), Some("1"));
+    diacraft_doc::work::reset();
+    for i in 0..20_000u32 {
+        write(&mut sheet, 600_000 + i);
+    }
+    // Rising keys that each go ahead of the ones just made, and ahead of the last row: the place is found through the last rows.
+    for j in 0..50u32 {
+        write(&mut sheet, 700_000 - j);
+    }
+    let tables = diacraft_doc::work::row_tables_built();
+    assert!(tables <= 1, "{tables} tables of the rows built by 20,050 writes that put a row among the last");
+    let rows = &sheet.sections[0].rows;
+    assert_eq!(rows.len(), 50_000 + 20_050);
+    let ixs: Vec<u32> = rows.iter().map(|r| r.ix.unwrap()).collect();
+    assert!(ixs.windows(2).all(|pair| pair[0] < pair[1]), "the rows rise by their IX");
+    // The table agrees with the rows: every row is found by its key, the shifted ones too.
+    for (at, r) in rows.iter().enumerate().skip(49_000) {
+        assert_eq!(sheet.sections[0].row(&RowKey::Ix(r.ix.unwrap())).map(|found| Arc::ptr_eq(found, r)), Some(true), "row {at}");
+    }
+    assert_eq!(x_of(&sheet, 600_000 + 19_999).as_deref(), Some("w"));
+    assert_eq!(x_of(&sheet, 700_000).as_deref(), Some("w"));
+    assert_eq!(x_of(&sheet, 4_000_000_000).as_deref(), Some("1"));
+    assert_eq!(x_of(&sheet, 100).as_deref(), Some("1"));
+}
+
+/// The table kept as a row is put among the last still finds the first of two rows with one key, as a scan does (a hostile file may hold two).
+#[test]
+fn a_row_made_ahead_of_two_rows_with_one_key_leaves_the_first_of_them_the_one_found() {
+    let mut section = Section::new("Geometry", Some(0));
+    let mut rows: Vec<Arc<Row>> = (0..=36u32).map(|i| Arc::new(row(i, "1"))).collect();
+    rows.extend([Arc::new(row(38, "first")), Arc::new(row(38, "second")), Arc::new(row(4_000_000_000, "last"))]);
+    section.rows = rows.into_iter().collect();
+    let mut sheet = Sheet::default();
+    sheet.sections.push(Arc::new(section));
+    assert!(sheet.sections[0].rows.len() > diacraft_doc::ROW_SCAN_LIMIT, "the section holds a table");
+    assert_eq!(x_of(&sheet, 38).as_deref(), Some("first"), "the table is built here");
+    let addr = CellAddr { section: Some(SectionKey::new("Geometry", Some(0))), row: Some(RowKey::Ix(37)), cell: CellName::new("X") };
+    sheet.set_cell(&addr, Cell::constant(Value::from_text("new"))).unwrap();
+    let ixs: Vec<Option<u32>> = sheet.sections[0].rows.iter().map(|r| r.ix).skip(36).collect();
+    assert_eq!(ixs, [Some(36), Some(37), Some(38), Some(38), Some(4_000_000_000)], "the new row goes ahead of the two");
+    assert_eq!(x_of(&sheet, 37).as_deref(), Some("new"));
+    assert_eq!(x_of(&sheet, 38).as_deref(), Some("first"));
+    assert_eq!(x_of(&sheet, 4_000_000_000).as_deref(), Some("last"));
+    assert_eq!(x_of(&sheet, 36).as_deref(), Some("1"));
+}

@@ -10,7 +10,7 @@
 //! itself behind an `Arc` in its shape, page, master or style (`shape.rs`), so the older document keeps the old sheet.
 
 use std::collections::{BTreeMap, HashMap};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Bound, Deref, DerefMut};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::DocError;
@@ -35,6 +35,9 @@ pub const MAX_SECTIONS_PER_SHEET: usize = 8_192;
 pub const MAX_ROWS_PER_SECTION: usize = 320_000;
 /// A section of this many rows or fewer is searched by a scan; a larger one has its lookup table.
 pub const ROW_SCAN_LIMIT: usize = 32;
+/// How many rows from the end a new row's place is looked for through ([`Section::place_for`]): past them the row goes at the end, so that a section whose rows are far out of order costs a write
+/// no more than one look through this many.
+const ORDER_SCAN: usize = 64;
 /// Longest name of a cell, section or row, in bytes.
 pub const MAX_NAME_BYTES: usize = 1_024;
 
@@ -102,6 +105,12 @@ pub struct Row {
 }
 
 impl Row {
+    /// Puts `cell` under `name` among the row's cells, and moves the nodes that stood among them: a new cell goes ahead of the nodes that stood after the cell before it. → the cell it
+    /// replaced. Refused past [`MAX_CELLS_PER_CONTAINER`].
+    pub fn put_cell(&mut self, name: &CellName, cell: Cell) -> Result<Option<Cell>, DocError> {
+        put(&mut self.cells, &mut self.passthrough, name, cell)
+    }
+
     /// The row's key in a section called `section`: by `N` where the section is keyed by name, by `IX` where it is keyed by
     /// index, and by `N` when there is one in a section keyed either way. `None` for a row with
     /// neither.
@@ -196,6 +205,29 @@ impl Rows {
         {
             Arc::make_mut(table).keys.entry(key).or_insert(at);
         }
+    }
+
+    /// Puts `row` at `at` (at the end when that is past the rows), **keeping the table (if one is held) as it goes**: the places the table holds for the rows from `at` on move up by one
+    /// and the new key is put in, so the cost is the rows from `at` to the end and not one rebuild of the table. A key that two rows hold keeps the place of the first of them, as a scan finds it.
+    fn insert_keeping_table(&mut self, at: usize, row: Row, section: &str) {
+        let at = at.min(self.list.len());
+        let key = row.key(section);
+        let held = self.table.0.get_mut().unwrap_or_else(PoisonError::into_inner);
+        if let Some(table) = held.as_mut() {
+            let keys = &mut Arc::make_mut(table).keys;
+            // From the last row down, so that a row never moves a place the row after it has not yet left.
+            for (place, later) in self.list.iter().enumerate().skip(at).rev() {
+                if let Some(later_key) = later.key(section)
+                    && keys.get(&later_key) == Some(&place)
+                {
+                    keys.insert(later_key, place + 1);
+                }
+            }
+            if let Some(key) = key {
+                keys.entry(key).or_insert(at);
+            }
+        }
+        self.list.insert(at, Arc::new(row));
     }
 
     /// The row at `at`, to change its cells, without dropping the table: its key is not to be changed through it.
@@ -296,11 +328,115 @@ impl Section {
         self.rows.table(self.name.as_str()).keys.get(key).copied()
     }
 
-    /// Puts `row` after the others, keeping the lookup table (if one is held) as it goes, so that a run of writes that each make a row is
-    /// not a run of rebuilds.
-    fn push_row(&mut self, row: Row) {
-        self.rows.push_keeping_table(row, self.name.as_str());
+    /// Where a row with this key that a write makes goes, in a `Geometry` section, so that **the `IX` of the rows rise through the section**: after the last row whose `IX`
+    /// is not above the key's, looked for from the end through at most [`ORDER_SCAN`] rows, and at the end for a key that is a name, a section whose rows are not in order that far back and a row that
+    /// is above all of them (the way a run of writes in order goes, at the cost of one look). **Only `Geometry`'s rows are placed**: the order of its rows is the order of its path, which a program
+    /// that draws the rows as the file lists them draws (a row of an instance made by a resize after another resize's rows, `IX` 2 after 3 and 4, is the edge it draws last), where the rows of the other
+    /// sections are found by their keys, and are put after the others as they always were.
+    fn place_for(&self, key: &RowKey) -> usize {
+        let RowKey::Ix(ix) = key else { return self.rows.len() };
+        if self.name.as_str() != "Geometry" {
+            return self.rows.len();
+        }
+        let (mut at, mut scanned) = (self.rows.len(), 0usize);
+        while let Some(before) = at.checked_sub(1) {
+            match self.rows.get(before).and_then(|row| row.ix) {
+                Some(held) if held > *ix => {
+                    at = before;
+                    scanned += 1;
+                    if scanned >= ORDER_SCAN {
+                        return self.rows.len();
+                    }
+                }
+                _ => break,
+            }
+        }
+        at
     }
+
+    /// Puts `row` after the others, keeping the lookup table (if one is held) as it goes, so that a run of writes that each make a row is
+    /// not a run of rebuilds. The nodes that stood among the section's children move with it: **a row at the end goes ahead of a node that trailed the last row**.
+    fn push_row(&mut self, row: Row) {
+        let old_len = self.rows.len();
+        self.rows.push_keeping_table(row, self.name.as_str());
+        self.passthrough.children_inserted(self.cells.len(), old_len, &[old_len], true);
+    }
+
+    /// Puts `row` among the section's rows at `at` (at the end when that is past them), and moves the nodes that stood among the section's children: a node that stood after the row
+    /// before it now stands after the new row, and one that stood before the first row stands there still (see the module `places`). The lookup table of the rows is dropped.
+    pub fn insert_row(&mut self, at: usize, row: Arc<Row>) {
+        let old_len = self.rows.len();
+        let at = at.min(old_len);
+        self.rows.insert(at, row);
+        self.passthrough.children_inserted(self.cells.len(), old_len, &[at], true);
+    }
+
+    /// Puts `row` at `at` as [`Section::insert_row`] does, and **keeps the lookup table of the rows** ([`Rows::insert_keeping_table`]): what a write that makes a row in the middle of a section
+    /// uses, so that a run of them is not a run of rebuilds.
+    fn insert_row_keeping_table(&mut self, at: usize, row: Row) {
+        let old_len = self.rows.len();
+        let at = at.min(old_len);
+        self.rows.insert_keeping_table(at, row, self.name.as_str());
+        self.passthrough.children_inserted(self.cells.len(), old_len, &[at], true);
+    }
+
+    /// Puts `row` after the others ([`Section::insert_row`]): it goes ahead of a node that trailed the last row.
+    pub fn append_row(&mut self, row: Arc<Row>) {
+        self.insert_row(usize::MAX, row);
+    }
+
+    /// Puts the rows in the order of `key` when they are not (a stable sort), **keeping each node that stood among them with the row it followed**: the nodes go where the rows they
+    /// followed went, in the order of their places ([`Passthrough::children_followed`]). A section whose rows are in order is not touched. The lookup table of the rows is dropped
+    /// when they move.
+    pub fn sort_rows_by_key<K: Ord>(&mut self, key: impl Fn(&Row) -> K) {
+        if self.rows.iter().zip(self.rows.iter().skip(1)).all(|(a, b)| key(a) <= key(b)) {
+            return;
+        }
+        let mut order: Vec<usize> = (0..self.rows.len()).collect();
+        order.sort_by_key(|at| self.rows.get(*at).map(|row| key(row)));
+        let sorted: Vec<Arc<Row>> = order.iter().filter_map(|at| self.rows.get(*at).cloned()).collect();
+        if !self.passthrough.is_empty() {
+            let before: Vec<usize> = (0..order.len()).collect();
+            self.passthrough.children_followed(self.cells.len(), &before, &order);
+        }
+        *self.rows = sorted;
+    }
+
+    /// Puts `cell` under `name` among the section's own cells (the flags of a `Geometry` section), and moves the nodes that stood among them: a new cell goes ahead of the nodes that
+    /// stood after the cell before it. → the cell it replaced. Refused past [`MAX_CELLS_PER_CONTAINER`].
+    pub fn put_cell(&mut self, name: &CellName, cell: Cell) -> Result<Option<Cell>, DocError> {
+        put(&mut self.cells, &mut self.passthrough, name, cell)
+    }
+
+    /// Takes out the rows at the places `gone` (in rising order) of the section's rows, and moves the nodes that stood among the section's children: those that stood after a row that
+    /// went stand after the row before it. The lookup table of the rows is dropped.
+    pub fn remove_rows(&mut self, gone: &[usize]) {
+        if gone.is_empty() {
+            return;
+        }
+        let old_len = self.rows.len();
+        let (mut next, mut at) = (0usize, 0usize);
+        self.rows.retain(|_| {
+            let out = gone.get(next) == Some(&at);
+            next += usize::from(out);
+            at += 1;
+            !out
+        });
+        self.passthrough.children_removed(self.cells.len(), old_len, gone);
+    }
+
+    /// Keeps the rows `keep` says and takes out the others, in **one pass** over the rows, moving the nodes as [`Section::remove_rows`] does (a `retain` for each row would make the
+    /// lookup table again for each).
+    pub fn retain_rows(&mut self, mut keep: impl FnMut(&Row) -> bool) {
+        let gone: Vec<usize> = self.rows.iter().enumerate().filter(|(_, row)| !keep(row)).map(|(at, _)| at).collect();
+        self.remove_rows(&gone);
+    }
+}
+
+/// Where [`Sheet::row_slot`] found, or made, a row: the place of its section among the sheet's, and of the row among the section's.
+pub(crate) struct RowSlot {
+    pub section: usize,
+    pub row: usize,
 }
 
 /// Which section a cell is in: its name and, for `Geometry`, its `IX`.
@@ -456,7 +592,7 @@ impl Sheet {
     pub fn set_cell(&mut self, addr: &CellAddr, cell: Cell) -> Result<Option<Cell>, DocError> {
         check_name(addr.cell.as_str(), "a cell name")?;
         let Some(key) = &addr.section else {
-            return put(&mut self.cells, &addr.cell, cell);
+            return put(&mut self.cells, &mut self.passthrough, &addr.cell, cell);
         };
         check_name(key.name.as_str(), "a section name")?;
         if let Some(RowKey::Name(n)) = &addr.row {
@@ -472,16 +608,27 @@ impl Sheet {
         let Some(row_key) = &addr.row else {
             // Checked before the copy: a write that is refused copies nothing.
             check_room(&section.cells, &addr.cell)?;
-            return put(&mut Arc::make_mut(section).cells, &addr.cell, cell);
+            let section = Arc::make_mut(section);
+            return put(&mut section.cells, &mut section.passthrough, &addr.cell, cell);
         };
         check_room_for_row(section, section.row_position(row_key), &addr.cell)?;
-        put(&mut self.row_mut(key, row_key)?.cells, &addr.cell, cell)
+        let row = self.row_mut(key, row_key)?;
+        put(&mut row.cells, &mut row.passthrough, &addr.cell, cell)
     }
 
     /// The row with this key of this section, to change, making the section and the row if the sheet has neither. Only what is
     /// on the way to the row is copied. Refuses a name that is empty or enormous and a section or row past the limits, and then
     /// changes nothing.
+    ///
+    /// **The unknown nodes that stood among the sheet's and the section's children move with what it makes** (a node goes on following the child it followed: see the module
+    /// `places`). The nodes of the shape or the style that holds the sheet are not the sheet's: a writer that holds one uses [`Shape::counted_sheet`](crate::Shape::counted_sheet).
     pub fn row_mut(&mut self, key: &SectionKey, row: &RowKey) -> Result<&mut Row, DocError> {
+        let slot = self.row_slot(key, row)?;
+        self.row_at_mut(&slot)
+    }
+
+    /// Finds the row with this key of this section, making the section and the row if the sheet has neither ([`Sheet::row_mut`] without the borrow of the row).
+    pub(crate) fn row_slot(&mut self, key: &SectionKey, row: &RowKey) -> Result<RowSlot, DocError> {
         check_name(key.name.as_str(), "a section name")?;
         if let RowKey::Name(n) = row {
             check_name(n, "a row name")?;
@@ -496,22 +643,43 @@ impl Sheet {
         let row_at = match existing {
             Some(at) => at,
             None => {
-                section.push_row(new_row(row));
-                section.rows.len().saturating_sub(1)
+                let end = section.rows.len();
+                let place = section.place_for(row);
+                if place >= end {
+                    section.push_row(new_row(row));
+                    end
+                } else {
+                    section.insert_row_keeping_table(place, new_row(row));
+                    place
+                }
             }
         };
-        section.rows.slot_mut(row_at).map(Arc::make_mut).ok_or(DocError::NoSuchSheet)
+        Ok(RowSlot { section: at, row: row_at })
+    }
+
+    /// The row a [`RowSlot`] says, to change.
+    pub(crate) fn row_at_mut(&mut self, slot: &RowSlot) -> Result<&mut Row, DocError> {
+        let section = self.sections.get_mut(slot.section).map(Arc::make_mut).ok_or(DocError::NoSuchSheet)?;
+        section.rows.slot_mut(slot.row).map(Arc::make_mut).ok_or(DocError::NoSuchSheet)
     }
 
     /// The section with this key, to change (to mark it deleted, to give it cells of its own), making it if the sheet has none. Only what
     /// is on the way to it is copied. Refuses a name that is empty or enormous and a section past the limit, and then changes nothing.
+    ///
+    /// **The unknown nodes that stood among the sheet's children move with a section it makes**: it goes after the others, ahead of a node that trailed them (see the module
+    /// `places`). The nodes of the shape or the style that holds the sheet are not the sheet's: a writer that holds one uses [`Shape::counted_sheet`](crate::Shape::counted_sheet).
     pub fn section_mut(&mut self, key: &SectionKey) -> Result<&mut Section, DocError> {
-        check_name(key.name.as_str(), "a section name")?;
-        let at = self.section_at_or_new(key)?;
+        let at = self.section_slot(key)?;
         self.sections.get_mut(at).map(Arc::make_mut).ok_or(DocError::NoSuchSheet)
     }
 
-    /// Where the section with this key is in the list, making it if it is not there.
+    /// Finds the section with this key, making it if the sheet has none ([`Sheet::section_mut`] without the borrow of the section).
+    pub(crate) fn section_slot(&mut self, key: &SectionKey) -> Result<usize, DocError> {
+        check_name(key.name.as_str(), "a section name")?;
+        self.section_at_or_new(key)
+    }
+
+    /// Where the section with this key is in the list, making it if it is not there: after the others, and the sheet's nodes move with it.
     fn section_at_or_new(&mut self, key: &SectionKey) -> Result<usize, DocError> {
         if let Some(at) = self.sections.iter().position(|s| key.matches(s)) {
             return Ok(at);
@@ -519,8 +687,43 @@ impl Sheet {
         if self.sections.len() >= MAX_SECTIONS_PER_SHEET {
             return Err(DocError::Limit { what: "sections in a sheet", max: MAX_SECTIONS_PER_SHEET });
         }
+        let old_len = self.sections.len();
         self.sections.push(Arc::new(Section::new(key.name.as_str(), key.ix)));
-        Ok(self.sections.len().saturating_sub(1))
+        self.passthrough.children_inserted(self.cells.len(), old_len, &[old_len], false);
+        Ok(old_len)
+    }
+
+    /// Puts `section` among the sheet's sections at `at` (at the end when that is past them), and moves the sheet's nodes: a node that stood after the section before it now stands after the
+    /// new one, and a node that stood right after the cells stands ahead of it. → where it went. The caller holds the limit ([`MAX_SECTIONS_PER_SHEET`]).
+    pub fn insert_section(&mut self, at: usize, section: Arc<Section>) -> usize {
+        let old_len = self.sections.len();
+        let at = at.min(old_len);
+        self.sections.insert(at, section);
+        self.passthrough.children_inserted(self.cells.len(), old_len, &[at], false);
+        at
+    }
+
+    /// Puts `section` after the others ([`Sheet::insert_section`]).
+    pub fn push_section(&mut self, section: Arc<Section>) -> usize {
+        self.insert_section(usize::MAX, section)
+    }
+
+    /// Takes out every section `is_it` says, and moves the sheet's nodes that stood after them with the section before. → the places the sections had, in rising order (for the nodes of
+    /// an element that holds the sheet, [`Counted`](crate::Counted)).
+    pub fn remove_sections(&mut self, is_it: impl Fn(&Section) -> bool) -> Vec<usize> {
+        let gone: Vec<usize> = self.sections.iter().enumerate().filter(|(_, s)| is_it(s)).map(|(at, _)| at).collect();
+        if gone.is_empty() {
+            return gone;
+        }
+        let (offset, old_len) = (self.cells.len(), self.sections.len());
+        self.sections.retain(|s| !is_it(s));
+        self.passthrough.children_removed(offset, old_len, &gone);
+        gone
+    }
+
+    /// How many of the sheet's cells have a name before `name`: the place the cell has, or would have, among them.
+    pub(crate) fn rank_of(&self, name: &CellName) -> usize {
+        rank_in(&self.cells, name.as_str())
     }
 
     /// Takes out the cell at `addr`, returning it. An emptied row or section is left, as the file would hold it.
@@ -529,15 +732,16 @@ impl Sheet {
             return None;
         }
         let Some(key) = &addr.section else {
-            return self.cells.remove(addr.cell.as_str());
+            return take(&mut self.cells, &mut self.passthrough, &addr.cell);
         };
         let at = self.sections.iter().position(|s| key.matches(s))?;
         let section = Arc::make_mut(self.sections.get_mut(at)?);
         let Some(row_key) = &addr.row else {
-            return section.cells.remove(addr.cell.as_str());
+            return take(&mut section.cells, &mut section.passthrough, &addr.cell);
         };
         let row_at = section.row_position(row_key)?;
-        Arc::make_mut(section.rows.slot_mut(row_at)?).cells.remove(addr.cell.as_str())
+        let row = Arc::make_mut(section.rows.slot_mut(row_at)?);
+        take(&mut row.cells, &mut row.passthrough, &addr.cell)
     }
 }
 
@@ -580,7 +784,31 @@ fn check_room_for_row(section: &Arc<Section>, existing: Option<usize>, name: &Ce
     }
 }
 
-fn put(cells: &mut Cells, name: &CellName, cell: Cell) -> Result<Option<Cell>, DocError> {
+/// How many of `cells` have a name before `name`: the place the cell has, or would have, among them.
+fn rank_in(cells: &Cells, name: &str) -> usize {
+    cells.range::<str, _>((Bound::Unbounded, Bound::Excluded(name))).count()
+}
+
+/// Puts `cell` under `name` in the cells of an element, and moves `nodes`, the element's unknown nodes, which count its cells first: **a new cell goes ahead of the nodes that stood after the
+/// cell before it**, a cell that was there already is replaced and nothing moves.
+fn put(cells: &mut Cells, nodes: &mut Passthrough, name: &CellName, cell: Cell) -> Result<Option<Cell>, DocError> {
     check_room(cells, name)?;
-    Ok(cells.insert(name.clone(), cell))
+    if nodes.is_empty() || cells.contains_key(name.as_str()) {
+        return Ok(cells.insert(name.clone(), cell));
+    }
+    let (old_len, rank) = (cells.len(), rank_in(cells, name.as_str()));
+    cells.insert(name.clone(), cell);
+    nodes.children_inserted(0, old_len, &[rank], true);
+    Ok(None)
+}
+
+/// Takes the cell `name` out of the cells of an element, and moves `nodes`: those that stood after it stand after the cell before it.
+fn take(cells: &mut Cells, nodes: &mut Passthrough, name: &CellName) -> Option<Cell> {
+    if nodes.is_empty() {
+        return cells.remove(name.as_str());
+    }
+    let (old_len, rank) = (cells.len(), rank_in(cells, name.as_str()));
+    let gone = cells.remove(name.as_str())?;
+    nodes.children_removed(0, old_len, &[rank]);
+    Some(gone)
 }

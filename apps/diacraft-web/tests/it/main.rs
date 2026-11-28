@@ -9,11 +9,13 @@
 mod canvas_size;
 mod deep_files;
 mod fonts;
+mod glyphs;
 mod html;
 mod loading;
 mod manifest;
 mod native;
 mod page;
+mod prefs;
 mod trunk;
 
 use std::path::PathBuf;

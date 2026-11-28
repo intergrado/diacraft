@@ -76,7 +76,7 @@ fn straight_lines_join_the_two_ends_with_one_leg_and_keep_it_when_a_shape_moves(
 }
 
 /// The stroke of the connector's rows as the geometry crate draws them: the points of the flattened path.
-fn drawn(d: &Document, id: u32) -> Vec<P> {
+pub(crate) fn drawn(d: &Document, id: u32) -> Vec<P> {
     let sheet = SheetRef::Shape(d.find_shape(Owner::Page(1), id).unwrap());
     let res = Resolver::new(d);
     let rows = res.effective_rows(&sheet, &SectionKey::new("Geometry", Some(0))).unwrap();
@@ -119,7 +119,7 @@ fn drawn(d: &Document, id: u32) -> Vec<P> {
     points
 }
 
-fn distance_to(points: &[P], target: P) -> f64 {
+pub(crate) fn distance_to(points: &[P], target: P) -> f64 {
     points
         .windows(2)
         .map(|w| {

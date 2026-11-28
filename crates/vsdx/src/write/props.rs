@@ -9,12 +9,13 @@
 use std::sync::Arc;
 
 use diacraft_doc::{CustomProp, DocProps, Format, Kept, RawAttrs, RawElement, RawNode};
-use diacraft_opc::xml::{El, Node};
+use diacraft_opc::xml::{self, El, Node, XmlLimits};
+use diacraft_opc::{Package, TargetMode};
 use diacraft_sheetxml::build::weave;
 
 use super::WriteError;
 use super::build::{charge_kept, element, take_kept_for, with_kept_attrs};
-use super::parts::Tree;
+use super::parts::{OD, Tree, rel_type};
 
 pub(super) const NS_APP: &str = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties";
 pub(super) const NS_CUSTOM: &str = "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties";
@@ -25,7 +26,21 @@ const NS_TERMS: &str = "http://purl.org/dc/terms/";
 const NS_XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
 /// The name DiaCraft states as the application that wrote a file: never `the reference app`.
-pub(super) const APPLICATION: &str = "DiaCraft";
+pub(super) const APPLICATION: &str = diacraft_doc::DIACRAFT_APPLICATION;
+
+/// Whether the package says a DiaCraft build wrote it: its extended properties name the program `DiaCraft` (`Application`), as the properties of every file the writers make do
+/// A package with no such part, or one that is no usable XML, is not a file of ours (a save into a file gives its text cells the unit only
+/// in a file of ours).
+pub(super) fn names_diacraft(pkg: &Package) -> bool {
+    let Ok(rels) = pkg.rels("/") else { return false };
+    let reached: Vec<(&str, &str)> =
+        rels.items.iter().filter(|r| r.mode != TargetMode::External).filter_map(|r| Some((r.ty.as_str(), r.target.as_deref()?))).collect();
+    let rel = rel_type(OD, "extended-properties");
+    let Some(part) = crate::props::property_part(&reached, &rel, crate::props::CT_APP, |part| pkg.content_type(part)) else { return false };
+    let Some(bytes) = pkg.part(part) else { return false };
+    let Ok(root) = xml::parse_with(bytes, &XmlLimits::default()) else { return false };
+    root.is("Properties") && root.child("Application").is_some_and(|app| app.text().trim() == APPLICATION)
+}
 
 /// The format id of a user-defined property (ECMA-376 Part 1 section 22.3), and of `RecalcDocument`.
 const USER_PROPERTY_FMTID: &str = "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}";

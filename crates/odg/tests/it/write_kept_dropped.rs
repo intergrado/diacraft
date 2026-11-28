@@ -543,15 +543,16 @@ fn a_row_shared_by_two_paragraphs_is_one_copy_and_an_edit_the_style_says_already
     assert!(!again.edited && again.bytes == saved.bytes);
 }
 
-/// The alignment row is fed by `HorzAlign` and by `Flags` (`start` and `end` swap with the writing mode): the writing mode edited with the alignment as it was
-/// writes the alignment again, in words that do not swap (`left`), so that it reads back as the model has it, and the second save is no edit.
-fn a_writing_mode_edit_writes_the_alignment_again_in_words_that_do_not_swap(save: &Saver) {
+/// The alignment row is fed by `HorzAlign` and by `Flags` (`start` and `end` follow the writing direction, R21 as amended it): the writing mode
+/// edited with the alignment as it was writes the alignment again, in a right-to-left paragraph as `start` for 0 and `end` for 2, so that it reads back as the model has it, and the
+/// second save is no edit.
+fn a_writing_mode_edit_writes_the_alignment_again_as_start_and_end(save: &Saver) {
     let mut o = open(&paragraph_drawing());
     edit_cell(&mut o, "Paragraph", 0, "Flags", 1.0);
     let saved = save(&o.doc, &o.bytes, &o.index).unwrap_or_else(|e| panic!("{e}"));
     let after = part(&saved.bytes, "content.xml");
     let (_, style) = paragraph_style(&after);
-    assert!(style.contains(r#"style:writing-mode="rl-tb""#) && style.contains(r#"fo:text-align="left""#) && !style.contains("start"), "{style}");
+    assert!(style.contains(r#"style:writing-mode="rl-tb""#) && style.contains(r#"fo:text-align="start""#) && !style.contains("left"), "{style}");
     // What is no cell's stays: the line spacing and the tab stop.
     assert!(style.contains(r#"style:line-spacing="0.1cm""#) && style.contains(r#"style:leader-style="dotted""#), "{style}");
     let back = open_bytes(saved.bytes.clone());
@@ -584,10 +585,7 @@ const CASES: [Case; 12] = [
         "a_row_shared_by_two_paragraphs_is_one_copy_and_an_edit_the_style_says_already_is_none",
         a_row_shared_by_two_paragraphs_is_one_copy_and_an_edit_the_style_says_already_is_none,
     ),
-    (
-        "a_writing_mode_edit_writes_the_alignment_again_in_words_that_do_not_swap",
-        a_writing_mode_edit_writes_the_alignment_again_in_words_that_do_not_swap,
-    ),
+    ("a_writing_mode_edit_writes_the_alignment_again_as_start_and_end", a_writing_mode_edit_writes_the_alignment_again_as_start_and_end),
 ];
 
 #[test]
@@ -646,8 +644,8 @@ fn a_row_shared_by_two_paragraphs_is_one_copy_and_an_edit_the_style_says_already
 }
 
 #[test]
-fn a_writing_mode_edit_writes_the_alignment_again_in_words_that_do_not_swap_test() {
-    a_writing_mode_edit_writes_the_alignment_again_in_words_that_do_not_swap(&real);
+fn a_writing_mode_edit_writes_the_alignment_again_as_start_and_end_test() {
+    a_writing_mode_edit_writes_the_alignment_again_as_start_and_end(&real);
 }
 
 /// The echo control: a writer that gives the original back fails every case, and the real writer passes each.

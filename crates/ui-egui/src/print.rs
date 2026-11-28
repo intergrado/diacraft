@@ -268,8 +268,9 @@ pub struct PrintState {
     /// The Save dialog of a PDF, on its thread.
     pdf_pick: Option<Receiver<Option<PathBuf>>>,
     running: Option<Running>,
-    /// `print.start` asked for a print: the next frame begins it (the window command has no context to start a thread with).
-    want: Option<Option<String>>,
+    /// `print.start` asked for a print: the next frame begins it (the window command has no context to start a thread with). The file a program names is written in that
+    /// later frame, so the automation roots in force when it asked go with it (`file_access::ScopeHandle`).
+    want: Option<(Option<String>, diacraft_engine::file_access::ScopeHandle)>,
     /// The faces the job's text is laid out in.
     pub(crate) fonts: PrintFonts,
     /// How the last job ended, in words.
@@ -418,8 +419,10 @@ impl DiacraftApp {
 
     /// Whether Print can be pressed now: a print can begin, and a PDF has a dialog to name its file with.
     pub fn can_print(&mut self) -> bool {
+        // A PDF is named with a file dialog, and one file dialog is open at a time (`file_dialog.rs`); a printer needs none.
         self.print_ready()
-            && (self.ui.print.choices.destination != Some(Destination::Pdf) || self.ui.print.pdf_picker.is_some() || self.has_file_host())
+            && (self.ui.print.choices.destination != Some(Destination::Pdf)
+                || ((self.ui.print.pdf_picker.is_some() || self.has_file_host()) && self.file_dialog().is_none()))
     }
 
     /// Whether the File view can show the Print page: a drawing is open.
@@ -539,8 +542,8 @@ impl DiacraftApp {
                 Err(TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(250)),
             }
         }
-        if let Some(path) = self.ui.print.want.take() {
-            self.begin_print(ctx, path);
+        if let Some((path, scope)) = self.ui.print.want.take() {
+            scope.run(|| self.begin_print(ctx, path));
         }
         self.advance_print_job(ctx);
     }
@@ -584,6 +587,10 @@ impl DiacraftApp {
     /// Print: begins the job for the destination. A PDF with no path asks for one with the Save dialog; a program's path skips it.
     pub(crate) fn begin_print(&mut self, ctx: &Context, path: Option<String>) {
         self.commit_pending_text();
+        // A PDF with no name asks with a file dialog, and one is open at a time (`file_dialog.rs`): the person is told why nothing happened.
+        if path.is_none() && self.ui.print.choices.destination == Some(Destination::Pdf) && self.refuse_while_a_file_dialog_is_open() {
+            return;
+        }
         // The button needs a dialog for a PDF; a program that names the file does not.
         if !(if path.is_some() { self.print_ready() } else { self.can_print() }) {
             return;
@@ -649,6 +656,7 @@ impl DiacraftApp {
         }
         if typed && crate::ask::is_there(&text) {
             self.saving.replacing = Some(crate::ask::Replacing::Print(PathBuf::from(text)));
+            self.saving.replacing_scope = diacraft_engine::file_access::ScopeHandle::capture();
             ctx.request_repaint();
             return;
         }
@@ -860,7 +868,7 @@ impl DiacraftApp {
                 });
             }
         }
-        self.ui.print.want = Some(path);
+        self.ui.print.want = Some((path, diacraft_engine::file_access::ScopeHandle::capture()));
         Ok(())
     }
 

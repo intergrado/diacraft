@@ -41,7 +41,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "Paste",
             ["Home", "Clipboard"],
             Some("Cmd+V"),
-            "page: whole number, optional, the id of the page to paste on (default: the page the shapes were copied from); \
+            "page: whole number, optional, the id of the page to paste on (default: the page the shapes were copied from, else the first page that is not a background); \
              x: number, optional, inches from the page's left edge where the middle of the pasted shapes goes (give x and y, or neither: \
              the shapes are then a quarter of an inch right and down of where they were, a step more for each paste of the same copy); \
              y: number, optional, inches from the page's bottom edge, see x",
@@ -127,7 +127,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let page = match optional_whole(p, "page", ID)? {
         Some(page) => page,
         None if doc.page(clip.source_page()).is_some() => clip.source_page(),
-        None => doc.pages.iter().next().map(|first| first.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
+        None => doc.first_foreground_page().map(|first| first.id).ok_or_else(|| bad(ID, "the document has no pages"))?,
     };
     let k = page_scale(s, page);
     let placement = match at {

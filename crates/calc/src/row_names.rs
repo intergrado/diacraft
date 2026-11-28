@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use diacraft_doc::Section;
+use diacraft_doc::{RowKey, Section};
 
 /// Where a row stands among the rows that would match: the sheet it is on (0 is the nearest), its `IX` or else its place in the section, and its
 /// place. Lower wins.
@@ -82,6 +82,26 @@ impl RowNames {
             Some((_, spelling)) => Spelled::As(Arc::clone(spelling)),
             None => Spelled::Nowhere,
         }
+    }
+}
+
+/// The spelling of the row that `name` names in the section the `layers` make up (nearest first, as `diacraft_doc::Resolver::section_layers` lists them), for a caller that has
+/// no evaluator and no budget: the commands that give a row by name (`sheet.add_row`'s `after` and `before`, `sheet.delete_row`) and the cell `sheet.cell` and `sheet.set_cell`
+/// address through a row's name, so that a command and a formula read the same row.
+///
+/// **A row that spells `name` exactly is the row, a deleted one too**: the name is not read as its twin in another case for a row that was deleted here, as the evaluator reads
+/// a row deleted at its nearest step (`Lookup::Deleted`), not as the twin. Otherwise the row that wins among those that spell it in another case, as the evaluator's index of
+/// the section's rows ranks them (the nearer sheet, then the lower `IX`, then the earlier place). `None` when no row has the name in any letter case. The listing costs one pass
+/// over the rows of the layers, which the caller has already made.
+pub fn spell_row(layers: &[&Arc<Section>], name: &str) -> Option<Arc<str>> {
+    let exact = RowKey::name(name);
+    if layers.iter().any(|section| section.row(&exact).is_some()) {
+        return Some(Arc::from(name));
+    }
+    match RowNames::build(layers, &mut |_| true).spell(name, &fold(name)) {
+        Spelled::As(spelling) => Some(spelling),
+        Spelled::Exact => Some(Arc::from(name)),
+        Spelled::Nowhere => None,
     }
 }
 
@@ -163,6 +183,35 @@ mod tests {
         });
         assert_eq!(spell(&n, "ONE"), Spelled::As(Arc::from("One")));
         assert_eq!(spell(&n, "THREE"), Spelled::Nowhere);
+    }
+
+    #[test]
+    fn spell_row_gives_the_exact_spelling_first_even_of_a_deleted_row_and_else_the_best_twin() {
+        // The exact spelling wins over a twin that comes first and has the lower `IX`.
+        let a = section(&[("tally9", Some(1)), ("TALLY9", Some(5)), ("Tally9", Some(7))]);
+        assert_eq!(spell_row(&[&a], "Tally9").as_deref(), Some("Tally9"));
+        assert_eq!(spell_row(&[&a], "TALLY9").as_deref(), Some("TALLY9"));
+        // A name no row spells exactly is the twin of the lowest `IX`, and with none the first place, as a formula reads it.
+        assert_eq!(spell_row(&[&a], "TaLLy9").as_deref(), Some("tally9"));
+        let b = section(&[("Cost", None), ("COST", None)]);
+        assert_eq!(spell_row(&[&b], "cost").as_deref(), Some("Cost"));
+        assert_eq!(spell_row(&[&a], "Tally8"), None);
+        // A deleted row that spells the name is still the row of that spelling: the name is not read as its live twin.
+        let mut s = Section::new("User", None);
+        s.rows.push(Arc::new(Row { name: Some(Arc::from("Gone")), del: true, ..Row::default() }));
+        s.rows.push(Arc::new(Row { name: Some(Arc::from("GONE")), ..Row::default() }));
+        let s = Arc::new(s);
+        assert_eq!(spell_row(&[&s], "Gone").as_deref(), Some("Gone"));
+        assert_eq!(spell_row(&[&s], "gone").as_deref(), Some("GONE"));
+    }
+
+    #[test]
+    fn spell_row_takes_the_exact_spelling_on_a_farther_sheet_before_a_twin_on_a_nearer_one() {
+        let near = section(&[("TALLY9", Some(9))]);
+        let far = section(&[("Tally9", Some(0))]);
+        assert_eq!(spell_row(&[&near, &far], "Tally9").as_deref(), Some("Tally9"));
+        assert_eq!(spell_row(&[&near, &far], "tally9").as_deref(), Some("TALLY9"));
+        assert_eq!(spell_row(&[], "tally9"), None);
     }
 
     #[test]

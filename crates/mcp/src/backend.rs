@@ -53,11 +53,17 @@ impl Backend {
         matches!(self, Backend::Remote(_))
     }
 
-    /// A short description for the person and for the client: `headless`, or where the app is.
+    /// A short description for the person and for the client: `headless` and the folders its files are kept to (the roots in force on the thread that asks: the server loop's),
+    /// or where the app is, whose own roots `ui_inspect` tells (`automation`).
     pub fn describe(&self) -> String {
         match self {
-            Backend::Headless(_) => "headless (no window)".to_owned(),
-            Backend::Remote(client) => format!("the DiaCraft app at {}", shown(client.addr(), MOST_NAME)),
+            Backend::Headless(_) => match diacraft_engine::file_access::current() {
+                Some(roots) => format!("headless (no window); files are kept to the folders granted: {}", roots.describe()),
+                None => "headless (no window); files are not limited to any folder".to_owned(),
+            },
+            Backend::Remote(client) => {
+                format!("the DiaCraft app at {} (the folders it may read and write are in ui_inspect, automation)", shown(client.addr(), MOST_NAME))
+            }
         }
     }
 

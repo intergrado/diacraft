@@ -105,7 +105,8 @@ fn every_masters_geometry_is_a_closed_path_inside_its_box() {
 
 #[test]
 fn every_master_has_four_or_more_connection_points_inside_its_box_with_a_direction() {
-    for spec in all_masters().filter(|spec| !spec.is_connector()) {
+    // The seven stencils of the first batches (a title or a key of the second batch has no connection point: the catalogue's invariants hold its masters to their own rule).
+    for spec in first_seven().into_iter().flat_map(|s| s.masters()).filter(|spec| !spec.is_connector()) {
         let (doc, id) = with_master(spec);
         let res = Resolver::new(&doc);
         let sheet = SheetRef::Shape(ShapeRef::top(Owner::Master(id), 0));
@@ -136,7 +137,8 @@ fn every_masters_saved_values_are_what_its_formulas_give() {
 
 #[test]
 fn every_formula_of_a_master_parses() {
-    for spec in all_masters() {
+    // The seven stencils of the first batches: a group master keeps its formulas in its members, and the catalogue's invariants parse every formula of every master.
+    for spec in first_seven().into_iter().flat_map(|s| s.masters()) {
         let (doc, id) = with_master(spec);
         let master = doc.master(id).unwrap();
         let shape = master.shapes.get(0).unwrap();
@@ -171,7 +173,12 @@ fn a_master_is_copied_in_once_and_found_again() {
     assert_eq!(doc.masters.len(), 2);
     let master = doc.master(a).unwrap();
     assert_eq!(master.name.as_deref(), Some("Rectangle"));
-    assert!(master.unique_id.is_some() && master.raw.get("BaseID") == master.unique_id.as_deref());
+    // The `BaseID` is the master's fixed identity and the `UniqueID` is one of its own.
+    assert!(
+        master.unique_id.is_some()
+            && master.raw.get("BaseID") == Some(rect.guid().as_str())
+            && master.unique_id.as_deref() != master.raw.get("BaseID")
+    );
     // Ids follow the highest one in use.
     let mut other = Document::new_blank();
     other.add_master(diacraft_doc::Master { id: 41, ..diacraft_doc::Master::default() }).unwrap();
@@ -462,7 +469,9 @@ fn each_flowchart_master_is_copied_in_once_beside_the_basic_ones() {
         ids.push(ensure_master(&mut doc, spec).unwrap());
     }
     let count = all_masters().count();
-    assert_eq!(doc.masters.len(), count);
+    // A master that brings another (a composition line brings its line end) leaves that one in the document too, once.
+    let brought = all_masters().flat_map(|m| m.more.brings.iter()).collect::<std::collections::BTreeSet<_>>().len();
+    assert_eq!(doc.masters.len(), count + brought);
     ids.sort_unstable();
     ids.dedup();
     assert_eq!(ids.len(), count, "every master has its own id");
@@ -470,7 +479,7 @@ fn each_flowchart_master_is_copied_in_once_beside_the_basic_ones() {
         let again = ensure_master(&mut doc, spec).unwrap();
         assert_eq!(doc.master(again).unwrap().name.as_deref(), Some(spec.name));
     }
-    assert_eq!(doc.masters.len(), count, "nothing is added twice");
+    assert_eq!(doc.masters.len(), count + brought, "nothing is added twice");
 }
 
 // ---- which built-in stencils are open -------------------------------------------------------------------------------------------
@@ -525,5 +534,36 @@ fn any_run_of_opens_and_sets_leaves_distinct_catalogue_ids() {
         seen.dedup();
         assert_eq!(seen.len(), open.len(), "{open:?}");
         assert!(open.iter().all(|id| ids.contains(id)), "{open:?}");
+    }
+}
+
+/// A number is the text of a value to nine places, and **a zero is `0` whichever way it came**: a negative zero, and a number a hair below 0 that the rounding takes to it, are
+/// no `-0` in a cell. A point of a route carried into a connector's own frame and out again is such a hair, and `-0` against `0` made two writes of one route differ.
+#[test]
+fn a_number_is_nine_places_and_a_zero_is_never_negative() {
+    use super::number_text;
+    for zero in [0.0, -0.0, -1.0e-12, 1.0e-12, -4.9e-10, 4.9e-10, -1.0e-300, f64::MIN_POSITIVE, -f64::MIN_POSITIVE] {
+        let text = number_text(zero);
+        assert_eq!(text, "0", "{zero:e}");
+    }
+    // Every other number is as it was: its sign, its nine places, no noise.
+    for (n, text) in [
+        (1.0, "1"),
+        (-1.0, "-1"),
+        (0.5, "0.5"),
+        (-0.5, "-0.5"),
+        (0.30000000000000004, "0.3"),
+        (-0.30000000000000004, "-0.3"),
+        (5.1e-10, "1e-9"),
+        (-5.1e-10, "-1e-9"),
+        (1.0e-9, "1e-9"),
+        (-1.0e-9, "-1e-9"),
+        (1234.567891234, "1234.567891234"),
+    ] {
+        assert_eq!(number_text(n), text, "{n:e}");
+    }
+    // What is no number is 0.
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(number_text(bad), "0");
     }
 }

@@ -5,7 +5,7 @@
 //! Ctrl+Home and Ctrl+End the corners of the sheet; Page Up and Page Down scroll a screen and the selection with it, and Ctrl with them a screen sideways; Enter goes down (a
 //! spreadsheet's way: ours, R44 leaves it `unknown`); **F2** edits the formula's text, a **printable key** starts an edit with its character, **Delete and Backspace** with none (Enter
 //! then clears the cell); Ctrl+C copies the formula and Ctrl+V commits the clipboard's text as one; **Space or Enter on a header** folds the section or opens it; **Shift+F10** or the
-//! F10 opens the cell's right-click menu; **Escape gives the focus back to the drawing**.
+//! F10 opens the cell's right-click menu; **Ctrl+E opens the Edit Formula card**; **Escape gives the focus back to the drawing**.
 //!
 //! **Inside an edit**: Enter commits and goes down, Tab commits and goes right, Escape cancels, and in typing mode the arrows commit and move where in F2 mode they move the caret.
 //!
@@ -14,6 +14,7 @@
 //! fold or a change of the list's width keeps the selection where it was.
 
 use diacraft_engine::doc::Document;
+use egui::os::OperatingSystem;
 use egui::{Context, Event, InputState, Key, Modifiers};
 use serde_json::{Value, json};
 
@@ -22,6 +23,7 @@ use super::place_params;
 use super::scroll::Scroll;
 use super::view::{Sel, Stop, View};
 use crate::app::DiacraftApp;
+use crate::shortcuts::{consume_exact, types_text};
 
 /// The most lines a move looks through to find a place to stop at: a table's line of titles and a note have none, and a block of pairs is a few lines.
 const MAX_SCAN: u64 = 8_192;
@@ -192,13 +194,14 @@ struct Nav {
     space: bool,
     escape: bool,
     menu: bool,
+    formula: bool,
     typed: Option<String>,
     copy: bool,
     paste: Option<String>,
 }
 
 /// Takes the keys of the sheet from this frame's input: each is removed from it, so that the drawing's keys and egui's own never see it.
-fn take_nav(i: &mut InputState, header: bool) -> Nav {
+fn take_nav(i: &mut InputState, os: OperatingSystem, header: bool) -> Nav {
     let mut nav = Nav::default();
     for (key, dir) in [(Key::ArrowUp, Dir::Up), (Key::ArrowDown, Dir::Down), (Key::ArrowLeft, Dir::Left), (Key::ArrowRight, Dir::Right)] {
         if i.consume_key(Modifiers::SHIFT, key) || i.consume_key(Modifiers::NONE, key) {
@@ -212,13 +215,14 @@ fn take_nav(i: &mut InputState, header: bool) -> Nav {
     } else {
         None
     };
-    nav.ctrl_home = i.consume_key(Modifiers::COMMAND, Key::Home);
-    nav.ctrl_end = i.consume_key(Modifiers::COMMAND, Key::End);
+    // The chords with Ctrl are matched exactly: Ctrl and Alt together can be AltGr (`shortcuts::consume_exact`).
+    nav.ctrl_home = consume_exact(i, Modifiers::COMMAND, Key::Home);
+    nav.ctrl_end = consume_exact(i, Modifiers::COMMAND, Key::End);
     nav.home = i.consume_key(Modifiers::NONE, Key::Home);
     nav.end = i.consume_key(Modifiers::NONE, Key::End);
-    nav.ctrl_page = if i.consume_key(Modifiers::COMMAND, Key::PageDown) {
+    nav.ctrl_page = if consume_exact(i, Modifiers::COMMAND, Key::PageDown) {
         Some(true)
-    } else if i.consume_key(Modifiers::COMMAND, Key::PageUp) {
+    } else if consume_exact(i, Modifiers::COMMAND, Key::PageUp) {
         Some(false)
     } else {
         None
@@ -235,6 +239,7 @@ fn take_nav(i: &mut InputState, header: bool) -> Nav {
     nav.delete = i.consume_key(Modifiers::NONE, Key::Delete) | i.consume_key(Modifiers::NONE, Key::Backspace);
     nav.escape = i.consume_key(Modifiers::NONE, Key::Escape);
     nav.menu = i.consume_key(Modifiers::SHIFT, Key::F10);
+    nav.formula = i.consume_key(Modifiers::COMMAND, Key::E);
     if header {
         // Space folds a header; the text event that comes with the key is no character to type.
         nav.space = i.consume_key(Modifiers::NONE, Key::Space);
@@ -242,7 +247,8 @@ fn take_nav(i: &mut InputState, header: bool) -> Nav {
             i.events.retain(|e| !matches!(e, Event::Text(t) if t == " "));
         }
     }
-    let plain = !(i.modifiers.ctrl || i.modifiers.alt || i.modifiers.command || i.modifiers.mac_cmd);
+    // A character typed (AltGr's and a Mac's Option's too), and not what a chord leaves behind.
+    let plain = types_text(os, &i.modifiers);
     let mut typed = None;
     i.events.retain(|e| match e {
         Event::Copy => {
@@ -273,6 +279,7 @@ struct EditKeys {
     tab: Option<bool>,
     dir: Option<Dir>,
     f2: bool,
+    formula: bool,
 }
 
 fn take_edit(i: &mut InputState, typing: bool) -> EditKeys {
@@ -300,6 +307,7 @@ fn take_edit(i: &mut InputState, typing: bool) -> EditKeys {
         }
     }
     keys.f2 = i.consume_key(Modifiers::NONE, Key::F2);
+    keys.formula = i.consume_key(Modifiers::COMMAND, Key::E);
     keys
 }
 
@@ -380,7 +388,10 @@ impl DiacraftApp {
         {
             e.typing = false;
         }
-        let taken = keys.escape || keys.enter.is_some() || keys.tab.is_some() || keys.dir.is_some() || keys.f2;
+        let taken = keys.escape || keys.enter.is_some() || keys.tab.is_some() || keys.dir.is_some() || keys.f2 || keys.formula;
+        if keys.formula {
+            self.sheet_formula_key();
+        }
         if keys.escape {
             self.sheet_cancel_edit();
         } else if let Some(shift) = keys.enter {
@@ -406,7 +417,9 @@ impl DiacraftApp {
         let active = self.ui.sheet.active;
         let selected = self.ui.sheet.tabs.get(active).and_then(|t| t.selected.clone());
         let header = matches!(selected, Some(Sel::Header { .. }));
-        let nav = ctx.input_mut(|i| take_nav(i, header));
+        // Before the input is borrowed: `Context::os` reads the context, which `input_mut` holds.
+        let os = ctx.os();
+        let nav = ctx.input_mut(|i| take_nav(i, os, header));
         let mut moved = false;
         for dir in &nav.dirs {
             self.sheet_move_selection(match dir {
@@ -460,6 +473,9 @@ impl DiacraftApp {
             let at = self.sheet_selected_at().unwrap_or_default();
             self.ui.sheet.menu = Some(at);
         }
+        if nav.formula {
+            self.sheet_formula_key();
+        }
         if nav.f2 {
             self.sheet_try_begin(Begin::Text { in_bar: false });
         }
@@ -478,7 +494,7 @@ impl DiacraftApp {
         if nav.escape {
             self.ui.sheet.focus = false;
         }
-        if moved || nav.f2 || nav.delete || nav.menu || nav.escape {
+        if moved || nav.f2 || nav.delete || nav.menu || nav.escape || nav.formula {
             ctx.request_repaint();
         }
     }

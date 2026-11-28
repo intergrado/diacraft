@@ -9,13 +9,18 @@
 use std::time::{Duration, Instant};
 
 use diacraft_opc::Package;
-use diacraft_testkit::package::{MasterSpec, OD, PageSpec, Pkg, VsdxBuilder};
+use diacraft_testkit::package::{DIR, MasterSpec, OD, PageSpec, Pkg, VsdxBuilder};
 use diacraft_vsdx::{Limits, ReadReport, read, read_partial};
 use proptest::prelude::*;
 
 /// A package that has a little of everything the reader reads.
 pub(crate) fn seed_package() -> Pkg {
     seed_builder().pkg()
+}
+
+/// The seed with its theme part listed in the content types and no relationship to it: the reader finds the theme by its content type.
+pub(crate) fn orphan_seed_package() -> Pkg {
+    seed_package().without_rels_of_type(&format!("{DIR}/document.xml"), &format!("{OD}theme"))
 }
 
 /// The builder of [`seed_package`], for a test that changes the variant or adds to it.
@@ -273,6 +278,37 @@ proptest! {
         check(&bytes);
     }
 
+    /// The same, where the theme part has no relationship and is found by its content type: the part is mutated like any other, and so are the content types.
+    #[test]
+    fn mutated_xml_where_the_theme_has_no_relationship_never_panics_or_hangs(seed in any::<u64>()) {
+        let mut g = Gen(seed | 1);
+        let names = orphan_seed_package().part_names();
+        let mut chosen = vec![format!("{DIR}/theme/theme1.xml"), names[g.below(names.len())].clone()];
+        if g.below(3) == 0 {
+            chosen.push(names[g.below(names.len())].clone());
+        }
+        let bytes = orphan_seed_package().map_parts(|name, part| {
+            if chosen.iter().any(|c| c == name) {
+                let mut inner = Gen(g.next() | 1);
+                mutate(&mut inner, part);
+            }
+        }).build();
+        check(&bytes);
+    }
+
+    /// The same, read in a pool of any size.
+    #[test]
+    fn mutated_orphan_theme_read_in_a_pool_of_any_size_makes_no_tree_the_pool_does_not_hold(seed in any::<u64>(), pool in 0u64..600_000) {
+        let mut g = Gen(seed | 1);
+        let bytes = orphan_seed_package().map_parts(|name, part| {
+            if *name == format!("{DIR}/theme/theme1.xml") {
+                let mut inner = Gen(g.next() | 1);
+                mutate(&mut inner, part);
+            }
+        }).build();
+        check_pool(&bytes, pool);
+    }
+
     /// A package that carries the data of the other format, one of its parts mutated (the solution part, its relationships, a part of DiaCraft's own, the types) and packed
     /// again with right checksums: it reads, or is refused, never panics or hangs, reads the same twice, and what reads is written again.
     #[test]
@@ -309,6 +345,29 @@ proptest! {
         doc.vsdx = Some(std::sync::Arc::new(diacraft_doc::VsdxHeld::default()));
         model_writer_holds(&doc, None);
     }
+
+    /// Any sheet edit of rows and sections of the seed package, and a second one after it (the property of `vsdx_roundtrip`'s kind 5): each save is a package that reads or a
+    /// refusal in words that is not the writer's own check and says nothing of unknown nodes.
+    #[test]
+    fn any_edit_of_the_rows_and_sections_of_the_seed_package_is_saved_twice_or_refused_in_words(data in proptest::collection::vec(any::<u8>(), 0..8)) {
+        let bytes = seed_package().build();
+        let (doc, _) = crate::read_ok(&bytes);
+        if let Err(why) = fuzz_edits::save_after_edit(&bytes, &doc, &data) {
+            panic!("{why}");
+        }
+    }
+}
+
+/// The edits and the two saves of the fuzz target `vsdx_roundtrip` (kind 5), the very source it is built from.
+#[path = "../../fuzz/src/edits.rs"]
+mod fuzz_edits;
+
+#[test]
+fn the_orphan_seed_reads_its_theme_and_says_it_had_no_relationship() {
+    let (doc, report) = crate::read_ok(&orphan_seed_package().build());
+    assert_eq!((doc.pages.len(), doc.masters.len(), doc.themes.len()), (2, 1, 1));
+    assert_eq!(report.warning_count("theme_without_relationship"), 1, "{:?}", report.warnings);
+    assert_eq!(report.warnings.len(), 1, "that, and nothing else: {:?}", report.warnings);
 }
 
 #[test]

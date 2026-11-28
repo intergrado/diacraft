@@ -91,7 +91,9 @@ fn typed_fields(doc: &Document) -> Vec<El> {
     put("meta:creation-date", p.created.as_deref().unwrap_or_default());
     put("dc:date", p.modified.as_deref().unwrap_or_default());
     put("meta:print-date", p.last_printed.as_deref().unwrap_or_default());
-    put("dc:language", p.language.as_deref().unwrap_or_default());
+    // The drawing's language is the core language as the model holds it, and, where it holds none, `DocLangID` when that is a language tag.
+    let language = p.language.as_deref().map(str::to_owned).or_else(|| crate::lang::declared(doc).map(|tag| tag.to_string()));
+    put("dc:language", language.as_deref().unwrap_or_default());
     for custom in &p.custom {
         let prop = odf_custom(custom);
         let mut attrs = vec![("meta:name".to_owned(), prop.name.to_string())];
@@ -178,6 +180,8 @@ fn typed_fields_bytes(doc: &Document) -> usize {
         p.language.as_ref(),
     ];
     let mut total = fields.iter().fold(0usize, |sum, s| sum.saturating_add(s.map_or(0, |s| s.len())).saturating_add(FIELD));
+    // The language `DocLangID` says when the model holds no core language.
+    total = total.saturating_add(diacraft_doc::lang::MAX_TAG_BYTES);
     for c in &p.custom {
         let raw: usize = c.raw.iter().fold(0usize, |sum, (k, v)| sum.saturating_add(k.len()).saturating_add(v.len()).saturating_add(4));
         total = total

@@ -18,7 +18,7 @@
 //! **The line** is one JSON object: `in` (the type of the input: the type `file.open` says it is, told by its bytes and not its name), `out` (the path as given), `format` (the type written)
 //! and `bytes`. For a drawing, the save's own counts follow: `variant`, `macros_dropped`, `parts` (`kept`, `rewritten`, `added`, `removed`: a VSDX save counts parts, any other is `null`), `copied`
 //! (the entries of a `.diacraft` package copied as they were: any other save is `null`), `carried` (what the file carries) and `checked` (what the check after the save found: the file read back and compared
-//! with the drawing, `{done, classes: [{class, words, count}], as_values, reason}`, or `null` for a save that is not through a model writer), `warning_count` and `warnings`, each told by the class word `roundtrip` tells it by. For a picture, `export`'s
+//! with the drawing, `{done, classes: [{class, words, count}], as_values, reason}`, or `null` for a save that is not through a model writer), `warning_count` and `warnings`, each `{class, words}` (the class word `roundtrip` tells it by, and what changed and where). For a picture, `export`'s
 //! own fields follow.
 //!
 //! **Exit status** is `export`'s: a mistake in the line (no `--out`, a type that is not written, an option for another type) is 2 and nothing ran; an input that cannot be opened, a refusal of the
@@ -31,7 +31,7 @@ use diacraft_vsdx::{Kind, Variant};
 use serde_json::{Value, json};
 
 use crate::args::{ConvertArgs, ConvertTo};
-use crate::{Failure, export, roundtrip, write_line};
+use crate::{Failure, export, warning_class, write_line};
 
 /// The most characters of the engine's words an error repeats: a refusal of a save is a sentence and a way out, and is not cut short of it.
 const MOST_WORDS: usize = 1_000;
@@ -101,9 +101,20 @@ fn drawing(file: &str, out: &str, extension: &'static str, (drop_macros, drop_ob
     let saved = session
         .execute("file.save_as", &json!({ "path": out, "drop_macros": drop_macros, "drop_objects": drop_objects }))
         .map_err(|e| Failure::Message(format!("cannot save the drawing as .{extension}: {}", engine_words(&e))))?;
-    // The save's own fields, picked: a warning is told by its class (the table of `roundtrip`), as it is there.
-    let warnings: Vec<&'static str> =
-        saved["warnings"].as_array().map(|w| w.iter().filter_map(Value::as_str).map(roundtrip::warning_class).collect()).unwrap_or_default();
+    // The save's own fields, picked: a warning is told by its class and in words (`warning_class`: the engine's own sentence where it holds words and numbers only, a sentence of the class where it
+    // may name a part), and `other` is only a warning no class knows.
+    let warnings: Vec<Value> = saved["warnings"]
+        .as_array()
+        .map(|w| {
+            w.iter()
+                .filter_map(Value::as_str)
+                .map(|text| {
+                    let told = warning_class::told(text);
+                    json!({ "class": told.class, "words": told.words })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(json!({
         "in": opened["file"]["variant"],
         "out": out,

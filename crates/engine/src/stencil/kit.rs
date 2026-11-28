@@ -2,7 +2,8 @@
 //!
 //! **Original figures.** Everything here is plain geometry made by a function, drawn from the public notations' generic shapes (a dog-eared note, a cylinder, a stick figure) and nothing is
 //! traced or copied. A figure is a `Vec<OwnedPath>` for [`super::Outline::Code`]: shares of the box, fixed lengths in inches and one clamped corner radius ([`super::Co`]), so a resize moves
-//! every vertex. **Every point set is on the outline it is made for and faces away from it**: the unit tests of this file and the catalogue test hold it.
+//! every vertex. **A fixed length and a corner radius follow the page's drop scale** (`Co` writes them times the factor a drop beyond the range of eight wrote), so that the dog ear
+//! of a note and the corner of a rounded box are as big on paper at 1:100 as at 1:1. **Every point set is on the outline it is made for and faces away from it**: the unit tests of this file and the catalogue test hold it.
 //!
 //! * Point sets: [`SIDES`], [`GRID3`], [`RING8`], [`TIPS4`], [`BAR`], and the stem of a lifeline ([`stem_points`], [`stem_array`]). A point set is a `const` a master names: `points: &GRID3`.
 //! * A diagonal point of [`RING8`] leaves along the horizontal axis, since the router knows the four ways out and no more.
@@ -114,7 +115,7 @@ pub(super) const LABEL_BELOW: TextBox = TextBox { x: -0.3, y: -0.4, w: 1.6, h: 0
 
 // ---- compartments -------------------------------------------------------------------------------------------------------------------
 
-/// The frame of one compartment of a group master: as wide as the group, as tall as its text needs and at least `min_in` inches, standing under the compartments of lower `rank` (0 is the top). The
+/// The frame of one compartment of a group master: as wide as the group, as tall as its text needs and at least `min_in` inches on the master's paper (the least follows the page's drop scale: times the group's `DropOnPageScale`, 1 where it holds none), standing under the compartments of lower `rank` (0 is the top). The
 /// order of the members in the table does not stack them: a member's rank does, so the member last in the table (the one typing goes to) can be the name at the top. The group is as tall as its
 /// compartments together, so it holds `LockHeight` and a line typed in a compartment makes it taller.
 pub(super) const fn compartment(rank: u8, min_in: f64) -> MemberFrame {
@@ -262,6 +263,7 @@ pub(super) fn box_3d(depth_in: f64) -> Vec<OwnedPath> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::group_master::Factor;
     use super::*;
 
     /// A point of a set at the default size of a box of `w` by `h` inches.
@@ -384,16 +386,27 @@ mod tests {
 
     #[test]
     fn a_corner_radius_gives_way_on_a_small_box_and_a_coordinate_with_a_length_writes_it() {
+        // The value is the one at the master's own scale, whatever factor the formula names.
         let corner = fr(0.15, 1.0);
         assert!((corner.value(1.6, 1.2) - 0.15).abs() < 1e-12);
         assert!((corner.value(0.4, 0.4) - 0.1).abs() < 1e-12, "a quarter of the shorter side when that is less");
-        assert_eq!(corner.formula().as_deref(), Some("MIN(0.15,MIN(Width,Height)*0.25)"));
-        assert_eq!(W.plus(fr(0.15, -1.0)).formula().as_deref(), Some("Width-MIN(0.15,MIN(Width,Height)*0.25)"));
-        assert_eq!(fr(0.15, -0.5).formula().as_deref(), Some("-0.5*MIN(0.15,MIN(Width,Height)*0.25)"));
-        assert_eq!(W.plus(fk(-0.2)).formula().as_deref(), Some("Width-0.2"));
         assert!((W.plus(fk(-0.2)).value(1.0, 1.0) - 0.8).abs() < 1e-12);
-        assert_eq!(fk(0.2).formula(), None, "a fixed length alone is a constant");
         assert!((fk(0.2).value(5.0, 5.0) - 0.2).abs() < 1e-12);
-        assert_eq!(mix(0.5, -0.12).formula().as_deref(), Some("Width*0.5-Height*0.12"));
+        // A fixed length and a corner radius are written times the factor of the page's drop scale: a shape reads its own, a member of a group the group's. A share of the box is not.
+        let own = "IF(DropOnPageScale>0,DropOnPageScale,1)";
+        let group = "IF(Sheet.5!DropOnPageScale>0,Sheet.5!DropOnPageScale,1)";
+        assert_eq!(corner.formula(Factor::Shape), Some(format!("MIN(0.15*{own},MIN(Width,Height)*0.25)")));
+        assert_eq!(W.plus(fr(0.15, -1.0)).formula(Factor::Shape), Some(format!("Width-MIN(0.15*{own},MIN(Width,Height)*0.25)")));
+        assert_eq!(fr(0.15, -0.5).formula(Factor::Shape), Some(format!("-0.5*MIN(0.15*{own},MIN(Width,Height)*0.25)")));
+        assert_eq!(W.plus(fk(-0.2)).formula(Factor::Shape), Some(format!("Width-0.2*{own}")));
+        assert_eq!(W.plus(fk(-0.2)).formula(Factor::Group), Some(format!("Width-0.2*{group}")));
+        assert_eq!(fk(0.2).formula(Factor::Shape), Some(format!("0.2*{own}")), "a fixed length alone is a length times the factor");
+        assert_eq!(fk(-0.1).formula(Factor::Group), Some(format!("-0.1*{group}")));
+        assert_eq!(fk(0.0).formula(Factor::Shape), None, "no length is the constant 0");
+        assert_eq!(mix(0.5, -0.12).formula(Factor::Shape).as_deref(), Some("Width*0.5-Height*0.12"), "a share of the box follows the box");
+        assert_eq!(fw(0.0).formula(Factor::Group), None);
+        // The cell holds the value at the master's own scale.
+        assert_eq!(fk(0.2).cell(1.0, 1.0, Factor::Shape).value.as_ref().and_then(|v| v.number()), Some(0.2));
+        assert_eq!(fw(0.0).cell(1.0, 1.0, Factor::Shape).formula.text(), None, "0 is a plain constant");
     }
 }

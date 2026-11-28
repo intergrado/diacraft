@@ -150,7 +150,7 @@ fn a_line_that_is_not_a_sum_a_repeated_name_and_a_bundle_nobody_listed_are_refus
     let hash = hash_of(&good, &first_bundle);
     for (bad, said) in [
         (format!("{good}{}  {first_bundle}\n", digest(99)), "twice"),
-        (format!("{good}{}  diacraft-mcp-{version}-freebsd-x86_64.mcpb\n", digest(98)), "not one of the bundles"),
+        (format!("{good}{}  diacraft-mcp-{version}-other-x86_64.mcpb\n", digest(98)), "not one of the bundles"),
         (good.replace(&hash, &hash.to_uppercase()), "not a SHA-256"),
         (good.replace(&hash, &hash[..63]), "not a SHA-256"),
         (good.replace(&format!("{hash}  "), &format!("{hash} ")), "not a line of sha256sum"),

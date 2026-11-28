@@ -415,3 +415,28 @@ fn a_metafile_is_painted_as_paths_in_the_pdf() {
     assert!(seen.images.is_empty());
     assert_eq!(seen.open_clips, 0, "every clip is closed");
 }
+
+/// A horizontal line 3 inches long at paper height 2, green, of weight 0.02 inch, with the text of the pattern's cell as given.
+fn line_with_pattern_text(pattern: &str) -> ShapeBuilder {
+    geometry_of(shape_at(1, 0.5, 2.0, 3.0, 0.0), vec![("MoveTo", vec![("X", 0.0), ("Y", 0.0)]), ("LineTo", vec![("X", 3.0), ("Y", 0.0)])])
+        .cell("FillPattern", "0")
+        .cell("LinePattern", pattern)
+        .cell("LineWeight", "0.02")
+        .cell("LineColor", "#008000")
+}
+
+#[test]
+fn a_line_pattern_outside_the_table_is_written_solid_and_the_file_says_so() {
+    // A fraction and a number the table has no row for draw solid, with a warning. A fraction was rounded to the number beside it: 2.5 was written with the dashes of
+    // pattern 3, 1.6 with those of 2, and 0.4 as no line at all.
+    for text in ["2.5", "1.6", "0.4", "24", "100", "-1"] {
+        let (out, seen) = export(&one_page(vec![line_with_pattern_text(text)]), &plain());
+        let line = seen.with_colour([0, 128, 0]);
+        assert_eq!(line.len(), 1, "{text}: the line is there");
+        assert!(line[0].dashes.is_empty(), "{text}: a solid line has no dashes, got {:?}", line[0].dashes);
+        assert!(out.skipped.iter().any(|s| s.kind == SkipKind::PatternOutsideTable), "{text}: said so, got {:?}", out.skipped);
+    }
+    let (out, seen) = export(&one_page(vec![line_with_pattern_text("2")]), &plain());
+    assert!(!seen.with_colour([0, 128, 0])[0].dashes.is_empty());
+    assert!(out.skipped.iter().all(|s| s.kind != SkipKind::PatternOutsideTable), "{:?}", out.skipped);
+}

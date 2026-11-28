@@ -103,6 +103,7 @@
             <figcaption>The drawing that request describes. This one was made with the commands an agent runs through <code>command_run</code> (<code>file.new</code>, <code>shape.drop</code>, <code>shape.set_text</code> and <code>connector.add</code>), and the picture is the part of the page with the shapes, from <code>diacraft-cli export</code>.</figcaption>
           </figure>
           <p>The agent can use <code>command_list</code> to find commands and their parameters, and <code>command_run</code> to run them. A headless session ends with the server, so have the agent save the file before you close the client.</p>
+          <p>To keep the agent’s files to a folder of your choice, add <code>"--automation-read-root"</code> and <code>"--automation-write-root"</code> to the arguments, each followed by the folder. The agent’s commands then open files only from the first and save, export and print only into the second, a path outside is refused, and the server tells the client which folders it keeps to. Without them, the agent reaches any file you can.</p>
         </section>
         <section id="visible-window">
           <h2>Work in the visible window</h2>
@@ -119,7 +120,7 @@
           <p>Ask the agent to use <code>doc_inspect</code> to identify the open drawing before editing. Changes now appear in that window.</p>
           <div class="note">
             <p class="label">Keep in mind</p>
-            <p>The local control port has no password, so run the app in this mode only while using it.</p>
+            <p>The local control port has no password, so run the app in this mode only while using it. Start it with <code>--automation-read-root</code> and <code>--automation-write-root</code> after <code>--control 7997</code> to keep the files of its requests to those folders.</p>
           </div>
         </section>
       </article>
@@ -163,7 +164,7 @@
         <div><p class="label">Guides</p><a href="/guides/">All guides</a><a href="/guides/getting-started.html">First diagram</a><a href="/guides/file-formats.html">File formats</a><a href="/guides/native-format.html">Native format</a><a href="/guides/command-line.html">Command line</a><a href="/guides/agents.html">AI agents</a></div>
         <div><p class="label">Project</p><a data-repo="" href="https://github.com/intergrado/diacraft">GitHub</a><a data-repo="/issues" href="https://github.com/intergrado/diacraft/issues">Issues</a><a href="/privacy.html">Privacy</a></div>
       </nav>
-      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.</p>
+      <p class="legal">Visio is a trademark of the Microsoft group of companies. OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. draw.io is a registered trademark of draw.io Ltd. DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group, the Object Management Group or draw.io Ltd.</p>
     </div>
   </footer>
 </body>

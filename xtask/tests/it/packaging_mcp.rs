@@ -247,7 +247,7 @@ fn a_bundle_is_not_made_of_what_is_not_a_program_of_the_system_nor_of_a_name_tha
     }
     program(&dir, &elf(0x3e), "");
     for (args, said) in [
-        (vec!["freebsd", "dev-test"], "PLATFORM must be linux, windows or macos: 'freebsd'"),
+        (vec!["other", "dev-test"], "PLATFORM must be linux, windows or macos: 'other'"),
         (vec!["linux", "v0.2.1/../x"], "NAME must be letters, digits"),
         (vec!["linux", ""], "NAME must be letters, digits"),
     ] {

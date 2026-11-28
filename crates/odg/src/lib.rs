@@ -46,6 +46,7 @@ mod ext;
 mod figures;
 mod flat;
 mod index;
+mod lang;
 pub mod limits;
 mod ns;
 pub mod package;
@@ -77,7 +78,9 @@ pub use package::{Manifest, ManifestEntry, Package, copy_unchanged, copy_unchang
 pub use package_data::{PackageData, read_package_data};
 pub use read::{TEXT_OBJECT_ROW, read, read_partial};
 pub use report::{CarryReport, NOT_KEPT_HEAD, NOT_KEPT_LINE_CHARS, ReadReport, ReadWork, Stats};
-pub use write::{SaveNote, WriteError, WriteOptions, WriteWork, Written, model_refusal, without_carried_objects, write_counted, write_with};
+pub use write::{
+    SaveNote, WriteError, WriteOptions, WriteWork, Written, model_refusal, rows_are_listed_glue, without_carried_objects, write_counted, write_with,
+};
 
 /// What an OpenDocument drawing package is, by its media type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

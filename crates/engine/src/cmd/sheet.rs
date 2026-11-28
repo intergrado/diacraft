@@ -67,7 +67,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
              master: whole number, the master, whose page sheet is read when it is alone, and with id the master's shape; \
              style: whole number, the style, whose sheet is read; \
              document: true, the document's sheet is read; \
-             cell: text, the reference a formula names the cell by with no sheet before it: Width, Geometry1.X2, Scratch.A1, Prop.Cost, Prop.Cost.Label, User.Total.Prompt (a name that is no reference, a leading = and a sheet such as Sheet.4! are refused in words)",
+             cell: text, the reference a formula names the cell by with no sheet before it: Width, Geometry1.X2, Scratch.A1, Prop.Cost, Prop.Cost.Label, User.Total.Prompt (a cell directly under the sheet that the catalogue lists is read in any letter case, so WIDTH is Width. A name that is no reference, a leading = and a sheet such as Sheet.4! are refused in words)",
             has_document,
             cell
         ),
@@ -123,7 +123,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
              master: whole number, the master, whose page sheet is written when it is alone, and with id the master's shape; \
              style: whole number, the style, whose sheet is written; \
              document: true, the document's sheet is written; \
-             cell: text, the reference a formula names the cell by with no sheet before it: Width, Geometry1.X2, Scratch.A1, Prop.Cost.Value, User.Total.Prompt (a row's name matches in any letter case); \
+             cell: text, the reference a formula names the cell by with no sheet before it: Width, Geometry1.X2, Scratch.A1, Prop.Cost.Value, User.Total.Prompt (a row's name matches in any letter case, and so does a cell directly under the sheet that the catalogue lists: WIDTH is Width); \
              formula: text, the formula typed, or an empty text to clear the cell's own formula; \
              force: true or false, optional (default false), true replaces a formula that GUARD protects",
             has_document,
@@ -433,7 +433,8 @@ fn cell(s: &mut Session, p: &Value) -> Result<Value> {
     let (doc, place, sheet) = target(s, p, ID)?;
     let res = Resolver::new(doc);
     let addr = reference(&res, &sheet, p, "cell", ID)?.ok_or_else(|| bad(ID, "missing `cell`"))?;
-    let ctx = Ctx { res: &res, sheet: &sheet };
+    let mut eval = sheetview::read_eval_ctx();
+    let ctx = Ctx::new(&res, &sheet, &mut eval);
     let mut counts = Counts::default();
     let name = addr.cell.as_str().to_owned();
     let view = sheetview::view(&ctx, &addr, &name, None, None, &mut counts)

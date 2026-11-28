@@ -204,16 +204,27 @@ fn a_copy_has_the_look_and_the_size_of_the_shape_and_not_its_words() {
 }
 
 #[test]
-fn a_shape_with_no_connection_point_is_refused_like_connector_add_and_leaves_no_copy_behind() {
+fn a_shape_with_no_connection_point_is_glued_to_as_a_whole_like_connector_add_glues_it() {
     let mut s = blank_session();
     let a = drop_shape(&mut s, "rectangle", 2.0, 4.0);
     let b = drop_shape(&mut s, "ellipse", 3.5, 4.0);
-    // A group has no connection point of its own, and a connector cannot be glued to it by point.
+    // A group has no connection point of its own: the connector is glued to the whole of it, as connector.add glues it.
     let group = run(&mut s, "shape.group", json!({"ids": [a, b]}))["id"].as_u64().unwrap() as u32;
-    let was = snapshot(&s);
-    let e = s.execute("connector.autoconnect", &json!({"from": group, "direction": "right"})).unwrap_err();
-    assert!(e.to_string().contains("no connection points"), "{e}");
-    assert_eq!(snapshot(&s), was, "the copy that was made is not left on the page");
+    assert!(connection_points(doc(&s), 1, group).is_empty());
+    let shapes_before = doc(&s).page(1).unwrap().shapes.len();
+    let made = run(&mut s, "connector.autoconnect", json!({"from": group, "direction": "right"}));
+    assert_eq!(made["begin"], json!({"id": group, "point": null}), "{made}");
+    assert_eq!(made["end"], json!({"id": made["id"], "point": null}), "the copy of a group is a group, glued to as a whole too: {made}");
+    assert_eq!(doc(&s).page(1).unwrap().shapes.len(), shapes_before + 2, "the copy and the connector");
+    // The connector leaves the group's right side, level with it, and is glued to it by a row of the page.
+    let d = doc(&s);
+    let connector = made["connector"].as_u64().unwrap() as u32;
+    let rows: Vec<(u32, u32)> =
+        d.page(1).unwrap().connects.iter().filter(|c| c.from_sheet == connector).map(|c| (c.to_sheet, c.to_part.unwrap_or(0))).collect();
+    assert!(rows.contains(&(group, 3)), "{rows:?}");
+    let group_box = bounds(d, group);
+    assert!(near(cell(d, connector, "BeginX").unwrap(), group_box.2), "the begin is on the group's right side: {group_box:?}");
+    assert_eq!(check_session(&s), Ok(()));
 }
 
 #[test]

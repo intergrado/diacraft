@@ -15,7 +15,7 @@ use crate::{blank_session, check_session, run, snapshot};
 
 // ---- builders ----------------------------------------------------------------------------------------------------------------------
 
-fn session_with(built: Document) -> Session {
+pub(crate) fn session_with(built: Document) -> Session {
     let mut s = blank_session();
     s.edit("build", |d| {
         *d = built;
@@ -25,7 +25,7 @@ fn session_with(built: Document) -> Session {
     s
 }
 
-fn page_of(shapes: Vec<ShapeBuilder>) -> Document {
+pub(crate) fn page_of(shapes: Vec<ShapeBuilder>) -> Document {
     let mut page = PageBuilder::new();
     for shape in shapes {
         page = page.shape(shape);
@@ -34,7 +34,7 @@ fn page_of(shapes: Vec<ShapeBuilder>) -> Document {
 }
 
 /// A shape `w` by `h` at the page's origin with its local pin at (0, 0), and nothing drawn.
-fn base(id: u32, w: f64, h: f64) -> ShapeBuilder {
+pub(crate) fn base(id: u32, w: f64, h: f64) -> ShapeBuilder {
     ShapeBuilder::new(id)
         .cell("PinX", "0")
         .cell("PinY", "0")
@@ -45,7 +45,7 @@ fn base(id: u32, w: f64, h: f64) -> ShapeBuilder {
 }
 
 /// A row of `Geometry` section `section`: its type and its cells.
-fn row(s: ShapeBuilder, section: u32, ix: u32, kind: &str, cells: &[(&str, &str)]) -> ShapeBuilder {
+pub(crate) fn row(s: ShapeBuilder, section: u32, ix: u32, kind: &str, cells: &[(&str, &str)]) -> ShapeBuilder {
     let key = RowKey::Ix(ix);
     let mut s = s.row_type("Geometry", Some(section), key.clone(), kind);
     for (name, text) in cells {
@@ -54,17 +54,17 @@ fn row(s: ShapeBuilder, section: u32, ix: u32, kind: &str, cells: &[(&str, &str)
     s
 }
 
-fn xy(x: f64, y: f64) -> [(&'static str, String); 2] {
+pub(crate) fn xy(x: f64, y: f64) -> [(&'static str, String); 2] {
     [("X", x.to_string()), ("Y", y.to_string())]
 }
 
-fn at(s: ShapeBuilder, section: u32, ix: u32, kind: &str, x: f64, y: f64) -> ShapeBuilder {
+pub(crate) fn at(s: ShapeBuilder, section: u32, ix: u32, kind: &str, x: f64, y: f64) -> ShapeBuilder {
     let cells = xy(x, y);
     row(s, section, ix, kind, &[("X", &cells[0].1), ("Y", &cells[1].1)])
 }
 
 /// A closed polygon: a move to the first vertex, a line to each other one, and a line back to the first. The rows are numbered from 1, as a master's are.
-fn polygon(mut s: ShapeBuilder, section: u32, vertices: &[(f64, f64)]) -> ShapeBuilder {
+pub(crate) fn polygon(mut s: ShapeBuilder, section: u32, vertices: &[(f64, f64)]) -> ShapeBuilder {
     for (i, (x, y)) in vertices.iter().chain(vertices.first()).enumerate() {
         s = at(s, section, u32::try_from(i + 1).unwrap(), if i == 0 { "MoveTo" } else { "LineTo" }, *x, *y);
     }
@@ -72,18 +72,18 @@ fn polygon(mut s: ShapeBuilder, section: u32, vertices: &[(f64, f64)]) -> ShapeB
 }
 
 /// An arc of a circle from the pen to (`x`, `y`) through (`mx`, `my`): an `EllipticalArcTo` of ratio 1.
-fn arc(s: ShapeBuilder, section: u32, ix: u32, (x, y): (f64, f64), (mx, my): (f64, f64)) -> ShapeBuilder {
+pub(crate) fn arc(s: ShapeBuilder, section: u32, ix: u32, (x, y): (f64, f64), (mx, my): (f64, f64)) -> ShapeBuilder {
     let (x, y, mx, my) = (x.to_string(), y.to_string(), mx.to_string(), my.to_string());
     row(s, section, ix, "EllipticalArcTo", &[("X", &x), ("Y", &y), ("A", &mx), ("B", &my), ("C", "0"), ("D", "1")])
 }
 
 /// The rectangle `w` by `h` as one section of a shape of that size.
-fn rectangle(id: u32, w: f64, h: f64) -> ShapeBuilder {
+pub(crate) fn rectangle(id: u32, w: f64, h: f64) -> ShapeBuilder {
     polygon(base(id, w, h), 0, &[(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)])
 }
 
 /// An ordinary inward connection point at (`x`, `y`) in the shape's frame, as row `ix`.
-fn point(s: ShapeBuilder, ix: u32, x: f64, y: f64) -> ShapeBuilder {
+pub(crate) fn point(s: ShapeBuilder, ix: u32, x: f64, y: f64) -> ShapeBuilder {
     let key = RowKey::Ix(ix);
     let (x, y) = (x.to_string(), y.to_string());
     let s = s.row_cell("Connection", None, key.clone(), "X", &x).row_cell("Connection", None, key.clone(), "Y", &y);
@@ -96,7 +96,7 @@ fn point(s: ShapeBuilder, ix: u32, x: f64, y: f64) -> ShapeBuilder {
     )
 }
 
-fn hidden(s: ShapeBuilder, section: u32) -> ShapeBuilder {
+pub(crate) fn hidden(s: ShapeBuilder, section: u32) -> ShapeBuilder {
     s.set(CellAddr::in_section("Geometry", Some(section), "NoShow"), Cell::constant(CellValue::from_text("1")))
 }
 
@@ -205,7 +205,7 @@ fn a_rounded_rectangle_has_eight_edges() {
 }
 
 /// A circle of radius 1 about (1, 1) drawn as four quarter arcs from its right end.
-fn circle_of_four_arcs(id: u32) -> ShapeBuilder {
+pub(crate) fn circle_of_four_arcs(id: u32) -> ShapeBuilder {
     let k = std::f64::consts::FRAC_1_SQRT_2;
     let mut s = at(base(id, 2.0, 2.0), 0, 1, "MoveTo", 2.0, 1.0);
     s = arc(s, 0, 2, (1.0, 2.0), (1.0 + k, 1.0 + k));
@@ -592,7 +592,7 @@ fn the_calls_params_are_checked_in_words() {
 // ---- design 3.8: the minimum distance --------------------------------------------------------------------------------
 
 /// A shape holding one straight edge of `length` inches along the bottom, with a point at each of `shares` (the shares of its length).
-fn edge_with_points(id: u32, length: f64, shares: &[f64]) -> ShapeBuilder {
+pub(crate) fn edge_with_points(id: u32, length: f64, shares: &[f64]) -> ShapeBuilder {
     let mut s = at(at(base(id, length, 1.0), 0, 1, "MoveTo", 0.0, 0.0), 0, 2, "LineTo", length, 0.0);
     for (i, share) in shares.iter().enumerate() {
         s = point(s, u32::try_from(i).unwrap(), share * length, 0.0);
@@ -764,7 +764,7 @@ fn a_shape_whose_doubling_would_pass_the_cap_cannot_be_doubled() {
 // ---- design 9: the counts ----------------------------------------------------------------------------------------------------------
 
 /// A zigzag of `lines` `LineTo` rows after a move, every piece over an inch long.
-fn zigzag(id: u32, lines: u32) -> ShapeBuilder {
+pub(crate) fn zigzag(id: u32, lines: u32) -> ShapeBuilder {
     let mut s = at(base(id, 1.0, 1.0), 0, 1, "MoveTo", 0.0, 0.0);
     for i in 1..=lines {
         s = at(s, 0, i + 1, "LineTo", f64::from(i) * 0.5, f64::from(i % 2));
@@ -900,7 +900,7 @@ fn arc_calls_are_counted_by_the_pieces_each_point_is_tried_against() {
 }
 
 /// A spline of `knots` knot rows, uniform and clamped, drawn as `knots - 1` cubics in one run, with 256 points inside its box.
-fn long_spline(id: u32, knots: u32, points: u32) -> ShapeBuilder {
+pub(crate) fn long_spline(id: u32, knots: u32, points: u32) -> ShapeBuilder {
     let mut s = at(base(id, f64::from(knots), 1.0), 0, 1, "MoveTo", 0.0, 0.0);
     // `SplineStart` X, Y, second knot A, first knot B, last knot C, degree D; then the knots.
     let last = (knots - 1).to_string();

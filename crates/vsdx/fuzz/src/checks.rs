@@ -204,9 +204,20 @@ fn parts_of(bytes: &[u8]) -> Option<std::collections::BTreeMap<String, Vec<u8>>>
 /// **A save with no edit leaves the parts of the file as they were**: the same names and the same bytes in each, but for the extended properties, where the save names itself as the writer
 /// (`Application`, whether or not an edit was made).
 pub fn same_parts(before: &[u8], after: &[u8]) {
+    same_parts_but(before, after, &[]);
+}
+
+/// [`same_parts`], **but for the parts in `rewritten`**: the parts a save of a file of DiaCraft's rewrote to give the `User` and `Field` text its unit and the time of the change.
+/// The names are the same, and the bytes of every other part.
+pub fn same_parts_but(before: &[u8], after: &[u8], rewritten: &[String]) {
     let (Some(mut before), Some(mut after)) = (parts_of(before), parts_of(after)) else { panic!("a package that read does not open again") };
     before.remove("/docprops/app.xml");
     after.remove("/docprops/app.xml");
+    for name in rewritten {
+        let name = name.to_ascii_lowercase();
+        before.remove(&name);
+        after.remove(&name);
+    }
     assert_eq!(before.keys().collect::<Vec<_>>(), after.keys().collect::<Vec<_>>(), "an unedited save changed the parts of the file");
     for (name, bytes) in &before {
         assert!(after.get(name) == Some(bytes), "an unedited save changed the bytes of {name:?}");
@@ -245,6 +256,17 @@ pub fn after_a_save(doc: &Document) -> Document {
     out
 }
 
+/// [`after_a_save`] for a save that was an edit of the file (the unit it gave to the `User` and `Field` text): such a save also **writes the time of the change**
+/// (`modified` of `docProps/core.xml`, with the attributes of the element it made), so the read of it differs from the read of the file by that time too, which is taken out of both.
+pub fn after_an_edited_save(doc: &Document) -> Document {
+    let mut out = after_a_save(doc);
+    Arc::make_mut(&mut out.props).modified = None;
+    if let Some(held) = out.vsdx.as_mut() {
+        Arc::make_mut(held).props_rest.retain(|(name, _)| &**name != "coreProperties/modified");
+    }
+    out
+}
+
 /// What the model says of one part of the other format: its folded name, the role and format, the bytes, the media type, and its name as written.
 pub type OtherPart = (String, String, Vec<u8>, String, String);
 
@@ -279,15 +301,26 @@ pub fn nothing_refused_in(report: &ReadReport) {
     }
 }
 
+/// Whether the part is one that holds the cells of the drawing: a page, a master or the document's own part (by name, in any case). The parts whose cells a save into a file of DiaCraft's may give the unit
+/// `STR`.
+pub fn is_drawing_part(name: &str) -> bool {
+    let (name, dir) = (name.to_ascii_lowercase(), crate::package::DIR.to_ascii_lowercase());
+    name.starts_with(&format!("{dir}/pages/")) || name.starts_with(&format!("{dir}/masters/")) || name == format!("{dir}/document.xml")
+}
+
 /// **A save that writes the solution part again takes out nothing that is not DiaCraft's**: every part of the original except those under the folder of DiaCraft's own, the relationships
 /// parts, the solution parts and the parts of the properties (a save with edits sets `modified` and takes the thumbnail out) is in the package after, with its bytes.
-pub fn kept_what_is_not_diacraft_s(before: &[u8], after: &[u8]) {
+///
+/// **A file of DiaCraft's** (`ours`: its extended properties name DiaCraft) **is given the unit of the text of its `User` and `Field` rows by any save**, so the parts of the
+/// drawing ([`is_drawing_part`]) are the writer's to write there.
+pub fn kept_what_is_not_diacraft_s(before: &[u8], after: &[u8], ours: bool) {
     let (Some(before), Some(after)) = (parts_of(before), parts_of(after)) else { panic!("a package that read does not open again") };
     for (name, bytes) in &before {
         let mine = name.starts_with("/diacraft/")
             || name.starts_with("/docprops/")
             || diacraft_opc::name::is_rels_part(name)
-            || name.contains("/solutions/");
+            || name.contains("/solutions/")
+            || (ours && is_drawing_part(name));
         if mine {
             continue;
         }

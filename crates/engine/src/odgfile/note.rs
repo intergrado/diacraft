@@ -10,7 +10,8 @@
 //! * **cross-shape formulas**: a shape one of whose cells (its own, or a cell of a row of one of its sections) holds a formula that names another shape (`Sheet.<ID>`
 //!   with another shape's `ID`), but the ends and triggers of a connector, which are its glue (ODF holds glue, and a LibreOffice save keeps it);
 //! * **shape data**: a shape with a `Property` row (the section the model keeps shape data in, as the VSDX reader builds it), or a `User` row but the `DiaCraftRoute` that marks a connector's route (the engine's own, and the reader gives every
-//!   connector one).
+//!   connector one) and the `DiaCraftAddedPoints` that records which connection points a doubling made (the engine's own too: a save that drops it leaves every point
+//!   an original, which is safe and no data of a person's).
 //!
 //! A shape that is an instance of a master is **not** counted.
 //!
@@ -40,12 +41,15 @@ const GLUE_CELLS: [&str; 6] = ["BeginX", "BeginY", "EndX", "EndY", "BegTrigger",
 /// is no data of a person's.
 const ROUTE_ROW: &str = "DiaCraftRoute";
 
+/// The name of the `User` row that records the connection points a doubling made (`crate::draw::conn_marker`): the engine's own bookkeeping, no data of a person's.
+const POINTS_ROW: &str = crate::draw::conn_marker::MARKER_ROW;
+
 /// What a drawing holds that a LibreOffice save would drop, counted by shape.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Found {
     /// Shapes with a formula that names another shape.
     pub cross_shape_formulas: u64,
-    /// Shapes with shape data (`Property` rows, or `User` rows beside the route marker).
+    /// Shapes with shape data (`Property` rows, or `User` rows beside the route marker and the marker of doubled points).
     pub shape_data: u64,
     /// The steps the count took (the cost a test holds to the size of the drawing).
     pub steps: u64,
@@ -223,7 +227,7 @@ fn of_shape(count: &mut Count, shape: &Shape) -> Option<(bool, bool)> {
             data = data
                 || match section.name.as_str() {
                     "Property" => true,
-                    "User" => row.name.as_deref() != Some(ROUTE_ROW),
+                    "User" => !matches!(row.name.as_deref(), Some(ROUTE_ROW | POINTS_ROW)),
                     _ => false,
                 };
         }
@@ -395,6 +399,18 @@ mod tests {
             (1, 1),
             "the first shape reads the second twice and holds two rows; the second only the marker: {found:?}"
         );
+    }
+
+    #[test]
+    fn the_marker_of_doubled_points_is_no_data_of_a_persons_and_does_not_hide_a_row_that_is() {
+        // The row that records which points a doubling made is the engine's, as the route marker is.
+        let mut s = session_with(2);
+        give(&mut s, 0, "User", POINTS_ROW, "0*(1*Connections.X5)");
+        let found = find(s.document().unwrap());
+        assert_eq!((found.cross_shape_formulas, found.shape_data), (0, 0), "{found:?}");
+        assert!(!found.any());
+        give(&mut s, 0, "User", "Cost", "Width");
+        assert_eq!(find(s.document().unwrap()).shape_data, 1, "a row of a person's beside it is data");
     }
 
     #[test]

@@ -44,7 +44,10 @@ pub fn assert_link_holds(made: &Document, read: &Document, at: usize, what: &str
             );
             continue;
         }
-        assert!(name != "Geometry" || !own.is_empty(), "{what}: the shape of the file holds its geometry");
+        // A group draws through its members and holds no geometry of its own: a group master's top-level shape.
+        // The shape of the file is a group by its kind, or the session's shape or the file's has members.
+        let is_group = b.kind == diacraft_doc::ShapeType::Group || !a.children.is_empty() || !b.children.is_empty();
+        assert!(name != "Geometry" || is_group || !own.is_empty(), "{what}: the shape of the file holds its geometry");
         assert_eq!(keys.len(), own.len(), "{what}: the {name} sections the shape resolves are its own");
         for key in keys {
             let rows = res.effective_rows(&place, &key).unwrap_or_default();

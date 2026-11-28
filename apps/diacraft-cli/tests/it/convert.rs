@@ -177,9 +177,12 @@ fn a_vsdx_drawing_goes_to_each_of_the_vsdx_types_and_the_type_is_the_names() {
         assert!(parts["kept"].as_u64().unwrap() > 0, "an edited save keeps the parts it did not touch: {line}");
         assert_eq!(line["copied"], Value::Null);
     }
-    // A stencil keeps its pages and says so, by the class word `roundtrip` tells it by; the warnings are the first 20 as the engine gives them.
+    // A stencil keeps its pages and says so, by the class word `roundtrip` tells it by and in words; the warnings are the first 20 as the engine gives them.
     let line = converted(&input, &dir.path("s.vssx"), &[]);
-    assert_eq!(line["warnings"], json!(["stencil_keeps_pages"]), "{line}");
+    let told = told_warnings(&line);
+    assert_eq!(told.len(), 1, "{line}");
+    assert_eq!(told[0].0, "stencil_keeps_pages", "{line}");
+    assert!(told[0].1.contains("keeps its pages") && !told[0].1.contains("Secret"), "words of the class, and nothing of the file: {}", told[0].1);
     assert_eq!(line["warning_count"], 1);
     assert_eq!(line["macros_dropped"], 0);
 }
@@ -726,4 +729,97 @@ fn the_types_convert_names_are_the_types_the_engine_allows_for_some_drawing() {
         let mistaken = run.status.code() == Some(2) && text(&run.stderr).contains("--out must end in");
         assert_eq!(mistaken, !named, ".{extension}: {}", text(&run.stderr));
     }
+}
+
+// ------------------------------------------------------------------------------------------------------------------------ the warnings
+
+/// The demo video's drawing (issue 10): a Basic Network Diagram drawing with a theme, of three devices that show their network name and address as fields, two connectors, saved as `name` (by its extension).
+fn made_from_the_network_template(dir: &TempDir, name: &str) -> std::path::PathBuf {
+    let path = dir.path(name);
+    let steps = [
+        ("file.new", json!({ "template": "basic_network" })),
+        ("theme.apply", json!({ "theme": "fernwood" })),
+        ("shape.drop", json!({ "master": "network.router", "page": 1, "x": 2.0, "y": 5.0 })),
+        ("shape.drop", json!({ "master": "network.switch", "page": 1, "x": 5.0, "y": 5.0 })),
+        ("shape.drop", json!({ "master": "computers.desktop", "page": 1, "x": 8.0, "y": 5.0 })),
+        ("connector.add", json!({ "from": { "id": 1 }, "to": { "id": 2 } })),
+        ("connector.add", json!({ "from": { "id": 2 }, "to": { "id": 3 } })),
+        ("file.save_as", json!({ "path": path })),
+    ];
+    let owned: Vec<(String, String)> = steps.iter().map(|(command, params)| ((*command).to_owned(), params.to_string())).collect();
+    let mut args = vec!["run"];
+    for (command, params) in &owned {
+        args.extend(["--cmd", command, "--params", params]);
+    }
+    let run = cli(&args, None);
+    assert!(run.status.success(), "{}", text(&run.stderr));
+    path
+}
+
+/// The warnings of a line as `(class, words)`: each is an object with both.
+fn told_warnings(line: &Value) -> Vec<(String, String)> {
+    line["warnings"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no warnings array: {line}"))
+        .iter()
+        .map(|w| {
+            let class = w["class"].as_str().unwrap_or_else(|| panic!("a warning with no class: {w} in {line}"));
+            let words = w["words"].as_str().unwrap_or_else(|| panic!("a warning with no words: {w} in {line}"));
+            (class.to_owned(), words.to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn a_drawing_the_app_made_saved_as_an_odg_tells_each_warning_by_a_class_and_in_words_and_none_is_other() {
+    // The demo's steps: `convert office-network.vsdx --out office-network.odg` answered `"warnings":["other", ...]`, eight times.
+    let dir = TempDir::new("conv-demo");
+    let vsdx = made_from_the_network_template(&dir, "office-network.vsdx");
+    let line = converted(&vsdx, &dir.path("office-network.odg"), &[]);
+    let told = told_warnings(&line);
+    assert_eq!(line["warning_count"].as_u64(), Some(told.len() as u64), "{line}");
+    assert!(!told.is_empty(), "the .odg has no place for some of what the drawing holds, and says so: {line}");
+    for (class, words) in &told {
+        assert_ne!(class, "other", "{words}");
+        assert!(words.contains(' '), "{class}: words, not a code: {words}");
+    }
+    let classes: std::collections::BTreeSet<&str> = told.iter().map(|(class, _)| class.as_str()).collect();
+    for expected in ["text_format_not_written", "style_links_not_written", "field_as_text"] {
+        assert!(classes.contains(expected), "{expected} is among {classes:?}: {line}");
+    }
+    // What changed and where: the engine's own sentences name the shapes by their numbers.
+    let fields = told.iter().find(|(class, _)| class == "field_as_text").unwrap();
+    assert!(fields.1.contains("of shape") && fields.1.contains("on page"), "{}", fields.1);
+}
+
+#[test]
+fn no_convert_of_the_fixtures_to_any_type_gives_a_warning_that_is_other() {
+    // Every drawing the tests make, to every type it can be: a warning no class knows is `other`, and none of these saves says one.
+    let dir = TempDir::new("conv-classes");
+    let inputs = [
+        dir.write("fixture.vsdx", &vsdx()),
+        dir.write("fixture.vstx", &template()),
+        dir.write("fixture.vssx", &stencil()),
+        made_by_the_engine(&dir, "made.diacraft"),
+        made_by_the_engine(&dir, "made.vsdx"),
+        made_by_the_engine(&dir, "made.odg"),
+        made_from_the_network_template(&dir, "network.diacraft"),
+        made_from_the_network_template(&dir, "network.vsdx"),
+    ];
+    let mut told_in_all = 0;
+    for input in &inputs {
+        for extension in DRAWING_TYPES {
+            let out = dir.path(&format!("out-{}.{extension}", input.file_name().unwrap().to_str().unwrap()));
+            let (line, run) = convert(input, &out, &[]);
+            if !run.status.success() {
+                // A refusal in the engine's words (a stencil is never an `.odg`, a macro project needs a type that holds one): no line, nothing to tell.
+                continue;
+            }
+            for (class, words) in told_warnings(&line) {
+                assert_ne!(class, "other", "{} as .{extension}: {words}", input.display());
+                told_in_all += 1;
+            }
+        }
+    }
+    assert!(told_in_all > 0, "the fixtures give warnings (a stencil keeps its pages)");
 }

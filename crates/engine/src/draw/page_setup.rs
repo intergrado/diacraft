@@ -34,7 +34,7 @@ use diacraft_units::Unit;
 
 use super::paper::{self, DEFAULT_PAPER, Orientation, Paper, SCALES, ScalePreset, SizePreset};
 use super::read::{Reader, units_per_inch};
-use super::settle::settle_kept;
+use super::settle::{route_recalculated, settle_kept};
 use super::{MAX_COORD, Problem, write_cells};
 use crate::stencil::number_text;
 
@@ -297,8 +297,12 @@ fn apply(doc: &mut Document, page: u32, cells: &[Put]) -> Result<bool, Problem> 
         return Ok(false);
     }
     let changed: Vec<(SheetRef, CellAddr)> = writes.iter().map(|(sheet, addr, _)| (sheet.clone(), addr.clone())).collect();
+    let was = doc.clone();
     write_cells(doc, writes)?;
     settle_kept(doc, page, &Changes { cells: changed, ..Changes::default() })?;
+    // The page's cells moved no shape themselves, but a shape whose formula reads one (the width of a title block, a size that follows the page) is resized by the recalculation, and
+    // the connectors glued to it follow.
+    route_recalculated(doc, &was, page)?;
     Ok(true)
 }
 

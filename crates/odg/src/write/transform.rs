@@ -183,6 +183,15 @@ pub(crate) fn turned(angle: f64, x: f64, y: f64, unit: LenUnit) -> Option<String
     Some(format!("rotate ({angle}) translate ({} {})", length_text(x, unit)?, length_text(y, unit)?))
 }
 
+/// The list of a turned shape that is flipped as well: `scale (1 -1) rotate (<angle>) translate (<x> <y>)`. The reader gives the frame the turn `angle` and the flip `FlipY`
+/// (the map's determinant is -1, [`crate::read::frame_read`]): the shape is flipped in its own frame and then turned, as the model has it (`own::local_to_parent`).
+pub(crate) fn turned_flipped(angle: f64, x: f64, y: f64, unit: LenUnit) -> Option<String> {
+    if !angle.is_finite() {
+        return None;
+    }
+    Some(format!("scale (1 -1) rotate ({angle}) translate ({} {})", length_text(x, unit)?, length_text(y, unit)?))
+}
+
 /// Whether the linear part of the list (the product of its terms') has a negative determinant: the list flips the shape, by a `scale` with one negative
 /// factor or a `matrix` that mirrors, an even number of them undoing each other. The reader reads such a flip as `FlipY`, and a list written anew would lose it.
 pub(crate) fn flips_the_frame(text: &str, terms: &[Term]) -> bool {
@@ -320,6 +329,27 @@ mod tests {
         assert_eq!(translated("matrix (1 0 0 1 2cm 3000)", cm(1.0), cm(1.0), LenUnit::Cm).as_deref(), Some("matrix (1 0 0 1 3cm 4000)"));
         assert_eq!(translated("translate (2000)", 0.0, cm(1.5), LenUnit::Cm).as_deref(), Some("translate (2000 1500)"));
         assert_eq!(translated("matrix (0.5 -0.8 0.8 0.5 0 0)", cm(0.25), 0.0, LenUnit::Cm).as_deref(), Some("matrix (0.5 -0.8 0.8 0.5 250 0)"));
+    }
+
+    /// The list of a flipped and turned frame is read as the turn written and as a flip, and its size and place are the frame's.
+    #[test]
+    fn a_flipped_and_turned_shape_is_read_as_the_turn_written_and_a_flip() {
+        let (w, h) = (6.0 / 2.54, 3.0 / 2.54);
+        for angle in [0.0_f64, 0.5235987755982988, -1.2, 3.0] {
+            let (s, c) = angle.sin_cos();
+            // The frame's centre taken through the flip and the turn, as the writer places it, and the place wanted for it.
+            let (hx, hy) = (w / 2.0 * c - h / 2.0 * s, -w / 2.0 * s - h / 2.0 * c);
+            let centre = (7.0 / 2.54, 9.0 / 2.54);
+            let text = turned_flipped(angle, centre.0 - hx, centre.1 - hy, LenUnit::Cm).unwrap();
+            assert!(text.starts_with("scale (1 -1) rotate ("), "{text}");
+            let read = crate::read::frame_read(0.0, 0.0, w, h, Some(&text)).unwrap();
+            assert!(read.flipped && !read.sheared, "{angle}: {read:?}");
+            assert!((read.angle - angle).abs() < 1e-9, "{angle}: {read:?}");
+            assert!((read.size.0 - w).abs() < 1e-9 && (read.size.1 - h).abs() < 1e-9, "{angle}: {read:?}");
+            // The list gives its length in a unit the writer rounds: the centre is where it was put within a ten-thousandth of an inch.
+            assert!((read.centre.0 - centre.0).abs() < 1e-4 && (read.centre.1 - centre.1).abs() < 1e-4, "{angle}: {read:?}");
+        }
+        assert_eq!(turned_flipped(f64::NAN, 1.0, 1.0, LenUnit::Cm), None);
     }
 
     #[test]

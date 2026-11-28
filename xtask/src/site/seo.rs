@@ -7,7 +7,8 @@
 //! **Structured data.** A page has JSON-LD (`<script type="application/ld+json" data-generated="">`, a block of data that a browser does not run and a content security policy does not see) of the kind its
 //! place in the site gives it ([`Kind`]): the home page is a `SoftwareApplication` (the version, the release page, the licences and the share picture are the workspace's and `site.json`'s
 //! own, so they are true on every release) and a `WebSite`; a guide is a `TechArticle`, and the guides' own index (`guides/index.html`) a `CollectionPage`; any other page that is for people
-//! to read is a `WebPage`; the page for a missing address has none.
+//! to read is a `WebPage`; the page for a missing address has none. A page that links a video with `<a data-video="">` (the home page's tour) has a `VideoObject` for it after
+//! those, made from what the link and the elements it names say (`html::videos`, [`video_document`]).
 //! Nothing is in them that the site does not say elsewhere: no rating, no review and no author. **No date of change** is in a page: the last commit that touched a page would be a commit
 //! of the page, which holds the date, and the two would never settle. The dates are in `sitemap.xml`, which is another file (`lastmod`, below).
 //!
@@ -208,6 +209,25 @@ pub(super) fn documents(kind: Kind, head: &Head, settings: &Settings, url: &str)
     }
 }
 
+/// The start of the address of the player of a video on YouTube, which a page may give a search engine as the video's `embedUrl`: the player, and not the page of the video.
+const VIDEO_PLAYER: &str = "https://www.youtube.com/embed/";
+
+/// The structured data of a video a page links: a `VideoObject` made from what the page says of it (`html::videos`). Its picture is the page's own copy, at the pages' address; its
+/// player is YouTube's for its id; its `url` is the address the page links. It has no `contentUrl`, which is the address of the video's own bytes (the file), and YouTube gives none.
+pub(super) fn video_document(video: &html::Video, settings: &Settings) -> Value {
+    json!({
+        "@context": CONTEXT,
+        "@type": "VideoObject",
+        "name": video.name,
+        "description": video.description,
+        "thumbnailUrl": format!("{}{}", settings.domain, video.thumbnail),
+        "uploadDate": video.upload_date,
+        "duration": video.duration,
+        "embedUrl": format!("{VIDEO_PLAYER}{}", video.id),
+        "url": video.address,
+    })
+}
+
 /// `value` as the lines of a block of data in the head: the opening line, the JSON indented, and the closing line. The JSON has no `<`, `>` or `&` (each is its JSON escape), so that the page is
 /// well-formed XML and no text can end the script.
 pub(super) fn script(value: &Value) -> Result<String, String> {
@@ -256,8 +276,13 @@ pub(super) fn render(source: &str, settings: &Settings, name: &str, url: &str) -
         .get(..end)
         .and_then(|before| before.iter().rposition(|line| line.trim_start().starts_with("<meta property=\"og:")))
         .ok_or("the head has no og: tag to put the twitter: tags after")?;
+    // The videos the page links follow the page's own data, each a block of its own. The page for a missing address has no data, so it may link none.
+    let videos = html::videos(source)?;
+    if kind(name) == Kind::NotFound && !videos.is_empty() {
+        return Err("the page for a missing address has no structured data, so it links no video marked data-video".into());
+    }
     let mut data = String::new();
-    for document in documents(kind(name), &head, settings, url) {
+    for document in documents(kind(name), &head, settings, url).into_iter().chain(videos.iter().map(|video| video_document(video, settings))) {
         data.push_str(&script(&document)?);
     }
     let mut out = String::with_capacity(plain.len() + 2048);
@@ -279,6 +304,23 @@ pub(super) fn render(source: &str, settings: &Settings, name: &str, url: &str) -
 pub(super) fn valid_date(text: &str) -> bool {
     let shape = text.len() == 10 && text.bytes().enumerate().all(|(n, b)| if matches!(n, 4 | 7) { b == b'-' } else { b.is_ascii_digit() });
     shape && text.parse::<jiff::civil::Date>().is_ok_and(|date| date.to_string() == text)
+}
+
+/// Whether `text` is the length of a video as ISO 8601 writes a duration and search engines read it (`PT6M53S`): `PT`, then hours, minutes and seconds, each a number of one to four digits and its
+/// letter (`H`, `M`, `S`), in that order, each at most once, and at least one of them. A duration of days, months or years, a fraction and a sign are not a video's length here.
+pub(super) fn valid_duration(text: &str) -> bool {
+    let Some(mut rest) = text.strip_prefix("PT") else { return false };
+    let mut parts = 0;
+    for unit in ['H', 'M', 'S'] {
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if (1..=4).contains(&digits)
+            && let Some(after) = rest.get(digits..).and_then(|after| after.strip_prefix(unit))
+        {
+            rest = after;
+            parts += 1;
+        }
+    }
+    parts > 0 && rest.is_empty()
 }
 
 /// Runs `git` in `root` with the arguments, and gives what it printed. Any failure (no `git`, not a repository, a non-zero exit) is `None`.

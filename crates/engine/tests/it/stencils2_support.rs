@@ -83,6 +83,12 @@ pub(crate) fn masters_of(id: &str) -> &'static [MasterSpec] {
     builtin_stencil(id).map_or(&[][..], |s| s.masters())
 }
 
+/// The masters of the built-in stencil `id` whose drop is one shape: **a master whose drop makes a structure of swimlanes (BPMN's Pool) is passed over by the checks that look at the one shape a
+/// drop makes** (its frame is resized by its lanes, and it has no master link, like every shape of a swimlane structure); the family's own tests look at the structure.
+fn shape_masters(id: &str) -> impl Iterator<Item = &'static MasterSpec> {
+    masters_of(id).iter().filter(|m| !m.makes_structure())
+}
+
 /// A new drawing with the master dropped at (`x`, `y`) on page 1 and its name typed: the session and the shape's `ID`.
 fn dropped(stencil: &str, master: &MasterSpec, (x, y): (f64, f64), label: bool) -> (Session, u32) {
     let mut s = Session::new();
@@ -131,7 +137,7 @@ fn first_page(s: &Session) -> u32 {
 /// finite, the label stays, and the history is as expected.
 #[track_caller]
 pub(crate) fn drop_edit_undo(stencil: &str) {
-    for master in masters_of(stencil) {
+    for master in shape_masters(stencil) {
         let key = format!("{stencil}/{}", master.id);
         let (mut s, id) = dropped(stencil, master, (5.0, 5.0), true);
         let page = first_page(&s);
@@ -237,7 +243,7 @@ fn ink_extent(r: &Rendered, ppi: f64, height: f64) -> Option<(f64, f64, f64, f64
 #[track_caller]
 pub(crate) fn render_inside_its_box(stencil: &str) {
     const PPI: f64 = 100.0;
-    for master in masters_of(stencil) {
+    for master in shape_masters(stencil) {
         let key = format!("{stencil}/{}", master.id);
         let (s, id) = dropped(stencil, master, (5.5, 4.25), true);
         let (doc, page) = (s.document().unwrap(), first_page(&s));
@@ -264,7 +270,7 @@ pub(crate) const RECTANGLE_NOTE: &str = "outline that is written as a rectangle"
 #[track_caller]
 pub(crate) fn round_trips(stencil: &str) -> Vec<String> {
     let mut approximated = Vec::new();
-    for master in masters_of(stencil) {
+    for master in shape_masters(stencil) {
         let key = format!("{stencil}/{}", master.id);
         for ext in ["vsdx", "diacraft"] {
             let dir = Dir::new();
@@ -303,7 +309,9 @@ pub(crate) fn round_trips(stencil: &str) -> Vec<String> {
         let said: Vec<&str> = saved["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
         for note in &said {
             // A text of fields is written as the text it shows, and an outline other programs cannot be given is a rectangle: both are said, and neither is a failure.
-            assert!(note.contains(RECTANGLE_NOTE) || note.contains("new fields written as the text they show"), "{key} as odg: {note}");
+            // (Said in the singular for a master with one field: "1 new field written as the text it shows".)
+            let fields = note.contains("new fields written as the text they show") || note.contains("new field written as the text it shows");
+            assert!(note.contains(RECTANGLE_NOTE) || fields, "{key} as odg: {note}");
         }
         if said.iter().any(|n| n.contains(RECTANGLE_NOTE)) {
             approximated.push(key.clone());

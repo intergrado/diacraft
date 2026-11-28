@@ -189,6 +189,7 @@ enum Lacks {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OnlyCell {
     lacks: Lacks,
+    basis: Basis,
     sources: Vec<Source>,
     read: String,
     note: String,
@@ -494,9 +495,10 @@ fn lacks_of(table: &Table, at: &str) -> Result<Lacks, String> {
 }
 
 fn only_cell(table: &Table, keys: &BTreeMap<String, String>, at: &str) -> Result<OnlyCell, String> {
-    basis_of(table, at)?;
+    let basis = basis_of(table, at)?;
     Ok(OnlyCell {
         lacks: lacks_of(table, at)?,
+        basis,
         sources: sources_of(table, keys, at)?,
         read: date_of(text_of(table, "read", at)?, at)?,
         note: text_of(table, "note", at)?.to_owned(),
@@ -896,7 +898,8 @@ impl View<'_> {
         )
     }
 
-    /// The line that says when the cells were read, and where to report a correction.
+    /// The line that says where the cells come from and when they were read, and where to report a correction. It names the copy of
+    /// LibreOffice Draw run as a black box only when a cell of it, in a row or in the list of what only DiaCraft has, rests on one.
     fn asof(&self) -> String {
         let (mut io, mut lo) = (BTreeSet::new(), BTreeSet::new());
         for row in &self.cmp.rows {
@@ -905,8 +908,15 @@ impl View<'_> {
         }
         let others: BTreeSet<String> = io.union(&lo).cloned().collect();
         let all: BTreeSet<String> = others.union(&self.cmp.reference_read).cloned().collect();
+        let black_box = self.cmp.rows.iter().any(|row| row.libreoffice.basis == Basis::Oracle)
+            || self.cmp.only.iter().any(|item| item.libreoffice.basis == Basis::Oracle);
+        let from = if black_box {
+            format!("public documentation or, for some of {LIBREOFFICE}'s, from a copy of it run as a black box")
+        } else {
+            "public documentation".to_owned()
+        };
         format!(
-            "<p class=\"cmp-asof\"><strong>As of {all_phrase}.</strong> Every cell comes from public documentation, not from running the tools: the pages of {reference} were read on {reference_phrase}, \
+            "<p class=\"cmp-asof\"><strong>As of {all_phrase}.</strong> Every cell comes from {from}: the pages of {reference} were read on {reference_phrase}, \
              and those of {DRAWIO} and {LIBREOFFICE} on {others_phrase}. The {OURS} column is computed from its parity checklist, whose scores were last reviewed on {reviewed}, for release {version}. \
              <a data-repo=\"/issues/new\" href=\"https://github.com/{repository}/issues/new\">Report a correction</a> on GitHub with the row, the cell and a public source.</p>\n",
             all_phrase = days_phrase(&all),

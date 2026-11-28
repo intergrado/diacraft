@@ -124,7 +124,7 @@ fn nothing_but_the_clock_and_what_is_about_real_time_reads_the_time() {
 /// machine's time. The files that ask for one are listed with what each wakes up for; another file that does asks the person who adds it to look at this.
 #[test]
 fn a_timed_repaint_is_asked_for_only_where_it_is_known_what_it_wakes_up() {
-    let known: [(&str, &str); 15] = [
+    let known: [(&str, &str); 16] = [
         (
             "app.rs",
             "a frame after a panic, so that the notice shows, and while the shared scan of the faces goes, so that the Font box reads them when it ends",
@@ -145,6 +145,10 @@ fn a_timed_repaint_is_asked_for_only_where_it_is_known_what_it_wakes_up() {
         ("font_list.rs", "the scan of the machine's fonts"),
         ("insert_picture.rs", "the thread of the picture file chooser"),
         ("notice.rs", "the end of the status bar's notice, by the window's clock"),
+        (
+            "prefs_host.rs",
+            "a change of the person's settings that waits out its quiet period before it is saved; a profile over a host has no wait but the one after a failed write",
+        ),
         ("print.rs", "the threads of the printers and of a job"),
         ("save.rs", "the thread of a save"),
         ("splash.rs", "the end of the start splash's four seconds, by the window's clock; none while the pointer holds it, and none for About"),

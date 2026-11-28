@@ -282,6 +282,39 @@ fn an_entry_up_to_4_mib_is_deflated_at_the_default_level_and_a_larger_one_at_the
     assert_eq!(data_of(&written[1]), deflated(over, flate2::Compression::fast()));
 }
 
+/// An entry that deflate makes smaller than a thousandth of itself is one this crate's own reader refuses (`zip_ratio_exceeded`: it inflates more than
+/// 1,000 times its size), so a package of it that the writer made was one the writer's caller could not read back: a part of one repeated pattern that a save only copied (a properties part
+/// the reader keeps as the bytes it is) made the save refused. `add_smallest` stores such an entry, and so does `pack`; the entry is read back, whole.
+#[test]
+fn an_entry_that_deflate_would_make_past_the_ratio_the_reader_holds_is_stored_by_add_smallest_and_packs_the_same() {
+    use diacraft_container::zip::{Pack, pack};
+    let past = b"<a/>".repeat(262_144);
+    let packed = deflated(&past, flate2::Compression::default()).len() as u64;
+    assert!(past.len() as u64 > 1_000 * packed, "the vector is past the ratio ({} bytes from {packed})", past.len());
+    let mut w = ArchiveWriter::new();
+    assert_eq!(w.add_smallest("docProps/app.xml", &past).unwrap(), Method::Stored, "stored, as deflate would pass the ratio");
+    // The same just under the ratio is deflated: 64 KiB of the pattern (the sweep saved it) and a run of every size that deflate makes at most a thousand times smaller.
+    let under = b"<a/>".repeat(16_384);
+    let packed = deflated(&under, flate2::Compression::default()).len() as u64;
+    assert!(under.len() as u64 <= 1_000 * packed, "the control is within the ratio ({} bytes from {packed})", under.len());
+    assert_eq!(w.add_smallest("under.xml", &under).unwrap(), Method::Deflated);
+    let files = read_all(&w.finish().unwrap()).expect("a package the writer made reads under the default limits");
+    assert_eq!(files[0], ("docProps/app.xml".to_owned(), past.clone()));
+    assert_eq!(files[1].1, under);
+    // Compressed apart, an entry is written as it is where it is added.
+    let apart = pack("docProps/app.xml", &past, Pack::Smallest).unwrap();
+    assert_eq!(apart.method(), Method::Stored);
+    let mut by_parts = ArchiveWriter::new();
+    by_parts.add_packed("docProps/app.xml", &past, Pack::Smallest, Ok(apart)).unwrap();
+    let mut at_once = ArchiveWriter::new();
+    at_once.add_smallest("docProps/app.xml", &past).unwrap();
+    assert!(by_parts.finish().unwrap() == at_once.finish().unwrap());
+    // A method asked for is kept: `add` deflates what it is told to, whatever the ratio (a save that keeps an entry's method wants it).
+    let mut kept = ArchiveWriter::new();
+    kept.add("kept.xml", &past, Method::Deflated).unwrap();
+    assert_eq!(rows(&kept.finish().unwrap())[0].central.method, 8);
+}
+
 #[test]
 fn deflate_that_saves_nothing_is_stored_by_add_smallest() {
     // Five equal bytes deflate to five bytes: no smaller, so stored.
@@ -400,6 +433,33 @@ fn at_level(data: &[u8], level: u32) -> Vec<u8> {
     let mut w = ArchiveWriter::new();
     w.add_at_level("part.xml", data, level).unwrap();
     w.finish().unwrap()
+}
+
+/// `add_at_level` and `pack` of a level deflate whatever the size and whatever the gain (the same model gives the same bytes), but **an entry that the level would
+/// make a thousand times smaller and more is stored**: this crate's reader refuses such an entry, and a `.diacraft` file with a part of one repeated pattern (a properties part a VSDX
+/// file held as bytes) was refused by its own writer's check. The same data gives the same bytes each time, and the entry reads back.
+#[test]
+fn add_at_level_stores_an_entry_that_the_level_would_make_past_the_ratio_the_reader_holds() {
+    use diacraft_container::zip::{Pack, pack};
+    let past = b"<a/>".repeat(262_144);
+    for level in [1u32, 6, 9] {
+        let packed = deflated(&past, flate2::Compression::new(level)).len() as u64;
+        if past.len() as u64 <= 1_000 * packed {
+            continue;
+        }
+        let first = at_level(&past, level);
+        assert_eq!(first, at_level(&past, level), "level {level}: the same entry gives the same bytes");
+        assert_eq!(rows(&first)[0].central.method, 0, "level {level}: stored, as the level would pass the ratio");
+        assert_eq!(read_all(&first).expect("reads back"), [("part.xml".to_owned(), past.clone())], "level {level}");
+        let apart = pack("part.xml", &past, Pack::Level(level)).unwrap();
+        assert_eq!(apart.method(), Method::Stored, "level {level}: packed apart the same");
+    }
+    // At level 6, the one the files of DiaCraft are written at, the vector is past the ratio (or this test looked at nothing).
+    assert!(past.len() as u64 > 1_000 * deflated(&past, flate2::Compression::new(6)).len() as u64);
+    // What is within the ratio stays deflated at the level, even where it gains little: 64 KiB of the same pattern.
+    let under = b"<a/>".repeat(16_384);
+    assert_eq!(rows(&at_level(&under, 6))[0].central.method, 8);
+    assert_eq!(pack("part.xml", &under, Pack::Level(6)).unwrap().method(), Method::Deflated);
 }
 
 #[test]

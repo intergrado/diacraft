@@ -32,7 +32,15 @@ pub(crate) enum Frame {
     TwoD { cx: f64, cy: f64, w: f64, h: f64, angle: f64, flip: (bool, bool) },
     /// A line or a connector: the ends are the cells' own.
     OneD,
+    /// **A segment written as the outline it draws**: a `draw:polyline` or `draw:path` on the page, which the reader gives back as a 2-D shape of the box of its outline. The
+    /// segment's frame is none of that shape's: its ends, the pose they work out and the geometry in its own frame ride in DiaCraft's data over it (every frame cell the model holds, whatever
+    /// the box says, and the geometry's sections), so that a read gives the same segment back. The box is never predicted: no frame cell is the reader's.
+    Segment,
 }
+
+/// The cells of a frame that a segment written as an outline carries whole: the reader makes the first six of the box of the polyline (a model that lacks one has it said gone), and the
+/// others it does not make (a model that lacks one has nothing to say).
+const SEGMENT_MADE: [&str; 6] = ["PinX", "PinY", "LocPinX", "LocPinY", "Width", "Height"];
 
 /// **What the display forms of a style do beside the cells written natively**: a visible shadow, a gradient or a hatch is written for the programs that draw it, and the cells that go
 /// with it ride in DiaCraft's data, so the reader (which makes a stand-in for each from the markup) gives back more than the model's cells say, and gives some of the model's fingerprinted
@@ -101,6 +109,9 @@ pub(crate) struct Native<'a> {
     pub outline: Option<super::fingerprint::Fp>,
     /// What the display forms written beside the cells do; `None` for a shape that has none.
     pub display: Option<&'a Display>,
+    /// The title and the description written natively, as `svg:title` and `svg:desc`, each empty when none was written: the reader gives each back as a row of the
+    /// `User` section in the form the files hold, **whatever the model's rows are** (its own, or the master's text an instance was written with). `None` for a shape whose element has none.
+    pub alt: Option<(&'a str, &'a str)>,
 }
 
 /// Whether a cell holds no formula and a number within the writer's tolerance of `want`.
@@ -310,6 +321,15 @@ pub(crate) fn rebuilt(shape: &Shape, n: &Native<'_>) -> Sheet {
             keep(&mut p, "LocPinX", formula_is(pin("LocPinX"), "Width*0.5"));
             keep(&mut p, "LocPinY", formula_is(pin("LocPinY"), "Height*0.5"));
         }
+        Frame::Segment => {
+            // Every frame cell of the model is carried, and none is the reader's: a cell the reader makes of the polyline's box and the model lacks is said gone, and a cell the reader does not
+            // make and the model lacks is nothing to say.
+            for name in crate::write::own::POSE_CELLS {
+                if SEGMENT_MADE.contains(&name) || m.cells.contains_key(name) {
+                    p.cells.insert(CellName::new(name), unlike(name));
+                }
+            }
+        }
     }
     // The style cells written natively: each reads back as written, and **one with a formula as the constant it was worked out to** (its attribute says the value, so its
     // formula is carried beside it).
@@ -382,13 +402,33 @@ pub(crate) fn rebuilt(shape: &Shape, n: &Native<'_>) -> Sheet {
         Some(s) if n.connection => p.sections.push(Arc::clone(s)),
         _ => p.sections.push(Arc::new(unlike_section(&connection_key))),
     }
-    if n.connector {
-        // The `DiaCraftRoute` row marks a route the router may route again; a connector that lacks it, or holds other user rows, is tier 2.
-        let user_key = SectionKey::new("User", None);
-        match m.sections.iter().find(|s| s.name.as_str() == "User") {
-            Some(s) if s.rows.iter().all(|r| r.name.as_deref() == Some("DiaCraftRoute")) && s.cells.is_empty() => p.sections.push(Arc::clone(s)),
-            _ => p.sections.push(Arc::new(unlike_section(&user_key))),
+    // The `User` section the reader rebuilds: a connector's `DiaCraftRoute` row (the model's own, which marks a route the router may route again), then the title and the description
+    // written natively, each as the row the files hold. A connector that lacks the marker is tier 2; so is a section that holds any other row, a row of another form, and a
+    // section with cells of its own: the delta against the section rebuilt carries it whole, and a model that holds none of the rows the reader makes has them taken away (`Gone`).
+    let user_key = SectionKey::new("User", None);
+    let model_user = m.sections.iter().find(|s| s.name.as_str() == "User");
+    let marker: Option<Vec<Arc<diacraft_doc::Row>>> = if n.connector {
+        model_user
+            .map(|s| s.rows.iter().filter(|r| r.name.as_deref() == Some("DiaCraftRoute")).cloned().collect())
+            .filter(|rows: &Vec<_>| !rows.is_empty())
+    } else {
+        Some(Vec::new())
+    };
+    let alt_rows: Vec<Arc<diacraft_doc::Row>> = n
+        .alt
+        .into_iter()
+        .flat_map(|(title, description)| [(diacraft_doc::alt_text::TITLE_ROW, title), (diacraft_doc::alt_text::DESCRIPTION_ROW, description)])
+        .filter(|(_, text)| !text.is_empty())
+        .map(|(name, text)| Arc::new(diacraft_doc::alt_text::standard_row(name, text)))
+        .collect();
+    match marker {
+        Some(rows) if rows.is_empty() && alt_rows.is_empty() => {}
+        Some(rows) => {
+            let mut section = Section::new("User", None);
+            section.rows = rows.into_iter().chain(alt_rows).collect();
+            p.sections.push(Arc::new(section));
         }
+        None => p.sections.push(Arc::new(unlike_section(&user_key))),
     }
     p
 }
@@ -487,6 +527,29 @@ pub(crate) fn tier2(shape: &Shape, n: &Native<'_>, referenced: bool) -> Tier2 {
     };
     super::tier3::stamp_new(&mut t, n.text, n.format, n.name, n.outline, n.picture_bytes, cells);
     t
+}
+
+/// The end cells `t` carries for a line or a connector, **with their values as the page has the ends** (`page`: the begin's place and the end's, in inches, y up), or `None` when no carried
+/// end cell holds another value there (a shape outside a group, whose frame is the page).
+///
+/// **Why.** The model holds the ends of a member of a group in the group's frame, and the file holds them in the page's (a `draw:g` has no frame of its own). The reader judges a carried end
+/// against the markup's, which is the page's, and takes the group's corner off the end cells of each member once it has measured the group (`read::shapes::translate`), the carried ones
+/// among them. An end held in the group's frame was taken for one that another program had moved, and the file's own end stood in its place: a glue formula carried on it (`_WALKGLUE`)
+/// was lost. The carried ends are written in the page's frame, so that the reader keeps them and puts them in the group's like the markup's. The copy is for the attributes
+/// only: the check of the file made compares what it reads with the model's cells, `t` as it is.
+pub(crate) fn with_ends_on_page(t: &Tier2, page: &[(f64, f64); 2]) -> Option<Tier2> {
+    let mut out: Option<Tier2> = None;
+    for (name, on_page) in [("BeginX", page[0].0), ("BeginY", page[0].1), ("EndX", page[1].0), ("EndY", page[1].1)] {
+        let Some(held) = t.cells.get(name).and_then(|c| c.value.as_ref()).and_then(diacraft_doc::Value::number) else { continue };
+        if held == on_page {
+            continue;
+        }
+        let Some(value) = diacraft_doc::Value::from_number(on_page) else { continue };
+        if let Some(cell) = out.get_or_insert_with(|| t.clone()).cells.get_mut(name) {
+            cell.value = Some(value);
+        }
+    }
+    out
 }
 
 /// The `ID`s of the sheets that the formulas of a shape's cells name (`Sheet.5!Width`, `Sheet.5`), in order and once each, leaving out the cells named in
@@ -711,6 +774,7 @@ mod tests {
     const NATIVE: Native<'static> = Native {
         frame: Frame::TwoD { cx: 1.0, cy: 0.5, w: 2.0, h: 1.0, angle: 0.0, flip: (false, false) },
         style: &[],
+        alt: None,
         geometry: true,
         outline_sections: 1,
         picture: false,
@@ -886,6 +950,42 @@ mod tests {
         let t = tier2(&s, &n, false);
         let names: Vec<&str> = t.cells.keys().map(CellName::as_str).collect();
         assert_eq!(names, ["BeginX", "BeginY"], "a free end holding a formula is carried");
+    }
+
+    /// The ends a member of a group carries are in the group's frame in the model and in the page's in the file: the copy for the attributes holds each carried end the number the
+    /// page has, keeps its formula and its unit, and leaves a cell that is no end, a cell that holds no number and a cell that is already the page's.
+    #[test]
+    fn carried_ends_are_given_the_values_the_page_has() {
+        let (mut s, n) = one_d(true);
+        let glue = "_WALKGLUE(BegTrigger,EndTrigger,WalkPreference)";
+        put(&mut s, "BeginX", Some(glue), "1.5");
+        put(&mut s, "BeginY", Some(glue), "1");
+        put(&mut s, "EndX", Some("Width*2"), "abc");
+        put(&mut s, "EndY", Some("Width*2"), "4");
+        put(&mut s, "GlueType", None, "2");
+        let t = tier2(&s, &n, false);
+        let names: Vec<&str> = t.cells.keys().map(CellName::as_str).collect();
+        assert_eq!(names, ["BeginX", "BeginY", "EndX", "EndY", "GlueType"], "the ends that hold formulas are carried");
+        let on_page = with_ends_on_page(&t, &[(2.75, 1.0), (9.0, 5.0)]).expect("the begin and the end are not where the page has them");
+        let value = |t: &Tier2, name: &str| t.cells.get(name).and_then(|c| c.value.as_ref()).and_then(diacraft_doc::Value::number);
+        assert_eq!(value(&on_page, "BeginX"), Some(2.75), "the page's x of the begin");
+        assert_eq!(value(&on_page, "BeginY"), Some(1.0), "a value that is the page's already is left");
+        assert_eq!(value(&on_page, "EndX"), None, "a text is no place");
+        assert_eq!(value(&on_page, "EndY"), Some(5.0));
+        assert_eq!(value(&on_page, "GlueType"), Some(2.0), "a cell that is no end is not moved");
+        for name in ["BeginX", "EndY"] {
+            let (was, now) = (t.cells.get(name).unwrap(), on_page.cells.get(name).unwrap());
+            assert_eq!(
+                (now.formula.text(), now.unit.as_deref()),
+                (was.formula.text(), was.unit.as_deref()),
+                "{name}: the formula and the unit are the model's"
+            );
+        }
+        // The tier 2 the check compares is the model's, as it was.
+        assert_eq!(value(&t, "BeginX"), Some(1.5));
+        // A shape outside a group has the page for its frame: nothing differs.
+        assert!(with_ends_on_page(&t, &[(1.5, 1.0), (0.0, 4.0)]).is_none());
+        assert!(with_ends_on_page(&Tier2::default(), &[(1.0, 2.0), (3.0, 4.0)]).is_none(), "no carried end, no copy");
     }
 
     /// The connection section is the writer's four side middles only where it wrote them.
@@ -1157,6 +1257,7 @@ mod tests {
         let n = Native {
             frame: Frame::TwoD { cx: 1.0, cy: 0.5, w: 2.0, h: 1.0, angle: 0.0, flip: (false, false) },
             style: &[],
+            alt: None,
             geometry: true,
             outline_sections: 1,
             picture: false,
@@ -1194,6 +1295,7 @@ mod tests {
         let native = |angle: f64, flip: (bool, bool)| Native {
             frame: frame(angle, flip),
             style: &[],
+            alt: None,
             geometry: true,
             outline_sections: 1,
             picture: false,
@@ -1513,5 +1615,27 @@ mod tests {
             !drops(turned, &carried(&[("PinX", 1.0), ("PinY", -0.5), ("LocPinX", 0.0)])),
             "the pin at the left of the middle line, turned a quarter"
         );
+    }
+
+    /// A segment written as the outline it draws is carried whole over the box of its polyline: every frame cell the model holds is tier 2, the cells the reader makes of the box that the
+    /// model lacks are said gone, and none of them is the reader's. Its pin is never one the reader would drop.
+    #[test]
+    fn a_segment_written_as_an_outline_carries_every_frame_cell_it_holds() {
+        let (shape, native) = one_d(false);
+        let native = Native { frame: Frame::Segment, geometry: false, ..native };
+        let t = tier2(&shape, &native, false);
+        for name in crate::write::own::POSE_CELLS {
+            assert_eq!(t.cells.contains_key(name), shape.sheet.cells.contains_key(name), "{name}: carried when the model holds it");
+        }
+        assert!(t.cells.contains_key("BeginX") && t.cells.contains_key("Width") && t.cells.contains_key("PinX"));
+        assert!(t.sections.iter().any(|s| s.name.as_str() == "Geometry"), "its geometry is the model's, whatever the polyline says");
+        assert!(!carried_pin_the_reader_drops(&native, &t), "a pin of a segment is the model's");
+        // A model that lacks a cell the reader makes of the box has it said gone; one that lacks a cell the reader does not make has nothing to say.
+        let mut lacking = shape.clone();
+        Arc::make_mut(&mut lacking.sheet).cells.remove("LocPinY");
+        Arc::make_mut(&mut lacking.sheet).cells.remove("Angle");
+        let t = tier2(&lacking, &native, false);
+        assert!(t.gone.contains(&Gone::Cell("LocPinY".to_owned())), "the reader makes LocPinY of the box");
+        assert!(!t.gone.contains(&Gone::Cell("Angle".to_owned())), "the reader makes no Angle of an unturned box");
     }
 }

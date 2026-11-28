@@ -56,10 +56,13 @@ pub struct Work {
     /// where they sit probed (at most two for each row).
     pub comment_rows_seen: usize,
     pub comment_cells_probed: usize,
+    /// Doubling and halving connection points: times the engine was asked what the edges of the shapes selected can take (`shape.connection_edges`'s query: it reads the
+    /// shapes' outlines), which is once for each drawing, revision, page, selection and minimum distance, and never for a frame.
+    pub connection_edge_queries: usize,
 }
 
 thread_local! {
-    static WORK: Cell<Work> = const { Cell::new(Work { caps_built: 0, placement_queries: 0, data_queries: 0, thumb_builds: 0, thumb_points: 0, thumb_simplified: 0, thumb_left_out: 0, thumb_painted: 0, explorer_scans: 0, explorer_names: 0, snap_page_reads: 0, move_subjects: 0, snaps: 0, points_marked: 0, shape_op_checks: 0, marks_painted: 0, labels_painted: 0, index_built_here: 0, targets_built_here: 0, reads_asked: 0, reads_inline: 0, comment_rows_seen: 0, comment_cells_probed: 0 }) };
+    static WORK: Cell<Work> = const { Cell::new(Work { caps_built: 0, placement_queries: 0, data_queries: 0, thumb_builds: 0, thumb_points: 0, thumb_simplified: 0, thumb_left_out: 0, thumb_painted: 0, explorer_scans: 0, explorer_names: 0, snap_page_reads: 0, move_subjects: 0, snaps: 0, points_marked: 0, shape_op_checks: 0, marks_painted: 0, labels_painted: 0, index_built_here: 0, targets_built_here: 0, reads_asked: 0, reads_inline: 0, comment_rows_seen: 0, comment_cells_probed: 0, connection_edge_queries: 0 }) };
 }
 
 /// What the panes have done on this thread since the last [`reset`].

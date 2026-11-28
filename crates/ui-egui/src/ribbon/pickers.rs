@@ -362,7 +362,7 @@ pub fn paint_sample(painter: &Painter, rect: Rect, sample: Sample, t: &Tokens, e
             let (shaft_from, shaft_to) = if begin { (tip.x + stop, rect.right()) } else { (rect.left(), tip.x - stop) };
             painter.line_segment([pos2(shaft_from, y), pos2(shaft_to, y)], Stroke::new(1.5, ink));
             if let Some(art) = art {
-                super::line_ends::paint(&painter, tip, back, unit, &art, ink);
+                super::line_ends::paint(&painter, tip, back, unit, &art, ink, t.stencil_fill);
             }
         }
     }

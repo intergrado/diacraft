@@ -16,7 +16,8 @@
 //! layer batch sets by project rule for a missing `Visible`, `Print`, `Snap`, `Glue` and `Color` are not kinds, so they
 //! are the reader's to apply, as `render` does.
 //!
-//! Names match exactly, in case: `pinx` is not `PinX`.
+//! Names match exactly, in case: `pinx` is not `PinX`. That is how a file's cells are read; **a formula's reference names a cell without regard to case**
+//! ([`direct_cell_spelling`]).
 
 mod display;
 mod table;
@@ -25,6 +26,9 @@ pub use display::{
     DISPLAY_ORDER, DisplaySection, SECTION_SPELLINGS, SectionKind, SectionRules, SheetKind, display_group, display_section, ix_to_row_number,
     next_row_number, row_number_to_ix, section_for_spelling, section_rules, section_spelling,
 };
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use crate::ValueKind;
 
@@ -141,6 +145,41 @@ pub(crate) fn known_cell_name(name: &str) -> Option<&'static str> {
     table::NAMES.binary_search(&name).ok().and_then(|i| table::NAMES.get(i)).copied()
 }
 
+/// The names the table lists directly under a sheet, by their lower-case spelling, and the longest of them in bytes. A spelling that two names share (there is none) maps to nothing.
+struct Folded {
+    by_lower: HashMap<String, Option<&'static str>>,
+    longest: usize,
+}
+
+fn folded_direct_names() -> &'static Folded {
+    static FOLDED: OnceLock<Folded> = OnceLock::new();
+    FOLDED.get_or_init(|| {
+        let mut by_lower: HashMap<String, Option<&'static str>> = HashMap::with_capacity(table::DIRECT.len());
+        let mut longest = 0;
+        for entry in table::DIRECT {
+            longest = longest.max(entry.name.len());
+            // A second name with the same spelling in lower case makes the match ambiguous, and no name is matched by it.
+            by_lower.entry(entry.name.to_ascii_lowercase()).and_modify(|held| *held = None).or_insert(Some(entry.name));
+        }
+        Folded { by_lower, longest }
+    })
+}
+
+/// The cell the table lists directly under a sheet that `name` names **without regard to letter case**: the table's own spelling (`WIDTH` is `Width`), or `None` for a name that is
+/// none of them in any case. **A cell named in a formula's reference is the cell in any case** (`WIDTH/1 in*12` read `Width`, observed in the reference application on the project's
+/// test PC, 2026-11-27); the names a file holds still match exactly, so a cell written `pinx` in a file is an unknown cell, and a reference to `pinx` reads `PinX`.
+/// The exact spelling is one binary search; any other is one lower-casing of a name no longer than the longest the table lists.
+pub fn direct_cell_spelling(name: &str) -> Option<&'static str> {
+    if let Ok(at) = table::DIRECT.binary_search_by(|entry| entry.name.cmp(name)) {
+        return table::DIRECT.get(at).map(|entry| entry.name);
+    }
+    let folded = folded_direct_names();
+    if name.len() > folded.longest {
+        return None;
+    }
+    folded.by_lower.get(name.to_ascii_lowercase().as_str()).copied().flatten()
+}
+
 /// The names of the 17 predefined sections, which are `Section` elements in a file.
 pub const SECTION_NAMES: [&str; 17] = [
     "Geometry",
@@ -182,6 +221,14 @@ pub fn keying(name: &str) -> Keying {
         }
         _ => Keying::Either,
     }
+}
+
+/// Whether a row that an instance holds of its own carries the type `T` of the master's row it overrides, in the section `name`: the `Geometry` section, whose every row has
+/// a `T` in the files of the sample-file run ("Every `Geometry` row has a `T`"), and so has the row of an instance that holds only the cells that differ from the
+/// master's. **`Connection` is not one**: its rows hold a `T` in some files and none in others, and "absent on a partial local row" is how the files write the
+/// row of an instance, so a row of that section is left as the master's has it. No other section has a row type.
+pub fn rows_inherit_type(name: &str) -> bool {
+    name == "Geometry"
 }
 
 /// The names of the cells the catalogue lists directly under a sheet, and of those in rows, as `(section, name)`; for tests

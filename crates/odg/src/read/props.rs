@@ -13,6 +13,7 @@
 use std::rc::Rc;
 
 use diacraft_doc::Cell;
+use diacraft_fonts::script::FontSlot;
 
 use super::Reader;
 use super::cells;
@@ -352,7 +353,7 @@ fn fill_pattern(r: &mut Reader, view: &View<'_>, out: &mut Out) {
 }
 
 /// The marks and gaps of each `LinePattern` from 2 to 23, in weights, for a round or projecting cap.
-const PATTERNS: [(u8, &[f64]); 22] = [
+pub(crate) const PATTERNS: [(u8, &[f64]); 22] = [
     (2, &[7.0, 5.0]),
     (3, &[0.0, 5.0]),
     (4, &[7.0, 5.0, 0.0, 5.0]),
@@ -427,11 +428,17 @@ fn matches_pattern(n: u8, runs: &[f64], flat: bool) -> bool {
     table.len() == runs.len() && table.iter().zip(runs).enumerate().all(|(i, (t, v))| (t - back(i, *v)).abs() <= 0.01)
 }
 
+/// The prefix of DiaCraft's own dash names: the number of the pattern follows it.
+pub(crate) const DASH_PREFIX: &str = "DiaCraft_20_dash_20_";
+
+/// What follows the number in the name of a dash drawn for a flat cap.
+pub(crate) const FLAT_SUFFIX: &str = "_20_flat";
+
 /// The pattern and cap form of DiaCraft's own dash of this name: `DiaCraft_20_dash_20_<n>` for 2 to 23, and `_20_flat` after it for the
 /// form of a flat cap, the number written with no sign and no leading zero. `None` for any other name.
 pub(crate) fn own_dash(name: &str) -> Option<(u8, bool)> {
-    let rest = name.strip_prefix("DiaCraft_20_dash_20_")?;
-    let (digits, flat) = match rest.strip_suffix("_20_flat") {
+    let rest = name.strip_prefix(DASH_PREFIX)?;
+    let (digits, flat) = match rest.strip_suffix(FLAT_SUFFIX) {
         Some(digits) => (digits, true),
         None => (rest, false),
     };
@@ -659,12 +666,14 @@ pub(crate) fn paragraph(r: &mut Reader, view: &View<'_>, own: Own<'_>, out: &mut
     let rtl = |mode: Option<&str>| matches!(mode, Some("rl-tb" | "rl"));
     if own(k, P::TextAlign) || own(k, P::TextAlignLast) || own(k, P::WritingMode) {
         let mode = view.value(r, k, P::WritingMode);
+        // `start` and `end` follow the paragraph's writing direction, so they are the line's first and last side whatever it is: 0 and 2. `left`
+        // and `right` are the page's sides, which a right-to-left paragraph reads against: `left` is the line's end there, and `right` its start.
         let align = match view.value(r, k, P::TextAlign) {
-            Some("left") => Some(0.0),
-            Some("start") => Some(if rtl(mode) { 2.0 } else { 0.0 }),
+            Some("left") => Some(if rtl(mode) { 2.0 } else { 0.0 }),
+            Some("start") => Some(0.0),
             Some("center") => Some(1.0),
-            Some("right") => Some(2.0),
-            Some("end") => Some(if rtl(mode) { 0.0 } else { 2.0 }),
+            Some("right") => Some(if rtl(mode) { 0.0 } else { 2.0 }),
+            Some("end") => Some(2.0),
             Some("justify") => Some(if view.value(r, k, P::TextAlignLast) == Some("justify") { 4.0 } else { 3.0 }),
             Some(_) => {
                 r.keep("property_value");
@@ -713,7 +722,61 @@ pub(crate) fn paragraph(r: &mut Reader, view: &View<'_>, own: Own<'_>, out: &mut
     }
 }
 
-/// The character cells.
+/// The script type of the letters a text reads through, for the one language of a run: the type most of the **letters** belong to, a letter being
+/// a character of a script of its own (digits, punctuation and spaces are of none), and **a tie goes to the Latin type, then the Asian one** (the Latin triplet is the one a run
+/// with no letters reads, so it wins where the letters do not say). Every byte is a unit of the work, charged before the walk.
+pub(crate) fn script_type_of<'t>(r: &mut Reader, text: impl Iterator<Item = &'t str>) -> FontSlot {
+    let mut letters = crate::lang::Letters::default();
+    for piece in text {
+        r.text_units(piece.len());
+        letters.add(piece);
+    }
+    letters.slot()
+}
+
+/// The language the triplet of the script type `slot` says, as the tag a `LangID` holds, read through the chain the view is: the type's `style:rfc-language-tag`
+/// when it is there and as near as the language (it says the same and more), else its language with its script and its country, each from the nearest style that states it. A triplet whose
+/// language is `zxx` or `none` is **no language** (`x-none`), and a country or a script that is `none` (as LibreOffice writes beside `zxx`) says nothing. `None` when the triplet says no
+/// language, or says one that is no well-formed tag (RFC 5646): the run then keeps what it inherits.
+pub(crate) fn language_of(r: &mut Reader, view: &View<'_>, slot: FontSlot) -> Option<String> {
+    use diacraft_doc::lang;
+    let [language, script, country, rfc] = P::triplet(slot);
+    let k = Kind::Text;
+    let language = view.get(r, k, language);
+    // A full tag that a style states farther off than the language is overruled by the language.
+    let full = view.get(r, k, rfc).filter(|(_, hit)| language.is_none_or(|(_, near)| hit.rank() <= near.rank())).map(|(text, _)| text);
+    if let Some(text) = full
+        && let Ok(tag) = lang::parse(text)
+    {
+        return Some(if lang::is_no_language(tag.as_str()) { "x-none".to_owned() } else { tag.as_str().to_owned() });
+    }
+    let (language, _) = language?;
+    if language.eq_ignore_ascii_case("zxx") || language.eq_ignore_ascii_case("none") {
+        return Some("x-none".to_owned());
+    }
+    let parts: Vec<&str> = [script, country]
+        .into_iter()
+        .filter_map(|part| view.value(r, k, part))
+        .filter(|text| !text.is_empty() && !text.eq_ignore_ascii_case("none"))
+        .collect();
+    // A tag longer than a tag may be is no tag: it is not joined (a style may state a megabyte for each of the three).
+    let length = parts.iter().fold(language.len(), |sum, part| sum.saturating_add(part.len()).saturating_add(1));
+    if length > diacraft_doc::lang::MAX_TAG_BYTES {
+        return None;
+    }
+    let mut joined = String::with_capacity(length);
+    joined.push_str(language);
+    for part in parts {
+        joined.push('-');
+        joined.push_str(part);
+    }
+    let tag = lang::parse(&joined).ok()?;
+    Some(if lang::is_no_language(tag.as_str()) { "x-none".to_owned() } else { tag.as_str().to_owned() })
+}
+
+/// The character cells. `slot` is the script type of the run's letters, whose triplet its `LangID` is read from ([`script_type_of`]): the Latin one for a style sheet, which has no
+/// letters.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn character<'a>(
     r: &mut Reader,
     texts: &mut StyleTexts<'a>,
@@ -721,6 +784,7 @@ pub(crate) fn character<'a>(
     own: Own<'_>,
     size: Option<f64>,
     base: &Base,
+    slot: FontSlot,
     out: &mut Out,
 ) -> Result<(), OdgError> {
     let k = Kind::Text;
@@ -804,6 +868,14 @@ pub(crate) fn character<'a>(
         && let Some(p) = view.percent(r, k, P::TextScale)
     {
         out.character.push(("FontScale", cells::plain(p / 100.0)));
+    }
+    // The language: a cell when any of the twelve attributes is the conversion's own, whichever triplet it is in, since the type the run's letters belong to picks the triplet.
+    if [FontSlot::Latin, FontSlot::Asian, FontSlot::Complex].into_iter().any(|s| P::triplet(s).into_iter().any(|p| own(k, p)))
+        && let Some(tag) = language_of(r, view, slot)
+    {
+        // A tag of a cell's own short text is compared as it is; a longer one (a tag may be 255 bytes) is one shared value for each distinct tag, as a family is.
+        let cell = if tag.len() <= cells::SHORT_TEXT { cells::text(&tag) } else { Cell::constant(r.shared_value(&tag)?) };
+        out.character.push(("LangID", cell));
     }
     for (name, family, cell) in [
         (P::FontName, P::FontFamily, "Font"),

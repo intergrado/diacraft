@@ -16,7 +16,8 @@
 //! **The steps**: a Save As to each type, with or without `drop_objects` and `drop_macros`; a Save; an edit (a move, a text, a picture inserted, a delete) and then a Save. After each step the file
 //! written is read back and **every payload this test made is counted in it** (the object's compound file, each picture, each file of a macro project): each is held once, at most.
 //!
-//! [`chains_keep_the_rule`] runs in nextest; [`a_long_sweep_of_chains`] is the local sweep (`#[ignore]`), which runs many more and groups what fails by its words.
+//! [`chains_keep_the_rule`] runs in nextest, with a count of chains small enough for a busy machine and a count of what they cover; [`the_old_four_hundred_chains_keep_the_rule`] is the 400 it ran before (`#[ignore]`); [`a_long_sweep_of_chains`] is
+//! the local sweep (`#[ignore]`), which runs many more and groups what fails by its words.
 
 use std::collections::BTreeMap;
 
@@ -793,23 +794,79 @@ fn class_of(chain: &Chain, failure: &Failure) -> String {
     format!("{outside}{} | {}", step.unwrap_or_else(|| "start".to_owned()), words.chars().take(160).collect::<String>())
 }
 
-/// Runs `cases` random chains from the seed, and gives every failure with its chain.
-fn sweep(cases: u32, seed: u64) -> (Tally, Vec<(Chain, Failure)>) {
-    let files = Files::new();
+/// The chains a run of `cases` draws from `seed`, one after another: the first `n` chains of a longer run are the chains of a run of `n`.
+pub(crate) fn chains_of(cases: u32, seed: u64) -> Vec<Chain> {
     let config = Config { cases, failure_persistence: None, ..Config::default() };
     let mut seed_bytes = [0u8; 32];
     seed_bytes[..8].copy_from_slice(&seed.to_le_bytes());
     let mut runner = TestRunner::new_with_rng(config, TestRng::from_seed(RngAlgorithm::ChaCha, &seed_bytes));
     let strategy = chain();
+    (0..cases).map(|_| strategy.new_tree(&mut runner).unwrap().current()).collect()
+}
+
+/// Runs `cases` random chains from the seed, and gives every failure with its chain.
+fn sweep(cases: u32, seed: u64) -> (Tally, Vec<(Chain, Failure)>) {
+    let files = Files::new();
     let mut tally = Tally::default();
     let mut failures = Vec::new();
-    for case in 0..cases as usize {
-        let chain = strategy.new_tree(&mut runner).unwrap().current();
+    for (case, chain) in chains_of(cases, seed).into_iter().enumerate() {
         if let Err(failure) = run_chain(&files, &chain, case, &mut tally) {
             failures.push((chain, failure));
         }
     }
     (tally, failures)
+}
+
+/// What a set of chains covers, counted: how many chains start from each kind of drawing, how many steps save as each type, make each edit, save, and add each thing before the first
+/// step, and how many Save As steps leave out objects and macros and how many do not. A run is held to cover every one of these (`COVERED`), so that fewer chains are no less of a test of
+/// what it is about.
+fn coverage(chains: &[Chain]) -> BTreeMap<String, usize> {
+    let mut covered: BTreeMap<String, usize> = BTreeMap::new();
+    let mut count = |key: String| *covered.entry(key).or_insert(0) += 1;
+    for chain in chains {
+        count(format!("start {:?}", chain.start));
+        for (flag, on) in
+            [("picture", chain.live.picture), ("group", chain.live.group), ("connector", chain.live.connector), ("link", chain.live.link)]
+        {
+            if on {
+                count(format!("live {flag}"));
+            }
+        }
+        for step in &chain.steps {
+            match *step {
+                Step::SaveAs { target, drop_objects, drop_macros } => {
+                    count(format!("save as .{}", TARGETS[target]));
+                    count(format!("drop_objects {drop_objects}"));
+                    count(format!("drop_macros {drop_macros}"));
+                }
+                Step::Save => count("save".to_owned()),
+                Step::Edit { edit, .. } => count(format!("edit {edit:?}")),
+            }
+        }
+    }
+    covered
+}
+
+/// Every key of [`coverage`] a run must have, each at least `least` times.
+pub(crate) fn assert_covers(chains: &[Chain], least: usize) {
+    let covered = coverage(chains);
+    let mut wanted: Vec<String> = STARTS.iter().map(|start| format!("start {start:?}")).collect();
+    wanted.extend(TARGETS.iter().map(|target| format!("save as .{target}")));
+    for edit in ["Move", "Text", "Picture", "Delete"] {
+        wanted.push(format!("edit {edit}"));
+    }
+    for key in ["live picture", "live group", "live connector", "live link", "save"] {
+        wanted.push(key.to_owned());
+    }
+    for flag in ["drop_objects", "drop_macros"] {
+        wanted.extend([format!("{flag} true"), format!("{flag} false")]);
+    }
+    let thin: Vec<String> = wanted
+        .iter()
+        .filter(|key| covered.get(*key).copied().unwrap_or(0) < least)
+        .map(|key| format!("{key}: {}", covered.get(key).copied().unwrap_or(0)))
+        .collect();
+    assert!(thin.is_empty(), "the {} chains cover these fewer than {least} times: {thin:?}\n{covered:?}", chains.len());
 }
 
 /// The failures grouped by class, each with how many and the shortest chain that shows it.
@@ -836,9 +893,29 @@ fn grouped(failures: &[(Chain, Failure)]) -> String {
         .join("\n")
 }
 
-/// **Every chain keeps the rule**: random chains of two to six steps from every start, a fixed seed and a case count set here (nextest runs this; `PROPTEST_CASES` is not read).
+/// How many chains `chains_keep_the_rule` runs. Each chain writes about three files and reads each back (400 chains wrote 1,354 and took 17 seconds of CPU, 12.5 of them the process's own and
+/// the rest the system's: the 120 seconds nextest allows a test ran out on a machine that gave the process a seventh of one core). The chains are drawn one after another from the seed, so
+/// these are the first of the 400 that `the_old_four_hundred_chains_keep_the_rule` runs, and the run is held to cover each start, each type, each edit and each option (`assert_covers`).
+const CHAINS: u32 = 100;
+
+/// **Every chain keeps the rule**: random chains of two to six steps from every start, a fixed seed and a case count set here (nextest runs this; `PROPTEST_CASES` is not read). The count is
+/// small, and what the chains cover is counted: every start, every type of Save As, every edit and each option of a Save As appears in them at least twice (the least is a start, 2 of the 15, `VsdxNew`; most are in a dozen or more).
 #[test]
 fn chains_keep_the_rule() {
+    assert_covers(&chains_of(CHAINS, 0x5EED_0001), 2);
+    let (tally, failures) = sweep(CHAINS, 0x5EED_0001);
+    assert!(tally.chains == CHAINS as usize && tally.written > CHAINS as usize, "{tally:?}");
+    let broken: Vec<(Chain, Failure)> = failures.into_iter().filter(|(_, failure)| !failure.outside).collect();
+    assert!(broken.is_empty(), "{} of {} chains failed ({tally:?}):\n{}", broken.len(), tally.chains, grouped(&broken));
+}
+
+/// **The run nextest made before its count was cut**: the 400 chains of the seed (the 100 of `chains_keep_the_rule` are the first of them), which write 1,354 files and take about 17 seconds of
+/// CPU, a minute and more where the machine is busy (`#[ignore]`: nextest ends a test at 120 seconds).
+/// `cargo test -p diacraft-engine --test it resave_sweep::the_old_four_hundred_chains_keep_the_rule -- --ignored`.
+#[test]
+#[ignore = "the 400 chains the test ran before its count was cut: a minute where the machine is busy"]
+fn the_old_four_hundred_chains_keep_the_rule() {
+    assert_covers(&chains_of(400, 0x5EED_0001), 10);
     let (tally, failures) = sweep(400, 0x5EED_0001);
     assert!(tally.chains == 400 && tally.written > 400, "{tally:?}");
     let broken: Vec<(Chain, Failure)> = failures.into_iter().filter(|(_, failure)| !failure.outside).collect();

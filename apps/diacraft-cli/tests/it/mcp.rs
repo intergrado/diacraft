@@ -21,7 +21,7 @@ fn call(id: u64, tool: &str, arguments: Value) -> String {
 /// Runs the binary with `args` and `RUST_LOG` as given, feeds it `input` and closes its input.
 fn run_with_log(args: &[&str], input: &str, rust_log: Option<&str>) -> std::process::Output {
     let mut command = Command::new(BIN);
-    command.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).env_remove("RUST_LOG");
+    command.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).env_remove("RUST_LOG").env("DIACRAFT_NO_PREFS", "1");
     if let Some(level) = rust_log {
         command.env("RUST_LOG", level);
     }
@@ -186,6 +186,7 @@ fn peak_kib_after(line: &str) -> u64 {
     let mut child = Command::new(BIN)
         .args(["mcp", "--headless"])
         .env_remove("RUST_LOG")
+        .env("DIACRAFT_NO_PREFS", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

@@ -218,12 +218,15 @@ fn flags_a_right_to_left_paragraph_orders_its_letters_right_to_left() {
     let laid = lay_text(&db, "aאב", &c, &two, &block, Some(2.0));
     assert_eq!(crate::gids(&laid.lines[0])[0], u32::from(he.gid('a')));
     // Flags 1: the base direction is right to left, so the Latin letter, first typed, ends up at the far right of the run, and
-    // alignment 0 keeps its side: the line still starts at the left.
+    // the paragraph mirrors (which replaced the rule that alignment 0 keeps its side): alignment 0 puts the
+    // line against the start edge, the right, and 2 against the left.
     let rtl = ParaFormat { flags: 1, halign: 0, ..ParaFormat::default() };
     let laid = lay_text(&db, "aאב", &c, &rtl, &block, Some(2.0));
     assert_eq!(crate::gids(&laid.lines[0]), vec![u32::from(he.gid('ב')), u32::from(he.gid('א')), u32::from(he.gid('a'))]);
-    close(laid.lines[0].x, 0.0);
+    close(laid.lines[0].x, 2.0 - 0.3);
     assert!(laid.lines[0].rtl);
+    let rtl_left = ParaFormat { flags: 1, halign: 2, ..ParaFormat::default() };
+    close(lay_text(&db, "aאב", &c, &rtl_left, &block, Some(2.0)).lines[0].x, 0.0);
 }
 
 #[test]

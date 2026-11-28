@@ -209,7 +209,19 @@ impl Typed {
             | P::TextTransform
             | P::FontName
             | P::FontNameAsian
-            | P::FontNameComplex => Typed::Word,
+            | P::FontNameComplex
+            | P::Language
+            | P::Script
+            | P::Country
+            | P::RfcTag
+            | P::LanguageAsian
+            | P::ScriptAsian
+            | P::CountryAsian
+            | P::RfcTagAsian
+            | P::LanguageComplex
+            | P::ScriptComplex
+            | P::CountryComplex
+            | P::RfcTagComplex => Typed::Word,
         }
     }
 }

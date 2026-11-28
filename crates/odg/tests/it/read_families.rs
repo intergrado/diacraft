@@ -178,8 +178,9 @@ fn unknown_markup_is_counted_not_dropped() {
     assert_eq!(report.kept("attribute"), 2);
     assert_eq!(report.kept("foreign_attribute"), 1);
     // Children it does not read: in the shape's passthrough, and counted.
-    assert_eq!(odf(s).kept.len(), 2);
-    assert_eq!((report.kept("shape_child"), report.kept("title")), (1, 1));
+    // (The title is a row of the User section, and no kept child.)
+    assert_eq!(odf(s).kept.len(), 1);
+    assert_eq!((report.kept("shape_child"), report.kept("title")), (1, 0));
     // A hyperlink in text: its text read, the element counted.
     assert_eq!(report.kept("text_element"), 1);
     // Custom shapes, connectors and groups are modelled; an unknown page child is in the page's passthrough, and counted.

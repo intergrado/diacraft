@@ -45,6 +45,20 @@ fn test_clock() -> Clock {
     }
 }
 
+/// Lays the window's text out as the shipped window does. **A test window is stricter than the app**: `egui_kittest` turns on egui's `MissingGlyphPolicy::Panic`, so that
+/// a character no face draws (a label of ours with an arrow the bundled faces lack) is a failing test and not a box nobody sees. The shipped window never sets it, and
+/// egui's own default, which eframe keeps on the desktop and in the browser, is `Tofu`: a box, no panic. A test that puts a person's text in front of the window (a name
+/// typed, pasted or read from a file, in any script) calls this first, or it fails on the harness and not on the window (`tests/it/glyphs.rs`).
+pub fn as_shipped(window: &Window) {
+    window.ctx.set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
+}
+
+/// A window of `size` points laid out as shipped from its **first** frame: the harness draws frames while it builds the window, before a test can call [`as_shipped`], so an app
+/// that starts with a person's text in it (a notice, a file's page name) is built here.
+pub fn shipped_window(app: DiacraftApp, size: impl Into<Vec2>) -> Window {
+    Harness::builder().with_size(size).allow_missing_glyphs().build_eframe(|_| with_inline_reads(with_test_clock(app)))
+}
+
 /// A window of `size` points with no control channel.
 pub fn window(app: DiacraftApp, size: impl Into<Vec2>) -> Window {
     Harness::builder().with_size(size).build_eframe(|_| with_inline_reads(with_test_clock(app)))
@@ -195,6 +209,21 @@ pub fn click(window: &mut Window, pos: egui::Pos2) -> Vec<ViewportCommand> {
 pub fn drawing_window(size: impl Into<Vec2>) -> Window {
     let mut session = Session::new();
     session.execute("file.new", &serde_json::json!({})).unwrap();
+    let mut window = window(DiacraftApp::new(session, None).with_inline_pictures(bundled_drawer()), size);
+    window.rest();
+    window
+}
+
+/// A window of `size` points on a new drawing whose first page is named `name` as **a file may name it**: the model holds up to 255 characters, where a command that names a page
+/// takes 31, so no command can make such a page.
+pub fn drawing_window_with_page_name(size: impl Into<Vec2>, name: &str) -> Window {
+    let mut session = Session::new();
+    session.execute("file.new", &serde_json::json!({})).unwrap();
+    session
+        .edit("a name a file held", |doc| {
+            doc.rename_page(1, name).map_err(|e| diacraft_engine::EngineError::Internal { cmd: "test".to_owned(), msg: e.to_string() })
+        })
+        .unwrap();
     let mut window = window(DiacraftApp::new(session, None).with_inline_pictures(bundled_drawer()), size);
     window.rest();
     window

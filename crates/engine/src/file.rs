@@ -7,6 +7,11 @@
 //! was opened is checked again, so a path that is swapped for a pipe between the check and the open is refused and does not block the
 //! caller. No message holds the path or the system's own text, which carries it.
 //!
+//! **With automation roots in force** ([`crate::file_access`]: the control channel and the MCP server started with `--automation-read-root` or `--automation-write-root`)
+//! every function here that is given a path asks first whether the roots let it be read or written, and reads and writes **the real path** that answer gives (the name with
+//! its `..` and links followed), so that a link put in the name's place afterwards leads nowhere new; a read also looks at the handle it opened. With none in force (what
+//! the person at the window does, and the programs started with no roots) nothing changes: the path is used as it is given.
+//!
 //! **Where there is no file system (the browser) the file is in memory** ([`crate::memfs`]): every function below that meets the disk meets the store instead, with the same
 //! answers and the same refusals, and a link, a folder and a device are things a store does not have.
 
@@ -38,6 +43,8 @@ pub enum FileError {
     OutOfMemory,
     /// Anything else the system said while reading.
     Failed,
+    /// The automation roots in force do not let this path be read (`file_access`).
+    Refused(crate::file_access::Refusal),
 }
 
 impl fmt::Display for FileError {
@@ -49,6 +56,7 @@ impl fmt::Display for FileError {
             FileError::TooLarge { limit } => write!(f, "the file is larger than {limit} bytes"),
             FileError::OutOfMemory => write!(f, "there is not enough memory to read the file"),
             FileError::Failed => write!(f, "the file could not be read"),
+            FileError::Refused(why) => write!(f, "{why}"),
         }
     }
 }
@@ -100,8 +108,14 @@ pub fn file_len(path: &Path) -> Result<u64, FileError> {
     if crate::memfs::active() {
         return crate::memfs::len(path).ok_or(FileError::NotFound);
     }
-    let meta = std::fs::metadata(path).map_err(|e| classify(&e))?;
+    let real = readable(path)?;
+    let meta = std::fs::metadata(real).map_err(|e| classify(&e))?;
     if meta.is_file() { Ok(meta.len()) } else { Err(FileError::NotAFile) }
+}
+
+/// The path to read `path` by: as it is given when no automation roots are in force, and the real path inside a read root when they are (`file_access`), or why it may not be read.
+fn readable(path: &Path) -> Result<PathBuf, FileError> {
+    crate::file_access::allow(path, crate::file_access::Access::Read).map_err(FileError::Refused)
 }
 
 /// [`read_file`], and the [`FileStamp`] of the file that was read, taken from what was opened.
@@ -109,11 +123,12 @@ pub fn read_file_stamped(path: &Path, max_bytes: u64) -> Result<(Vec<u8>, FileSt
     if crate::memfs::active() {
         return crate::memfs::read(path, max_bytes);
     }
-    let meta = std::fs::metadata(path).map_err(|e| classify(&e))?;
+    let real = readable(path)?;
+    let meta = std::fs::metadata(&real).map_err(|e| classify(&e))?;
     if !meta.is_file() {
         return Err(FileError::NotAFile);
     }
-    read_opened_stamped(path, max_bytes)
+    read_opened_stamped(&real, max_bytes)
 }
 
 /// [`read_file`] without its first look: opens `path` and reads what it opened if that is a regular file. The part of `read_file` that
@@ -125,6 +140,8 @@ pub(crate) fn read_opened(path: &Path, max_bytes: u64) -> Result<Vec<u8>, FileEr
 
 fn read_opened_stamped(path: &Path, max_bytes: u64) -> Result<(Vec<u8>, FileStamp), FileError> {
     let file = open_without_waiting(path).map_err(|e| classify(&e))?;
+    // Roots in force: what was opened is looked at before a byte of it is read, so a link put in the checked path's place meanwhile is refused (`file_access::verify_opened`).
+    crate::file_access::verify_opened(&file, path, crate::file_access::Access::Read).map_err(FileError::Refused)?;
     let meta = file.metadata().map_err(|e| classify(&e))?;
     if !meta.is_file() {
         return Err(FileError::NotAFile);
@@ -204,6 +221,8 @@ pub enum SaveError {
     NoRoom,
     /// Anything else the system said.
     Failed,
+    /// The automation roots in force do not let this path be written (`file_access`).
+    Refused(crate::file_access::Refusal),
 }
 
 impl fmt::Display for SaveError {
@@ -219,6 +238,7 @@ impl fmt::Display for SaveError {
             SaveError::DiskFull => write!(f, "the disk is full"),
             SaveError::NoRoom => write!(f, "there is not enough memory to hold the file"),
             SaveError::Failed => write!(f, "the file could not be written"),
+            SaveError::Refused(why) => write!(f, "{why}"),
         }
     }
 }
@@ -241,6 +261,17 @@ pub fn save_target(path: &Path, own: Option<&Path>) -> Result<PathBuf, SaveError
     if crate::memfs::active() {
         return Ok(path.to_path_buf());
     }
+    // Roots in force: the name is judged first, before anything of what is at it is looked at (a path outside every write root is told as that and no more), and the file the
+    // rules below settle on is judged again. The real paths are for the write ([`write_target`]); the answer is the target as it has always been.
+    let writable = |at: &Path| crate::file_access::allow(at, crate::file_access::Access::Write).map(drop).map_err(SaveError::Refused);
+    writable(path)?;
+    let target = save_target_unchecked(path, own)?;
+    writable(&target)?;
+    Ok(target)
+}
+
+/// [`save_target`]'s rules for the file a save writes, with no roots asked.
+fn save_target_unchecked(path: &Path, own: Option<&Path>) -> Result<PathBuf, SaveError> {
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(path.to_path_buf()),
@@ -274,7 +305,11 @@ pub fn write_target(target: &Path, bytes: &[u8]) -> Result<(), SaveError> {
     if crate::memfs::active() {
         return crate::memfs::write(target, bytes);
     }
-    craft_atomic::atomic_write(target, bytes).map_err(|e| classify_save(&e))
+    // Roots in force: the file is judged again now, after the work of making it, and written at its folder's real path and its own name, so that what is written is the file that was
+    // judged. **A link that stands at the name by now is refused** (`Refusal::Swapped`), and never written through: the answer of `save_target` is never a link (the drawing's own file,
+    // reached by a link, is the file the link leads to), so a link here was put there since.
+    let real = crate::file_access::allow_entry(target, crate::file_access::Access::Write).map_err(SaveError::Refused)?;
+    craft_atomic::atomic_write(&real, bytes).map_err(|e| classify_save(&e))
 }
 
 /// [`save_target`] and then [`write_target`]: what a save to `path` does.
@@ -806,6 +841,118 @@ mod tests {
         assert_eq!(read_opened(&file, 19), Err(FileError::TooLarge { limit: 19 }));
         assert_eq!(read_opened(&scratch("nothing-here"), 20), Err(FileError::NotFound));
         let _ = std::fs::remove_file(&file);
+    }
+
+    /// The read under roots (`file_access`): a file inside a read root reads, one outside does not, and **a link put where the checked file was, after the check**,
+    /// is refused when the handle that was opened is looked at: the part of `read_file` a test cannot time, so it runs `read_opened` on the path the check gave.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_swapped_for_a_link_after_the_check_is_not_read_under_roots() {
+        use crate::file_access::{Access, AutomationRoots, Refusal, allow, confine};
+        let base = scratch("roots-swap");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("in")).unwrap();
+        std::fs::create_dir_all(base.join("outside")).unwrap();
+        std::fs::write(base.join("in/a.bin"), b"inside").unwrap();
+        std::fs::write(base.join("outside/secret.bin"), b"SECRET").unwrap();
+        let roots = AutomationRoots::new(&[&base.join("in")], &[]).unwrap().unwrap();
+        // The reads: inside, and outside.
+        assert_eq!(confine(Some(&roots), || read_file(&base.join("in/a.bin"), 100)).unwrap(), b"inside");
+        assert!(matches!(
+            confine(Some(&roots), || read_file(&base.join("outside/secret.bin"), 100)),
+            Err(FileError::Refused(Refusal::Outside(Access::Read)))
+        ));
+        assert!(matches!(confine(Some(&roots), || file_len(&base.join("outside/secret.bin"))), Err(FileError::Refused(_))));
+        // The swap: checked as the file inside, then a link to the file outside put in its place, then opened.
+        confine(Some(&roots), || {
+            let checked = allow(&base.join("in/a.bin"), Access::Read).unwrap();
+            std::fs::remove_file(&checked).unwrap();
+            std::os::unix::fs::symlink(base.join("outside/secret.bin"), &checked).unwrap();
+            assert_eq!(read_opened(&checked, 100), Err(FileError::Refused(Refusal::Swapped(Access::Read))), "the secret was not read");
+        });
+        assert_eq!(
+            read_opened(&base.join("in/a.bin"), 100).unwrap(),
+            b"SECRET",
+            "with no roots in force nothing is looked at: the check is the roots'"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A save under roots writes the file that was judged, and a name that leads out is refused after the file is made too: `write_target` judges again.
+    #[cfg(unix)]
+    #[test]
+    fn a_save_under_roots_is_judged_before_and_after_the_file_is_made() {
+        use crate::file_access::{Access, AutomationRoots, Refusal, confine};
+        let base = scratch("roots-save");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("out")).unwrap();
+        std::fs::create_dir_all(base.join("outside")).unwrap();
+        let roots = AutomationRoots::new(&[], &[&base.join("out")]).unwrap().unwrap();
+        let (inside, outside) = (base.join("out/a.bin"), base.join("outside/b.bin"));
+        confine(Some(&roots), || save_file(&inside, b"one", None)).unwrap();
+        assert_eq!(std::fs::read(&inside).unwrap(), b"one");
+        assert_eq!(confine(Some(&roots), || save_file(&outside, b"two", None)), Err(SaveError::Refused(Refusal::Outside(Access::Write))));
+        assert!(!outside.exists(), "nothing was made outside");
+        // The target was judged inside, and a link was put in its folder's place before the write: the write judges it again.
+        let target = confine(Some(&roots), || save_target(&base.join("out/sub/c.bin"), None)).unwrap();
+        std::fs::create_dir_all(base.join("out/sub")).unwrap();
+        std::fs::remove_dir(base.join("out/sub")).unwrap();
+        std::os::unix::fs::symlink(base.join("outside"), base.join("out/sub")).unwrap();
+        assert_eq!(confine(Some(&roots), || write_target(&target, b"three")), Err(SaveError::Refused(Refusal::Outside(Access::Write))));
+        assert!(!base.join("outside/c.bin").exists(), "nothing was made where the link leads");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The name was free when the save was judged, and a link stands at it by the time the file (made in memory meanwhile) is written: under roots the write goes to the folder's
+    /// real place and the name, and **a link at the name is refused**, so the file the link leads to (inside the roots too) is not replaced in the name's stead.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_put_at_the_name_after_the_save_was_judged_is_not_written_through_under_roots() {
+        use crate::file_access::{Access, AutomationRoots, Refusal, confine};
+        let base = scratch("roots-save-link");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("out")).unwrap();
+        std::fs::write(base.join("out/other.bin"), b"keep").unwrap();
+        let roots = AutomationRoots::new(&[], &[&base.join("out")]).unwrap().unwrap();
+        let target = confine(Some(&roots), || save_target(&base.join("out/new.bin"), None)).unwrap();
+        assert_eq!(target, base.join("out/new.bin"), "judged as a new file");
+        std::os::unix::fs::symlink(base.join("out/other.bin"), &target).unwrap();
+        assert_eq!(
+            confine(Some(&roots), || write_target(&target, b"new")),
+            Err(SaveError::Refused(Refusal::Swapped(Access::Write))),
+            "a link that stands at the name when the file is written"
+        );
+        assert_eq!(std::fs::read(base.join("out/other.bin")).unwrap(), b"keep", "the file the link leads to was not replaced");
+        assert!(std::fs::symlink_metadata(&target).unwrap().file_type().is_symlink(), "and the link is as it was");
+        // A name with a regular file at it, or with nothing, is written as ever.
+        let plain = base.join("out/plain.bin");
+        confine(Some(&roots), || write_target(&plain, b"one")).unwrap();
+        confine(Some(&roots), || write_target(&plain, b"two")).unwrap();
+        assert_eq!(std::fs::read(&plain).unwrap(), b"two");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The exception stays: a drawing opened through a link is saved through it, under roots too. The target is the file the link leads to, the link stays a link, and any other
+    /// link inside the roots is still refused when the save is judged.
+    #[cfg(unix)]
+    #[test]
+    fn a_drawing_opened_through_a_link_is_still_saved_through_it_under_roots() {
+        use crate::file_access::{AutomationRoots, confine};
+        let base = scratch("roots-save-own");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("out")).unwrap();
+        std::fs::write(base.join("out/real.bin"), b"one").unwrap();
+        std::fs::write(base.join("out/other.bin"), b"keep").unwrap();
+        std::os::unix::fs::symlink(base.join("out/real.bin"), base.join("out/link.bin")).unwrap();
+        std::os::unix::fs::symlink(base.join("out/other.bin"), base.join("out/stray.bin")).unwrap();
+        let roots = AutomationRoots::new(&[], &[&base.join("out")]).unwrap().unwrap();
+        let own = std::fs::canonicalize(base.join("out/real.bin")).unwrap();
+        confine(Some(&roots), || save_file(&base.join("out/link.bin"), b"two", Some(&own))).unwrap();
+        assert_eq!(std::fs::read(base.join("out/real.bin")).unwrap(), b"two", "the drawing's own file was written");
+        assert!(std::fs::symlink_metadata(base.join("out/link.bin")).unwrap().file_type().is_symlink(), "and the link is still a link");
+        assert_eq!(confine(Some(&roots), || save_file(&base.join("out/stray.bin"), b"no", Some(&own))), Err(SaveError::Link));
+        assert_eq!(std::fs::read(base.join("out/other.bin")).unwrap(), b"keep");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

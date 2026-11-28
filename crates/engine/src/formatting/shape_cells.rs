@@ -25,7 +25,8 @@
 //! Our rule (no specification says what picking a colour does to the pattern): a colour that cannot be seen would be a
 //! command that does nothing, so a colour on a shape whose pattern is none, or a theme marker, or a custom pattern, makes the pattern solid, and a
 //! colour on a shape that paints a gradient turns the gradient off (the gradient is painted in place of the colour). A hatch
-//! pattern (2 to 40 on a fill) stays: the colour is the hatch's foreground.
+//! pattern (2 to 40 on a fill) stays: the colour is the hatch's foreground. **Are for a shape the command names**: a member reached through a group that draws no line (no
+//! fill) keeps it so, and is given the colour and not the pattern (ours), and a member filled with its own line colour is left by every fill setting (ours).
 //!
 //! **A theme colour or default on a shape of a themed page** makes sure the shape reads the page's theme: it follows the page's `Theme` style for the families that have no style
 //! of their own (as a shape put on the page does), and the scheme cells that send it to its page are written 65534 where it does not read them so (`quick.rs`'s `plan_scheme`), so
@@ -34,8 +35,9 @@
 
 use diacraft_doc::{CellAddr, Document, Reading, Resolver, RowKey, SectionKey, SheetRef};
 
+use super::look::{Reader, eval_ctx};
 use super::quick::plan_scheme;
-use super::{Edits, New, Rgb, has_value, resolved_number, targets};
+use super::{Edits, New, Rgb, fill_is_line, keeps_none, resolved_number, targets_reached};
 use crate::draw::Problem;
 use crate::theme::{PICK_PREFIX, ThemePick, follow_page_theme_refs, pick_colour, selection_of};
 
@@ -115,23 +117,25 @@ const POINTS_PER_INCH: f64 = 72.0;
 /// Sets what `format` names on the shapes `ids` of a page, and the shapes inside them. → how many shapes were written to; the
 /// document is not touched when that is none.
 pub fn format_shapes(doc: &mut Document, page: u32, ids: &[u32], format: &ShapeFormat) -> Result<usize, Problem> {
-    let shapes = targets(doc, page, ids)?;
+    let targets = targets_reached(doc, page, ids)?;
     // A theme colour or default is answered by the page's theme: the shapes follow it (the module documentation).
     let themed = format.fill.is_some_and(Paint::is_themed) || format.line.is_some_and(Paint::is_themed);
     let page_is_themed = themed && selection_of(doc, page).is_some_and(|s| s.is_themed());
     if page_is_themed {
         // One pass over the places already resolved, charged and capped (the finding of the security scan: a pass for each shape walked the page once for each).
+        let shapes: Vec<_> = targets.iter().map(|target| target.at.clone()).collect();
         follow_page_theme_refs(doc, page, &shapes)?;
     }
     let picked = Picked { fill: picked_value(doc, page, format.fill), line: picked_value(doc, page, format.line), scheme: page_is_themed };
     let mut edits = Edits::default();
     let mut formatted = 0_usize;
     {
-        let res = Resolver::new(doc);
-        for at in &shapes {
+        let mut ctx = eval_ctx();
+        let reader = Reader::new(doc, &mut ctx);
+        for target in &targets {
             edits.begin();
             let before = edits.len();
-            plan(doc, &res, &SheetRef::Shape(at.clone()), format, &picked, &mut edits);
+            plan(doc, &reader, &SheetRef::Shape(target.at.clone()), format, &picked, target.through_group, &mut edits);
             formatted = formatted.saturating_add(usize::from(edits.len() > before));
         }
     }
@@ -198,15 +202,24 @@ const LINE: Side = Side {
 };
 
 /// What `paint` writes for the fill or the line of one shape (the module documentation's table): none turns the pattern off, default hands the cells to the theme, and a colour or a theme colour is
-/// written with the pattern that shows it.
-fn plan_side(doc: &Document, res: &Resolver<'_>, sheet: &SheetRef, side: &Side, paint: Paint, value: Option<&String>, edits: &mut Edits) {
+/// written with the pattern that shows it. **A shape reached through a group that draws none of it keeps it so** (`hidden`): its colour is written and its
+/// pattern is left, so that a figure's colour never turns on the box of a name or the frame of a text.
+fn plan_side(
+    doc: &Document,
+    reader: &Reader<'_, '_>,
+    sheet: &SheetRef,
+    side: &Side,
+    (paint, value): (Paint, Option<&String>),
+    hidden: bool,
+    edits: &mut Edits,
+) {
     let mut put = |name: &str, new: New| {
         edits.put(doc, sheet, direct(name), &new);
     };
     match paint {
         Paint::None => put(side.pattern, New::whole(0)),
         Paint::Default => {
-            for name in side.defaults {
+            for name in side.defaults.iter().filter(|name| !(hidden && **name == side.pattern)) {
                 put(name, New::Themed);
             }
         }
@@ -214,27 +227,38 @@ fn plan_side(doc: &Document, res: &Resolver<'_>, sheet: &SheetRef, side: &Side, 
             if let Some(new) = colour_new(paint, value) {
                 put(side.colour, new);
             }
-            if !resolved_number(res, sheet, &direct(side.pattern)).is_some_and(|n| (1.0..=side.most_pattern).contains(&n)) {
+            if hidden {
+                return;
+            }
+            if !resolved_number(reader, sheet, &direct(side.pattern)).is_some_and(|n| (1.0..=side.most_pattern).contains(&n)) {
                 put(side.pattern, New::whole(1));
             }
-            if gradient_on(res, sheet, side.gradient) {
+            if gradient_on(reader, sheet, side.gradient) {
                 put(side.gradient, New::whole(0));
             }
         }
     }
 }
 
-/// Plans the writes for one shape.
-fn plan(doc: &Document, res: &Resolver<'_>, sheet: &SheetRef, f: &ShapeFormat, picked: &Picked, edits: &mut Edits) {
+/// Plans the writes for one shape. `through_group` says it was reached through a group the person named.
+fn plan(doc: &Document, reader: &Reader<'_, '_>, sheet: &SheetRef, f: &ShapeFormat, picked: &Picked, through_group: bool, edits: &mut Edits) {
     // The shape reads the page's theme for what a theme colour or default asks of it.
     if picked.scheme && (f.fill.is_some_and(Paint::is_themed) || f.line.is_some_and(Paint::is_themed)) {
-        plan_scheme(doc, res, sheet, edits);
+        plan_scheme(doc, reader, sheet, edits);
     }
-    if let Some(paint) = f.fill {
-        plan_side(doc, res, sheet, &FILL, paint, picked.fill.as_ref(), edits);
+    // A mark filled with its own line colour is left by every fill setting, and a member that draws no fill or no line keeps its pattern.
+    let fill_follows_line = fill_is_line(reader, sheet, through_group);
+    let no_fill = keeps_none(reader, sheet, through_group, FILL.pattern);
+    let no_line = keeps_none(reader, sheet, through_group, LINE.pattern);
+    if let Some(paint) = f.fill.filter(|_| !fill_follows_line) {
+        plan_side(doc, reader, sheet, &FILL, (paint, picked.fill.as_ref()), no_fill, edits);
     }
     if let Some(paint) = f.line {
-        plan_side(doc, res, sheet, &LINE, paint, picked.line.as_ref(), edits);
+        plan_side(doc, reader, sheet, &LINE, (paint, picked.line.as_ref()), no_line, edits);
+    }
+    // After the colours, so that an explicit pattern wins over the one a colour makes.
+    if !fill_follows_line {
+        plan_fill(doc, reader, sheet, f, no_fill, edits);
     }
     let mut put_at = |addr: CellAddr, new: New| {
         edits.put(doc, sheet, addr, &new);
@@ -243,8 +267,8 @@ fn plan(doc: &Document, res: &Resolver<'_>, sheet: &SheetRef, f: &ShapeFormat, p
     if let Some(points) = f.weight {
         put("LineWeight", New::number(points / POINTS_PER_INCH));
     }
-    // An explicit pattern after a colour wins: the later plan for a cell replaces the earlier in the batch.
-    if let Some(pattern) = f.pattern {
+    // An explicit pattern after a colour wins: the later plan for a cell replaces the earlier in the batch. A member that draws no line keeps none.
+    if let Some(pattern) = f.pattern.filter(|pattern| !(no_line && *pattern != 0)) {
         put("LinePattern", New::whole(u32::from(pattern)));
     }
     if let Some(arrow) = f.begin_arrow {
@@ -262,32 +286,10 @@ fn plan(doc: &Document, res: &Resolver<'_>, sheet: &SheetRef, f: &ShapeFormat, p
     if let Some(rounding) = f.rounding {
         put("Rounding", New::number(rounding));
     }
-    if let Some(pattern) = f.fill_pattern {
-        put_at(direct("FillPattern"), New::whole(u32::from(pattern)));
-        if gradient_on(res, sheet, "FillGradientEnabled") {
-            put_at(direct("FillGradientEnabled"), New::whole(0));
-        }
-    }
-    if let Some(colour) = f.fill_background {
-        put_at(direct("FillBkgnd"), New::Colour(colour));
-    }
-    if let Some(percent) = f.fill_transparency {
-        put_at(direct("FillForegndTrans"), New::number(share(percent)));
-        let pattern = f.fill_pattern.map(f64::from).or_else(|| resolved_number(res, sheet, &direct("FillPattern"))).map_or(1, |n| n.round() as i64);
-        if (2..=24).contains(&pattern) {
-            put_at(direct("FillBkgndTrans"), New::number(share(percent)));
-        }
-        // A gradient is painted in place of the colours, and its transparency is the stops': the same on every stop is one over the whole shape.
-        if gradient_on(res, sheet, "FillGradientEnabled") && f.fill_pattern.is_none() {
-            for ix in stop_rows(res, sheet, "FillGradient") {
-                put_at(row_addr("FillGradient", ix, "GradientStopColorTrans"), New::number(share(percent)));
-            }
-        }
-    }
     if let Some(percent) = f.line_transparency {
         put_at(direct("LineColorTrans"), New::number(share(percent)));
-        if gradient_on(res, sheet, "LineGradientEnabled") {
-            for ix in stop_rows(res, sheet, "LineGradient") {
+        if gradient_on(reader, sheet, "LineGradientEnabled") {
+            for ix in stop_rows(&reader.res, sheet, "LineGradient") {
                 put_at(row_addr("LineGradient", ix, "GradientStopColorTrans"), New::number(share(percent)));
             }
         }
@@ -297,6 +299,36 @@ fn plan(doc: &Document, res: &Resolver<'_>, sheet: &SheetRef, f: &ShapeFormat, p
     }
     if let Some(compound) = f.compound {
         put_at(direct("CompoundType"), New::whole(u32::from(compound)));
+    }
+}
+
+/// What `fill_pattern`, `fill_background` and `fill_transparency` write for one shape. A member that draws no fill (`no_fill`) keeps none: the hatch is not put on it.
+fn plan_fill(doc: &Document, reader: &Reader<'_, '_>, sheet: &SheetRef, f: &ShapeFormat, no_fill: bool, edits: &mut Edits) {
+    let mut put_at = |addr: CellAddr, new: New| {
+        edits.put(doc, sheet, addr, &new);
+    };
+    if let Some(pattern) = f.fill_pattern.filter(|pattern| !(no_fill && *pattern != 0)) {
+        put_at(direct("FillPattern"), New::whole(u32::from(pattern)));
+        if gradient_on(reader, sheet, "FillGradientEnabled") {
+            put_at(direct("FillGradientEnabled"), New::whole(0));
+        }
+    }
+    if let Some(colour) = f.fill_background {
+        put_at(direct("FillBkgnd"), New::Colour(colour));
+    }
+    if let Some(percent) = f.fill_transparency {
+        put_at(direct("FillForegndTrans"), New::number(share(percent)));
+        let pattern =
+            f.fill_pattern.map(f64::from).or_else(|| resolved_number(reader, sheet, &direct("FillPattern"))).map_or(1, |n| n.round() as i64);
+        if (2..=24).contains(&pattern) {
+            put_at(direct("FillBkgndTrans"), New::number(share(percent)));
+        }
+        // A gradient is painted in place of the colours, and its transparency is the stops': the same on every stop is one over the whole shape.
+        if gradient_on(reader, sheet, "FillGradientEnabled") && f.fill_pattern.is_none() {
+            for ix in stop_rows(&reader.res, sheet, "FillGradient") {
+                put_at(row_addr("FillGradient", ix, "GradientStopColorTrans"), New::number(share(percent)));
+            }
+        }
     }
 }
 
@@ -334,13 +366,11 @@ pub(super) fn row_addr(section: &str, ix: u32, name: &str) -> CellAddr {
     CellAddr::in_row(section, None, RowKey::Ix(ix), name)
 }
 
-/// Whether a gradient flag reads as set: any value but 0 and an empty one (the theme marker included, which the theme answers).
-fn gradient_on(res: &Resolver<'_>, sheet: &SheetRef, name: &str) -> bool {
-    if !has_value(res, sheet, &direct(name)) {
-        return false;
-    }
-    let reading = res.resolve(sheet, &direct(name)).and_then(|found| found.value.cell?.value.as_ref().map(|v| v.reading()));
-    match reading {
+/// Whether a gradient flag reads as set: any value but 0 and an empty one (the theme marker included, which the theme answers), **and for a cell that holds a formula and no
+/// saved value what the formula works out to**: the picture draws the gradient that a flag of `1` and no value turns on, so a colour chosen for the fill
+/// turns it off as it does a flag that was saved.
+fn gradient_on(reader: &Reader<'_, '_>, sheet: &SheetRef, name: &str) -> bool {
+    match reader.held(sheet, &direct(name)).map(|value| value.reading()) {
         None | Some(Reading::Empty) => false,
         Some(Reading::Number(n)) => n != 0.0,
         Some(_) => true,

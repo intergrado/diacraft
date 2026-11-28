@@ -795,3 +795,57 @@ fn client_text_in_errors_is_escaped() {
     assert_eq!(code(&replies[4]), -32602);
     assert_eq!(code(&replies[5]), -32602);
 }
+
+/// `shape.drop` through `command_run` follows the range of eight: a master drawn at 1:1 dropped on a page at 1:100 keeps its size on paper,
+/// with the factor in the answer and in the shape's `DropOnPageScale`; one on a page at 1:4 keeps its drawing size and nothing is written.
+#[test]
+fn a_drop_through_command_run_follows_the_range_of_eight() {
+    let replies = talk(&[
+        call(1, "command_run", json!({"id": "file.new"})),
+        call(2, "command_run", json!({"id": "page.scale", "params": {"paper": 1, "drawing": 100}})),
+        call(3, "command_run", json!({"id": "shape.drop", "params": {"master": "Rectangle", "page": 1, "x": 5, "y": 4}})),
+        call(4, "command_run", json!({"id": "sheet.cell", "params": {"id": 1, "page": 1, "cell": "DropOnPageScale"}})),
+        call(5, "command_run", json!({"id": "page.scale", "params": {"paper": 1, "drawing": 4}})),
+        call(6, "command_run", json!({"id": "shape.drop", "params": {"master": "Rectangle", "page": 1, "x": 5, "y": 4}})),
+        call(7, "command_run", json!({"id": "sheet.cell", "params": {"id": 2, "page": 1, "cell": "DropOnPageScale"}})),
+    ]);
+    for reply in &replies {
+        assert_eq!(reply["result"]["isError"], false, "{reply}");
+    }
+    let beyond = tool_json(&replies[2]);
+    assert!((beyond["drop_on_page_scale"].as_f64().unwrap() - 100.0).abs() < 1e-9, "{beyond}");
+    assert_eq!(tool_json(&replies[3])["origin"], "local", "the factor is the shape's own");
+    let within = tool_json(&replies[5]);
+    assert!(within.get("drop_on_page_scale").is_none(), "{within}");
+    assert_ne!(tool_json(&replies[6])["origin"], "local", "nothing is written within the range");
+}
+
+#[test]
+fn reverse_ends_is_reached_through_command_run_and_command_list_and_a_refusal_is_in_words() {
+    // `connector.reverse_ends` is a command of the registry, so the server runs it by id and lists it with its key and its parameters.
+    let replies = talk(&[
+        call(1, "command_run", json!({"id": "file.new"})),
+        call(2, "command_run", json!({"id": "shape.drop", "params": {"master": "Rectangle", "page": 1, "x": 2, "y": 2}})),
+        call(3, "command_run", json!({"id": "shape.drop", "params": {"master": "Ellipse", "page": 1, "x": 6, "y": 2}})),
+        call(4, "command_run", json!({"id": "connector.add", "params": {"from": {"id": 1}, "to": {"id": 2}}})),
+        call(5, "command_run", json!({"id": "connector.reverse_ends", "params": {"id": 3}})),
+        call(6, "command_run", json!({"id": "connector.reverse_ends", "params": {"ids": [1]}})),
+        call(7, "command_list", json!({"filter": "connector.reverse_ends"})),
+        call(8, "doc_inspect", json!({})),
+    ]);
+    let done = tool_json(&replies[4]);
+    assert_eq!(
+        (&done["reversed"], &done["ids"], &done["begin"], &done["end"]),
+        (&json!(1), &json!([3]), &json!({"id": 2, "point": 1}), &json!({"id": 1, "point": 3})),
+        "{done}"
+    );
+    assert!(done["says"].as_str().is_some_and(|words| words.contains("Reversed shape 3")), "{done}");
+    // A box has no ends: the engine's refusal, in words, and the session as it was.
+    assert_eq!(replies[5]["result"]["isError"], true, "{:?}", replies[5]);
+    assert!(tool_text(&replies[5]).contains("is not a connector or a line"), "{:?}", replies[5]);
+    let listed = tool_json(&replies[6]);
+    let entry = listed.as_array().and_then(|list| list.iter().find(|c| c["id"] == "connector.reverse_ends")).unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!(entry["shortcut"], "Cmd+Alt+R", "{entry}");
+    assert!(entry["params"].as_str().is_some_and(|p| p.contains("ids:") && p.contains("page:")), "{entry}");
+    assert_eq!(tool_json(&replies[7])["history"]["undo"], 4, "two drops, a connector and the reversal; the refusal made no step");
+}

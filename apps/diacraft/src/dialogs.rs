@@ -1,4 +1,4 @@
-//! The native Open dialog: the desktop's own file chooser, through `rfd` (the portal on Linux, the system's dialog elsewhere).
+//! The native Open dialog: the desktop's own file chooser, through `rfd` (the portal on Linux, the system's dialog elsewhere), and the message box of a start that failed.
 //!
 //! The window runs the chooser on a thread of its own (`FilePicker` in the window crate), because it blocks until the person
 //! chooses or cancels. This file is the app's alone: the window crate depends on no dialog library, so it builds for the web, where
@@ -101,6 +101,18 @@ pub fn print_pdf_picker() -> ExportPicker {
             .add_filter("PDF document (.pdf)", &["pdf"])
             .save_file()
     })
+}
+
+/// The message box of a start that failed (`failure`): the system's own (`rfd`: `MessageBoxW` on Windows, an alert on macOS, zenity on Linux), with an error icon and one OK button.
+/// It waits until the person closes it. Where the system has no way to show it (Linux with no zenity) it shows nothing: the log and standard error have the text.
+pub fn failure_box(title: &str, body: &str) {
+    // The answer of a box with one button says nothing; there is nobody to tell if it could not be shown.
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title(title)
+        .set_description(body)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
 }
 
 #[cfg(test)]

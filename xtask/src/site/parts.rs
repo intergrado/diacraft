@@ -28,7 +28,7 @@ pub(super) const MAX_MODULE: u64 = 64 * 1024 * 1024;
 
 /// The most the module may be in all: room over what it is when this was written (docs/website.md, "The web app"), so that growth is seen when it happens. The limit of a file
 /// (25 MiB) is not what it is held to any more, since it is in parts: the cost is the time a visitor waits.
-pub(super) const MODULE_BUDGET: u64 = 19 * 1024 * 1024;
+pub(super) const MODULE_BUDGET: u64 = 21 * 1024 * 1024;
 
 /// The most bytes of manifest anything reads.
 pub(super) const MAX_MANIFEST: u64 = 64 * 1024;

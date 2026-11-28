@@ -242,9 +242,10 @@ fn odg_styles_paragraph_alignment_line_height_and_right_to_left() {
     let s = only(&doc);
     close(num(row_cell(s, "Paragraph", None, 0, "HorzAlign")), 2.0);
     close(num(row_cell(s, "Paragraph", None, 0, "SpLine")), -1.15);
+    // Amended: `end` is the end of the line in either direction, so it is 2 in a right-to-left paragraph too.
     let (doc, _) = d(r#"fo:text-align="end" fo:line-height="115%" style:writing-mode="rl-tb""#);
     let s = only(&doc);
-    close(num(row_cell(s, "Paragraph", None, 0, "HorzAlign")), 0.0);
+    close(num(row_cell(s, "Paragraph", None, 0, "HorzAlign")), 2.0);
     close(num(row_cell(s, "Paragraph", None, 0, "Flags")), 1.0);
 }
 
@@ -617,7 +618,11 @@ fn odg_styles_paragraph_value_forms() {
     assert_eq!(p(r#"fo:text-align="right""#, "HorzAlign").as_deref(), Some("2"));
     assert_eq!(p(r#"fo:text-align="justify""#, "HorzAlign").as_deref(), Some("3"));
     assert_eq!(p(r#"fo:text-align="justify" fo:text-align-last="justify""#, "HorzAlign").as_deref(), Some("4"));
-    assert_eq!(p(r#"fo:text-align="start" style:writing-mode="rl""#, "HorzAlign").as_deref(), Some("2"));
+    // `start` and `end` are 0 and 2 whatever the writing mode (the short form `rl` too); `left` and `right` are read against a right-to-left one.
+    assert_eq!(p(r#"fo:text-align="start" style:writing-mode="rl""#, "HorzAlign").as_deref(), Some("0"));
+    assert_eq!(p(r#"fo:text-align="end" style:writing-mode="rl""#, "HorzAlign").as_deref(), Some("2"));
+    assert_eq!(p(r#"fo:text-align="left" style:writing-mode="rl""#, "HorzAlign").as_deref(), Some("2"));
+    assert_eq!(p(r#"fo:text-align="right" style:writing-mode="rl""#, "HorzAlign").as_deref(), Some("0"));
     assert_eq!(p(r#"style:writing-mode="lr-tb""#, "Flags").as_deref(), Some("0"));
     assert_eq!(p(r#"fo:line-height="normal""#, "SpLine"), None);
     assert!(p(r#"fo:line-height="0.5cm""#, "SpLine").is_some_and(|v| (v.parse::<f64>().unwrap() - cm(0.5)).abs() < 1e-12));

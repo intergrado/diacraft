@@ -37,7 +37,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::catalogue::{CellClass, Family, Keying, cell_info, keying, section_class};
-use crate::cell::Cell;
+use crate::cell::{Cell, FormulaSlot};
 use crate::document::Document;
 use crate::name::{CellName, SectionName};
 use crate::part::{Master, Page, Style};
@@ -167,6 +167,23 @@ pub struct Resolved<'a> {
 }
 
 impl Resolved<'_> {
+    /// Whether the cell has **a formula and no value saved anywhere on the way to it**: the formula, found by inheritance, is the one thing that says what the cell holds
+    /// A cell with `F="Inh"` and no value finds the formula of the master or the style it inherits from; a cell with a value, `Themed`
+    /// or not, a constant, and a cell found nowhere are no such cell. What a reader of cells does with one is worked out ([`Resolved::on`] is the sheet to run it on), where
+    /// it reads a cell to draw or to show it, and not read it as holding the default of its kind.
+    pub fn holds_unsaved_formula(&self) -> bool {
+        self.value.cell.and_then(|c| c.value.as_ref()).is_none() && self.formula.cell.is_some_and(|c| matches!(c.formula, FormulaSlot::Local(_)))
+    }
+
+    /// Whether the cell follows the theme: its value is the marker `Themed`, or it holds **a call of `THEMEVAL` and no value** (a file that leaves the value out beside the call
+    /// is read as the same call with the marker beside it). A formula with no value that does not call it is a formula and no more, and so is a call with a value saved.
+    pub fn reads_theme(&self) -> bool {
+        match self.value.cell.and_then(|c| c.value.as_ref()) {
+            Some(value) => value.is_themed(),
+            None => self.formula.cell.is_some_and(|c| matches!(&c.formula, FormulaSlot::Local(f) if f.calls("THEMEVAL"))),
+        }
+    }
+
     /// The kind of value a cell with no `V` reads as: by its unit when the cell found has one, else the
     /// default of the cell's own type.
     pub fn kind_if_no_value(&self) -> ValueKind {
@@ -909,9 +926,35 @@ impl<'a> Resolver<'a> {
         self.resolve_from(sheet, addr, false)
     }
 
+    /// [`Resolver::resolve`] as a reader that draws takes it: a shape that finds no stored value for the cell on its way (a shape with no style link of the cell's family
+    /// finds nothing for it) reads the root style's value. "No Style" is the style every object has (ASSUMED, no spec settles it: real shapes always link up to it).
+    /// The renderer reads every cell so, and the language of a run ([`crate::lang::saved_value`]) is read by this function in the renderer and in
+    /// the text measure.
+    pub fn resolve_or_root(&self, sheet: &SheetRef, addr: &CellAddr) -> Option<Resolved<'a>> {
+        let found = self.resolve(sheet, addr)?;
+        // The rule is [`Resolver::root_standin`]'s, the one every reader of a cell that holds no value is given.
+        Some(self.root_standin(sheet, addr, &found).unwrap_or(found))
+    }
+
     /// Whether the cell at `addr` would be found somewhere if the sheet held no cell of its own there: the master, a style.
     pub fn inherits(&self, sheet: &SheetRef, addr: &CellAddr) -> bool {
         self.resolve_from(sheet, addr, true).is_some_and(|r| r.formula.source != Source::Default)
+    }
+
+    /// **The one rule for a cell that holds no value anywhere on the way** (`found` is what [`Resolver::resolve`] gave for `addr` on `sheet`): the cell that stands in for it, which is the
+    /// root style's, **for a shape's cell that the root style holds a value for**. "No Style" is the style every object has, so a shape that finds nothing for a cell reads the root's
+    /// (ASSUMED: no specification settles it for a shape with no link to a style of the cell's family, and give the default of the cell's kind; a
+    /// `THEMEVAL` that the theme cannot answer reads the root's cell).
+    ///
+    /// **A cell with a formula and no saved value whose formula gives no value** (an error, a function the evaluator lacks, steps that ran out) reads as a cell
+    /// that holds none, and so by this rule, in every reader: the renderer, the formatting controls and the readers of the edit commands and the pointer
+    /// (`Worked`), which would each otherwise pick a rule of their own. `None` for a cell that holds a value, for a sheet that is not a shape's and for a cell the root style holds
+    /// no value of: the reader's own default then stands.
+    pub fn root_standin(&self, sheet: &SheetRef, addr: &CellAddr, found: &Resolved<'_>) -> Option<Resolved<'a>> {
+        if found.value.cell.is_some() || !matches!(sheet, SheetRef::Shape(_)) {
+            return None;
+        }
+        self.resolve(&SheetRef::Style(0), addr).filter(|root| root.value.cell.is_some())
     }
 
     fn resolve_from(&self, sheet: &SheetRef, addr: &CellAddr, skip_local: bool) -> Option<Resolved<'a>> {
@@ -1117,6 +1160,15 @@ impl<'a> Resolver<'a> {
             }
         }
         None
+    }
+
+    /// The type `T` the master gives one row of an instance: the type of the row of the master shape the sheet stands for, read as [`Resolver::row_type`] reads it there. `None`
+    /// for a sheet that is no shape, a shape that inherits from no master (or from a master that is not there), a master with no such row, one that deletes it, and a row of no type. It looks
+    /// at the master's row alone, not at the sheet's: it is what an instance's row of its own takes when it holds none.
+    pub fn inherited_row_type(&self, sheet: &SheetRef, section: &SectionKey, row: &RowKey) -> Option<Arc<str>> {
+        let SheetRef::Shape(at) = sheet else { return None };
+        let step = self.master_step(at).ok()??;
+        self.row_type(&SheetRef::Shape(step.shape), section, row)
     }
 
     /// How many rows a section holds over the sheet, its master and the styles, before any is merged: the rows [`Resolver::effective_rows`] would walk, which

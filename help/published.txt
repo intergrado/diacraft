@@ -1,0 +1,2 @@
+# Every topic id that was ever published on the website, one a line. An id on this list may never disappear: the topic can move to another
+# file, but its id stays, so that its address keeps working.

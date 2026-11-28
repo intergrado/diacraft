@@ -24,7 +24,7 @@ use diacraft_doc::{Document, Held, HeldGroup, RawAttrs, RawElement, RawNode, Sha
 use super::{Editor, Element, Kind, NewShape, NewWrote, TierCtx, WriteError, native, rebuilt_connection, refuse, static_name, turn_and_flips};
 use crate::read::names::Ns;
 use crate::read::units::{LenUnit, length};
-use crate::read::{HeldValue as Value, frame_read, transform_map};
+use crate::read::{HeldValue as Value, frame_read, transform_map, turn_beside_mirrors};
 use crate::write::compare::PageDiff;
 use crate::write::emit::Pfx;
 use crate::write::lengths::{length_text, same, unit_of_suffix, unit_of_word};
@@ -33,7 +33,7 @@ use crate::write::scan::Fam;
 use crate::write::splice::has_bad_char;
 use crate::write::stylemap::Op;
 use crate::write::styles::{KeptAttr, KeptAttrs, KeptRest, Written};
-use crate::write::transform::{translated, turned};
+use crate::write::transform::{translated, turned, turned_flipped};
 
 /// The words of the refusal of an automatic style that keeps more than a shape's kept markup may be.
 const WORDS_KEPT_STYLE_BIG: &str = "an automatic style that keeps more than 1 MiB of the markup of the file it was read from beside what its cells say (its attributes and the elements kept whole)";
@@ -312,6 +312,19 @@ impl Now {
         let (rx, ry) = (read.centre.0, height - read.centre.1);
         if same(rx, self.centre.0) && same(ry, self.centre.1) { Was::Same } else { Was::Moved(self.centre.0 - rx, -(self.centre.1 - ry)) }
     }
+}
+
+/// **The turn and the flips the reader gave the shape when it read its file**, from what the file said: the turn of its `draw:transform` (none when it had none), whether that
+/// transform flips the frame, and the mirrors of its geometry (`mirrors`: `draw:mirror-horizontal`, `draw:mirror-vertical`, `(false, false)` for a shape that has none). Each of them is the
+/// reader's (`custom_geometry`, `turn_beside_mirrors`): `Angle` is the transform's turn, and minus it beside exactly one mirror; `FlipX` is the horizontal mirror, and `FlipY` the vertical one
+/// unless the transform flips the frame as well, which the two undo.
+///
+/// The place of a glue point a `draw:glue-point` element gave was worked out in that turn and those flips (LibreOffice places such an element in the page's axes): an element is still the
+/// row it made only while the shape has them.
+pub(super) fn place_as_read(read: &AsRead, mirrors: (bool, bool)) -> (f64, (bool, bool)) {
+    let frame = read.frame2d.as_deref().and_then(held_frame);
+    let (turn, flipped) = frame.map_or((0.0, false), |f| (f.angle, f.flipped));
+    (turn_beside_mirrors(turn, mirrors.0, mirrors.1), (mirrors.0, mirrors.1 != flipped))
 }
 
 /// The frame a held `Frame2d` value gives, as the reader reads it.
@@ -634,7 +647,16 @@ impl Editor<'_, '_> {
             wrote.push((Ns::Svg, static_name(local)));
         }
         let top = self.height - centre.1;
-        if angle == 0.0 {
+        if flipped {
+            // **A frame that is flipped keeps its flip**: a plain element has no mirror of its own, so the flip a shape was read with, or was given, is in the transform (the reader's
+            // `FlipY`), and a frame written with a turn or none would lose it. The shape is flipped in its own frame and then turned, so the frame's centre is at (w/2, h/2) taken through both.
+            let (s, c) = angle.sin_cos();
+            let (hx, hy) = (w / 2.0 * c - h / 2.0 * s, -w / 2.0 * s - h / 2.0 * c);
+            let unit = self.unit_for(read, "draw:transform", sheet, "PinX");
+            let transform = turned_flipped(angle, centre.0 - hx, top - hy, unit).ok_or(WriteError::Unsupported("a length too large to write"))?;
+            text.push_str(&pfx.attr(Ns::Draw, "transform", &transform));
+            wrote.push((Ns::Draw, "transform"));
+        } else if angle == 0.0 {
             for (attr, cell, value) in [("svg:x", "PinX", centre.0 - w / 2.0), ("svg:y", "PinY", top - h / 2.0)] {
                 let unit = self.unit_for(read, attr, sheet, cell);
                 let local = local(attr);
@@ -916,6 +938,7 @@ impl Editor<'_, '_> {
         let kept_body = std::mem::take(&mut self.kept.body);
         let kept_before = std::mem::take(&mut self.kept.before);
         let kept_after = std::mem::take(&mut self.kept.after);
+        let alt = std::mem::take(&mut self.kept.alt);
         let (paragraphs, holds_text, paras, plain, text_native) = self.paragraphs_text(n, pfx)?;
         let (_, mut ops, mut style_names) = super::native_style_as(sheet, &[], true, true);
         crate::write::held::graphic_ops_said(&n.shape, &mut ops, &mut style_names);
@@ -923,6 +946,7 @@ impl Editor<'_, '_> {
         let display = crate::write::fx::display_of(sheet, &ops);
         let layer_row = read.layer.as_deref().and_then(|name| diff.layers.row_named(name));
         let native = native::Native {
+            alt: Some((alt.0.as_str(), alt.1.as_str())),
             frame: native::Frame::TwoD { cx: here.centre.0, cy: here.centre.1, w: pose.size.0, h: pose.size.1, angle, flip },
             style: &style_names,
             display: Some(&display),

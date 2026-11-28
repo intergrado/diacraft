@@ -603,6 +603,14 @@ fn put_meta(doc: &mut Document, meta: Option<Meta>) {
         if let Some(title) = meta.title {
             doc.title = title;
         }
+        // **`dc:language` is the drawing's language**: the core language, as written, and `DocLangID`, when what is written is a language tag. A value
+        // that says no language or is no tag (`German`) is the core language alone: the drawing is then in the language the person's settings say, or English.
+        if let Some(language) =
+            meta.props.language.as_deref().filter(|l| diacraft_doc::lang::parse(l).is_ok() && !diacraft_doc::lang::is_no_language(l))
+        {
+            let cell = diacraft_doc::Cell::constant(diacraft_doc::Value::from_text(language));
+            Arc::make_mut(&mut doc.sheet).cells.insert(diacraft_doc::CellName::new("DocLangID"), cell);
+        }
         doc.props = Arc::new(meta.props);
         doc.ext.make_mut().odf.meta = meta.kept;
     }

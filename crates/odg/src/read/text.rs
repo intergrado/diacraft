@@ -27,6 +27,7 @@ use std::sync::Arc;
 
 use diacraft_container::xml::{El, Node};
 use diacraft_doc::{Cell, MAX_LIST_LEVELS, OdfListLevel, RawAttrs, RawElement, RawNode, Text, TextPart};
+use diacraft_fonts::script::FontSlot;
 
 use super::Reader;
 use super::cells::SHORT_TEXT;
@@ -410,7 +411,7 @@ fn own_cells(r: &mut Reader, cx: &mut Cx<'_>, style: Option<usize>, layers: &[(R
     let mut out = Out::default();
     props::paragraph(r, &view, &own, &mut out);
     let base = cx.sheets.base();
-    props::character(r, &mut cx.texts, &view, &own, size, &base, &mut out)?;
+    props::character(r, &mut cx.texts, &view, &own, size, &base, FontSlot::Latin, &mut out)?;
     if set.get(at).is_some_and(|s| s.tabs.is_some()) {
         r.keep("paragraph_tabs");
     }
@@ -423,8 +424,8 @@ fn own_cells(r: &mut Reader, cx: &mut Cx<'_>, style: Option<usize>, layers: &[(R
 }
 
 /// Every paragraph and character cell the chain `layers` resolves, with the size always: what a row of `IX` 1 or more holds. What
-/// these conversions keep is counted once, by the run's own conversion, so the counts are put back.
-fn full_cells(r: &mut Reader, cx: &mut Cx<'_>, layers: &[(Rc<Resolved>, Serves)], size_base: f64) -> Result<Out, OdgError> {
+/// these conversions keep is counted once, by the run's own conversion, so the counts are put back. `slot` is the script type of the run's letters, which its language is read through.
+fn full_cells(r: &mut Reader, cx: &mut Cx<'_>, layers: &[(Rc<Resolved>, Serves)], size_base: f64, slot: FontSlot) -> Result<Out, OdgError> {
     let mut present: HashSet<(Kind, P)> = HashSet::new();
     for (resolved, serves) in layers {
         for (key, _) in resolved.iter() {
@@ -442,7 +443,7 @@ fn full_cells(r: &mut Reader, cx: &mut Cx<'_>, layers: &[(Rc<Resolved>, Serves)]
     let mut out = Out::default();
     props::paragraph(r, &view, &own, &mut out);
     let base = cx.sheets.base();
-    props::character(r, &mut cx.texts, &view, &own, Some(size), &base, &mut out)?;
+    props::character(r, &mut cx.texts, &view, &own, Some(size), &base, slot, &mut out)?;
     // `DefaultTabStop` is the shape's, not a row's.
     out.direct.clear();
     for (k, before) in ["property_value", "text_position"].into_iter().zip(counted) {
@@ -524,7 +525,7 @@ fn paragraph<'t, 's>(
     // The paragraph's own conversion counts what the styles keep without a cell, once (`full_cells` puts the counts back).
     own_cells(r, cx, style, st.shape_layers, st.size)?;
     let layers = paragraph_layers(r, cx, style, st.shape_layers)?;
-    let mut full_para = full_cells(r, cx, &layers, st.size)?.paragraph;
+    let mut full_para = full_cells(r, cx, &layers, st.size, FontSlot::Latin)?.paragraph;
     if let Some(level) = bullet {
         for (name, cell) in bullet_cells(r, cx, level)? {
             full_para.retain(|(n, _)| *n != name);
@@ -673,15 +674,39 @@ impl Run {
     }
 }
 
-/// The row of a run's set of resolved character cells, numbered when the run first writes something (in order of first use).
-fn run_row(r: &mut Reader, cx: &mut Cx<'_>, st: &mut State<'_>, layers: &[(Rc<Resolved>, Serves)], row: &mut Option<u32>) -> Result<u32, OdgError> {
-    if let Some(row) = row {
-        return Ok(*row);
+/// The row the own text of a content element (a paragraph or a span) is on, once it has some, and the element, whose own text says the script type the run's language is read through.
+struct RowOf<'t> {
+    ix: Option<u32>,
+    el: &'t El,
+}
+
+impl<'t> RowOf<'t> {
+    fn of(el: &'t El) -> RowOf<'t> {
+        RowOf { ix: None, el }
     }
-    let full = full_cells(r, cx, layers, st.size)?.character;
+}
+
+/// The text nodes an element holds itself, in order: the characters of its own run. What a span or a field inside it holds is the run of its own.
+fn own_text(el: &El) -> impl Iterator<Item = &str> {
+    el.children.iter().filter_map(|node| if let Node::Text(t) | Node::CData(t) = node { Some(t.as_str()) } else { None })
+}
+
+/// Whether the chain `layers` states a language in any of the three triplets: only then is the script type of a run's letters worked out.
+fn states_language(layers: &[(Rc<Resolved>, Serves)]) -> bool {
+    layers.iter().any(|(resolved, _)| resolved.has_language())
+}
+
+/// The row of a run's set of resolved character cells, numbered when the run first writes something (in order of first use). **A run's language is read from the triplet of the script
+/// type most of its letters belong to**, so the letters of the element's own text are counted when the chain states a language.
+fn run_row(r: &mut Reader, cx: &mut Cx<'_>, st: &mut State<'_>, layers: &[(Rc<Resolved>, Serves)], row: &mut RowOf<'_>) -> Result<u32, OdgError> {
+    if let Some(ix) = row.ix {
+        return Ok(ix);
+    }
+    let slot = if states_language(layers) { props::script_type_of(r, own_text(row.el)) } else { FontSlot::Latin };
+    let full = full_cells(r, cx, layers, st.size, slot)?.character;
     let base = shape_base(r, cx, st)?;
     let made = st.characters.row(r, &base.character, full)?;
-    *row = Some(made);
+    row.ix = Some(made);
     Ok(made)
 }
 
@@ -690,7 +715,7 @@ fn shape_base(r: &mut Reader, cx: &mut Cx<'_>, st: &mut State<'_>) -> Result<Rc<
     if let Some(base) = &st.base {
         return Ok(Rc::clone(base));
     }
-    let out = full_cells(r, cx, st.shape_layers, st.size)?;
+    let out = full_cells(r, cx, st.shape_layers, st.size, FontSlot::Latin)?;
     let base = Rc::new(Base { paragraph: out.paragraph, character: out.character });
     st.base = Some(Rc::clone(&base));
     Ok(base)
@@ -709,7 +734,7 @@ fn content<'t>(
     run: &mut Run,
     depth: usize,
 ) -> Result<Option<u32>, OdgError> {
-    let mut row = None;
+    let mut row = RowOf::of(el);
     for node in &el.children {
         match node {
             Node::Text(t) | Node::CData(t) => {
@@ -728,7 +753,7 @@ fn content<'t>(
             Node::Comment(_) | Node::Pi { .. } => {}
         }
     }
-    Ok(row)
+    Ok(row.ix)
 }
 
 /// The chain a run's properties read through.
@@ -744,7 +769,7 @@ fn element<'t>(
     st: &mut State<'_>,
     run_cells: RunCells<'_>,
     run: &mut Run,
-    row: &mut Option<u32>,
+    row: &mut RowOf<'t>,
     depth: usize,
 ) -> Result<(), OdgError> {
     let layers = run_cells;

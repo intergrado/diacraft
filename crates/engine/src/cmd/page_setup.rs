@@ -131,7 +131,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             None,
             "id: whole number, the id of the page to move (not a background page); \
              to: whole number, the place it takes among the pages that are not backgrounds, counted from 0; \
-             renumber: true or false, optional, name the pages with a default name (Page-1, Page-2, ...) for the places they now have (default false)",
+             renumber: true or false, optional, name the pages with a default name (Page-1, Page-2, ...) for the places they now have, refused when a name it would give is another page's (default false)",
             has_two_pages,
             move_page
         ),
@@ -150,13 +150,7 @@ pub(super) fn target_page(s: &Session, p: &Value, cmd: &str) -> Result<u32> {
     match optional_whole(p, "page", cmd)? {
         Some(id) if doc.page(id).is_some() => Ok(id),
         Some(id) => Err(bad(cmd, format!("there is no page {id}"))),
-        None => doc
-            .pages
-            .iter()
-            .find(|page| !page.background)
-            .or_else(|| doc.pages.iter().next())
-            .map(|page| page.id)
-            .ok_or_else(|| bad(cmd, "the document has no pages")),
+        None => doc.first_foreground_page().map(|page| page.id).ok_or_else(|| bad(cmd, "the document has no pages")),
     }
 }
 
@@ -401,7 +395,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     const ID: &str = "page.delete";
     let id = required_u32(p, "id", ID)?;
     s.edit("Delete page", |doc| {
+        let before = doc.clone();
         let deleted = draw::delete_page(doc, id).map_err(|e| e.into_engine(ID))?;
+        crate::draw::settle_pages(doc, &before).map_err(|e| e.into_engine(ID))?;
         crate::draw::fields::refresh_all_after_edit(doc, &crate::draw::fields::Env::none());
         Ok(json!({ "id": id, "name": deleted.name, "pages": doc.pages.len(), "unassigned": deleted.unassigned }))
     })
@@ -418,7 +414,9 @@ fn page_type(s: &mut Session, p: &Value) -> Result<Value> {
         other => return Err(bad(ID, format!("`type` must be foreground or background, not `{}`", shown(other)))),
     };
     s.edit_if(if background { "Page type: background" } else { "Page type: foreground" }, |doc| {
+        let before = doc.clone();
         let done = draw::set_page_type(doc, page, background).map_err(|e| e.into_engine(ID))?;
+        crate::draw::settle_pages(doc, &before).map_err(|e| e.into_engine(ID))?;
         crate::draw::fields::refresh_all_after_edit(doc, &crate::draw::fields::Env::none());
         let mut said = answer(doc, page, ID)?;
         if let Value::Object(map) = &mut said {
@@ -444,7 +442,9 @@ fn background(s: &mut Session, p: &Value) -> Result<Value> {
         ),
     };
     s.edit_if("Page background", |doc| {
+        let before = doc.clone();
         let changed = draw::set_background(doc, page, back).map_err(|e| e.into_engine(ID))?;
+        crate::draw::settle_pages(doc, &before).map_err(|e| e.into_engine(ID))?;
         crate::draw::fields::refresh_all_after_edit(doc, &crate::draw::fields::Env::none());
         Ok((answer(doc, page, ID)?, changed))
     })
@@ -458,7 +458,9 @@ fn move_page(s: &mut Session, p: &Value) -> Result<Value> {
     let to = usize::try_from(required_u32(p, "to", ID)?).map_err(|_| bad(ID, "`to` is too large"))?;
     let renumber = optional_bool(p, "renumber", ID)?.unwrap_or(false);
     s.edit_if("Reorder pages", |doc| {
+        let before = doc.clone();
         let moved = draw::move_page(doc, id, to, renumber).map_err(|e| e.into_engine(ID))?;
+        crate::draw::settle_pages(doc, &before).map_err(|e| e.into_engine(ID))?;
         crate::draw::fields::refresh_all_after_edit(doc, &crate::draw::fields::Env::none());
         Ok((json!({ "id": id, "from": moved.from, "to": moved.to, "renamed": moved.renamed }), moved.from != moved.to || moved.renamed > 0))
     })

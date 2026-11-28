@@ -11,17 +11,20 @@
 //!   the row they rest on still holds**, and from the cells when it does not (a new name, by R27).
 //! * **Lists** are `text:list` and `text:list-item` as held (a numbered list, a nested list, a list's own attributes), or, for a paragraph whose row says a bullet and has no held lists, a list with
 //!   an automatic list style, the paragraphs of one row at one place being the items of one list.
-//! * **Fields.** `PAGENUMBER()`, `PAGECOUNT()`, `FILENAME()` and `NOW()` are `text:page-number`, `text:page-count`, `text:file-name` and `text:date`, as the reader reads them; any other field is its
-//!   shown text, and the save says so ([`SaveNote::FieldAsText`]).
+//! * **Fields.** `PAGENUMBER()`, `PAGECOUNT()`, `FILENAME()` and `NOW()` are `text:page-number`, `text:page-count`, `text:file-name` and `text:date` (`text:time` where the row's `Format` is a clock
+//!   and no date), as the reader reads them, **whatever else the row holds**: a VSDX file's field rows hold a `Type`, a `Format` and the unit of a date, none of which the
+//!   element can say, so the element is written all the same and DiaCraft's extension carries the row. Any other field is its shown text, and the save says so ([`SaveNote::FieldAsText`]).
 //! * **What the file cannot say is carried** ([`Rich::native`] false): a carriage return, a tab stop marker, a row with a cell no attribute holds or one that is a formula, a row **no held stamp
-//!   confirms** (the reader would number it and give it the cells of its chain, which are not the model's), a field the file cannot hold whole. DiaCraft's extension then carries the text and its rows as
-//!   it always did, and the file shows the text all the same.
+//!   confirms** (the reader would number it and give it the cells of its chain, which are not the model's), a field the file cannot hold whole (a field row that holds more than its `Value`, or a
+//!   `Value` that is not the text the paragraph shows). DiaCraft's extension then carries the text and its rows as it always did, and the file shows the text all the same.
 //!
 //! **Hostile input.** Every paragraph, run, list level and field is charged before it is made; a list is at most [`MAX_LIST_LEVELS`] and the depth of the files DiaCraft reads deep; the sweep that opens and
 //! closes the elements of a paragraph is linear in its runs, and keeps its stack on the heap.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
+use diacraft_fonts::script::FontSlot;
 
 use diacraft_doc::{
     Document, HeldStyleValue, MAX_LIST_LEVELS, OdfListLevel, OdfParagraph, OdfRun, OdfText, RawElement, RawNode, Row, Shape, Sheet, TextGroup,
@@ -30,8 +33,9 @@ use diacraft_doc::{
 
 use super::super::emit::Pfx;
 use super::super::frame::Editor;
+use super::super::lengths::length_text;
 use super::super::runs::Props;
-use super::super::runs::model::{Inline, ModelPara, ModelRows, characters_stamp, model_paragraphs};
+use super::super::runs::model::{Inline, ModelPara, ModelRows, SlotCursor, characters_stamp, model_paragraphs};
 use super::super::scan::{Fam, ScanPage};
 use super::super::stylemap::{Op, Val};
 use super::super::styles::Written;
@@ -97,6 +101,34 @@ fn field_element(formula: &str) -> Option<&'static str> {
         "NOW()" => "date",
         _ => return None,
     })
+}
+
+/// Whether a `Format` picture shows a clock and no date (`h:mm tt`, `HH:mm:ss`): it has an hour and no day, month or year. Text in quotes or after a backslash is no token, and the `am/pm` mark
+/// is none either (its `M` is no month).
+fn picture_is_clock(picture: &str) -> bool {
+    let (mut hour, mut date) = (false, false);
+    let mut chars = picture.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '"' | '\'' => {
+                for quoted in chars.by_ref() {
+                    if quoted == c {
+                        break;
+                    }
+                }
+            }
+            'a' | 'A' if chars.as_str().get(..4).is_some_and(|rest| rest.eq_ignore_ascii_case("m/pm")) => {
+                chars.nth(3);
+            }
+            'h' | 'H' => hour = true,
+            'd' | 'D' | 'y' | 'Y' | 'M' => date = true,
+            _ => {}
+        }
+    }
+    hour && !date
 }
 
 /// Whether the local name `local` names a field of the text namespace whose content the reader takes as it stands (so it is written as plain text, with no `text:s`).
@@ -615,9 +647,20 @@ impl Editor<'_, '_> {
             cx.held.filter(|h| h.row_holds).and_then(|h| h.para.style.held.iter().find(|v| !v.group.is_paragraph())).and_then(|v| v.stamp);
         // The stretches that are the file's own spans, whatever came of them: no span is made for them again.
         let mut seen_spans: HashSet<(usize, usize)> = HashSet::new();
+        // The script type of each stretch's letters, which its language is written into the triplet of: one walk of the paragraph's characters, charged as it goes.
+        let mut cursor = SlotCursor::new(&cx.para.chars);
         for &(start, end, row) in &stretches {
             facts.used_char.insert(row);
-            let Some((props, lossy)) = char_rows.props(row) else { continue };
+            // Only a row that holds a language is written into a triplet: the letters of the others are not counted.
+            let slot = if char_rows.row(row).is_some_and(|r| r.cells.contains_key("LangID")) {
+                let walked = cursor.walked();
+                let slot = cursor.slot(start, end);
+                self.work.charge_steps(cursor.walked().saturating_sub(walked) / 64)?;
+                slot
+            } else {
+                FontSlot::Latin
+            };
+            let Some((props, lossy)) = char_rows.props_in(row, slot) else { continue };
             facts.native &= !lossy;
             if !props.writes() {
                 continue;
@@ -650,13 +693,16 @@ impl Editor<'_, '_> {
                 Inline::Field { at, len, ix, bytes } => {
                     let shown = cx.para.chars.get(bytes.0..bytes.1).unwrap_or_default();
                     match field_kind(field_rows, *ix, shown) {
-                        Some(local) => {
+                        Some(FieldKind { local, whole }) => {
                             facts.used_field.insert(*ix);
+                            // The element is written whatever the row says; a row that says more than it reads back as is carried.
+                            facts.native &= whole;
                             // `NOW()` is the date or the time the file's element was (the reader maps both to it).
+                            let now = matches!(local, "date" | "time");
                             let shell = elem_by
                                 .get(&(*at, at.saturating_add(*len)))
                                 .and_then(|r| r.element.as_ref())
-                                .filter(|e| local_of(&e.name) == local || (local == "date" && local_of(&e.name) == "time"));
+                                .filter(|e| local_of(&e.name) == local || (now && matches!(local_of(&e.name), "date" | "time")));
                             let held_tags = match shell {
                                 Some(shell) => self.shell_tags(shell, None, cx.page, pfx)?,
                                 None => None,
@@ -871,9 +917,10 @@ impl Editor<'_, '_> {
     }
 
     /// An automatic style made under the name the file gave it, with the values the file held for it that the row still says, **once for each name** (the same name asked for with another content is a
-    /// new style under a new name: two paragraphs of one file's style that the model has come to give different rows are two styles, the paragraph's with the text properties the file stated, and a run's
-    /// from its cells). The same name asked for with the same cells and values is one style, **whether or not the paragraph's text is on the row the style's text properties were read with**, and
-    /// whatever the cells say the faces of that text are while the part declares the faces the style names.
+    /// new style under a new name: two paragraphs of one file's style that the model has come to give different rows are two styles, each with the text properties the file stated, and so are two runs
+    /// of one file's style that the file's rows say through other cells). The same name asked for with the same attributes is one style, **whether or not the paragraph's text is on the row the style's
+    /// text properties were read with**, and whatever the cells say the faces of that text are while the part declares the faces the style names. **The other content is no style when it
+    /// says nothing** ([`Editor::held_variant`]: the shape's graphic style gives what the file's style stated, and no cell or held value is left to write), whichever of the paragraphs asks first.
     ///
     /// **What the file stated is written as it stated it**: a held value of the group `Size` or `Style` of a run's style, while its stamp holds, is the whole statement of the group (its
     /// attributes none included), so the attributes the cells write for the group are not written; the text properties a paragraph style stated are written as they were (an element of their own
@@ -903,7 +950,13 @@ impl Editor<'_, '_> {
             })
             .collect();
         // The groups whose whole statement a value is: the attributes the cells write for them are not written (a face of such a group is not declared either).
-        let whole: Vec<&str> = values.iter().filter(|v| states_whole(v)).map(|v| v.group.id()).collect();
+        let mut whole: Vec<&str> = values.iter().filter(|v| states_whole(v)).map(|v| v.group.id()).collect();
+        // **A run whose row is as the file's span was read says the language the file stated, as it stated it**: its `LangID` came from the style's triplets, or through the chain
+        // from a style it names, and the style's own attributes (the kept remainder) are what the file said. Written from the cell they would add a language the style never stated, to every
+        // span of a drawing whose shape style or default style states one. A run whose row changed is no run of this function: it is written from its cells.
+        if family == Fam::Text {
+            whole.extend(["LangLatin", "LangAsian", "LangComplex"]);
+        }
         let mut ops = self.style_ops_without(props, &whole)?;
         // A run that stated no underline is not given one that says "none": the cells of the row hold no `DblUnderline`, and the file's style would read back with it.
         if !row.cells.contains_key("DblUnderline") {
@@ -913,19 +966,29 @@ impl Editor<'_, '_> {
         // (GATE1622-CROSS-FONTNAME), not the faces the paragraph's own text is in: two paragraphs of one style, one whose text is on the row of the style's text properties and one whose text is all in
         // spans, write the same names while the part declares the faces the style names, and are one style.
         let faces = format!("{:?}", self.written_faces(&values)?);
-        let base = format!(
-            "{}#{:?}",
-            self.ops_key(&ops)?,
-            values.iter().map(|v| v.attrs.iter().map(|(k, t)| format!("{k}={t}")).collect::<Vec<_>>()).collect::<Vec<_>>()
-        );
+        // **A run's style is told by the attributes it is written with, and not by the way each reached it**: a run whose row is the first of its text (row 0, the cells that differ
+        // from the shape's) and one whose row is a later one (every cell its chain resolves) say the same style by other routes, a value that says none of a group the later row holds a cell of
+        // among them. A style asked for by name with the other of the two was taken for another content, and its second use was rewritten from the cells alone, which lost what the file's style
+        // stated that no cell reads (the sizes and weights of the Asian and complex scripts).
+        let base = if paragraph {
+            format!(
+                "{}#{:?}",
+                self.ops_key(&ops)?,
+                values.iter().map(|v| v.attrs.iter().map(|(k, t)| format!("{k}={t}")).collect::<Vec<_>>()).collect::<Vec<_>>()
+            )
+        } else {
+            self.written_set_key(&ops, &values)?
+        };
         if let Some((made_base, made_faces)) = self.texts.held_made.get(&key) {
             // A paragraph with no text of its own on that row has nothing the faces would draw, so it takes the style as it was made, whatever faces the style was made with.
             if *made_base == base && (*made_faces == faces || self.texts.own_faces.is_empty()) {
                 return Ok(Some(name.to_owned()));
             }
-            // A run's row that is another row is said by its cells. A paragraph's style is more: the text properties it stated are its own text's, and the paragraph names it with no span for that text
-            // (the row it holds is the one the style's text properties were read with), so a style of its own that lost them would draw the text in the default style's face and size.
-            return if paragraph { self.held_variant(name, &format!("{base}#{faces}"), &ops, &values) } else { self.style_for(family, props) };
+            // **Another content is a style of its own that still says what the file's style said** (for a paragraph's, for a run's). A paragraph's text properties are its own
+            // text's, and the paragraph names the style with no span for that text (the row it holds is the one the style's text properties were read with), so a style of its own that lost them would
+            // draw the text in the default style's face and size. A run's style is the file's too: the row is the file's (the run is confirmed), so what a style of its cells alone would lose, the sizes and
+            // weights of the Asian and complex scripts the file's style stated, is no less the run's.
+            return self.held_variant(family, name, &format!("{base}#{faces}"), &ops, &values);
         }
         let content = format!("{base}#{faces}");
         if self.texts.held_none.get(&key).is_some_and(|said| *said == content) {
@@ -942,7 +1005,12 @@ impl Editor<'_, '_> {
             }
             remainder = Some(kept);
         }
-        self.make_named_style(family, name, name, &ops, &values, remainder)?;
+        if !self.make_named_style(family, name, name, &ops, &values, remainder)? {
+            // Nothing the writer can spell was left to say: no style, as for the style that says nothing above.
+            self.texts.held_none.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: 0 })?;
+            self.texts.held_none.insert(key, content);
+            return Ok(None);
+        }
         self.work.text_names_written.insert((family == Fam::Text, name.to_owned()));
         self.texts.held_made.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: 0 })?;
         self.texts.held_made.insert(key, (base, faces));
@@ -1007,7 +1075,15 @@ impl Editor<'_, '_> {
         };
         let style_own = declared(&el.attrs);
         // What the cells and the held values write, by namespace and local name: an attribute of the remainder that names one of them is theirs.
-        let written: HashSet<(Ns, &str)> = ops.iter().map(|o| (o.ns, o.local)).chain(extra.iter().map(|(n, l, _)| (*n, l.as_str()))).collect();
+        let mut written: HashSet<(Ns, &str)> = ops.iter().map(|o| (o.ns, o.local)).chain(extra.iter().map(|(n, l, _)| (*n, l.as_str()))).collect();
+        // **A triplet the cells write is theirs whole**: the language says all four of its attributes, so a script or a full tag the file stated beside it, which the cells do not
+        // say, is no longer true of the language they write; the other two triplets are the file's.
+        for slot in [FontSlot::Latin, FontSlot::Asian, FontSlot::Complex] {
+            let triplet = crate::lang::attributes(slot);
+            if triplet.iter().any(|attribute| written.contains(attribute)) {
+                written.extend(triplet);
+            }
+        }
         let main = if family == Fam::Text { "text-properties" } else { "paragraph-properties" };
         let mut out = Remainder::default();
         let mut left = 0usize;
@@ -1207,22 +1283,77 @@ impl Editor<'_, '_> {
         Ok(faces)
     }
 
-    /// The paragraph style the file called `name`, asked for again with a `content` other than the one it was made with: **a style of its own that says what the file's said**, the text properties among
-    /// it, under a name the save gives it, and made once for each content. The remainder is the file's style's, which `name` finds.
-    fn held_variant(&mut self, name: &str, content: &str, ops: &[Op], values: &[&HeldStyleValue]) -> Result<Option<String>, WriteError> {
-        let key = (Fam::Paragraph, name.to_owned(), content.to_owned());
-        if let Some(made) = self.texts.held_variants.get(&key) {
-            return Ok(Some(made.clone()));
+    /// The attributes a run's style is written with, as one text: the cells' `ops`, each attribute a held value states standing in the place of the op of the same name (the way
+    /// [`Editor::make_named_style`] writes them), the faces as it names them. **A held value that states no attribute adds none** (a value that says the style stated none of its group changes the
+    /// ops by skipping the group, which the ops show), so two asks of one name that write the same attributes have the same text, whichever of them holds such a value or says a property by a
+    /// value where the other says it by a cell. Each attribute is a look at one name, as in [`Editor::ops_key`] and [`Editor::written_faces`].
+    fn written_set_key(&mut self, ops: &[Op], values: &[&HeldStyleValue]) -> Result<String, WriteError> {
+        let mut set: HashMap<String, String> = HashMap::new();
+        for o in ops {
+            let value = match &o.val {
+                Val::Text(t) => t.clone(),
+                Val::Length(inches) => length_text(*inches, self.unit).ok_or(WriteError::Unsupported("a length too large to write"))?,
+                Val::Remove => continue,
+            };
+            set.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: set.len() as u64 })?;
+            set.insert(format!("{:?}:{}", o.ns, o.local), value);
         }
-        let fresh = self.book.as_mut().ok_or(WriteError::Mismatch("a text style without the styles of the part"))?.names.next(Fam::Paragraph);
-        self.make_named_style(Fam::Paragraph, &fresh, name, ops, values, None)?;
+        for value in values {
+            for (key, text) in value.attrs.iter() {
+                let Some((prefix, local)) = key.split_once(':') else { continue };
+                let ns = match prefix {
+                    "fo" => Ns::Fo,
+                    "style" => Ns::Style,
+                    _ => continue,
+                };
+                if !super::super::kept::is_qname(key) || super::super::splice::has_bad_char(text) {
+                    continue;
+                }
+                let text = if ns == Ns::Style && is_face_attribute(local) { self.declared_face_of(local, text)? } else { text.to_owned() };
+                set.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: set.len() as u64 })?;
+                set.insert(format!("{ns:?}:{local}"), text);
+            }
+        }
+        let mut parts: Vec<String> = set.iter().map(|(name, value)| format!("{name}={value}")).collect();
+        parts.sort_unstable();
+        Ok(parts.join(";"))
+    }
+
+    /// The style of `family` the file called `name`, asked for again with a `content` other than the one it was made with: **a style of its own that says what the file's said**, the text properties among
+    /// it, under a name the save gives it, and made once for each content (a run's style too). The remainder is the file's style's, which `name` finds.
+    ///
+    /// **A content that says nothing is no style**, as it is when it is the first the name is asked for with ([`Editor::held_style`]): a paragraph whose cells and held values write
+    /// nothing, because the graphic style of its shape gives every property the file's style stated, and whose style holds nothing no cell reads either, is written with no style, and not with an
+    /// automatic style whose properties element has no attribute. A style that holds something no cell reads is still made, with just that. The content is looked at before a name is taken for it,
+    /// and a style that [`Editor::make_named_style`] finds nothing to write for after all (what its values state is under a prefix the writer does not spell) is no style either.
+    fn held_variant(&mut self, family: Fam, name: &str, content: &str, ops: &[Op], values: &[&HeldStyleValue]) -> Result<Option<String>, WriteError> {
+        let key = (family, name.to_owned(), content.to_owned());
+        if let Some(made) = self.texts.held_variants.get(&key) {
+            return Ok(made.clone());
+        }
+        let mut kept: Option<Remainder> = None;
+        let mut nothing = false;
+        if ops.is_empty() && values.iter().all(|v| v.attrs.is_empty()) {
+            let found = self.text_remainder(family, name, &[], &[])?;
+            nothing = found.is_empty();
+            kept = Some(found);
+        }
+        let made = if nothing {
+            None
+        } else {
+            let fresh = self.book.as_mut().ok_or(WriteError::Mismatch("a text style without the styles of the part"))?.names.next(family);
+            self.make_named_style(family, &fresh, name, ops, values, kept)?.then_some(fresh)
+        };
         self.texts.held_variants.try_reserve(1).map_err(|_| WriteError::Limit { what: "memory for the styles of a part", max: 0 })?;
-        self.texts.held_variants.insert(key, fresh.clone());
-        Ok(Some(fresh))
+        self.texts.held_variants.insert(key, made.clone());
+        Ok(made)
     }
 
     /// A new automatic style of `family` called `name`, with the attributes `ops` and the held values `held` (each of its attributes over the op that writes the same name). `source` is the name the file
     /// gave the style, which its kept remainder is found by (`name` itself for a style written under the file's name). `kept` is what the style's remainder holds, when the caller has asked for it already.
+    ///
+    /// **Gives whether a style was made.** A style that would hold no property at all (what its held values state is under a prefix the writer does not spell, and no cell or remainder says anything)
+    /// is no style and is not put in the part: the caller names none.
     fn make_named_style(
         &mut self,
         family: Fam,
@@ -1231,7 +1362,7 @@ impl Editor<'_, '_> {
         ops: &[Op],
         held: &[&HeldStyleValue],
         kept: Option<Remainder>,
-    ) -> Result<(), WriteError> {
+    ) -> Result<bool, WriteError> {
         let (word, element, prop) = if family == Fam::Text { ("text", "text-properties", 2) } else { ("paragraph", "paragraph-properties", 1) };
         let book = self.book.as_mut().ok_or(WriteError::Mismatch("a text style without the styles of the part"))?;
         let scope =
@@ -1300,6 +1431,9 @@ impl Editor<'_, '_> {
             more.push_str(&self.foreign_attributes(&pfx, &text_carriers)?);
             more.push_str("/>");
         }
+        if attrs.is_empty() && more.is_empty() {
+            return Ok(false);
+        }
         // A paragraph style that stated text properties and no paragraph properties has no element of the paragraph properties.
         let main = if family == Fam::Paragraph && attrs.is_empty() && !more.is_empty() { String::new() } else { format!("<{s}:{element}{attrs}/>") };
         let text = format!(
@@ -1310,7 +1444,7 @@ impl Editor<'_, '_> {
         self.put_style(text)?;
         let book = self.book.as_mut().ok_or(WriteError::Mismatch("a text style without the styles of the part"))?;
         book.written.push(Written { name: name.to_owned(), family, attrs: wrote, prop });
-        Ok(())
+        Ok(true)
     }
 
     /// The text of the elements of one paragraph: its characters, with each element opened where its stretch starts and closed where it ends, and each field and mark where it stands. **One sweep
@@ -1671,15 +1805,28 @@ impl Editor<'_, '_> {
     }
 }
 
-/// The kind of a field of the model: the local name of the element the reader reads it from, when its row says one of the four it maps and shows what the paragraph holds.
-fn field_kind(rows: &HashMap<u32, &Row>, ix: u32, shown: &str) -> Option<&'static str> {
+/// The element a field of the model is written as, and whether the file says the whole row.
+#[derive(Debug, PartialEq, Eq)]
+struct FieldKind {
+    /// The local name of the element: `page-number`, `page-count`, `file-name`, `date` or `time`.
+    local: &'static str,
+    /// The element reads back as the row the model has: the row holds its `Value` and nothing else, and shows what the paragraph has there. A row that says more (a `Type`, a `Format`, the unit of a
+    /// date: the rows of a VSDX file) is carried by DiaCraft's extension, and the element is written all the same.
+    whole: bool,
+}
+
+/// The kind of a field of the model, by the formula of its row's `Value`: the element the reader reads it from, when the row's formula is one of the four it maps. **What else the row holds, or shows,
+/// decides only whether the file says all of it** (the rows of a VSDX file hold a `Type` and a `Format`, and were written as plain text). `NOW()` is the element of a time when
+/// the row's `Format` is a clock and no date, and the date's otherwise.
+fn field_kind(rows: &HashMap<u32, &Row>, ix: u32, shown: &str) -> Option<FieldKind> {
     let row = rows.get(&ix)?;
     let value = row.cells.get("Value")?;
-    let kind = field_element(value.formula.text()?)?;
+    let element = field_element(value.formula.text()?)?;
+    let clock = element == "date" && row.cells.get("Format").and_then(|f| f.value.as_ref()).is_some_and(|f| picture_is_clock(f.text()));
     // The row holds nothing the file has no place for, and shows the characters the paragraph has there.
     let only_value = row.cells.len() == 1 && value.extra.is_none() && value.raw.is_empty();
     let same = value.value.as_ref().map(diacraft_doc::Value::text) == Some(shown);
-    (only_value && same).then_some(kind)
+    Some(FieldKind { local: if clock { "time" } else { element }, whole: only_value && same })
 }
 
 /// A list style's content without its name, written canonically: what two list styles of one content have in common. `None` for a text that does not parse (a list style whose prefixes the
@@ -1857,14 +2004,57 @@ mod tests {
         assert_eq!(drop_crossing(&mut covers, 4), 0);
     }
 
+    fn field_row(ix: u32, formula: &str, shown: &str, others: &[(&str, &str)]) -> Row {
+        let mut row = Row { ix: Some(ix), ..Row::default() };
+        row.cells.insert(diacraft_doc::CellName::new("Value"), diacraft_doc::Cell::read(Some(formula), Some(shown), None, None, &mut 1_000));
+        for (name, value) in others {
+            row.cells.insert(diacraft_doc::CellName::new(name), diacraft_doc::Cell::constant(diacraft_doc::Value::from_text(value)));
+        }
+        row
+    }
+
     #[test]
-    fn a_field_finds_its_row_by_the_index_and_only_when_the_row_says_what_the_paragraph_shows() {
-        let mut row = Row { ix: Some(3), ..Row::default() };
-        row.cells.insert(diacraft_doc::CellName::new("Value"), diacraft_doc::Cell::read(Some("PAGENUMBER()"), Some("7"), None, None, &mut 1_000));
+    fn a_field_finds_its_row_by_the_index_and_is_whole_only_when_the_row_says_what_the_paragraph_shows() {
+        let row = field_row(3, "PAGENUMBER()", "7", &[]);
         let mut rows: HashMap<u32, &Row> = HashMap::new();
         rows.insert(3, &row);
-        assert_eq!(field_kind(&rows, 3, "7"), Some("page-number"));
-        assert_eq!(field_kind(&rows, 3, "8"), None, "another shown text");
+        assert_eq!(field_kind(&rows, 3, "7"), Some(FieldKind { local: "page-number", whole: true }));
+        // Another shown text is the same field, and the file does not say the whole row.
+        assert_eq!(field_kind(&rows, 3, "8"), Some(FieldKind { local: "page-number", whole: false }), "another shown text");
         assert_eq!(field_kind(&rows, 4, "7"), None, "no such row");
+    }
+
+    /// The rows of a VSDX file hold a `Type` and a `Format`, and are fields all the same.
+    #[test]
+    fn a_row_that_holds_a_type_and_a_format_is_the_element_of_its_formula_and_not_whole() {
+        let rows_of = |rows: &[Row]| -> Vec<Option<FieldKind>> {
+            let by_ix: HashMap<u32, &Row> = rows.iter().filter_map(|r| r.ix.map(|ix| (ix, r))).collect();
+            (0..).take(rows.len()).map(|ix| field_kind(&by_ix, ix, "5")).collect()
+        };
+        let got = rows_of(&[
+            field_row(0, "PAGENUMBER()", "5", &[("Type", "2"), ("Format", "esc(0)")]),
+            field_row(1, "PAGECOUNT()", "5", &[("Format", "esc(0)")]),
+            field_row(2, "FILENAME()", "5", &[("Type", "0")]),
+            field_row(3, "NOW()", "5", &[("Type", "5"), ("Format", "{<211>}")]),
+            field_row(4, "now()", "5", &[("Type", "5"), ("Format", "h:mm tt")]),
+            field_row(5, "PAGENAME()", "5", &[("Type", "0"), ("Format", "@")]),
+            field_row(6, "Prop.Row_1", "5", &[]),
+        ]);
+        let kind = |local, whole| Some(FieldKind { local, whole });
+        assert_eq!(
+            got,
+            [kind("page-number", false), kind("page-count", false), kind("file-name", false), kind("date", false), kind("time", false), None, None]
+        );
+    }
+
+    #[test]
+    fn a_picture_with_a_clock_and_no_date_is_a_time() {
+        for time in ["h:mm", "h:mm tt", "HH:mm", "HH:mm:ss", "h:mm AM/PM", "h:mm am/pm", "h:mm A/P", "hh 'o''clock'", "h \\d"] {
+            assert!(picture_is_clock(time), "{time}");
+        }
+        // (`h \d` holds a day only as literal text; `'h'` holds an hour only as literal text.)
+        for other in ["{<211>}", "M/d/yyyy h:mm am/pm", "yyyy-MM-dd", "dddd, MMMM dd, yyyy", "esc(0)", "@", "", "m", "'h'"] {
+            assert!(!picture_is_clock(other), "{other}");
+        }
     }
 }

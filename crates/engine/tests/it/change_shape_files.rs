@@ -2,7 +2,7 @@
 //! master lacks, a group master, and a one-dimensional instance whose frame the old master supplied. Every package is built in code from the specifications' XML
 //! No file from another application is used.
 
-use diacraft_doc::{CellAddr, Document, Owner, Resolver, RowKey, SectionKey, SheetRef};
+use diacraft_doc::{CellAddr, Document, Lookup, Owner, Resolver, RowKey, SectionKey, SheetRef};
 use diacraft_engine::Session;
 use diacraft_engine::draw::{connection_points, shape_corners};
 use diacraft_testkit::package::{MasterSpec, PageSpec, VsdxBuilder, shape, shape_with};
@@ -115,8 +115,35 @@ fn with_data(id: u32, name: &str, rows: &str) -> MasterSpec {
     master(id, name, &sh(5, &format!("{LOOK}{}<Section N=\"Property\">{rows}</Section>", box_cells(1.5, 1.0))))
 }
 
+/// A master that names the cells a swap carries over (`ReplaceCopyCells`, a `DEPENDSON` call) on a blue line, with `extra` cells of its own.
+fn copier(id: u32, name: &str, list: &str, extra: &str) -> MasterSpec {
+    let own = format!(
+        r##"<Cell N="LinePattern" V="1"/><Cell N="LineColor" V="#0000AA"/><Cell N="LineWeight" V="0.01"/><Cell N="FillPattern" V="1"/><Cell N="ReplaceCopyCells" V="0" F="{list}"/>{extra}{}"##,
+        box_cells(1.5, 1.0)
+    );
+    master(id, name, &sh(5, &own))
+}
+
+/// `DEPENDSON(User.X0, User.X1, ..., User.X<n-1>, <last>)`: a list of `n` cells the old shape never has, ending in `last`.
+fn long_list(n: usize, last: &str) -> String {
+    let missing: Vec<String> = (0..n).map(|k| format!("User.X{k}")).collect();
+    format!("DEPENDSON({},{last})", missing.join(","))
+}
+
 fn all_masters() -> Vec<MasterSpec> {
+    let format_lock = r#"<Cell N="ReplaceLockFormat" V="1"/>"#;
+    let cost_row = r#"<Cell N="ReplaceLockShapeData" V="1"/><Section N="Property"><Row N="Cost"><Cell N="Label" V="Price"/><Cell N="Value" V="0"/></Row></Section>"#;
+    let rank_row = r#"<Section N="User"><Row N="Rank"><Cell N="Value" V="1"/></Row></Section>"#;
     vec![
+        copier(12, "CopyRankLine", "DEPENDSON(User.Rank,LineColor)", format_lock),
+        copier(13, "CopyRankOnly", "DEPENDSON(User.Rank)", ""),
+        copier(14, "CopyCostLocked", "DEPENDSON(Prop.Cost)", cost_row),
+        copier(15, "CopyOdd", "DEPENDSON(3,Sheet.5!Width,User.Missing,User.Rank)", rank_row),
+        copier(16, "CopyLong", &long_list(4_000, "LineColor"), format_lock),
+        copier(17, "CopyNone", "No Formula", format_lock),
+        copier(18, "CopyPlain", "SUM(1,2)", format_lock),
+        copier(19, "CopyEdge", &long_list(255, "LineColor"), format_lock),
+        copier(20, "CopyPast", &long_list(256, "LineColor"), format_lock),
         six(),
         four(),
         link(3, "Link", ""),
@@ -200,6 +227,15 @@ fn value_of(rows: &[(String, Vec<(String, String)>)], row: &str, cell: &str) -> 
 fn resolved_text(d: &Document, id: u32, cell: &str) -> Option<String> {
     let sheet = SheetRef::Shape(d.find_shape(Owner::Page(1), id).unwrap());
     Resolver::new(d).resolve(&sheet, &CellAddr::direct(cell)).and_then(|r| r.value.cell.and_then(|c| c.value.as_ref()).map(|v| v.text().to_owned()))
+}
+
+/// The formula and the value text of `User.<row>` as shape `id` holds the cell itself, or none when it holds no such cell.
+fn user_cell(d: &Document, id: u32, row: &str) -> Option<(Option<String>, Option<String>)> {
+    let at = d.find_shape(Owner::Page(1), id)?;
+    match d.shape(&at)?.sheet.lookup(&CellAddr::in_row("User", None, RowKey::name(row), "Value")) {
+        Lookup::Found(c) => Some((c.formula.text().map(str::to_owned), c.value.as_ref().map(|v| v.text().to_owned()))),
+        _ => None,
+    }
 }
 
 fn connects(d: &Document) -> Vec<(u32, String, u32, u32)> {
@@ -300,6 +336,112 @@ fn a_master_that_locks_replacing_cannot_be_changed_to() {
     let e = s.execute("shape.change", &json!({"ids": [10], "master": "Sealed", "stencil": "file-1"})).unwrap_err();
     assert!(e.to_string().contains("LockReplace"), "{e}");
     assert_eq!(snapshot(&s), before);
+}
+
+// ---- ReplaceCopyCells -------------------------------------------------------------------------------------------------------------
+
+/// An instance of "Four" with its own red line and a `User.Rank` of 5, the cells the lists below name.
+fn rank_and_red(rank_formula: &str) -> String {
+    let f = if rank_formula.is_empty() { String::new() } else { format!(r#" F="{rank_formula}""#) };
+    let own = format!(r##"<Cell N="LineColor" V="#FF0000"/><Section N="User"><Row N="Rank"><Cell N="Value" V="5"{f}/></Row></Section>"##);
+    instance(10, 2, 3.0, 2.0, &own)
+}
+
+/// A list on the new master carries the cells it names, and beats the format lock of the same master: the result holds `User.Rank` 5 and a red line.
+#[test]
+fn the_cells_the_new_master_lists_are_carried_over_and_beat_its_format_lock() {
+    let dir = Dir::new();
+    let mut s = session_with(&dir, &rank_and_red(""), "");
+    assert_eq!(resolved_text(doc(&s), 10, "LineColor").as_deref(), Some("#FF0000"));
+    let steps = s.history().unwrap().undo_len();
+    let r = change(&mut s, &[10], "CopyRankLine");
+    assert_eq!(r["changed"], json!([10]), "{r}");
+    assert_eq!(s.history().unwrap().undo_len(), steps + 1, "one undo step");
+    let d = doc(&s);
+    assert_eq!(resolved_text(d, 10, "LineColor").as_deref(), Some("#FF0000"), "the line is the shape's own red: the list beats ReplaceLockFormat");
+    assert_eq!(user_cell(d, 10, "Rank"), Some((None, Some("5".to_owned()))));
+    // The same shape with no list on the master: the lock takes the new master's formatting, as before.
+    let mut s = session_with(&dir, &rank_and_red(""), "");
+    change(&mut s, &[10], "CopyNone");
+    assert_eq!(resolved_text(doc(&s), 10, "LineColor").as_deref(), Some("#0000AA"), "`No Formula` names nothing");
+    let mut s = session_with(&dir, &rank_and_red(""), "");
+    change(&mut s, &[10], "CopyPlain");
+    assert_eq!(resolved_text(doc(&s), 10, "LineColor").as_deref(), Some("#0000AA"), "a formula that holds no `DEPENDSON` names nothing");
+    assert_eq!(check_session(&s), Ok(()));
+}
+
+/// Where the result has no such cell only the value is copied, with no formula: a `User.Rank` of the formula `Width*3.4187` and a new master with no
+/// such row gives a row of the old value alone.
+#[test]
+fn a_listed_cell_the_new_master_lacks_is_copied_as_its_value_alone() {
+    let dir = Dir::new();
+    let mut s = session_with(&dir, &rank_and_red("Width*3.4187"), "");
+    assert_eq!(user_cell(doc(&s), 10, "Rank").and_then(|c| c.0).as_deref(), Some("Width*3.4187"));
+    change(&mut s, &[10], "CopyRankOnly");
+    assert_eq!(user_cell(doc(&s), 10, "Rank"), Some((None, Some("5".to_owned()))), "the old value, and no formula");
+    // A master that holds the row too takes the cell as the shape had it, formula and all: the list carries "as a value or as a formula".
+    let mut s = session_with(&dir, &rank_and_red("Width*3.4187"), "");
+    change(&mut s, &[10], "CopyOdd");
+    let (formula, _) = user_cell(doc(&s), 10, "Rank").unwrap();
+    assert_eq!(formula.as_deref(), Some("Width*3.4187"), "the result has the cell, so the formula is carried as it is");
+    assert_eq!(check_session(&s), Ok(()));
+}
+
+/// A reference beats the data lock too: the list names `Prop.Cost`, and the shape's own value stays over the new master's 0 although `ReplaceLockShapeData` is on.
+#[test]
+fn a_listed_data_cell_beats_the_data_lock() {
+    let dir = Dir::new();
+    let local = r#"<Section N="Property"><Row N="Cost"><Cell N="Value" V="12"/></Row></Section>"#;
+    let mut s = session_with(&dir, &instance(10, 9, 3.0, 2.0, local), "");
+    change(&mut s, &[10], "CopyCostLocked");
+    let rows = data_rows(doc(&s), 10);
+    assert_eq!(value_of(&rows, "Cost", "Value").as_deref(), Some("12"), "{rows:?}");
+    // The lock alone (the list is not read from an instance's own copy) takes the master's value, as before.
+    let own = r#"<Cell N="ReplaceCopyCells" V="0" F="DEPENDSON(Prop.Cost)"/>"#;
+    let mut s = session_with(&dir, &instance(10, 9, 3.0, 2.0, &format!("{local}{own}")), "");
+    change(&mut s, &[10], "Locked");
+    let rows = data_rows(doc(&s), 10);
+    assert_eq!(value_of(&rows, "Cost", "Value").as_deref(), Some("0"), "{rows:?}");
+    assert_eq!(check_session(&s), Ok(()));
+}
+
+/// An argument that is no cell reference, a reference to a cell of another shape and a reference to a row the old shape lacks are skipped, and the swap
+/// goes on: no row is made for the one the shape lacks.
+#[test]
+fn an_argument_that_names_no_cell_of_the_shape_is_skipped_and_the_swap_goes_on() {
+    let dir = Dir::new();
+    let mut s = session_with(&dir, &rank_and_red(""), "");
+    let r = change(&mut s, &[10], "CopyOdd");
+    assert_eq!(r["changed"], json!([10]), "{r}");
+    let d = doc(&s);
+    assert_eq!(user_cell(d, 10, "Missing"), None, "no row is made for a cell the old shape lacks");
+    assert_eq!(user_cell(d, 10, "Rank"), Some((None, Some("5".to_owned()))));
+    assert_eq!(master_name(d, 10).as_deref(), Some("CopyOdd"));
+    assert_eq!(check_session(&s), Ok(()));
+}
+
+/// A list of thousands of cells is read as far as its cap (256): a name after it is not carried, the swap is whole, and the work is counted and not timed.
+#[test]
+fn a_list_of_thousands_of_cells_is_read_to_its_cap_only() {
+    let dir = Dir::new();
+    let mut s = session_with(&dir, &rank_and_red(""), "");
+    let r = change(&mut s, &[10], "CopyLong");
+    assert_eq!(r["changed"], json!([10]), "{r}");
+    // `LineColor` is the 4,001st name: past the cap, so the format lock takes the new master's blue, as with no list.
+    assert_eq!(resolved_text(doc(&s), 10, "LineColor").as_deref(), Some("#0000AA"));
+    assert_eq!(check_session(&s), Ok(()));
+}
+
+/// The cap is exact: the 256th reference of a list is read and the 257th is not.
+#[test]
+fn the_256th_reference_of_a_list_is_carried_and_the_257th_is_not() {
+    let dir = Dir::new();
+    for (master, carried) in [("CopyEdge", true), ("CopyPast", false)] {
+        let mut s = session_with(&dir, &rank_and_red(""), "");
+        change(&mut s, &[10], master);
+        let want = if carried { "#FF0000" } else { "#0000AA" };
+        assert_eq!(resolved_text(doc(&s), 10, "LineColor").as_deref(), Some(want), "{master}");
+    }
 }
 
 // ---- glue -----------------------------------------------------------------------------------------------------------------------------

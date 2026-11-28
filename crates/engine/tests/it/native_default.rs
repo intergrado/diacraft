@@ -76,11 +76,25 @@ fn entry_text(bytes: &[u8], name: &str) -> String {
 /// each built-in template, the model after `file.new` is the model of the commit before this task (the pins were taken on main at 0bf05612, which holds what the commit the plan names,
 /// ae19066, did not: the held VSDX slots and the DiaCraft data, so the pins are of that model and not of the older one), with the property times cleared; and page 1's `ID` is 1 and the
 /// page's name is the one a new drawing has.
+///
+/// **The pins moved once since, on purpose** (the ruling on F40): the root style of a new drawing holds `DropOnPageScale` 1, as the root of every file of the corpus
+/// does. That is one cell in the root style and nothing else. **`pins` are the fingerprints of the model a new drawing starts with
+/// now; `before` are the old pins, which the model has once the cell is taken out of its root** (`without_root_factor`): so the test says that the one cell is all that moved, and
+/// that pages, shapes, masters, themes and their `ID`s are as they were.
+///
+/// **And once more**: the root style of a new drawing states the text cells the renderer assumes, a `Paragraph` row, the rest of the text block and the cells of the first run.
+/// `without_text` are the pins as left them, which the model has once those cells are taken out of its root (`without_root_text_cells`).
 #[test]
 fn a_new_drawings_model_is_exactly_as_before() {
     let pins: [(Option<&str>, &str); 3] =
+        [(None, "f071ddd2747cb588"), (Some("basic_diagram"), "35ed259ac307c896"), (Some("basic_flowchart"), "24713bd87dd982c6")];
+    let without_text: [(Option<&str>, &str); 3] =
+        [(None, "57d3da0b4c2cbf31"), (Some("basic_diagram"), "dae6fe1d68a7dd39"), (Some("basic_flowchart"), "6f360fbbad8dbead")];
+    let before: [(Option<&str>, &str); 3] =
         [(None, "d60ea187d92bb3b5"), (Some("basic_diagram"), "86c97b0377bff463"), (Some("basic_flowchart"), "f97d0c44d5e76a27")];
     let mut seen: Vec<(Option<&str>, String)> = Vec::new();
+    let mut earlier: Vec<(Option<&str>, String)> = Vec::new();
+    let mut dropscale: Vec<(Option<&str>, String)> = Vec::new();
     for (template, _) in pins {
         let s = new_drawing(template);
         let doc = s.document().unwrap();
@@ -89,9 +103,15 @@ fn a_new_drawings_model_is_exactly_as_before() {
         assert_eq!(doc.pages.get(0).map(|p| p.name.to_string()).as_deref(), Some("Page-1"), "{template:?}");
         assert!(!s.is_dirty(), "{template:?}: a new drawing is not unsaved until it is edited");
         seen.push((template, fingerprint(doc)));
+        earlier.push((template, fingerprint(&diacraft_testkit::fixtures::without_root_factor(doc.clone()))));
+        dropscale.push((template, fingerprint(&diacraft_testkit::fixtures::without_root_text_cells(doc.clone()))));
     }
     let want: Vec<(Option<&str>, String)> = pins.iter().map(|(template, pin)| (*template, (*pin).to_owned())).collect();
     assert_eq!(seen, want, "the model a new drawing starts with moved");
+    let was: Vec<(Option<&str>, String)> = before.iter().map(|(template, pin)| (*template, (*pin).to_owned())).collect();
+    assert_eq!(earlier, was, "the model a new drawing starts with is the old one but for the factor and the text cells in the root style");
+    let kept: Vec<(Option<&str>, String)> = without_text.iter().map(|(template, pin)| (*template, (*pin).to_owned())).collect();
+    assert_eq!(dropscale, kept, "the model a new drawing starts with is the one of but for the text cells in the root style");
 }
 
 // ---- no bytes ---------------------------------------------------------------------------------------------------------------------------

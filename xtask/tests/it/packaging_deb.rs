@@ -1,34 +1,13 @@
-//! The .deb (`packaging/linux/make-deb.sh`): the CPU and the version it says, where it puts the files, and what it refuses. It needs `dpkg-deb`, which Debian and Ubuntu
-//! have (the gate's runner is one); a machine without it skips these tests.
+//! The .deb (`packaging/linux/make-deb.sh`): the CPU and the version it says, where it puts the files, and what it refuses. The tests that read the package need `dpkg-deb`, which
+//! Debian and Ubuntu have (the gate's runner is one); a machine without it skips them. What the script does with the completions and the manual pages is also looked at with a
+//! stand-in `dpkg-deb` that lists the files it is given, on every machine.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output};
 
 use crate::TempDir;
-use crate::packaging::{elf, names, programs, say};
-
-/// A program of CPU `machine` (0x3e is x86-64, 0xb7 is AArch64) for the package. `make-deb.sh` strips a program of the CPU it runs on with the machine's `strip`, which
-/// reads only a real program: so for this machine's own CPU it is a copy of `true`, a real and small one, and for the other CPU the first bytes of one, which the script
-/// leaves as it is, since this machine's `strip` cannot read it (a runner with `binutils` found this out; a machine without `strip` did not).
-fn program(machine: u8) -> Vec<u8> {
-    let own = match std::env::consts::ARCH {
-        "x86_64" => 0x3e,
-        "aarch64" => 0xb7,
-        _ => 0,
-    };
-    if machine == own {
-        for path in ["/bin/true", "/usr/bin/true"] {
-            if let Ok(bytes) = std::fs::read(path)
-                && bytes.starts_with(b"\x7fELF")
-                && bytes.get(18) == Some(&machine)
-            {
-                return bytes;
-            }
-        }
-    }
-    elf(machine)
-}
+use crate::packaging::{elf, names, program, programs, say, stand_in_cli, write_script};
 
 fn has_strip() -> bool {
     Command::new("strip").arg("--version").output().is_ok()
@@ -42,15 +21,61 @@ fn has_dpkg_deb() -> bool {
     found
 }
 
-/// Runs `packaging/linux/make-deb.sh NAME OUT BIN`, with a plain `PATH` as the runners have.
-fn make_deb(name: &str, out: &Path, bin: &Path) -> Output {
+/// The CPU of this machine in the two words the tests use: the ELF machine and the name of the CPU in a file name. None for a CPU the downloads are not made for.
+fn own() -> Option<(u8, &'static str)> {
+    match std::env::consts::ARCH {
+        "x86_64" => Some((0x3e, "x86_64")),
+        "aarch64" => Some((0xb7, "aarch64")),
+        _ => None,
+    }
+}
+
+/// What `diacraft-cli man --list` prints for the stand-in command line.
+const PAGES: &str = "diacraft-cli\\ndiacraft-cli-convert\\ndiacraft\\n";
+
+/// What the stand-in command line writes into the package, where bash, zsh and fish look for the completions of an installed program, and `man` for its pages.
+const EXTRAS: [&str; 9] = [
+    "./usr/share/bash-completion/completions/diacraft",
+    "./usr/share/bash-completion/completions/diacraft-cli",
+    "./usr/share/zsh/vendor-completions/_diacraft",
+    "./usr/share/zsh/vendor-completions/_diacraft-cli",
+    "./usr/share/fish/vendor_completions.d/diacraft.fish",
+    "./usr/share/fish/vendor_completions.d/diacraft-cli.fish",
+    "./usr/share/man/man1/diacraft.1.gz",
+    "./usr/share/man/man1/diacraft-cli.1.gz",
+    "./usr/share/man/man1/diacraft-cli-convert.1.gz",
+];
+
+/// Runs `packaging/linux/make-deb.sh NAME OUT BIN` on the programs of `dir` (`out` and `bin` in it), with `path` as the `PATH` and `env` added.
+fn run_make_deb(path: &str, env: &[(&str, &str)], name: &str, dir: &TempDir) -> Output {
     Command::new("bash")
-        .env("PATH", "/usr/bin:/bin")
-        .args([xtask::root().join("packaging/linux/make-deb.sh").to_str().unwrap(), name])
-        .arg(out)
-        .arg(bin)
+        .env("PATH", path)
+        .envs(env.iter().copied())
+        .arg(xtask::root().join("packaging/linux/make-deb.sh"))
+        .arg(name)
+        .arg(dir.path().join("out"))
+        .arg(dir.path().join("bin"))
         .output()
         .unwrap()
+}
+
+/// Runs the script with a plain `PATH` as the runners have, and the stand-in command line for the completions and the pages as `EXTRAS_CLI`. The programs of a test are no programs, or
+/// copies of `true` that have no right to run, so the script asks the stand-in whatever CPU they are of, and a test does not depend on what the machine can run (the runner of the
+/// gate has the CPU of the programs here and `dpkg-deb`, and a Fedora machine has neither).
+fn make_deb(dir: &TempDir, name: &str) -> Output {
+    let cli = stand_in_cli(dir, PAGES);
+    run_make_deb("/usr/bin:/bin", &[("EXTRAS_CLI", &cli)], name, dir)
+}
+
+/// Runs the script with a `dpkg-deb` that is none first on the `PATH`: it writes the list of the files of the tree it is asked to build (`--build TREE FILE`) as the package, one for each
+/// line, so that what the script puts in the package is read on a machine that has no dpkg.
+fn make_deb_listing(dir: &TempDir, name: &str, env: &[(&str, &str)]) -> Output {
+    write_script(
+        dir,
+        "tools/dpkg-deb",
+        "#!/bin/sh\ntree=\nfile=\nfor arg in \"$@\"; do tree=$file; file=$arg; done\n(cd \"$tree\" && find . -type f | sort) >\"$file\"\n",
+    );
+    run_make_deb(&format!("{}:/usr/bin:/bin", dir.path().join("tools").display()), env, name, dir)
 }
 
 /// A field of the control file of a .deb.
@@ -77,7 +102,7 @@ fn a_deb_says_the_cpu_and_the_version_of_its_programs() {
         ] {
             let dir = TempDir::new("make-deb");
             programs(&dir, &program(machine), &program(machine), "");
-            let out = make_deb(name, &dir.path().join("out"), &dir.path().join("bin"));
+            let out = make_deb(&dir, name);
             assert!(out.status.success(), "{arch} {name}: {}", say(&out));
             let file = format!("diacraft-{named}-linux-{in_names}.deb");
             assert_eq!(names(&dir.path().join("out")), [file.as_str()]);
@@ -91,8 +116,9 @@ fn a_deb_says_the_cpu_and_the_version_of_its_programs() {
     }
 }
 
-/// What the file is called, with a stand-in for `dpkg-deb` that only writes the file it is asked for, so that the name is checked on a machine that has no dpkg (the programs are
-/// those of the CPU this machine is not, which the script leaves as they are): the version with no `v`, and aarch64 or x86_64 for the CPU.
+/// What the file is called, with a stand-in for `dpkg-deb`, so that the name is checked on a machine that has no dpkg (the programs are those of the CPU this machine is not, which the
+/// script leaves as they are): the version with no `v`, and aarch64 or x86_64 for the CPU. A program of the other CPU cannot be asked for the completions and the manual
+/// pages, and the script makes the package without them and says so.
 #[test]
 fn a_deb_is_named_for_the_version_and_the_cpu_with_no_dpkg_on_the_machine() {
     let (other, in_names) = match std::env::consts::ARCH {
@@ -102,20 +128,53 @@ fn a_deb_is_named_for_the_version_and_the_cpu_with_no_dpkg_on_the_machine() {
     for (name, said) in [("0.2.1", "0.2.1"), ("v0.2.1", "0.2.1"), ("v0.3.0-rc.1", "0.3.0-rc.1"), ("dev-1a2b3c4", "dev-1a2b3c4")] {
         let dir = TempDir::new("make-deb-name");
         programs(&dir, &elf(other), &elf(other), "");
-        dir.write("tools/dpkg-deb", "#!/bin/sh\nfor last in \"$@\"; do :; done\necho \"a package\" >\"$last\"\n");
-        std::fs::set_permissions(dir.path().join("tools/dpkg-deb"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        let out = Command::new("bash")
-            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().join("tools").display()))
-            .arg(xtask::root().join("packaging/linux/make-deb.sh"))
-            .arg(name)
-            .arg(dir.path().join("out"))
-            .arg(dir.path().join("bin"))
-            .output()
-            .unwrap();
+        let out = make_deb_listing(&dir, name, &[]);
         assert!(out.status.success(), "{name}: {}", say(&out));
         let file = format!("diacraft-{said}-linux-{in_names}.deb");
         assert_eq!(names(&dir.path().join("out")), [file.as_str()], "{name}");
         assert!(String::from_utf8_lossy(&out.stdout).trim_end().ends_with(&file), "the last line is the file: {}", say(&out));
+        let files = std::fs::read_to_string(dir.path().join("out").join(&file)).unwrap();
+        assert!(files.contains("./usr/bin/diacraft-cli") && !files.contains("completion") && !files.contains("/man/"), "{name}: {files}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("the package is made without shell completions and manual pages"),
+            "{name}: {}",
+            say(&out)
+        );
+    }
+}
+
+/// The two ways the script goes for the completions and the manual pages, on every machine (the stand-in `dpkg-deb` lists the package): a command line that runs writes them into the folders
+/// where bash, zsh, fish and `man` look for those of an installed program (`EXTRAS_CLI` is the stand-in for the program of this machine's CPU that runs, which the programs of the tests
+/// are not), and one that cannot write them, or writes nothing, is no build to package: the script stops, and says so.
+#[test]
+fn a_command_line_that_runs_has_its_completions_and_pages_in_the_package_and_one_that_cannot_stops_the_script() {
+    let Some((own, in_names)) = own() else {
+        return;
+    };
+    // The command line of the stand-in: nine files.
+    let dir = TempDir::new("make-deb-extras");
+    programs(&dir, &program(own), &program(own), "");
+    let cli = stand_in_cli(&dir, PAGES);
+    let out = make_deb_listing(&dir, "0.2.0", &[("EXTRAS_CLI", &cli)]);
+    assert!(out.status.success(), "{}", say(&out));
+    let files = std::fs::read_to_string(dir.path().join("out").join(format!("diacraft-0.2.0-linux-{in_names}.deb"))).unwrap();
+    for path in EXTRAS {
+        assert!(files.lines().any(|f| f == path), "{path} is not in the package: {files}");
+    }
+    assert!(!say(&out).contains("without shell completions"), "{}", say(&out));
+    // The programs of this machine's CPU as the other tests write them, with no stand-in: a file with no right to run (what the runner of the gate found), and one that runs and prints
+    // nothing (a copy of `true`, once it may run). Neither writes completions, so the package is not made.
+    if program(own) == elf(own) {
+        return;
+    }
+    for (mode, said) in [(0o644, "diacraft-cli could not write the bash completions of diacraft-cli"), (0o755, "the package is missing")] {
+        let dir = TempDir::new("make-deb-no-cli");
+        programs(&dir, &program(own), &program(own), "");
+        std::fs::set_permissions(dir.path().join("bin/diacraft-cli"), std::fs::Permissions::from_mode(mode)).unwrap();
+        let out = make_deb_listing(&dir, "0.2.0", &[]);
+        assert!(!out.status.success(), "{mode:o}: {}", say(&out));
+        assert!(say(&out).contains(said), "{mode:o}: {}", say(&out));
+        assert!(!dir.path().join("out").exists() || names(&dir.path().join("out")).is_empty(), "{mode:o}: no package is written");
     }
 }
 
@@ -126,7 +185,7 @@ fn a_label_that_is_no_tag_gives_a_version_that_sorts_before_the_release_it_leads
     }
     let dir = TempDir::new("make-deb-label");
     programs(&dir, &program(0x3e), &program(0x3e), "");
-    let out = make_deb("dev-1a2b3c4", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb(&dir, "dev-1a2b3c4");
     assert!(out.status.success(), "{}", say(&out));
     let version = field(&dir.path().join("out").join("diacraft-dev-1a2b3c4-linux-x86_64.deb"), "Version");
     assert!(version.ends_with("~dev.1a2b3c4") && version.starts_with(|c: char| c.is_ascii_digit()), "{version}");
@@ -139,7 +198,7 @@ fn a_deb_puts_the_programs_the_entry_the_icon_and_the_licences_where_the_system_
     }
     let dir = TempDir::new("make-deb-files");
     programs(&dir, &program(0x3e), &program(0x3e), "");
-    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb(&dir, "0.2.0");
     assert!(out.status.success(), "{}", say(&out));
     let deb = dir.path().join("out").join("diacraft-0.2.0-linux-x86_64.deb");
     let listing = Command::new("dpkg-deb").arg("--contents").arg(&deb).output().unwrap();
@@ -156,10 +215,24 @@ fn a_deb_puts_the_programs_the_entry_the_icon_and_the_licences_where_the_system_
         "./usr/share/doc/diacraft/ATTRIBUTION.md",
         "./usr/share/doc/diacraft/THIRD-PARTY-LICENSES.txt",
         "./usr/share/doc/diacraft/copyright",
-    ] {
+    ]
+    .into_iter()
+    .chain(EXTRAS)
+    {
         assert!(paths.contains(&path), "{path} is not in the package: {paths:?}");
     }
     assert!(listing.lines().all(|l| l.contains("root/root")), "every file belongs to root, whoever made the package: {listing}");
+    // What the command line wrote is what the package holds.
+    let unpacked = dir.path().join("unpacked");
+    let extracted = Command::new("dpkg-deb").arg("--extract").arg(&deb).arg(&unpacked).output().unwrap();
+    assert!(extracted.status.success(), "{}", say(&extracted));
+    for (file, wrote) in [
+        ("usr/share/bash-completion/completions/diacraft", "# bash completions of diacraft\n"),
+        ("usr/share/zsh/vendor-completions/_diacraft-cli", "# zsh completions of diacraft-cli\n"),
+        ("usr/share/fish/vendor_completions.d/diacraft-cli.fish", "# fish completions of diacraft-cli\n"),
+    ] {
+        assert_eq!(std::fs::read_to_string(unpacked.join(file)).unwrap(), wrote, "{file}");
+    }
 }
 
 #[test]
@@ -171,7 +244,7 @@ fn a_deb_is_refused_for_programs_that_name_a_library_it_does_not_cover() {
     let mut program = elf(0x3e);
     program.extend(b"libnotknown.so.9\0");
     programs(&dir, &program, &elf(0x3e), "");
-    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb(&dir, "0.2.0");
     assert!(!out.status.success(), "{}", say(&out));
     assert!(say(&out).contains("diacraft names the library libnotknown.so.9, which this script does not know"), "{}", say(&out));
 }
@@ -192,17 +265,17 @@ fn a_program_of_this_cpu_is_stripped_one_strip_refuses_stops_the_script_and_one_
     // This CPU's, real: made.
     let dir = TempDir::new("make-deb-own");
     programs(&dir, &program(own), &program(own), "");
-    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb(&dir, "0.2.0");
     assert!(out.status.success(), "{}", say(&out));
     // The other CPU's, as the first bytes of a program: made, as it is.
     let dir = TempDir::new("make-deb-other");
     programs(&dir, &elf(other), &elf(other), "");
-    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb(&dir, "0.2.0");
     assert!(out.status.success(), "{}", say(&out));
     // This CPU's, and no program: strip refuses it, and the script says whose.
     let dir = TempDir::new("make-deb-refused");
     programs(&dir, &elf(own), &elf(own), "");
-    let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+    let out = make_deb(&dir, "0.2.0");
     assert!(!out.status.success(), "{}", say(&out));
     assert!(say(&out).contains("strip could not read diacraft"), "{}", say(&out));
     assert!(!dir.path().join("out").join("diacraft-0.2.0-linux-x86_64.deb").exists());
@@ -246,7 +319,7 @@ fn every_library_the_programs_load_by_name_is_known_with_its_package_and_libxcb_
         let mut named = elf(other);
         named.extend(format!("{library}\0").bytes());
         programs(&dir, &named, &named, "");
-        let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+        let out = make_deb(&dir, "0.2.0");
         assert!(out.status.success(), "{library}: {}", say(&out));
         let deb = dir.path().join("out").join(format!("diacraft-0.2.0-linux-{arch}.deb"));
         let wanted = format!("{} {}", field(&deb, "Depends"), field(&deb, "Recommends"));
@@ -258,7 +331,7 @@ fn every_library_the_programs_load_by_name_is_known_with_its_package_and_libxcb_
     let depends = {
         let dir = TempDir::new("make-deb-xcb");
         programs(&dir, &elf(other), &elf(other), "");
-        let out = make_deb("0.2.0", &dir.path().join("out"), &dir.path().join("bin"));
+        let out = make_deb(&dir, "0.2.0");
         assert!(out.status.success(), "{}", say(&out));
         field(&dir.path().join("out").join(format!("diacraft-0.2.0-linux-{arch}.deb")), "Depends")
     };

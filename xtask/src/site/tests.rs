@@ -259,6 +259,53 @@ fn a_page_may_link_the_documentation_it_cites_and_nothing_else_may_name_those_ho
     }
 }
 
+/// A page may link the project's videos on YouTube (the tour, the Short, the channel) at the two hosts their addresses use, and that is all the allowance is: a picture or a script
+/// from YouTube is an external asset and refused (the home page shows the tour's picture from its own site), another host of YouTube's or plain HTTP is refused in a page, and a file that is no
+/// page may not name YouTube at all.
+#[test]
+fn a_page_may_link_videos_on_youtube_and_loads_nothing_from_it() {
+    let link = |url: &str| {
+        HTML.replace("<a href=\"/guides/g.html#open\">Open</a>", &format!("<a href=\"/guides/g.html#open\">Open</a><a href=\"{url}\">Watch</a>"))
+    };
+    let site = Fixture::new();
+    for url in
+        ["https://youtu.be/eEROjf1YHEA", "https://www.youtube.com/shorts/lcnmzfaxEDA", "https://www.youtube.com/@DiaCraft-app?sub_confirmation=1"]
+    {
+        site.write("index.html", link(url));
+        check(&site.0, DOMAIN).unwrap();
+    }
+    for url in [
+        "https://youtube.com/shorts/lcnmzfaxEDA",
+        "https://m.youtube.com/watch?v=eEROjf1YHEA",
+        "http://youtu.be/eEROjf1YHEA",
+        "https://www.youtube.com.unlisted.invalid/x",
+        "https://youtu.be.unlisted.invalid/x",
+        "https://i.ytimg.com/vi/eEROjf1YHEA/hqdefault.jpg",
+    ] {
+        site.write("index.html", link(url));
+        site.rejects("origin");
+    }
+    for (from, to) in [
+        ("src=\"/art.png\"", "src=\"https://www.youtube.com/art.png\""),
+        ("src=\"/art.png\"", "src=\"https://youtu.be/art.png\""),
+        ("src=\"/download.js\"", "src=\"https://www.youtube.com/iframe_api\""),
+    ] {
+        site.write("index.html", HTML.replace(from, to));
+        site.rejects("external asset");
+    }
+    site.write("index.html", HTML);
+    for (name, body) in [
+        ("download.js", "fetch('https://www.youtube.com/oembed')"),
+        ("style.css", "body {background:url(https://youtu.be/p.png)}"),
+        ("site.json", r#"{"video":"https://youtu.be/eEROjf1YHEA"}"#),
+        ("robots.txt", "Sitemap: https://www.youtube.com/site.xml"),
+    ] {
+        let site = Fixture::new();
+        site.write(name, body);
+        site.rejects(name);
+    }
+}
+
 #[test]
 fn vendor_and_suite_bans_apply_to_names_and_content() {
     let site = Fixture::new();

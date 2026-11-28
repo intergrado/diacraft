@@ -19,8 +19,11 @@
 //!   [`ReaderIndex`], which keeps from one edit to the next what reads what through other sheets (and [`changes_between_with`] is [`changes_between`]
 //!   given the same index, which remembers the page it compared), so that an edit costs what it touched and not the formulas and the shapes of the page.
 //!
-//! **What it does not do.** It never evaluates an action cell (`Action` and its kin) and performs no `SETF` write during
-//! recalculation. A function it does not have is [`Value::Unsupported`], and the saved value stands.
+//! **What it does not do.** It never evaluates an action cell (`Action` and its kin). A function it does not have is [`Value::Unsupported`],
+//! and the saved value stands. **A `SETF` writes when its cell is worked out** (`setf.rs`; documented behaviour wins over
+//!): the evaluator only queues the write, since it holds the document, and a commit makes it after the working-out and works out what it changed
+//! again, within [`rules::MAX_SETF_WRITES`] writes, [`rules::MAX_SETF_ROUNDS`] rounds and the commit's budget. [`SetfMode::Inert`] is the old reading, kept as an
+//! [`EvalOptions`] setting; the comparison with a file's saved values always takes it.
 //!
 //! **Hostile input.** A formula, a cell chain and a document are as hostile as the file. Every node and every cell read costs a step
 //! of the [`Budget`]; a cycle, a spent budget and a chain too deep are [`rules::LOOP_ERROR`], counted in [`EvalStats`]; nothing
@@ -57,14 +60,17 @@ mod index;
 mod locate;
 mod names;
 mod ops;
+mod pages;
 mod pathwalk;
 mod picture;
 mod recalc;
 mod refs;
 mod registry;
 mod row_names;
+pub mod row_refs;
 pub mod rules;
 mod salt;
+mod setf;
 mod shapes;
 mod store;
 mod strnum;
@@ -82,17 +88,19 @@ pub use cells::{CellEval, CellKind};
 pub use changes::{Changes, Since, changes_between, changes_between_with};
 pub use commit::{CommitReport, Scope, commit, commit_changed, commit_changed_with, commit_in, write_value};
 pub use entry::{EvalResult, Evaluated, evaluate_text, evaluate_text_with};
-pub use eval::{Budget, CellAddress, Clock, EvalCtx, EvalOptions, EvalStats, Evaluator, FileInfo, OperandMode};
+pub use eval::{Budget, CellAddress, Clock, EvalCtx, EvalOptions, EvalStats, Evaluator, FileInfo, OperandMode, SetfMode};
 pub use field_text::{clock_at, field_picture, field_text, utc_iso};
 pub use fn_measure::Fonts;
 pub use index::{MAX_KEPT_BYTES, ReaderIndex};
 pub use locate::Locator;
+pub use pages::{PageNames, commit_changed_across, masters_are_named};
 pub use recalc::{
     Calculator, Difference, DifferenceKind, FunctionScore, Native, NotFormulas, RecalcReport, SheetPlace, Skipped, ValueClass, class_of, recalc_all,
     recalc_all_salted, recalc_all_using, recalc_all_with,
 };
 pub use refs::{MAX_REFERENCE_BYTES, RefError, cell_address, reference_name};
 pub use registry::function_names;
+pub use row_names::spell_row;
 pub use salt::{MAX_MISSES_KEPT, RealSalt, SaltClass, SaltMiss, SaltPolicy, SaltTally};
 pub use store::{Encoded, decode, encode, iso_to_serial, serial_to_iso};
 pub use strnum::{format_number, parse_decimal, read_quantity};

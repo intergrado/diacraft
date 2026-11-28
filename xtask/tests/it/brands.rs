@@ -541,7 +541,8 @@ fn the_trademark_line_passes_where_it_is_listed_and_nowhere_else() {
 
 /// The notice (owner, 2026-11-23: "a note about the OASIS OpenDocument format and that we are not affiliated with OASIS, LibreOffice or OpenOffice"): its first sentence is the one it has always
 /// had (the allowed use of the product's name); it says that OpenDocument Format is an OASIS Standard, whose marks LibreOffice and OpenOffice are, whose marks ArchiMate (owner, 2026-11-25: the
-/// architecture page names it, and the notice says whose it is), UML and BPMN are (that page names them too), and that DiaCraft is not affiliated with or endorsed by the six owners. The text
+/// architecture page names it, and the notice says whose it is), UML and BPMN are (that page names them too), whose mark draw.io is (0.2.4: the public text says the files DiaCraft
+/// writes are being tested by opening them in draw.io), and that DiaCraft is not affiliated with or endorsed by the seven owners. The text
 /// is one paragraph, in NOTICE, the About box and every page's footer (`the_tree_holds_every_use_the_list_names` holds each place to it).
 #[test]
 fn the_notice_keeps_its_first_sentence_and_names_the_owners_of_the_other_marks() {
@@ -552,20 +553,23 @@ fn the_notice_keeps_its_first_sentence_and_names_the_owners_of_the_other_marks()
         "OpenOffice and Apache OpenOffice are registered trademarks of The Apache Software Foundation.",
         "ArchiMate is a registered trademark of The Open Group.",
         "UML and BPMN are trademarks of the Object Management Group.",
-        "DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group.",
+        "draw.io is a registered trademark of draw.io Ltd.",
+        "DiaCraft is not affiliated with or endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group, the Object Management Group or draw.io \
+         Ltd.",
     ] {
         assert!(TRADEMARK.contains(sentence), "{sentence}");
     }
     assert!(
         TRADEMARK.ends_with(
-            "endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group or the Object Management Group."
+            "endorsed by Microsoft, OASIS, The Document Foundation, The Apache Software Foundation, The Open Group, the Object Management Group or draw.io Ltd."
         ),
         "it ends with who it is not affiliated with"
     );
     assert!(!TRADEMARK.contains('\n') && TRADEMARK.is_ascii(), "one line of plain text, which the allowlist keeps whole");
     // Only the first and the last sentence hold a name of the deny list, and both are inside the allowed text; the others hold none, so they pass in a Rust literal anywhere.
     let others = "OpenDocument Format (ODF) is an OASIS Standard. LibreOffice is a registered trademark of The Document Foundation. OpenOffice and Apache OpenOffice are registered \
-                  trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group.";
+                  trademarks of The Apache Software Foundation. ArchiMate is a registered trademark of The Open Group. UML and BPMN are trademarks of the Object Management Group. \
+                  draw.io is a registered trademark of draw.io Ltd.";
     assert!(TRADEMARK.contains(others));
     assert!(hits(RUST, &format!("const T: &str = \"{others}\";\n")).is_empty());
     // The first sentence of the notice alone is not the allowed text: the use is the whole notice, in the files it is listed for.
@@ -690,4 +694,54 @@ fn the_tree_holds_every_use_the_list_names() {
         assert!(files.iter().any(|f| f == path), "{path} is not in the repository");
     }
     assert_eq!(stale_uses(&root, &files, PRODUCT_USES).unwrap(), Vec::<(String, String)>::new());
+}
+
+// ---------- the help tree (the design's section 11.3) ----------
+
+#[test]
+fn the_help_tree_and_its_catalogs_are_scanned_as_the_apps_text_and_a_site_only_field_may_name_the_product() {
+    for path in ["help/README.md", "help/topics/start/home.md", "help/tips.tsv", "help/sections.tsv", "i18n/help/de/home.tsv", "i18n/help/source.tsv"]
+    {
+        assert_eq!(kind_of(path), Some(Kind::Help), "{path}");
+    }
+    assert_eq!(kind_of("docs/help.md"), None, "a doc is still a Markdown doc");
+    let (v, term) = (product(), DENY[1]);
+    let topic = format!(
+        "---\nid: a\ntitle: A\nsummary: S.\nkeywords: k\nsite: yes\ndescription: Open {v} files.\nseo_title: A {v} guide\n---\nWorks like {v}.\n"
+    );
+    // a body names it: a hit; the two site-only header fields may
+    assert_eq!(hits("help/topics/start/a.md", &topic), [(10, term)]);
+    // the other header fields and the text of every other file may not
+    for field in ["title: {v}", "summary: About {v}.", "keywords: {v}, vsdx", "picture: {v}-picture", "unlisted: {v}"] {
+        let one = format!("---\nid: a\n{}\n---\nBody.\n", field.replace("{v}", &v));
+        assert_eq!(hits("help/topics/start/a.md", &one), [(3, term)], "{field}");
+    }
+    // the company's name and other vendors' are hits in a site-only field too
+    assert_eq!(hits("help/topics/start/a.md", "---\nid: a\ndescription: By Microsoft.\n---\nBody.\n"), [(3, "microsoft")]);
+    assert_eq!(hits("help/topics/start/a.md", "---\nid: a\nseo_title: Like Lucidchart\n---\nBody.\n"), [(3, "lucidchart")]);
+    // a line of the body that looks like a header field is body
+    assert_eq!(hits("help/topics/start/a.md", &format!("---\nid: a\n---\ndescription: {v}\n")), [(4, term)]);
+    // no header, no exemption
+    assert_eq!(hits("help/README.md", &format!("description: {v}\n")), [(1, term)]);
+    assert_eq!(hits("help/tips.tsv", &format!("Alpha\tLike {v} does.\tk\n")), [(1, term)]);
+    assert_eq!(hits("help/README.md", "# How to write\n\nNever name Microsoft products.\n"), [(3, "microsoft")]);
+}
+
+#[test]
+fn a_help_catalog_row_may_name_the_product_in_the_site_only_contexts_only() {
+    let (v, term) = (product(), DENY[1]);
+    let rows = format!(
+        "description\tOpen files.\tDateien mit {v} öffnen.\nseo_title\tFiles\t{v}-Dateien\ntitle\tFiles\t{v}-Dateien\npara\tText.\tMit {v}.\n"
+    );
+    assert_eq!(hits("i18n/help/de/files.tsv", &rows), [(3, term), (4, term)]);
+}
+
+#[test]
+fn a_text_of_product_uses_is_no_hit_in_a_help_file() {
+    let v = product();
+    let list = format!("{v} drawings, stencils and templates (`.vsdx`)");
+    let text = format!("---\nid: a\n---\nDiaCraft opens {list}.\nAnd {v} alone.\n");
+    let found: Vec<(usize, &str)> =
+        scan_text_with("help/topics/files/formats.md", &text, &[list.as_str()]).into_iter().map(|h| (h.line, h.term)).collect();
+    assert_eq!(found, [(5, DENY[1])]);
 }

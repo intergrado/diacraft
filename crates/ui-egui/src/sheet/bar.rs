@@ -68,7 +68,7 @@ fn button(ui: &Ui, rect: Rect, name: &str, enabled: bool, t: &Tokens, draw: impl
 }
 
 /// What the bar shows beside the text while an edit is open: the value the text works out to, the error it works out to, or the fault in words; or nothing.
-fn live_text(edit: &EditState) -> Option<(String, Ink)> {
+pub(super) fn live_text(edit: &EditState) -> Option<(String, Ink)> {
     let live = edit.live.as_ref()?;
     if live.exhausted {
         return Some(("= ...".to_owned(), Ink::Dim));

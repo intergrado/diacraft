@@ -47,9 +47,12 @@ fn workspace() -> (String, String) {
 }
 
 /// The properties schema.org lists for each type the site uses, with those it inherits (from <https://schema.org/SoftwareApplication>, `/WebApplication`, `/TechArticle`, `/WebPage`, `/WebSite`
-/// and `/Offer`, which were read when this was written; a `CollectionPage` is a `WebPage`, and the site gives it no property of its own): a key that is not here is a typo or a property of another type, and a search engine would ignore it.
+/// and `/Offer`, which were read when this was written; a `CollectionPage` is a `WebPage`, and the site gives it no property of its own; `/VideoObject`, read 2026-11-26, with the
+/// `name`, `description` and `url` of a `Thing`, the `thumbnailUrl` of a `CreativeWork` and the `uploadDate`, `duration` and `embedUrl` of a `MediaObject`): a key that is not here is a typo or a
+/// property of another type, and a search engine would ignore it.
 fn properties(kind: &str) -> &'static [&'static str] {
     match kind {
+        "VideoObject" => &["@context", "@type", "description", "duration", "embedUrl", "name", "thumbnailUrl", "uploadDate", "url"],
         "SoftwareApplication" => &[
             "@context",
             "@type",
@@ -147,7 +150,8 @@ fn every_page_but_the_missing_one_has_structured_data_of_the_kind_its_place_give
         let data = json_ld(&html);
         let kinds: Vec<&str> = data.iter().map(|d| d["@type"].as_str().unwrap()).collect();
         let expected: &[&str] = match page.as_str() {
-            "site/index.html" => &["SoftwareApplication", "WebSite"],
+            // The home page links the tour.
+            "site/index.html" => &["SoftwareApplication", "WebSite", "VideoObject"],
             "site/404.html" => &[],
             "site/guides/index.html" => &["CollectionPage"],
             p if p.starts_with("site/guides/") => &["TechArticle"],
@@ -158,27 +162,44 @@ fn every_page_but_the_missing_one_has_structured_data_of_the_kind_its_place_give
         for document in &data {
             assert_eq!(document["@context"], "https://schema.org", "{page}");
             only_listed_properties(document, &page);
-            // The text is the page's own, and an address is an HTTPS address of the site or of GitHub's repository: nothing is loaded or named from anywhere else.
+            // The text is the page's own, and an address is an HTTPS address of the site or of GitHub's repository, or a video's address and player on YouTube: nothing is loaded or named
+            // from anywhere else.
+            let video = document["@type"] == "VideoObject";
             let mut found = Vec::new();
             strings(document, &mut found);
             for text in found.iter().filter(|t| t.contains("://")) {
                 assert!(
                     text.starts_with("https://diacraft.dev/")
                         || text.starts_with("https://github.com/intergrado/diacraft")
-                        || *text == "https://schema.org",
+                        || *text == "https://schema.org"
+                        || video && (text.starts_with("https://youtu.be/") || text.starts_with("https://www.youtube.com/embed/")),
                     "{page}: {text}"
                 );
             }
-            // Nothing the site does not say: no rating, review, author or date in the data (the date of a page is in the sitemap).
-            for key in
-                ["aggregateRating", "review", "author", "creator", "publisher", "datePublished", "dateModified", "ratingValue", "reviewCount", "isbn"]
-            {
+            // Nothing the site does not say: no rating, review, author or date in the data (the date of a page is in the sitemap; the day a video was published is its `uploadDate`, which the
+            // page says beside the video).
+            for key in [
+                "aggregateRating",
+                "review",
+                "author",
+                "creator",
+                "publisher",
+                "datePublished",
+                "dateModified",
+                "ratingValue",
+                "reviewCount",
+                "isbn",
+                "interactionStatistic",
+                "contentUrl",
+            ] {
                 assert!(document.get(key).is_none(), "{page}: invented data: {key}");
             }
-            if document["@type"] != "WebSite" && document["@type"] != "SoftwareApplication" {
+            if document["@type"] != "WebSite" && document["@type"] != "SoftwareApplication" && !video {
                 assert_eq!(document["url"], canonical.as_str(), "{page}: the address of the page");
             }
-            if document["@type"] != "WebSite" {
+            if video {
+                a_video_says_what_its_page_says(document, &html, &page);
+            } else if document["@type"] != "WebSite" {
                 assert_eq!(
                     document["description"],
                     meta(&html, "name", "description").unwrap().replace("&amp;", "&").as_str(),
@@ -187,21 +208,48 @@ fn every_page_but_the_missing_one_has_structured_data_of_the_kind_its_place_give
             }
         }
         if page == "site/index.html" {
-            let app = &data[0];
-            assert_eq!(app["name"], "DiaCraft");
-            assert_eq!(app["url"], "https://diacraft.dev/");
-            assert_eq!(app["applicationCategory"], "DesignApplication");
-            assert_eq!(app["operatingSystem"], "Windows, macOS, Linux, Web browser");
-            assert_eq!(app["offers"]["price"], "0");
-            assert_eq!(app["offers"]["priceCurrency"], "USD");
-            assert_eq!(app["softwareVersion"], version.as_str(), "the version is the workspace's");
-            assert_eq!(app["downloadUrl"], format!("https://github.com/intergrado/diacraft/releases/tag/v{version}").as_str());
-            assert_eq!(app["image"], "https://diacraft.dev/assets/social.jpg");
-            assert_eq!(app["sameAs"][0], "https://github.com/intergrado/diacraft");
-            assert_eq!(data[1]["name"], "DiaCraft");
-            assert_eq!(data[1]["url"], "https://diacraft.dev/");
+            the_home_pages_data_is_the_workspaces_and_the_tours(&data, &version);
         }
     }
+}
+
+/// A `VideoObject` of a page says what the page says beside the video: its picture is a file of the site that the page shows, its player is YouTube's for the video the marked link
+/// goes to, and the page says the day and the length.
+fn a_video_says_what_its_page_says(document: &Value, html: &str, page: &str) {
+    let picture = document["thumbnailUrl"].as_str().unwrap().strip_prefix("https://diacraft.dev/").unwrap();
+    assert!(xtask::root().join("site").join(picture).is_file(), "{page}: the video's picture {picture} is a file of the site");
+    assert!(html.contains(&format!("src=\"/{picture}\"")), "{page}: the page shows the video's picture");
+    let id = document["url"].as_str().unwrap().strip_prefix("https://youtu.be/").unwrap();
+    assert_eq!(document["embedUrl"], format!("https://www.youtube.com/embed/{id}").as_str(), "{page}: the player of the video the page links");
+    assert!(html.contains(&format!("data-video=\"\" href=\"https://youtu.be/{id}\"")), "{page}: the link to the video is marked");
+    let date = document["uploadDate"].as_str().unwrap();
+    assert!(html.contains(&format!("<time datetime=\"{date}\">")), "{page}: the page says the day the video was published");
+    let length = document["duration"].as_str().unwrap();
+    assert!(html.contains(&format!("datetime=\"{length}\"")), "{page}: the page says the video's length");
+    assert!(!document["name"].as_str().unwrap().is_empty() && !document["description"].as_str().unwrap().is_empty(), "{page}");
+}
+
+/// The home page's data: the application of the workspace's release, the site, and the tour of 0.2.3 on YouTube, published 26 November 2026, 6 minutes 53 seconds long.
+fn the_home_pages_data_is_the_workspaces_and_the_tours(data: &[Value], version: &str) {
+    let app = &data[0];
+    assert_eq!(app["name"], "DiaCraft");
+    assert_eq!(app["url"], "https://diacraft.dev/");
+    assert_eq!(app["applicationCategory"], "DesignApplication");
+    assert_eq!(app["operatingSystem"], "Windows, macOS, Linux, Web browser");
+    assert_eq!(app["offers"]["price"], "0");
+    assert_eq!(app["offers"]["priceCurrency"], "USD");
+    assert_eq!(app["softwareVersion"], version, "the version is the workspace's");
+    assert_eq!(app["downloadUrl"], format!("https://github.com/intergrado/diacraft/releases/tag/v{version}").as_str());
+    assert_eq!(app["image"], "https://diacraft.dev/assets/social.jpg");
+    assert_eq!(app["sameAs"][0], "https://github.com/intergrado/diacraft");
+    assert_eq!(data[1]["name"], "DiaCraft");
+    assert_eq!(data[1]["url"], "https://diacraft.dev/");
+    let tour = &data[2];
+    assert_eq!(tour["url"], "https://youtu.be/eEROjf1YHEA");
+    assert_eq!(tour["embedUrl"], "https://www.youtube.com/embed/eEROjf1YHEA");
+    assert_eq!(tour["uploadDate"], "2026-11-26");
+    assert_eq!(tour["duration"], "PT6M53S");
+    assert!(tour["thumbnailUrl"].as_str().unwrap().starts_with("https://diacraft.dev/assets/hashed/tour."), "{}", tour["thumbnailUrl"]);
 }
 
 /// The `href` of the `<link rel="...">` of a page.

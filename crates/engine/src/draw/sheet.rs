@@ -24,7 +24,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use diacraft_calc::reference_name;
+use diacraft_calc::{Budget, reference_name};
 use diacraft_doc::{
     Cell, CellAddr, CellClass, CellEdit, CellWrite, Document, FormulaSlot, Lookup, MAX_SHAPE_DEPTH, MAX_SHAPES_PER_PAGE, Owner, Resolved, Resolver,
     RowKey, SectionKey, ShapeList, ShapeRef, SheetKind, SheetRef, Value as Held, ValueKind, WriteOrigin, WriteOutcome, cell_info,
@@ -625,20 +625,34 @@ fn pages_of(doc: &Document, planned: &[&Planned]) -> BTreeMap<u32, Vec<u32>> {
 /// The words of a recalculation that could not be finished.
 pub(super) fn too_large(problem: Problem, page: u32) -> Problem {
     if !problem.bad_params && problem.message.contains("too large to recalculate") {
-        Problem::failed(format!("the page {page} is too large to work out again after this edit: nothing was changed"))
+        Problem::failed(format!(
+            "the page {page} is too large to work out again after this edit, with the pages the edit reaches (they share {} steps of the evaluator): nothing was changed",
+            Budget::DEFAULT_STEPS
+        ))
     } else {
         problem
     }
 }
 
-/// What the call changed on the pages it worked out, other than the cells it wrote: the document as it began, with everything but the pages' own sheets and shapes taken from the
-/// document as it is (so that a style, a master or the document's sheet the call wrote is not a change this compares), against the document as it is.
-fn recalculated(
-    before: &Document,
-    doc: &Document,
-    pages: &[u32],
-    written: &HashSet<(SheetRef, CellAddr)>,
-) -> (Recalculated, Vec<(SheetRef, CellAddr)>) {
+/// The pages whose content is another allocation in `now` than in `before`: the pages an edit wrote, or a recalculation did. The lists of pages are compared chunk by chunk, so a
+/// drawing of thousands of pages costs what the pages that differ do; a list of another length (no cell write adds a page) names every page.
+pub(super) fn changed_pages(before: &Document, now: &Document) -> Vec<u32> {
+    if before.pages.len() != now.pages.len() {
+        return now.pages.iter().map(|p| p.id).collect();
+    }
+    let mut out: Vec<u32> = Vec::new();
+    for (was, is) in before.pages.chunk_arcs().iter().zip(now.pages.chunk_arcs()) {
+        if Arc::ptr_eq(was, is) {
+            continue;
+        }
+        out.extend(was.iter().zip(is.iter()).filter(|(a, b)| !Arc::ptr_eq(a, b)).map(|(_, b)| b.id));
+    }
+    out
+}
+
+/// The document as it began (`before`), with everything but the pages' own sheets and shapes taken from the document as it is (so that a style, a master or the document's sheet a call wrote
+/// is not a change a comparison of a page with it finds): what a page of the document is compared with to find the cells that were written on it.
+pub(super) fn comparison_base(before: &Document, doc: &Document) -> Document {
     let mut base = before.clone();
     base.styles = doc.styles.clone();
     base.themes = doc.themes.clone();
@@ -646,6 +660,17 @@ fn recalculated(
     base.fonts = Arc::clone(&doc.fonts);
     base.sheet = Arc::clone(&doc.sheet);
     base.masters = doc.masters.clone();
+    base
+}
+
+/// What the call changed on the pages it worked out, other than the cells it wrote: the pages of the document as it began, against the document as it is ([`comparison_base`]).
+fn recalculated(
+    before: &Document,
+    doc: &Document,
+    pages: &[u32],
+    written: &HashSet<(SheetRef, CellAddr)>,
+) -> (Recalculated, Vec<(SheetRef, CellAddr)>) {
+    let base = comparison_base(before, doc);
     let mut out = Recalculated::default();
     let mut all: Vec<(SheetRef, CellAddr)> = Vec::new();
     for page in pages {
@@ -673,7 +698,7 @@ fn recalculated(
 }
 
 /// Whether a changed cell moves or reshapes its shape: the pose and the size, the ends, and the sections that give its outline and its connection points.
-fn moves_shape(addr: &CellAddr) -> bool {
+pub(super) fn moves_shape(addr: &CellAddr) -> bool {
     match &addr.section {
         None => matches!(
             addr.cell.as_str(),
@@ -690,6 +715,8 @@ fn moves_shape(addr: &CellAddr) -> bool {
 /// **All or nothing**: every write is planned (parsed, found, checked) before one is made, and an error at any stage leaves nothing the caller keeps. `batch` makes the words of a
 /// refusal name the write (`write 2: ...`).
 pub fn apply(doc: &mut Document, writes: &[Write], batch: bool) -> Result<Done, Problem> {
+    // The pages the call works out share one budget of the evaluator's steps.
+    let _shared = crate::calc_index::SharedSteps::enter(Budget::DEFAULT_STEPS);
     if batch && writes.is_empty() {
         return Err(Problem::bad("`writes` must hold at least one write"));
     }
@@ -716,10 +743,11 @@ pub fn apply(doc: &mut Document, writes: &[Write], batch: bool) -> Result<Done, 
         }
     }
     // The cells as they were when the call began, against what the writes left: a call that put every cell back is no change.
-    let net_changed = {
+    let differ = |doc: &Document| {
         let (was, now) = (Resolver::new(&before), Resolver::new(doc));
         made.iter().filter_map(|i| planned.get(*i)).any(|p| local_cell(&was, &p.sheet, &p.addr) != local_cell(&now, &p.sheet, &p.addr))
     };
+    let net_changed = differ(doc);
     let mut written: HashSet<(SheetRef, CellAddr)> = HashSet::new();
     for p in planned.iter().filter(|p| p.make.is_some()) {
         written.insert((p.sheet.clone(), p.addr.clone()));
@@ -727,44 +755,40 @@ pub fn apply(doc: &mut Document, writes: &[Write], batch: bool) -> Result<Done, 
     let mut recalculated_out = Recalculated::default();
     if net_changed {
         let touched: Vec<&Planned> = planned.iter().filter(|p| p.make.is_some()).collect();
+        // A call that wrote only cells of pages has nothing on the sheets no page works out to compare.
+        if touched.iter().any(|p| !matches!(p.place, Place::Shape { owner: Owner::Page(_), .. } | Place::Page(_))) {
+            let on_no_page: Vec<(SheetRef, CellAddr)> = planned
+                .iter()
+                .filter(|p| p.make.is_some() && !matches!(p.place, Place::Shape { owner: Owner::Page(_), .. } | Place::Page(_)))
+                .map(|p| (p.sheet.clone(), p.addr.clone()))
+                .collect();
+            super::unpaged::work_out_written(doc, &before, &on_no_page)?;
+        }
         let pages = pages_of(doc, &touched);
+        // A write to the document's sheet or a style works every page out whole, the cells of one that name another included.
+        let _every = touched.iter().any(|p| matches!(p.place, Place::Style(_) | Place::Document)).then(crate::calc_index::EveryPage::enter);
         for (page, shapes) in &pages {
             let mut shapes = shapes.clone();
             shapes.sort_unstable();
             shapes.dedup();
             settle(doc, &before, *page, &shapes, &[]).map_err(|problem| too_large(problem, *page))?;
         }
-        let page_ids: Vec<u32> = pages.keys().copied().collect();
-        let (first, changed_cells) = recalculated(&before, doc, &page_ids, &written);
-        // A call that worked a whole page out (a master, a style or the document) does not know which shapes it moved: the connectors glued to those whose pose or outline cells
-        // changed are routed again, as they are after a move.
-        let whole =
-            planned.iter().filter(|p| p.make.is_some()).any(|p| !matches!(p.place, Place::Shape { owner: Owner::Page(_), .. } | Place::Page(_)));
-        recalculated_out = first;
-        if whole {
-            let mut by_page: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-            for (sheet, addr) in &changed_cells {
-                if let SheetRef::Shape(at) = sheet
-                    && let Owner::Page(page) = at.owner
-                    && moves_shape(addr)
-                    && let Some(shape) = doc.shape(at)
-                {
-                    by_page.entry(page).or_default().push(shape.id);
-                }
-            }
-            for (page, mut ids) in by_page {
-                ids.sort_unstable();
-                ids.dedup();
-                super::settle::route_after(doc, &before, page, &ids, &[], &[])?;
-            }
-            recalculated_out = recalculated(&before, doc, &page_ids, &written).0;
-        }
+        // The pages the recalculation reached through a formula that names a page (`Pages[..]`) are others than those the call settled: the cells that read what the
+        // call wrote were worked out there in the same commit, and are listed with the others. The connectors glued to the shapes of those pages that moved were routed again by the
+        // settle step that reached them (`settle::commit`), as they are after any command.
+        let reached: Vec<u32> = changed_pages(&before, doc).into_iter().filter(|page| !pages.contains_key(page)).collect();
+        let mut page_ids: Vec<u32> = pages.keys().copied().collect();
+        page_ids.extend(reached.iter().copied());
+        // A call that worked a whole page out (a master, a style or the document) names no shape it moved, and the connectors glued to the shapes whose pose, size or outline cells
+        // changed were routed again by the settle step of each page, as they are after any edit that recalculates: the cells the routes wrote are listed here too.
+        recalculated_out = recalculated(&before, doc, &page_ids, &written).0;
     }
     // What each of the first writes reads as now.
     let res = Resolver::new(doc);
+    let mut eval = sheetview::read_eval_ctx();
     let mut results = Vec::new();
     for p in planned.iter().take(MAX_LISTED) {
-        let ctx = Ctx { res: &res, sheet: &p.sheet };
+        let ctx = Ctx::new(&res, &p.sheet, &mut eval);
         let name = p.addr.cell.as_str().to_owned();
         let mut counts = Counts::default();
         if let Some(cell) = sheetview::view(&ctx, &p.addr, &name, None, None, &mut counts) {
@@ -773,13 +797,10 @@ pub fn apply(doc: &mut Document, writes: &[Write], batch: bool) -> Result<Done, 
         }
     }
     let written_count = planned.iter().filter(|p| p.make.is_some()).count();
-    Ok(Done {
-        changed: net_changed,
-        written: written_count,
-        unchanged: planned.len().saturating_sub(written_count),
-        results,
-        recalculated: recalculated_out,
-    })
+    // A write that stood a value in a cell until the recalculation may be followed by one that puts the formula back, and the recalculation then gives the value back as it was
+    // The cells written are judged again once the pages are worked out, and a call that left them as they were is no change, whatever it did between.
+    let changed = net_changed && differ(doc);
+    Ok(Done { changed, written: written_count, unchanged: planned.len().saturating_sub(written_count), results, recalculated: recalculated_out })
 }
 
 #[cfg(test)]

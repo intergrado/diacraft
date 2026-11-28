@@ -133,7 +133,7 @@ pub(crate) fn convert<'a>(
     }
     props::text_block(r, view, own, &mut out);
     props::paragraph(r, view, own, &mut out);
-    props::character(r, texts, view, own, size, base, &mut out)?;
+    props::character(r, texts, view, own, size, base, diacraft_fonts::script::FontSlot::Latin, &mut out)?;
     Ok(out)
 }
 

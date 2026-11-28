@@ -23,7 +23,7 @@ fn page_id(w: &Window) -> u32 {
 }
 
 /// A rectangle (1.5 by 1) centred at `(x, y)`, dropped by the command. → its `ID`.
-fn rectangle_at(w: &mut Window, x: f64, y: f64) -> u32 {
+pub fn rectangle_at(w: &mut Window, x: f64, y: f64) -> u32 {
     let page = page_id(w);
     let answer = w.state_mut().execute("shape.drop", &json!({"master": "rectangle", "page": page, "x": x, "y": y})).unwrap();
     w.rest();
@@ -42,7 +42,7 @@ fn sides(w: &Window) -> Vec<String> {
     arrows(w).into_iter().map(|(side, _)| side).collect()
 }
 
-fn arrow(w: &Window, side: &str) -> Pos2 {
+pub fn arrow(w: &Window, side: &str) -> Pos2 {
     arrows(w).into_iter().find(|(s, _)| s == side).unwrap_or_else(|| panic!("no {side} arrow: {:?}", sides(w))).1.center()
 }
 
@@ -94,28 +94,28 @@ fn end_glue(w: &Window, connector: u32) -> Option<(u32, Option<String>, Option<u
 }
 
 /// The pointer rests at `pos` for a few frames.
-fn rest_at(w: &mut Window, pos: Pos2) {
+pub fn rest_at(w: &mut Window, pos: Pos2) {
     for _ in 0..3 {
         move_to(w, pos);
     }
 }
 
 /// The pointer rests on the shape at `pos` until the arrows are due, and a frame draws them.
-fn show_arrows(w: &mut Window, pos: Pos2) {
+pub fn show_arrows(w: &mut Window, pos: Pos2) {
     rest_at(w, pos);
     w.advance(ARROWS_DELAY);
     w.step();
 }
 
 /// The pointer goes from where it is to `to` in six moves.
-fn glide(w: &mut Window, from: Pos2, to: Pos2) {
+pub fn glide(w: &mut Window, from: Pos2, to: Pos2) {
     for step in 1..=6 {
         move_to(w, from + (to - from) * (step as f32 / 6.0));
     }
 }
 
 /// The shapes a connector is glued to, begin then end, from the page's `Connect` rows.
-fn glued(w: &Window, connector: u32) -> (Option<u32>, Option<u32>) {
+pub fn glued(w: &Window, connector: u32) -> (Option<u32>, Option<u32>) {
     let page = w.state().session().document().unwrap().pages.get(0).unwrap();
     let to = |cell: &str| page.connects.iter().find(|c| c.from_sheet == connector && c.from_cell.as_deref() == Some(cell)).map(|c| c.to_sheet);
     (to("BeginX"), to("EndX"))
@@ -620,8 +620,8 @@ fn a_press_on_a_selection_handle_is_still_a_resize_while_the_arrows_are_up() {
 }
 
 #[test]
-fn a_shape_with_no_connection_point_gets_no_arrows() {
-    // The boxes of this file have no `Connection` section: a connector could not be glued to one, so a click on an arrow would only be refused.
+fn a_shape_with_no_connection_point_gets_arrows_like_any_other() {
+    // The boxes of this file have no `Connection` section: the engine glues a connector to the whole of such a shape, so a click on an arrow is not refused.
     let dir = crate::support::TempDir::new("auto-no-points");
     let path = crate::fixture::write(dir.path(), "plain.vsdx", &crate::fixture::crowded_vsdx(50));
     let mut session = diacraft_engine::Session::new();
@@ -638,7 +638,63 @@ fn a_shape_with_no_connection_point_gets_no_arrows() {
     // Shape 1 is the square at (0.2, 0.2).
     let on = at(&w, 0.24, 0.24);
     show_arrows(&mut w, on);
-    assert!(arrows(&w).is_empty(), "no arrows on a shape a connector cannot be glued to");
+    assert_eq!(sides(&w), ["down", "left", "right", "up"], "the four arrows on a shape with no connection point");
+}
+
+/// A drawing of boxes with no `Connection` section: 2 by 1 inches, their lower left corners at (2, 4), (6, 4) and (6, 7).
+fn plain_boxes_window(dir: &crate::support::TempDir) -> Window {
+    let shapes =
+        [crate::fixture::boxed(1, 2.0, 4.0, 2.0, 1.0), crate::fixture::boxed(2, 6.0, 4.0, 2.0, 1.0), crate::fixture::boxed(3, 6.0, 7.0, 2.0, 1.0)]
+            .concat();
+    let path = crate::fixture::write(dir.path(), "plain-boxes.vsdx", &crate::fixture::page_with(&shapes));
+    let mut session = diacraft_engine::Session::new();
+    session.execute("file.open", &json!({"path": path.to_str().unwrap()})).unwrap();
+    let mut w = crate::support::fast_window(
+        diacraft_ui_egui::DiacraftApp::new(session, None).with_inline_pictures(diacraft_ui_egui::render_worker::bundled_drawer()),
+        [1280.0, 900.0],
+    );
+    w.rest();
+    run_command(&mut w, "view.fitPage", json!({}));
+    w
+}
+
+/// The `Connect` rows of the first page: the connector, the end's cell, the shape and `ToPart`.
+fn rows(w: &Window) -> Vec<(u32, String, u32, u32)> {
+    let page = w.state().session().document().unwrap().pages.get(0).unwrap();
+    page.connects.iter().map(|c| (c.from_sheet, c.from_cell.clone().unwrap_or_default().to_string(), c.to_sheet, c.to_part.unwrap_or(0))).collect()
+}
+
+#[test]
+fn a_click_on_an_arrow_of_a_shape_with_no_connection_point_joins_its_neighbour_glued_to_the_whole_of_each() {
+    let dir = crate::support::TempDir::new("auto-whole-click");
+    let mut w = plain_boxes_window(&dir);
+    // The box at (2, 4): its right arrow joins the nearest box on its right (the one at (6, 4)).
+    let on = at(&w, 3.0, 4.5);
+    show_arrows(&mut w, on);
+    let pressed = arrow(&w, "right");
+    click(&mut w, pressed);
+    w.rest();
+    let ids = shape_ids(&w);
+    assert_eq!(ids.len(), 4, "the connector alone is new: {ids:?}");
+    let connector = ids[3];
+    assert_eq!(rows(&w), [(connector, "BeginX".to_owned(), 1, 3), (connector, "EndX".to_owned(), 2, 3)], "glued to the whole of each box");
+    assert_eq!(w.state().ui_panics(), 0);
+}
+
+#[test]
+fn a_click_on_an_arrow_of_a_shape_with_no_neighbour_makes_a_copy_and_glues_the_pair_as_wholes() {
+    let dir = crate::support::TempDir::new("auto-whole-copy");
+    let mut w = plain_boxes_window(&dir);
+    // The box at (6, 7) has nothing on its left in the lane: its left arrow makes a copy, which is a box with no connection point too.
+    let on = at(&w, 7.0, 7.5);
+    show_arrows(&mut w, on);
+    let pressed = arrow(&w, "left");
+    click(&mut w, pressed);
+    w.rest();
+    let ids = shape_ids(&w);
+    assert_eq!(ids.len(), 5, "the copy and the connector: {ids:?}");
+    let (copy, connector) = (ids[3], ids[4]);
+    assert_eq!(rows(&w), [(connector, "BeginX".to_owned(), 3, 3), (connector, "EndX".to_owned(), copy, 3)]);
 }
 
 #[test]

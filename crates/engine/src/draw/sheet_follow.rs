@@ -346,6 +346,31 @@ impl Scan<'_, '_> {
                 self.sheet(&master.sheet, &|| SheetRef::Master(id), false)?;
                 self.shapes(&master.shapes, Owner::Master(id), false)?;
             }
+        } else {
+            self.own_sheets(reading)?;
+        }
+        Ok(())
+    }
+
+    /// The formulas of the sheets that hold the section themselves when it is a style's or a master's: a formula on a style, on a master's page sheet or on the shapes of a
+    /// master that names a row of its own sheet names it as one on a page does, and reads `#REF!` when the row goes. The property test found a formula on a master's shape left naming
+    /// a row that had gone, to read the row that took its number later.
+    fn own_sheets(&mut self, reading: &Document) -> Result<(), Problem> {
+        match &self.remap.sheet {
+            SheetRef::Style(id) => {
+                let id = *id;
+                if let Some(style) = reading.style(id) {
+                    self.sheet(&style.sheet, &|| SheetRef::Style(id), false)?;
+                }
+            }
+            SheetRef::Master(id) | SheetRef::Shape(ShapeRef { owner: Owner::Master(id), .. }) => {
+                let id = *id;
+                if let Some(master) = reading.master(id) {
+                    self.sheet(&master.sheet, &|| SheetRef::Master(id), false)?;
+                    self.shapes(&master.shapes, Owner::Master(id), false)?;
+                }
+            }
+            _ => {}
         }
         Ok(())
     }

@@ -720,7 +720,11 @@ fn themeval_without_theme(ev: &mut Evaluator<'_, '_>, site: &Site<'_>, ask: Ask)
             // colours is for a call that names one, which the arm above gives.
             match host_property(&addr) {
                 // In the table, and not worked out from a theme here (the other fonts, `UseGroupGradient`): the root's cell of the same name.
-                Some(P::Other) => ev.read_cell(&SheetRef::Style(0), &other_host_cell(&addr)).view.clone(),
+                // A root that holds none gives no value, as `themeval_host_root` says.
+                Some(P::Other) => {
+                    let root = ev.read_cell(&SheetRef::Style(0), &other_host_cell(&addr));
+                    if root.found { root.view.clone() } else { Value::Error(CellError::Na) }
+                }
                 Some(p) => themeval_host_root(ev, site, p),
                 None => themeval_uncovered_host(ev, &addr),
             }
@@ -770,7 +774,25 @@ fn themeval_uncovered_host(ev: &mut Evaluator<'_, '_>, addr: &CellAddr) -> Value
 /// style's cell of the cell's own property. The root holds a colour cell's value as an index of the palette or as a colour,
 /// and the call gives a colour, as `THEMEVAL` does in every other case; a root cell that is not a colour (a number of a pattern, a weight, a
 /// flag) is given as it is.
+///
+/// **A root style that holds no such cell** (a drawing whose root is not whole: DiaCraft's new drawings hold no `BeginArrowSize` or `EndArrowSize` there, where the files of the corpus hold
+/// every cell of the batch) gives **no value**, `#N/A`, the answer a reader takes as a cell it finds nowhere and gives its own default, as the theme's stop
+/// past its list is: so a shape that follows the `Theme` style on a sheet with no theme reads what a shape that follows no style reads. The default for a number
+/// would be 0, the smallest line end, where the readers' own default for a line end that is found nowhere is the medium one. That holds for the cells every root holds: those directly
+/// under the sheet and row `IX` 0 of a section (`FillGradient` and `LineGradient`: the root holds that row in every file).
+///
+/// **A stop row past the first** (`IX` 1 and up) is no cell a root must hold: the root holds row 0 and no more, and the other rows "have no root value, so they take" the cell's own
+/// default (the table says the same of a named stop). So the cell reads
+/// the root's cell of its own row where the root holds that row, and the default where it does not, with the section there or not, and never the root's row 0 (
+/// second half).
 fn themeval_host_root(ev: &mut Evaluator<'_, '_>, site: &Site<'_>, p: P) -> Value {
+    let past_the_first_row = matches!(p, P::Stop { n, .. } if n > 0);
+    if !past_the_first_row
+        && let Some(addr) = crate::theme_names::root_cell(p)
+        && !ev.read_cell(&SheetRef::Style(0), &addr).found
+    {
+        return Value::Error(CellError::Na);
+    }
     let root = ev.fallback(p, true).unwrap_or_else(|v| v);
     if table_name(p).is_none() {
         return root;

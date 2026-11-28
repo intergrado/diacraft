@@ -15,6 +15,10 @@
 //! * **A theme only in the baseline** is **removed**: the document part's relationships of that type to it go, and the part with its own
 //!   relationships and `Override` goes if no relationship still reaches it.
 //!
+//! **A theme part the document part's relationships do not reach** (the reader found it by its content type, `read.rs`) stays as the file had it while the
+//! save leaves no theme relationship: unchanged, or rewritten in its own part. A save that leaves another theme relationship (a theme added beside it) gives it
+//! one as well, in the order of the model's themes, since the reader looks at the content types only where there is none.
+//!
 //! Selection is by `schemeEnum` and never by the place of a part, so none of this changes what a cell selects; the order of the model's themes
 //! is the order a save adds them in.
 //!
@@ -120,24 +124,33 @@ impl Plan<'_> {
         // pass over the parts and the rows for each.
         let mut names = NameWalk::new(&format!("{}theme/", super::parts::folder_of(&document)), "theme", ".xml");
         let mut ids: Option<IdWalk> = None;
+        // A theme part the document part's relationships do not reach (the reader found it by its content type, `read.rs`) is given one as well **when the save
+        // leaves the document part another theme relationship**: the reader looks at the content types only where there is no theme relationship at all, so a file
+        // that gained a relationship to a theme added beside such a part would read back with the part gone from its themes, and the shapes that select it would lose
+        // their colours. Where the save leaves no theme relationship the file's own way stands.
+        let reached = self.reached_themes(&document)?;
+        let kept_reached = pairing.of.iter().filter_map(|p| p.and_then(|i| b.get(i))).any(|old| reached.contains(&fold(&old.part)));
+        let adopts = kept_reached || pairing.of.iter().any(|p| p.and_then(|i| b.get(i)).is_none());
+        let mut adopted: HashSet<String> = HashSet::new();
         for (theme, paired) in n.iter().zip(&pairing.of) {
             match paired.and_then(|i| b.get(i)) {
-                Some(old) if old.bytes == theme.bytes => {}
                 Some(old) => {
-                    self.edited = true;
-                    self.set_part(&old.part, theme.bytes.to_vec(), None);
+                    if old.bytes != theme.bytes {
+                        self.edited = true;
+                        self.set_part(&old.part, theme.bytes.to_vec(), None);
+                    }
+                    let key = fold(&old.part);
+                    if adopts && !reached.contains(&key) && adopted.insert(key) {
+                        self.edited = true;
+                        self.add_theme_row(&document, &old.part, &mut ids)?;
+                    }
                 }
                 None => {
                     self.edited = true;
                     let Some(part) = self.next_name(&mut names) else { return Err(WriteError::Limit("no part name was left for a theme")) };
                     self.reserved.insert(fold(&part));
                     self.set_part(&part, theme.bytes.to_vec(), Some(CT_THEME));
-                    let rels = self.rels_mut(&document)?;
-                    let walk = ids.get_or_insert_with(|| rels.id_walk());
-                    let Some(id) = walk.next() else { return Err(WriteError::Limit("no relationship id was left for a theme")) };
-                    let target = relative_target(&document, &part);
-                    rels.add(&id, &rel_type(OD, "theme"), &target);
-                    self.document_rels.push(RelRow { id, ty: rel_type(OD, "theme"), target, external: false });
+                    self.add_theme_row(&document, &part, &mut ids)?;
                 }
             }
         }
@@ -147,6 +160,30 @@ impl Plan<'_> {
                 self.drop_theme(&document, &old.part)?;
             }
         }
+        Ok(())
+    }
+
+    /// The theme parts the document part's theme relationships lead to, by folded name.
+    fn reached_themes(&mut self, document: &str) -> R<HashSet<String>> {
+        let ty = rel_type(OD, "theme");
+        Ok(self
+            .rels_mut(document)?
+            .rows()
+            .into_iter()
+            .filter(|r| r.ty == ty && !r.external)
+            .filter_map(|r| resolve(document, &r.target))
+            .map(|t| fold(&t))
+            .collect())
+    }
+
+    /// A relationship of the theme type from the document part to `part`, under the least id the document part's relationships do not use.
+    fn add_theme_row(&mut self, document: &str, part: &str, ids: &mut Option<IdWalk>) -> R<()> {
+        let rels = self.rels_mut(document)?;
+        let walk = ids.get_or_insert_with(|| rels.id_walk());
+        let Some(id) = walk.next() else { return Err(WriteError::Limit("no relationship id was left for a theme")) };
+        let target = relative_target(document, part);
+        rels.add(&id, &rel_type(OD, "theme"), &target);
+        self.document_rels.push(RelRow { id, ty: rel_type(OD, "theme"), target, external: false });
         Ok(())
     }
 

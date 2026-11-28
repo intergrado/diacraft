@@ -50,6 +50,8 @@ fn save_word(e: &SaveError) -> &'static str {
         // A file kept in memory (the browser's): the command line never writes one, and the word is for the match to be whole.
         SaveError::NoRoom => "no_room",
         SaveError::Failed => "failed",
+        // The command line puts no roots in force, so it is never refused by one; the word is for the match to be whole.
+        SaveError::Refused(_) => "not_granted",
     }
 }
 

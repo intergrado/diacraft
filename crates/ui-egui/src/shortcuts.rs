@@ -1,12 +1,12 @@
 //! Keyboard shortcuts: the default shortcut each command carries, mapped to this platform's keys.
 //!
 //! A command's shortcut is written as in the registry (`Cmd+Shift+Z`): `Cmd` is the platform's command key (Ctrl on
-//! Windows, Linux and FreeBSD, Command on the Mac), the last word is the key. A shortcut runs its command only if the
+//! Windows and Linux, Command on the Mac), the last word is the key. A shortcut runs its command only if the
 //! command can run now, and a key the window used is consumed so that nothing else sees it.
 
 use diacraft_engine::command_specs;
 use egui::os::OperatingSystem;
-use egui::{Event, Key, KeyboardShortcut, Modifiers};
+use egui::{Event, InputState, Key, KeyboardShortcut, Modifiers};
 use serde_json::{Value, json};
 
 use crate::app::DiacraftApp;
@@ -43,7 +43,7 @@ const ALSO: &[(&str, &str)] = &[("edit.redo", "Cmd+Y"), ("view.zoomIn", "Alt+F6"
 /// Second keys on a Mac only. **Ours**: no spec gives the reference app's keys on a Mac.
 /// - **Backspace deletes the selection**, beside Delete: the key a Mac keyboard marks delete sends Backspace, and Delete is Fn+Delete there (Forward
 ///   Delete). It runs as Delete does, only while no text is being edited: with a shape's text open, or any other text field, the key is the text's.
-///   Windows, Linux and FreeBSD keep Delete alone, the key the shortcut list names.
+///   Windows and Linux keep Delete alone, the key the shortcut list names.
 /// - **Command+Plus zooms in**, beside Command+=. With Command held the window takes a key's character from the layout's Command table, which ignores
 ///   Option and, on several layouts, Shift too; so the `=` that a German, Portuguese or Nordic layout types with Shift arrives as `0` (Fit to Window),
 ///   and there `+` is a key of its own. Before, Command+Plus was egui's own key and scaled the whole window. Every layout measured (the list in the
@@ -140,35 +140,51 @@ fn same_key(os: OperatingSystem, a: &KeyboardShortcut, b: &KeyboardShortcut) -> 
     a.logical_key == b.logical_key && modifier_word(os, a.modifiers) == modifier_word(os, b.modifiers)
 }
 
-/// Whether the window would run the command of `shortcut` for the key press `press`: **as `pressed` decides it**, which is egui's own logical match. The command key must be the one the shortcut
-/// has; Shift and Alt the shortcut has must be held, and **an extra Shift or Alt does not stop it** (egui lets Shift be extra so that `Ctrl+=` is also the Shift that a keyboard needs for `=`:
-/// on a Portuguese layout the key that types `=` is Shift and 0, and a press of it arrives as Ctrl+Shift with the key `=`), **except that a letter's shortcut with no Shift in it is not run
-/// with Shift held** (so Ctrl+Shift+N is no Ctrl+N). The page takes a press that the window would run, so that the browser does not also act on it.
-fn window_would_run(os: OperatingSystem, shortcut: &KeyboardShortcut, press: &KeyboardShortcut) -> bool {
-    if shortcut.logical_key != press.logical_key {
+/// Whether a press of `key` with `modifiers` runs the command of `shortcut`: **the key and the modifiers must be the shortcut's, exactly**, with `Cmd` read as the platform reads it
+/// ([`modifier_word`]). egui's own match (`matches_logically`) lets an extra Alt or Shift stand, and AltGr can arrive as Ctrl and Alt held together (in a browser on Windows, and as Ctrl with the left Alt key on a Windows desktop), so Ctrl+Alt+K ran Ctrl+K, Ctrl+Alt+Shift+K ran
+/// Ctrl+Shift+K, and a person who typed ł, € or @ with AltGr ran the Ctrl+key command of the key. A shortcut fires for the press it names and for no other: Ctrl+K never for Ctrl+Alt+K or
+/// Ctrl+Shift+K, unless a shortcut of the table lists that combination. **The one allowance is an extra Shift on a key that is a character and no letter** ([`shift_may_be_extra`]: `=`, `-`, `,`,
+/// `.`, a digit): a layout that types `=` with Shift (the Portuguese one: Shift and 0) sends Ctrl+= as Ctrl+Shift with the key `=`, and that press is still Zoom In. A letter, a function key and Delete
+/// take no extra Shift, and **no key takes an extra Alt**: Alt is Option on a Mac, which types characters there too. The page of the browser version takes a press that the window would run
+/// ([`is_taken`]).
+pub fn press_matches(os: OperatingSystem, shortcut: &KeyboardShortcut, key: Key, modifiers: Modifiers) -> bool {
+    if shortcut.logical_key != key {
         return false;
     }
     let (sc, sk, ss, sa) = modifier_word(os, shortcut.modifiers);
-    let (pc, pk, ps, pa) = modifier_word(os, press.modifiers);
-    let name = shortcut.logical_key.name();
-    let letter = name.len() == 1 && name.bytes().all(|b| b.is_ascii_alphabetic());
-    (sc, sk) == (pc, pk) && (!ss || ps) && !(letter && !ss && ps) && (!sa || pa)
+    let (pc, pk, ps, pa) = modifier_word(os, modifiers);
+    (sc, sk, sa) == (pc, pk, pa) && (ss == ps || (ps && shift_may_be_extra(key)))
+}
+
+/// Whether a key is a character and no letter (a sign or a digit), which a layout may type with Shift held: such a press arrives with Shift in it ([`press_matches`]). A key whose `symbol_or_name` is one
+/// character is a sign, a digit or a letter, and an arrow key has a one-character symbol of its own.
+fn shift_may_be_extra(key: Key) -> bool {
+    let symbol = key.symbol_or_name();
+    !matches!(key, Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp)
+        && symbol.chars().count() == 1
+        && !symbol.chars().all(char::is_alphabetic)
 }
 
 /// The key press of a browser's `keydown` event as a shortcut on `os`: `key` and `code` are the event's `key` and `code`, then its `ctrlKey`, `metaKey`, `shiftKey` and `altKey`. `None` for a
-/// key that has no name in egui, and for a press with the Windows or Super key held off a Mac (it is not ours).
+/// key that has no name in egui, for a press with the Windows or Super key held off a Mac (it is not ours), and **for a press where AltGr typed a character**: in a browser on Windows AltGr is Ctrl and
+/// Alt held together (on Linux a browser holds neither), and with it a layout types a character (`ł`, `€`, `@`), which the browser gives as the event's `key` where the `code` names the key it is on (`KeyK`, `KeyE`, `KeyQ`). That press is the
+/// character's, and no shortcut's: the page leaves it to the browser, which has to see it to type the character.
 pub fn press_of(os: OperatingSystem, key: &str, code: &str, ctrl: bool, meta: bool, shift: bool, alt: bool) -> Option<KeyboardShortcut> {
     let mac = os == OperatingSystem::Mac;
     if meta && !mac {
         return None;
     }
-    let key = Key::from_name(key).or_else(|| Key::from_name(code))?;
+    let (named, by_code) = (Key::from_name(key), Key::from_name(code));
+    if ctrl && alt && !mac && key.chars().count() == 1 && named != by_code {
+        return None;
+    }
+    let key = named.or(by_code)?;
     Some(KeyboardShortcut::new(Modifiers { alt, ctrl, shift, mac_cmd: meta, command: if mac { meta } else { ctrl } }, key))
 }
 
-/// Whether `press` is one of `taken` ([`keys_to_take`]), or a press that the window would run the command of one of them for (an extra Shift on a key that needs it: [`window_would_run`]).
+/// Whether `press` is one of `taken` ([`keys_to_take`]), or a press that the window would run the command of one of them for (an extra Shift on a key that needs it: [`press_matches`]).
 pub fn is_taken(os: OperatingSystem, taken: &[KeyboardShortcut], press: &KeyboardShortcut) -> bool {
-    taken.iter().any(|t| window_would_run(os, t, press))
+    taken.iter().any(|t| press_matches(os, t, press.logical_key, press.modifiers))
 }
 
 /// The key presses the page of the browser version takes from the browser: for the system a browser's user agent names, the keys of [`keys_to_take`], and which `keydown` events are
@@ -298,6 +314,17 @@ pub const WINDOW_KEYS: &[WindowKey] = &[
     key("Alt+F9", "window.snapGlue", r#"{"tab":"General"}"#, "inventory-document: Snap on or off (Alt+F9 opens the dialog)", false),
     key("Cmd+Shift+F", "arrange.order", r#"{"to":"front"}"#, "inventory-shapes: Bring to front and send to back", false),
     key("Cmd+Shift+B", "arrange.order", r#"{"to":"back"}"#, "inventory-shapes: Bring to front and send to back", false),
+    // Double and halve the connection points of the edge under the pointer, else of every edge of the shapes selected: **ours**, a DiaCraft extra beyond the reference app (owner,
+    // 2026-11-26: "Ctrl+Alt+K", "Command+Option+K on a Mac"). They stand aside while a text box is open (`in_text_box` false), and **take their press even then**
+    // (`run_shortcuts`): egui lets an extra Alt or Shift match, and Ctrl+Alt+Shift+K was Small Caps through Ctrl+Shift+K.
+    key("Cmd+Alt+K", "window.connectionPointsDo", r#"{"action":"double"}"#, "ours: the owner's key for doubling connection points (CPDOUBLE)", false),
+    key(
+        "Cmd+Alt+Shift+K",
+        "window.connectionPointsDo",
+        r#"{"action":"halve"}"#,
+        "ours: the owner's key for halving connection points (CPDOUBLE)",
+        false,
+    ),
 ];
 
 /// The engine commands that have a key of their own (registered them) and that the window runs through its own commands, because they take the
@@ -311,7 +338,27 @@ pub const ENGINE_KEYS_FOR_THE_WINDOW: &[(&str, &str, &str)] = &[
     ("shape.duplicate", "clipboard.duplicate", "ours: named for the web only"),
     ("shape.group", "arrange.group", "inventory-shapes: Group and ungroup"),
     ("shape.ungroup", "arrange.ungroup", "inventory-shapes: Group and ungroup"),
+    // **Ctrl+Alt+R reverses the ends of the connectors selected**. **Ours**: the reference application keeps Reverse Ends off its ribbon and
+    // names no key for it, and its only Ctrl+Alt keys are Ctrl+Alt+P and Ctrl+Alt+F7.
+    (
+        "connector.reverse_ends",
+        "arrange.reverseEnds",
+        "ours: DiaCraft's extra; free in the reference's published keys, the Mac's reserved keys and the browser's kept ones",
+    ),
 ];
+
+/// The commands of the window whose key the ribbon and the menus show, in the right edge of a menu row and in the tooltip: the keys that are DiaCraft's own and that no
+/// document of the reference application gives (**ours**), so that nothing else tells a person the key. A key the reference publishes is in its own list.
+pub const KEY_SHOWN: &[&str] = &["arrange.reverseEnds"];
+
+/// The key to show beside the control that runs the window command `command`, as this system writes it (`Ctrl+Alt+R`, `Option+Cmd+R` on a Mac): `None` for a command whose key is not shown
+/// ([`KEY_SHOWN`]) or that has none. The key is the same in a browser, which only adds keys (`web`), so the browser's set is asked.
+pub fn hint_for(ctx: &egui::Context, command: &str) -> Option<String> {
+    if !KEY_SHOWN.contains(&command) {
+        return None;
+    }
+    shortcut_of(ctx.os(), command, true).map(|shortcut| ctx.format_shortcut(&shortcut))
+}
 
 /// The window command that stands for the engine command `id` when its key is pressed.
 fn window_id(id: &'static str) -> &'static str {
@@ -327,7 +374,7 @@ struct Binding {
 }
 
 /// Every command that has a shortcut on `os`, the engine's and the window's, then the keys of [`WINDOW_KEYS`], with the ones with the most
-/// modifiers first, so that `Cmd+Shift+Z` is taken before `Cmd+Z` can claim the same key.
+/// modifiers first, so that `Cmd+Shift+4` is taken before `Cmd+4` can claim the same press (an extra Shift on a digit or a sign stands: [`press_matches`]).
 #[cfg(test)]
 fn shortcuts(os: OperatingSystem) -> Vec<Binding> {
     shortcuts_for(os, false)
@@ -355,44 +402,66 @@ fn shortcuts_for(os: OperatingSystem, web: bool) -> Vec<Binding> {
     all
 }
 
-/// Whether `shortcut` was pressed in this frame, and takes the press. **A key the layout types with Shift held** (`>` on the full stop's key, `<`
-/// on the comma's) comes from the desktop as the symbol, which egui has no key for, with the physical key beside it: the physical key stands in.
+/// Whether `shortcut` was pressed in this frame, and takes the press: **the press must be the shortcut's exactly** ([`press_matches`]), and every such press of the frame is taken, so that nothing
+/// else reads it. **A key the layout types with Shift held** (`>` on the full stop's key, `<` on the comma's) comes from the desktop as the symbol, which egui has no key for, with the physical key
+/// beside it: the physical key stands in.
 fn pressed(ctx: &egui::Context, shortcut: &KeyboardShortcut) -> bool {
+    // Before the input is borrowed: `Context::os` reads the context, which `input_mut` holds.
+    let os = ctx.os();
+    let by_position = matches!(shortcut.logical_key, Key::Period | Key::Comma);
     ctx.input_mut(|i| {
-        // **A letter's shortcut with no Shift in it is not pressed with Shift**: egui's own match lets Shift be extra (so `Ctrl+=` is `Ctrl+Shift+=` on a
-        // keyboard that needs Shift for it), and then Ctrl+Shift+U, which a text box leaves to itself, would be taken by the Ctrl+U that a text box allows.
-        let letter = shortcut.logical_key.name().len() == 1 && shortcut.logical_key.name().bytes().all(|b| b.is_ascii_alphabetic());
-        if letter && !shortcut.modifiers.shift {
-            let at = i.events.iter().position(|e| {
-                matches!(e, Event::Key { key, pressed: true, modifiers, .. }
-                    if *key == shortcut.logical_key && !modifiers.shift && modifiers.matches_logically(shortcut.modifiers))
-            });
-            return match at {
-                Some(n) => {
-                    i.events.remove(n);
-                    true
-                }
-                None => false,
-            };
-        }
-        if i.consume_shortcut(shortcut) {
-            return true;
-        }
-        if !matches!(shortcut.logical_key, Key::Period | Key::Comma) {
-            return false;
-        }
-        let at = i.events.iter().position(|e| {
-            matches!(e, Event::Key { physical_key: Some(k), pressed: true, modifiers, .. }
-                if *k == shortcut.logical_key && modifiers.matches_logically(shortcut.modifiers))
+        let mut found = false;
+        i.events.retain(|e| {
+            let Event::Key { key, physical_key, pressed: true, modifiers, .. } = e else { return true };
+            let hit = press_matches(os, shortcut, *key, *modifiers)
+                || (by_position && *physical_key == Some(shortcut.logical_key) && press_matches(os, shortcut, shortcut.logical_key, *modifiers));
+            found |= hit;
+            !hit
         });
-        match at {
-            Some(n) => {
-                i.events.remove(n);
-                true
-            }
-            None => false,
-        }
+        found
     })
+}
+
+/// Whether an event is text a person typed: the characters a key typed (`Event::Text`, which is how AltGr's and a dead key's arrive), and no control character.
+fn is_typed_text(event: &Event) -> bool {
+    matches!(event, Event::Text(text) if !text.is_empty() && !text.chars().any(char::is_control))
+}
+
+/// **A press that typed a character is the text's**. With AltGr many layouts type characters (€ and @ on the German and others, ł on the Czech, Hungarian and Slovak, ś, ą and ż on the Polish), and the
+/// press can arrive with Ctrl and Alt held together (in a browser on Windows, and as Ctrl with the left Alt key on a Windows desktop, whose text the pinned egui fork's E22 keeps; the AltGr key itself arrives on
+/// a Windows desktop with no modifier, and on Linux AltGr is neither Ctrl nor Alt), so a frame that holds typed text (`Event::Text`) holds the key press that typed it, with Ctrl and Alt in it. **Such a press is taken out of the frame's events
+/// before anything reads them**: no Ctrl+key command of the window runs for it (it is no Ctrl+K, Ctrl+S or Ctrl+Z of anyone's), and egui's own text box does not read it as one of its Ctrl keys either
+/// (Ctrl+K cuts the rest of the line, Ctrl+U the line before the caret), so the text arrives alone, in a shape's text, the Shape Data and dialog fields, and the ShapeSheet's cell editor and bar.
+/// A press with Command and Option on a Mac types no text, and in a frame with none is left to its shortcut.
+pub(crate) fn let_typed_text_win(ctx: &egui::Context) {
+    ctx.input_mut(|i| {
+        if !i.events.iter().any(is_typed_text) {
+            return;
+        }
+        i.events.retain(|e| {
+            !matches!(e, Event::Key { pressed: true, modifiers, .. } if modifiers.alt && (modifiers.ctrl || modifiers.command || modifiers.mac_cmd))
+        });
+    });
+}
+
+/// Whether the text a key typed with `modifiers` held is a character the person typed, and not what a chord leaves behind (a system may send the `k` of Ctrl+K as text). **Off a Mac** that is a press with
+/// no Ctrl and no Alt (which is how the AltGr key arrives on a Windows desktop), and Ctrl and Alt together (AltGr in a browser on Windows, which types a character on many layouts); Ctrl alone and Alt alone are the window's keys. **On a Mac** Option types characters (å, a dead key's accent),
+/// with or without Shift, so it is the text's too; Command and Control make a chord.
+pub fn types_text(os: OperatingSystem, modifiers: &Modifiers) -> bool {
+    let chord = modifiers.ctrl || modifiers.command || modifiers.mac_cmd;
+    if os == OperatingSystem::Mac { !chord } else { modifiers.alt == chord }
+}
+
+/// egui's `consume_key` with the modifiers matched exactly, for the chords the window runs outside its table of keys (Ctrl+Enter, Ctrl+Home): egui's own match lets an extra Alt or Shift stand, and
+/// Ctrl and Alt together can be AltGr (see [`let_typed_text_win`]).
+pub(crate) fn consume_exact(i: &mut InputState, modifiers: Modifiers, key: Key) -> bool {
+    let mut found = false;
+    i.events.retain(|e| {
+        let hit = matches!(e, Event::Key { key: k, pressed: true, modifiers: m, .. } if *k == key && m.matches_exact(modifiers));
+        found |= hit;
+        !hit
+    });
+    found
 }
 
 impl DiacraftApp {
@@ -423,15 +492,30 @@ impl DiacraftApp {
             let files = id.starts_with("file.") || id == "app.closeWindow";
             let sheet_allows = !sheet || crate::sheet::shortcut_allowed(id);
             let allowed = files || (!backstage && !other_box && sheet_allows && (!editing || binding.in_text_box));
-            if !allowed {
+            // The keys that double and halve connection points take their press when they stand aside as well (`edit/conn_edges.rs`): egui lets an extra Alt or Shift match a shortcut, so a press
+            // left over would go to Ctrl+Shift+K (Small Caps) or Ctrl+K (Link) instead. They also stand aside while a menu is open. A press that typed a character (AltGr+K is ł on some layouts) never gets here: `let_typed_text_win` takes it out of the frame first.
+            let ours = id == "window.connectionPointsDo";
+            if !allowed && !ours {
                 continue;
             }
-            // A command that cannot run now is quiet.
-            if pressed(ctx, &binding.shortcut) && self.command_enabled(id).is_ok() {
+            if !pressed(ctx, &binding.shortcut) {
+                continue;
+            }
+            if ours && (!allowed || self.menu_open(ctx)) {
+                continue;
+            }
+            // A command that cannot run now is quiet. (The keys of one command may differ in whether they can: a doubling can run where a halving cannot.)
+            if self.shortcut_enabled(id, binding.params).is_ok() {
                 self.run_shortcut_command(ctx, id, binding.params);
                 ctx.request_repaint();
             }
         }
+    }
+
+    /// Whether the key `id` runs with `params` (the text of a JSON object) can run now, and if not why. **The same command with another action can differ** (doubling and halving connection points),
+    /// so a key asks with its parameters; every other key asks the command alone.
+    fn shortcut_enabled(&self, id: &str, params: &str) -> std::result::Result<(), String> {
+        if id == "window.connectionPointsDo" { self.connection_verdict_for(params) } else { self.command_enabled(id) }
     }
 
     /// Ctrl+C, Ctrl+X and Ctrl+V from a desktop. **egui-winit turns them into `Event::Copy`, `Event::Cut` and `Event::Paste` and sends no key**, so the
@@ -837,7 +921,7 @@ mod tests {
     }
 
     /// The Mac's second keys are the Mac's only. On a Mac Backspace deletes, beside Delete, and Command+Plus zooms in, beside Command+=; on
-    /// Windows, Linux and FreeBSD Backspace is no shortcut, and the keys of the other systems stay as they were.
+    /// Windows and Linux Backspace is no shortcut, and the keys of the other systems stay as they were.
     #[test]
     fn the_macs_second_keys_are_on_a_mac_only() {
         let keys = |os, id: &str| shortcuts(os).into_iter().filter(|b| b.id == id).map(|b| b.shortcut).collect::<Vec<_>>();
@@ -872,6 +956,104 @@ mod tests {
             assert!(crate::commands::find_ui_command(window).is_some(), "{window} is not a window command");
             assert!(!source.is_empty());
         }
+    }
+
+    /// The layouts the window's key tests cover: the Mac layouts of the measurement (the list in the notes of [`LAYOUT_SAFE`]).
+    const MAC_LAYOUTS: &[&str] = &[
+        "US",
+        "ABC",
+        "British",
+        "British-PC",
+        "German",
+        "Austrian",
+        "Swiss German",
+        "French",
+        "French-PC",
+        "ABC-AZERTY",
+        "Belgian",
+        "Swiss French",
+        "Spanish",
+        "Spanish-ISO",
+        "Latin American",
+        "Portuguese",
+        "Brazilian",
+        "Italian",
+        "Italian-Pro",
+        "Swedish",
+        "Swedish-Pro",
+        "Norwegian",
+        "Danish",
+        "Finnish",
+        "Icelandic",
+        "Dutch",
+    ];
+
+    /// The Windows layouts whose AltGr key (Ctrl+Alt: Windows reports the right Alt key as the two) types a letter on K: **read** on kbdlayout.info (`kbdhu`, `kbdcz`
+    /// and `kbdsl`, 2026-11-26), whose pages show the character of K's third column, ł, on each (the page's table is flattened, so the column is inferred from its order). The list
+    /// names what was looked at and is no list of every layout that does.
+    const ALTGR_TYPES_A_LETTER_ON_K: &[&str] = &["Czech", "Hungarian", "Slovak"];
+
+    /// Design §10.1: Ctrl+Alt+K doubles the connection points and Ctrl+Alt+Shift+K halves them (Command+Option+K and Shift+Command+Option+K on a Mac), as the
+    /// window keys of one window command, on every system; none is a key a browser keeps or a Mac reserves.
+    #[test]
+    fn the_connection_point_keys_are_on_every_system_and_none_is_reserved() {
+        let cmd = Modifiers::COMMAND;
+        let (double, halve) =
+            (KeyboardShortcut::new(cmd | Modifiers::ALT, Key::K), KeyboardShortcut::new(cmd | Modifiers::ALT | Modifiers::SHIFT, Key::K));
+        for os in SYSTEMS {
+            let keys = |action: &str| {
+                shortcuts_for(os, true)
+                    .into_iter()
+                    .filter(|b| b.id == "window.connectionPointsDo" && b.params == format!(r#"{{"action":"{action}"}}"#))
+                    .map(|b| (b.shortcut, b.in_text_box))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(keys("double"), [(double, false)], "{os:?}: Double is on Ctrl+Alt+K and stands aside while text is edited");
+            assert_eq!(keys("halve"), [(halve, false)], "{os:?}: Halve is on Ctrl+Alt+Shift+K");
+            assert!(!kept_by_browser(os, &double) && !kept_by_browser(os, &halve), "{os:?}: no browser keeps either");
+        }
+        // No key the Mac reserves is either of them, and each is a letter with Command, which every common Mac layout reaches (the notes of `LAYOUT_SAFE`).
+        for (key, what, _) in MAC_RESERVED {
+            let reserved = parse(key).unwrap_or_else(|| panic!("{key}"));
+            assert!(reserved != double && reserved != halve, "{key} is {what} on a Mac");
+        }
+        assert!(LAYOUT_SAFE.contains('K') && LAYOUT_SAFE_WITH_SHIFT.contains('K'));
+        assert_eq!(double.logical_key, Key::K);
+        assert!(double.modifiers.command && double.modifiers.alt && !double.modifiers.shift);
+    }
+
+    /// Design §10.1: the layouts the window's key tests cover each reach the keys as the letter K, and the ones where AltGr+K types a letter are named. On a Mac the keys
+    /// are Command and Option: with Command held the layout's Command table gives the letter whatever Option does to it, on every layout of the list. On Windows and Linux
+    /// the keys are Ctrl+Alt, which Windows takes for AltGr, and on the layouts named a person who types a letter with it (ł) with a shape selected and no text box
+    /// open is a person the key would act for: the window leaves a press that typed a character alone (`let_typed_text_win`), and names the layouts here.
+    #[test]
+    fn the_layouts_the_key_tests_cover_reach_the_letter_k_and_those_with_altgr_k_are_named() {
+        assert_eq!(MAC_LAYOUTS.len(), 26, "Measured twenty-six layouts");
+        let mac = shortcuts(OperatingSystem::Mac);
+        let on_mac = |action: &str| {
+            mac.iter().find(|b| b.id == "window.connectionPointsDo" && b.params == format!(r#"{{"action":"{action}"}}"#)).map(|b| b.shortcut)
+        };
+        for (action, with_shift) in [("double", false), ("halve", true)] {
+            let press = on_mac(action).unwrap_or_else(|| panic!("{action} has a key on a Mac"));
+            assert_eq!(press.logical_key, Key::K);
+            assert!(
+                press.modifiers.command && press.modifiers.alt && press.modifiers.shift == with_shift,
+                "{action}: Command and Option (and Shift to halve)"
+            );
+            let safe = if with_shift { LAYOUT_SAFE_WITH_SHIFT } else { LAYOUT_SAFE };
+            assert!(
+                character(press.logical_key).is_some_and(|c| safe.contains(c)),
+                "{action}: K is a letter every layout of the list reaches with Command"
+            );
+        }
+        // Elsewhere the same keys are Ctrl+Alt: no Command key, and so AltGr where the system says so.
+        for os in [OperatingSystem::Windows, OperatingSystem::Nix] {
+            let keys: Vec<_> = shortcuts(os).into_iter().filter(|b| b.id == "window.connectionPointsDo").map(|b| b.shortcut).collect();
+            assert_eq!(keys.len(), 2, "{os:?}");
+            assert!(keys.iter().all(|k| k.logical_key == Key::K && k.modifiers.alt && k.modifiers.command), "{os:?}");
+        }
+        assert_eq!(ALTGR_TYPES_A_LETTER_ON_K, ["Czech", "Hungarian", "Slovak"]);
+        assert!(ALTGR_TYPES_A_LETTER_ON_K.iter().all(|name| !MAC_LAYOUTS.contains(name)), "a Mac has no AltGr: those are Windows layouts");
     }
 
     /// A window key names a window command, with parameters that command takes and that are JSON.

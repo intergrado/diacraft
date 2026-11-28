@@ -4,7 +4,8 @@
 //! **The names** say the kind of mark in DiaCraft's words (the specification names each by its kind, and no vendor's label is used). **The pictures** are drawn here from
 //! plain pieces, a triangle, an open head, a disc, a bar, in the boxes give, **as the page's own renderer draws them** (`diacraft-render`'s `ends.rs`
 //! holds the same table, which this one follows so that a menu's picture and the line on the page agree; the renderer keeps its table private, so a change to one
-//! is a change to the other, and a test here holds this one to the numbers 1 to 45). A mark's tip is on the end of the line and its body lies back along it.
+//! is a change to the other, and a test here holds this one to the numbers 1 to 45). A mark's tip is on the end of the line and its body lies back along it. **A hollow mark's closed
+//! part is painted with the fill the caller gives** (the tile fill of the theme, transparent) before its outline.
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2};
 
@@ -199,7 +200,9 @@ fn reach(art: &Art) -> f32 {
 }
 
 /// Paints `art` with its tip at `tip`, its body lying back along the line in direction `back` (1 to the right, -1 to the left), one unit being `unit` points.
-pub(crate) fn paint(painter: &Painter, tip: Pos2, back: f32, unit: f32, art: &Art, ink: Color32) {
+/// **The closed part of a hollow mark is painted with `fill` before its outline**: the picture has no shape to take a fill from, so it takes the fill the theme gives a tile
+/// (`Tokens::stencil_fill`, transparent in both themes), as the Shapes window's tiles do (`tile_ends.rs`).
+pub(crate) fn paint(painter: &Painter, tip: Pos2, back: f32, unit: f32, art: &Art, ink: Color32, fill: Color32) {
     let at = |(along, across): At| pos2(tip.x + back * along * unit, tip.y + across * unit);
     let stroke = Stroke::new(1.3, ink);
     for piece in &art.pieces {
@@ -208,7 +211,12 @@ pub(crate) fn paint(painter: &Painter, tip: Pos2, back: f32, unit: f32, art: &Ar
                 painter.add(Shape::line(points.iter().map(|p| at(*p)).collect(), stroke));
             }
             Piece::Solid(form) => paint_form(painter, form, &at, unit, Some(ink), Stroke::NONE),
-            Piece::Ring(form) => paint_form(painter, form, &at, unit, None, stroke),
+            Piece::Ring(form) => {
+                if fill.a() > 0 {
+                    paint_form(painter, form, &at, unit, Some(fill), Stroke::NONE);
+                }
+                paint_form(painter, form, &at, unit, None, stroke);
+            }
         }
     }
 }
@@ -279,6 +287,59 @@ mod tests {
             let r = reach(&a);
             assert!(r > 0.0 && r <= 6.0 + 1e-6, "{n} reaches {r}");
             assert!(a.stop() <= r + 1e-6, "{n}: the shaft stops at {} and the mark ends at {r}", a.stop());
+        }
+    }
+
+    /// Every shape a [`paint`] of line end `number` made, with `fill` for the closed part of a hollow mark.
+    fn painted(number: u8, fill: Color32) -> Vec<Shape> {
+        let art = art(number).expect("a picture");
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint(ui.painter(), pos2(60.0, 20.0), -1.0, 4.0, &art, crate::theme::Tokens::light().stencil_ink, fill);
+        });
+        out.textures_delta.clear();
+        out.shapes.into_iter().map(|clipped| clipped.shape).collect()
+    }
+
+    /// How many shapes are painted in this colour as a fill: polygons, rectangles and circles.
+    fn filled_with(shapes: &[Shape], colour: Color32) -> usize {
+        shapes
+            .iter()
+            .filter(|s| match s {
+                Shape::Path(p) => p.fill == colour,
+                Shape::Rect(r) => r.fill == colour,
+                Shape::Circle(c) => c.fill == colour,
+                _ => false,
+            })
+            .count()
+    }
+
+    /// The picture of a hollow mark paints its closed part with the fill it is given (the theme's tile fill, transparent in both themes) before its outline; a solid mark is
+    /// ink and an open one has no closed part, so neither takes it.
+    #[test]
+    fn the_closed_part_of_a_hollow_marks_picture_takes_the_fill_it_is_given_and_a_solid_or_open_one_does_not() {
+        let (green, clear) = (crate::theme::Tokens::light().accent, crate::theme::Tokens::light().stencil_fill);
+        assert!(green.a() > 0 && clear.a() == 0 && green != crate::theme::Tokens::light().stencil_ink, "the tokens the test relies on");
+        let hollow = [14, 15, 16, 17, 18, 19, 20, 21, 22, 29, 30, 31, 32, 33, 34, 40, 41];
+        for number in hollow {
+            let shapes = painted(number, green);
+            assert!(filled_with(&shapes, green) >= 1, "number {number}: the closed part is painted");
+            let outline = shapes.iter().position(|s| {
+                matches!(s, Shape::Path(p) if p.closed && p.fill == clear)
+                    || matches!(s, Shape::Rect(r) if r.fill == clear && r.stroke.width > 0.0)
+                    || matches!(s, Shape::Circle(c) if c.fill == clear && c.stroke.width > 0.0)
+            });
+            let first_fill = shapes.iter().position(|s| match s {
+                Shape::Path(p) => p.fill == green,
+                Shape::Rect(r) => r.fill == green,
+                Shape::Circle(c) => c.fill == green,
+                _ => false,
+            });
+            assert!(first_fill < outline, "number {number}: the fill comes before the first outline");
+            assert_eq!(filled_with(&painted(number, clear), green), 0);
+        }
+        for number in [2, 4, 5, 10, 11, 13, 39, 1, 3, 12, 24, 43] {
+            assert_eq!(filled_with(&painted(number, green), green), 0, "number {number} has no hollow part");
         }
     }
 }

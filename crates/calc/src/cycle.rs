@@ -78,7 +78,8 @@ impl Evaluator<'_, '_> {
         self.ctx.release_bytes(held);
     }
 
-    /// The cells a cell's formula names, in any branch: references with a path qualifier or none. A reference qualified by a call, and
+    /// The cells a cell's formula names, in any branch: references with a path qualifier or none, the argument of `GETREF` and `GETVAL` too (it is no link of the dependency
+    /// graph, but the evaluator reads its value, so the cell is worked out first: [`crate::facts::Facts::named`]). A reference qualified by a call, and
     /// what a function reaches by itself, are not named here. Charged a step a reference, over the formula's facts, which are found once.
     pub(crate) fn static_deps(&mut self, key: &CellKey, out: &mut Vec<CellKey>) {
         if is_action_cell(&key.1) {
@@ -88,7 +89,7 @@ impl Evaluator<'_, '_> {
         let Some(FormulaSlot::Local(formula)) = res.formula.cell.map(|c| &c.formula) else { return };
         let Some(facts) = self.facts_of(formula) else { return };
         let env = Env::new(res.on.clone(), res.rebind.clone());
-        for r in &facts.refs {
+        for r in facts.named() {
             if !self.steps(1) {
                 return;
             }

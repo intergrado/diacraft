@@ -4,11 +4,11 @@
 
 use serde_json::{Value, json};
 
-use super::params::{end_of, optional_whole, page_for, units_per_inch};
+use super::params::{end_of, optional_whole, page_for, required_ids, units_per_inch};
 use super::snap_params::{self, Ask};
 use super::{CommandSpec, has_document, required_text, required_u32};
 use crate::Session;
-use crate::draw::{self, ConnectorInfo, End, Which};
+use crate::draw::{self, ConnectorInfo, End, EndGlue, Which};
 use crate::error::{Result, bad, failed};
 use crate::snap::{Glue, SnapPage, Subject, Use};
 
@@ -19,8 +19,9 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "Add Connector",
             ["Home", "Tools"],
             None,
-            "from: object, the begin: {id, point} for a shape (point: the connection point's number from 0, optional, else the nearest) or {x, y} for a place in inches; \
-             to: object, the end, the same way; page: whole number, optional, the id of the page (default: the first page with the shapes named, else the first page); \
+            "from: object, the begin: {id, point} for a shape (point: the connection point's number from 0, optional, else the nearest, and a shape with no connection point is glued \
+             to as a whole, at the place of its box nearest the other end, where a point named is refused) or {x, y} for a place in inches; \
+             to: object, the end, the same way; page: whole number, optional, the id of the page (default: the first page with the shapes named, else the first page that is not a background); \
              snap: true or {zoom, view}, optional, snap an end given as {x, y} by the document's Snap & Glue settings: onto a connection point it is glued to (snap.settings)",
             has_document,
             add
@@ -36,12 +37,28 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             has_document,
             reconnect
         ),
+        cmd!(
+            "connector.reverse_ends",
+            "Reverse Ends",
+            ["Home", "Tools"],
+            Some("Cmd+Alt+R"),
+            "id: whole number, optional, the connector or line to reverse (give id or ids, not both); \
+             ids: array of whole numbers, optional, the connectors and lines to reverse in one undo step, at most 4096 (a shape that is no connector or line is left alone and listed in the result's skipped, \
+             and one whose begin or end is protected (LockBegin or LockEnd) is left alone and listed in the result's locked); \
+             page: whole number, optional, the id of the page (default: the first page holding all the shapes named)",
+            has_document,
+            reverse_ends
+        ),
     ]
 }
 
-/// The glue as JSON: `{id, point}` or `null`.
-fn glue_json(glue: Option<(u32, u32)>) -> Value {
-    glue.map_or(Value::Null, |(id, point)| json!({ "id": id, "point": point }))
+/// The glue as JSON: `{id, point}` for a connection point, `{id, point: null}` for the whole of a shape that has none, or `null` for a free end.
+pub(super) fn glue_json(glue: Option<EndGlue>) -> Value {
+    match glue {
+        Some(EndGlue::Point { shape, index }) => json!({ "id": shape, "point": index }),
+        Some(EndGlue::Whole { shape }) => json!({ "id": shape, "point": null }),
+        None => Value::Null,
+    }
 }
 
 /// An end given as a place, snapped as the end of a connector (the glue targets and the snap targets of the document's settings): onto a connection point
@@ -75,7 +92,8 @@ fn info_json(page: u32, info: &ConnectorInfo) -> Value {
     json!({ "page": page, "id": info.id, "begin": glue_json(info.begin), "end": glue_json(info.end) })
 }
 
-/// Adds a connector → `{page, id, begin, end}`, where each of `begin` and `end` is `{id, point}` of what it is glued to, or `null`.
+/// Adds a connector → `{page, id, begin, end}`, where each of `begin` and `end` is `{id, point}` of what it is glued to (`point` is `null` for the whole of a shape that has no
+/// connection point), or `null`.
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     const ID: &str = "connector.add";
     let named = optional_whole(p, "page", ID)?;
@@ -132,4 +150,50 @@ fn reconnect(s: &mut Session, p: &Value) -> Result<Value> {
         map.insert("snap".into(), snap_json(&snapped));
     }
     Ok(out)
+}
+
+/// The shapes `id` or `ids` name (one of the two).
+fn named_shapes(p: &Value, cmd: &str) -> Result<Vec<u32>> {
+    let given = |key: &str| p.get(key).is_some_and(|v| !v.is_null());
+    match (given("id"), given("ids")) {
+        (true, true) => Err(bad(cmd, "give `id` or `ids`, not both")),
+        (false, false) => Err(bad(cmd, "give `id` (one connector or line) or `ids` (several)")),
+        (true, false) => Ok(vec![required_u32(p, "id", cmd)?]),
+        (false, true) => required_ids(p, "ids", cmd),
+    }
+}
+
+/// Reverse Ends (`draw/reverse.rs`) → `{page, reversed, ids, says, locked?, skipped?, geometry_kept?}`, and for one connector reversed also `{id, begin, end}` as
+/// `connector.reconnect` answers: the glue each end has now. A call that reverses nothing is refused in words.
+fn reverse_ends(s: &mut Session, p: &Value) -> Result<Value> {
+    const ID: &str = "connector.reverse_ends";
+    let ids = named_shapes(p, ID)?;
+    let named = optional_whole(p, "page", ID)?;
+    let doc = s.document().ok_or_else(|| failed(ID, "no document open"))?;
+    let page = page_for(doc, named, &ids, ID)?;
+    s.edit_if("Reverse ends", |doc| {
+        let done = draw::reverse_ends(doc, page, &ids).map_err(|e| e.into_engine(ID))?;
+        if done.reversed.is_empty() {
+            return Err(bad(ID, done.refusal(ids.len())));
+        }
+        let mut out = json!({ "page": page, "reversed": done.reversed.len(), "ids": done.reversed, "says": done.says() });
+        if let (Some(map), [only]) = (out.as_object_mut(), done.reversed.as_slice()) {
+            let info = draw::connector_info(doc, page, *only);
+            map.insert("id".into(), json!(only));
+            map.insert("begin".into(), glue_json(info.begin));
+            map.insert("end".into(), glue_json(info.end));
+        }
+        if let Some(map) = out.as_object_mut() {
+            if !done.locked.is_empty() {
+                map.insert("locked".into(), json!(done.locked));
+            }
+            if !done.skipped.is_empty() {
+                map.insert("skipped".into(), json!(done.skipped.iter().map(|k| json!({ "id": k.id, "why": k.why })).collect::<Vec<_>>()));
+            }
+            if !done.geometry_kept.is_empty() {
+                map.insert("geometry_kept".into(), json!(done.geometry_kept));
+            }
+        }
+        Ok((out, true))
+    })
 }

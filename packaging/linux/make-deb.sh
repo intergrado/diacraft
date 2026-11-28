@@ -16,6 +16,13 @@
 #   /usr/bin/diacraft, /usr/bin/diacraft-cli
 #   /usr/share/applications/app.diacraft.desktop, /usr/share/icons/hicolor/256x256/apps/app.diacraft.png
 #   /usr/share/doc/diacraft/   the five licence files, and `copyright`, which says the licences in the form Debian reads
+#   the shell completions of both programs, where bash, zsh and fish look for those of an installed program:
+#     /usr/share/bash-completion/completions/{diacraft-cli,diacraft}
+#     /usr/share/zsh/vendor-completions/{_diacraft-cli,_diacraft}
+#     /usr/share/fish/vendor_completions.d/{diacraft-cli,diacraft}.fish
+#   the manual pages /usr/share/man/man1/*.1.gz (`diacraft-cli`, one for each of its commands, and `diacraft`)
+#   The completions and the pages are written by the command line itself (`diacraft-cli completions SHELL --program NAME`, `diacraft-cli man PAGE`), so they list what the
+#   build does. That needs a program that runs here: a package for the other CPU than the machine's is made without them, and says so.
 #
 # What it needs: the programs load these libraries by name when they start, which a tool that reads a program's link line (`dpkg-shlibdeps`) does not see. `Depends` names
 # the ones the program cannot start without (the C library, the keyboard library, a window system, a graphics API), and `Recommends` the rest. The list is below and is
@@ -27,6 +34,9 @@
 #
 # Needs dpkg-deb (version 1.19 or newer), and the tools every Linux has: od, tr, sed, awk, du, md5sum, gzip, install (and strip, where there is one). Uses bash 3.2 syntax
 # like the other scripts.
+#
+# Environment (optional): EXTRAS_CLI (the program to ask for the completions and the manual pages instead of the packaged diacraft-cli, whatever CPU the programs are for, as in
+# make-rpm.sh: for the tests of this script, whose programs are no programs that run).
 set -euo pipefail
 
 script=make-deb.sh
@@ -53,23 +63,8 @@ x86_64) deb_arch=amd64 ;;
 esac
 linux_cpu_words "$arch"
 
-# The Debian version of the name.
-deb_version() { # deb_version NAME
-    local v=${1#v}
-    case $v in
-    [0-9]*.[0-9]*.[0-9]*)
-        # A tag: the first hyphen starts a pre-release (0.2.0-rc1 is 0.2.0~rc1), a later one is a dot.
-        v=$(printf '%s' "$v" | sed -e 's/-/~/' -e 's/-/./g')
-        ;;
-    *)
-        v=$(workspace_version)
-        v="${v%%-*}~$1"
-        ;;
-    esac
-    # Letters, digits, and . + ~ only (a Debian version also allows : and -, which a name never needs).
-    printf '%s' "$v" | tr -c 'A-Za-z0-9.+~' '.'
-}
-version=$(deb_version "$name")
+# The Debian version of the name (packaging/common.sh).
+version=$(package_version "$name")
 case $version in
 [0-9]*) ;;
 *) die "'$version' is not a Debian version: it does not start with a digit" ;;
@@ -136,6 +131,28 @@ elif command -v strip >/dev/null 2>&1; then
     done
 else
     echo "make-deb.sh: strip is not here: the programs in the package keep their symbols" >&2
+fi
+# The shell completions and the manual pages, which the command line writes. The program that writes them is the one just built, before it was stripped, and it runs only when it is
+# the machine's own CPU's (or EXTRAS_CLI is given: a program of the tests, which stands in for it).
+if [ "$arch" = "$machine_arch" ] || [ -n "${EXTRAS_CLI:-}" ]; then
+    cli=${EXTRAS_CLI:-$bin/diacraft-cli}
+    share=$pkg/usr/share
+    install -d -m 755 "$share/bash-completion/completions" "$share/zsh/vendor-completions" "$share/fish/vendor_completions.d" "$share/man/man1"
+    for program in diacraft-cli diacraft; do
+        "$cli" completions bash --program "$program" >"$share/bash-completion/completions/$program" || die "diacraft-cli could not write the bash completions of $program"
+        "$cli" completions zsh --program "$program" >"$share/zsh/vendor-completions/_$program" || die "diacraft-cli could not write the zsh completions of $program"
+        "$cli" completions fish --program "$program" >"$share/fish/vendor_completions.d/$program.fish" || die "diacraft-cli could not write the fish completions of $program"
+        need "$share/bash-completion/completions/$program" "$share/zsh/vendor-completions/_$program" "$share/fish/vendor_completions.d/$program.fish"
+    done
+    pages=$("$cli" man --list) || die "diacraft-cli could not list its manual pages"
+    [ -n "$pages" ] || die "diacraft-cli lists no manual page"
+    for page in $pages; do
+        "$cli" man "$page" | gzip -9n >"$share/man/man1/$page.1.gz" || die "diacraft-cli could not write the manual page $page"
+        need "$share/man/man1/$page.1.gz"
+    done
+    chmod 644 "$share"/bash-completion/completions/* "$share"/zsh/vendor-completions/* "$share"/fish/vendor_completions.d/* "$share"/man/man1/*
+else
+    echo "make-deb.sh: the programs are for $arch and this machine is $machine_arch: the package is made without shell completions and manual pages (they are written by running the program)" >&2
 fi
 # The launcher entry as it is in the download: it starts `diacraft` by name, which is on the PATH of a system install.
 install -m 644 "$root/packaging/linux/app.diacraft.desktop" "$pkg/usr/share/applications/app.diacraft.desktop"

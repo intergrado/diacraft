@@ -321,7 +321,21 @@ pub(super) fn wanted(doc: &Document) -> bool {
 
 /// Writes `doc` from the model alone.
 pub(super) fn write(doc: &Document, options: &WriteOptions) -> R<Written> {
+    // **The page names are the ones the program that opens the file keeps** (`page_names.rs`): a model has no file to compare with, so every page is looked at.
+    let kept = crate::page_names::keep_page_names(doc, None);
+    let doc = kept.as_ref().map_or(doc, |k| &k.doc);
+    // A page given a new name is a change of the content: the bookkeeping of an unedited visit (the program's name, the thumbnail) is not kept for it.
+    let edited_options;
+    let options = if kept.is_some() && options.content_unchanged {
+        edited_options = WriteOptions { content_unchanged: false, ..options.clone() };
+        &edited_options
+    } else {
+        options
+    };
     let mut book = Book::new(doc, options);
+    if let Some(words) = kept.as_ref().filter(|k| !k.renamed.is_empty()).map(crate::page_names::KeptNames::words) {
+        book.warn(words);
+    }
     book.plan()?;
     book.emit()
 }
@@ -945,9 +959,15 @@ impl<'a> Book<'a> {
             rows.rows.iter().filter(|r| r.ty == ty && !r.external).filter_map(|r| resolve(&document, &r.target)).map(|t| fold(&t)).collect();
         for theme in self.doc.themes.iter() {
             crate::work::model_part();
-            let known = plausible(&theme.part) && by_target.contains(&fold(&theme.part)) && !self.taken.contains(&fold(&theme.part));
+            let key = fold(&theme.part);
+            // A theme keeps the part name it has, and gets a relationship when the file's document part did not reach it (the reader found an orphan
+            // by its content type): the writer must not rename a part the model holds (`themes.rs` for a splice).
+            let known = plausible(&theme.part) && !self.taken.contains(&key);
             let name = if known {
                 self.claim(&theme.part);
+                if !by_target.contains(&key) {
+                    self.document_row(&ty, &theme.part);
+                }
                 theme.part.to_string()
             } else {
                 let folder = format!("{}theme/", folder_of(&document));

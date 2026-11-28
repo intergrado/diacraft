@@ -14,7 +14,7 @@ use super::route::P;
 use crate::stencil::number_text;
 
 /// The unit of the cell `A` of an `ArcTo` jump row in the files (drawing units).
-const BOW_UNIT: &str = "DL";
+pub(super) const BOW_UNIT: &str = "DL";
 
 /// One segment of a path. The pen starts at the first, a [`Seg::Move`].
 #[derive(Clone, Debug, PartialEq)]
@@ -33,20 +33,20 @@ pub(crate) enum Seg {
     Spline { to: P, via: Vec<P> },
 }
 
-fn length(n: f64) -> Cell {
+pub(super) fn length(n: f64) -> Cell {
     Cell::constant(Value::from_text(&number_text(n))).with_unit("IN")
 }
 
-fn plain(n: f64) -> Cell {
+pub(super) fn plain(n: f64) -> Cell {
     Cell::constant(Value::from_text(&number_text(n)))
 }
 
-fn put(row: &mut Row, name: &str, cell: Cell) {
+pub(super) fn put(row: &mut Row, name: &str, cell: Cell) {
     row.cells.insert(CellName::new(name), cell);
 }
 
 /// The `POLYLINE(1, 1, x1, y1, ...)` text: lengths in the shape's own units and not shares of its box.
-fn polyline_text(via: &[P]) -> String {
+pub(super) fn polyline_text(via: &[P]) -> String {
     let mut text = String::from("POLYLINE(1,1");
     for p in via {
         text.push(',');

@@ -146,20 +146,23 @@ impl Located {
 }
 
 /// The page a command about shapes works on: the one named, else the first page that holds every one of `ids` (found with one walk of a page for
-/// all of them, where `Document::find_shape` is asked once for each), else the first page. `None` for a document with no pages.
+/// all of them, where `Document::find_shape` is asked once for each), else the first page that is not a background ([`Document::first_foreground_page`]). `None` for a document with no pages.
+/// **The pages are looked at in the order of the tabs**: the pages that are not backgrounds, then the backgrounds. A shape's `ID` is its page's own, so a background page and another may both
+/// have a shape 1, and a file lists its background pages first: a search in the model's order would take the background's shape for the one a person means.
 pub fn page_holding(doc: &Document, named: Option<u32>, ids: &[u32]) -> Option<u32> {
     if named.is_some() {
         return named;
     }
     let wanted: HashSet<u32> = ids.iter().copied().collect();
     if !wanted.is_empty() {
-        for page in doc.pages.iter() {
+        let tabs = doc.pages.iter().filter(|p| !p.background).chain(doc.pages.iter().filter(|p| p.background));
+        for page in tabs {
             if find_named(doc, page.id, &wanted).is_ok_and(|found| found.len() == wanted.len()) {
                 return Some(page.id);
             }
         }
     }
-    doc.pages.iter().next().map(|p| p.id)
+    doc.first_foreground_page().map(|p| p.id)
 }
 
 /// The `ID`s named, each once, in the order they are named.

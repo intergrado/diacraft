@@ -100,7 +100,7 @@ pub(crate) fn add_drawn_shape_above(doc: &mut Document, page: u32, tool: Tool, d
         sides: matches!(tool, Tool::Rectangle | Tool::Ellipse),
     };
     let shape = drawn_shape(id, &spec, path);
-    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.push(Arc::new(shape));
+    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.push_shape(Arc::new(shape));
     Ok(Made { id, width: frame.width, height: frame.height, rows: drawn.rows.len(), closed: drawn.closed })
 }
 
@@ -171,7 +171,7 @@ fn read_existing(doc: &Document, page: u32, id: u32) -> Result<Existing, Problem
     let Some(Ok(effective)) = res.effective_rows_within(&sheet, key, held) else {
         return Err(Problem::failed(format!("the path of shape {id} could not be read")));
     };
-    let (geom, _) = diacraft_render::geom_rows(&effective);
+    let (geom, _) = reader.worked().geom_rows(&sheet, key, &effective);
     let size = (reader.number(&sheet, "Width"), reader.number(&sheet, "Height"));
     let rows = carry(&geom, size, Affine::IDENTITY);
     if rows.iter().any(|r| matches!(r, CRow::Ellipse { .. })) {
@@ -267,9 +267,10 @@ pub(crate) fn continue_shape(
             return Err(Problem::failed("the path went away"));
         };
         let mut section = (**held).clone();
-        section.rows = Rows::from(written);
+        // The path's rows are made again from the shape's own: each unknown node among them stays after the row of the same number that it followed.
+        section.replace_rows(Rows::from(written));
         if closed {
-            section.cells.insert(CellName::new("NoFill"), plain(0.0));
+            section.put_cell(&CellName::new("NoFill"), plain(0.0))?;
         }
         *held = Arc::new(section);
     }

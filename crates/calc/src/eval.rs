@@ -58,6 +58,19 @@ pub struct FileInfo {
     pub directory: Option<String>,
 }
 
+/// What a `SETF` does when its cell is worked out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SetfMode {
+    /// **The documented behaviour, and the default** (documented behaviour wins over): the call is 0, and the formula it
+    /// writes is queued with its target. The evaluator holds the document and changes none, so **the commit that worked the cell out makes the writes**, in the
+    /// order the calls were reached, and works out again the cells that read what they wrote (`commit.rs`), within the loop and work budgets
+    /// ([`MAX_SETF_WRITES`](crate::rules::MAX_SETF_WRITES), [`MAX_SETF_ROUNDS`](crate::rules::MAX_SETF_ROUNDS) and the commit's own [`Budget`]).
+    #[default]
+    Perform,
+    /// **M1 the reading, kept as a setting:** working formulas out never writes. The call is 0 whatever its target says, and nothing is queued.
+    Inert,
+}
+
 /// Options of an evaluation.
 #[derive(Clone, Debug)]
 pub struct EvalOptions {
@@ -69,11 +82,21 @@ pub struct EvalOptions {
     /// The faces `TEXTWIDTH` and `TEXTHEIGHT` measure with: the machine's, given by the caller. `None` measures with the bundled faces, which are
     /// the same on every machine (`fn_measure.rs`).
     pub fonts: Option<crate::fn_measure::Fonts>,
+    /// What a `SETF` does: [`SetfMode::Perform`] by default. The comparison with a file's saved values ([`recalc_all`](crate::recalc_all) and its kin) and
+    /// the work of the document before an edit take [`SetfMode::Inert`] whatever this says: they write nothing.
+    pub setf: SetfMode,
 }
 
 impl Default for EvalOptions {
     fn default() -> Self {
-        EvalOptions { operands: OperandMode::Live, clock: Clock::default(), file: FileInfo::default(), rand_seed: 0x9E37_79B9_7F4A_7C15, fonts: None }
+        EvalOptions {
+            operands: OperandMode::Live,
+            clock: Clock::default(),
+            file: FileInfo::default(),
+            rand_seed: 0x9E37_79B9_7F4A_7C15,
+            fonts: None,
+            setf: SetfMode::Perform,
+        }
     }
 }
 
@@ -138,6 +161,20 @@ pub struct EvalStats {
     pub cells_worked: u64,
 }
 
+impl EvalStats {
+    /// Adds the statistics of a later pass of the same commit: the counts sum, the flags are set when either set them, the memory peak is the larger.
+    pub(crate) fn absorb(&mut self, next: &EvalStats) {
+        self.steps = self.steps.saturating_add(next.steps);
+        self.cycles = self.cycles.saturating_add(next.cycles);
+        self.depth_limit_hits = self.depth_limit_hits.saturating_add(next.depth_limit_hits);
+        self.budget_exhausted |= next.budget_exhausted;
+        self.memory_exhausted |= next.memory_exhausted;
+        self.bytes_peak = self.bytes_peak.max(next.bytes_peak);
+        self.theme_fallbacks = self.theme_fallbacks.saturating_add(next.theme_fallbacks);
+        self.cells_worked = self.cells_worked.saturating_add(next.cells_worked);
+    }
+}
+
 /// The state of an evaluation that outlives one call: the budget left, the memo of cells worked out, and what happened.
 #[derive(Debug)]
 pub struct EvalCtx {
@@ -175,6 +212,20 @@ pub struct EvalCtx {
     /// project rule): a scheme cell that gives 0 because the sheet holds none, or follows a page that holds none, reads as that part
     /// ([`crate::rules::FIRST_THEME_PART`]). See [`Evaluator::under_first_theme_part`].
     pub(crate) first_theme_part: bool,
+    /// The writes the `SETF` calls ask for, in the order the cells that hold them were worked out as themselves (`setf.rs`): held until the commit that worked the cells
+    /// out makes them. **Only a cell worked out as itself puts its calls here** ([`crate::setf::ask`]); a cell read as an operand keeps them with its own result and asks
+    /// for none.
+    pub(crate) setf: Vec<crate::setf::SetfEffect>,
+    /// The `SETF` calls past [`MAX_SETF_QUEUED`](crate::rules::MAX_SETF_QUEUED) that were dropped.
+    pub(crate) setf_dropped: u64,
+    /// The calls of the cell being worked out now, in the order they were reached (`setf.rs`): [`Evaluator::compute_cell`] opens a list for each cell it runs and
+    /// hands it on with the cell's result ([`CellEval::setf`](crate::cells::CellEval)), so a call belongs to the cell that holds it, and to the cell whose
+    /// `EVALCELL` or string formula reached it.
+    pub(crate) setf_open: Vec<crate::setf::SetfEffect>,
+    /// The calls of the cell being worked out now that were past [`MAX_SETF_QUEUED`](crate::rules::MAX_SETF_QUEUED) in that cell alone, and so were not kept.
+    pub(crate) setf_open_over: u64,
+    /// The cells whose calls were asked for already, so that a cell worked out as itself twice in one pass asks once.
+    pub(crate) setf_asked: HashSet<CellKey>,
 }
 
 /// The counters of an evaluation, kept to be put back: the salt's work changes none of what a report says of the walk before it.
@@ -205,6 +256,11 @@ impl EvalCtx {
             must_fail_touched: false,
             no_shadow_touched: false,
             first_theme_part: false,
+            setf: Vec::new(),
+            setf_dropped: 0,
+            setf_open: Vec::new(),
+            setf_open_over: 0,
+            setf_asked: HashSet::new(),
         }
     }
 
@@ -238,6 +294,11 @@ impl EvalCtx {
     /// Steps left of the budget.
     pub fn steps_left(&self) -> u64 {
         self.steps_left
+    }
+
+    /// Adds `steps` to the budget (the most there is a number for).
+    pub fn grant_steps(&mut self, steps: u64) {
+        self.steps_left = self.steps_left.saturating_add(steps);
     }
 
     pub(crate) fn take_step(&mut self) -> bool {
@@ -364,11 +425,37 @@ impl Site<'_> {
     }
 }
 
+/// The context an evaluator works in: lent to it by its caller, or its own.
+pub(crate) enum CtxSlot<'c> {
+    Lent(&'c mut EvalCtx),
+    Own(Box<EvalCtx>),
+}
+
+impl std::ops::Deref for CtxSlot<'_> {
+    type Target = EvalCtx;
+
+    fn deref(&self) -> &EvalCtx {
+        match self {
+            CtxSlot::Lent(ctx) => ctx,
+            CtxSlot::Own(ctx) => ctx,
+        }
+    }
+}
+
+impl std::ops::DerefMut for CtxSlot<'_> {
+    fn deref_mut(&mut self) -> &mut EvalCtx {
+        match self {
+            CtxSlot::Lent(ctx) => ctx,
+            CtxSlot::Own(ctx) => ctx,
+        }
+    }
+}
+
 /// The evaluator over a document.
 pub struct Evaluator<'d, 'c> {
     pub(crate) doc: &'d Document,
     pub(crate) res: Resolver<'d>,
-    pub(crate) ctx: &'c mut EvalCtx,
+    pub(crate) ctx: CtxSlot<'c>,
     pub(crate) owners: HashMap<Owner, ShapeIndex>,
     pub(crate) peers: HashMap<(Owner, Vec<u32>), PeerNames>,
     /// The document's pages, masters, styles and faces by name, each listed on first use (`names.rs`).
@@ -380,13 +467,31 @@ pub struct Evaluator<'d, 'c> {
     pub(crate) row_names: HashMap<(SheetRef, SectionKey), Rc<RowNames>>,
     /// The group whose scheme cells a shape reads in place of the page's, for a shape in a group (`fn_color.rs`).
     pub(crate) scheme_groups: HashMap<SheetRef, Option<SheetRef>>,
+    /// The drawing's language (`diacraft_doc::lang::document_language`), which a run with no `LangID` anywhere is in: read the first time a measure needs it
+    /// (`fn_measure.rs`), as the renderer reads it once a frame.
+    pub(crate) document_language: std::cell::OnceCell<diacraft_doc::lang::Tag>,
+    /// The styles that can give a sheet a formula the listing of the sheets that name a page or the graph of a page looks at, found when first asked (`pages.rs`).
+    pub(crate) style_reach: Option<Rc<crate::pages::StyleReach>>,
     depth: usize,
+}
+
+impl<'d> Evaluator<'d, 'static> {
+    /// An evaluator of `doc` that **holds its context itself**, for a caller that keeps the evaluator beside the document it reads and cannot borrow a context from
+    /// anywhere: what it builds as it works (the lists of shapes, the names, the memo of the cells worked out) lives as long as it does, so a reader that
+    /// works many cells out over its life builds them once. [`Evaluator::new`] lends a context and is for a caller that has one.
+    pub fn owning(doc: &'d Document, ctx: EvalCtx) -> Evaluator<'d, 'static> {
+        Evaluator::with_slot(doc, CtxSlot::Own(Box::new(ctx)))
+    }
 }
 
 impl<'d, 'c> Evaluator<'d, 'c> {
     /// An evaluator of `doc`. It builds nothing until a read needs it, and keeps what it builds, so one evaluator should work out as
     /// many cells as the caller has.
     pub fn new(doc: &'d Document, ctx: &'c mut EvalCtx) -> Evaluator<'d, 'c> {
+        Evaluator::with_slot(doc, CtxSlot::Lent(ctx))
+    }
+
+    fn with_slot(doc: &'d Document, ctx: CtxSlot<'c>) -> Evaluator<'d, 'c> {
         Evaluator {
             doc,
             res: Resolver::new(doc),
@@ -397,8 +502,21 @@ impl<'d, 'c> Evaluator<'d, 'c> {
             ties: HashMap::new(),
             row_names: HashMap::new(),
             scheme_groups: HashMap::new(),
+            document_language: std::cell::OnceCell::new(),
+            style_reach: None,
             depth: 0,
         }
+    }
+
+    /// The steps left of the budget of the context the evaluator works in.
+    pub fn steps_left(&self) -> u64 {
+        self.ctx.steps_left()
+    }
+
+    /// Gives the context the evaluator works in `steps` more to spend, for a caller that takes them from a budget of its own a few at a time. A budget
+    /// that has run out stays out: [`EvalStats::budget_exhausted`] is for good, and everything after it gives [`LOOP_ERROR`].
+    pub fn grant_steps(&mut self, steps: u64) {
+        self.ctx.grant_steps(steps);
     }
 
     /// The options of the evaluation.
@@ -412,6 +530,8 @@ impl<'d, 'c> Evaluator<'d, 'c> {
         self.ties.clear();
         self.row_names.clear();
         self.scheme_groups.clear();
+        self.document_language = std::cell::OnceCell::new();
+        self.style_reach = None;
     }
 
     /// The statistics so far.

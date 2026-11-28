@@ -21,6 +21,26 @@ pub(crate) enum TextRead {
     Of(CellRef),
 }
 
+/// The functions whose argument names a cell and is no read of it ("A `GETREF` or `GETVAL` argument: No"). A change to the cell
+/// does not work out the formula that holds the call, which is also why a `SETF` names its target through `GETREF`: a write to the target is no read of it.
+pub(crate) const ADDRESS_FUNCTIONS: [&str; 2] = ["GETREF", "GETVAL"];
+
+/// A reference a formula names, with how it names it. **This is the one place the two notions of "reads" are told apart**: a reference that is the argument of
+/// [`ADDRESS_FUNCTIONS`] is *address only*, and a reference anywhere else is a read.
+///
+/// * The graph of what an edit reaches ([`Facts::links`]: `affected.rs`, the reader lists of `index.rs`) holds the reads: **a change to a cell that is only an address does
+///   not work the formula out again.**
+/// * The order cells are worked out in, and what follows the cells a cell's value comes from ([`Facts::named`]: `cycle.rs`, `entry.rs`, the clock walk of `recalc.rs`),
+///   hold every reference. `GETVAL(Width)` and `GETREF(User.Q)*22` give the value of the cell they name, so the cell is worked out before them, in the same recalculation,
+///   and a loop of such reads is a loop for the evaluator (it needs the result of the cell it is reading): what the graph leaves out is only when the formula is asked to run.
+#[derive(Clone, Debug)]
+pub(crate) struct Named {
+    /// The reference, with a path qualifier or none.
+    pub cell: CellRef,
+    /// Whether the reference is the argument of `GETREF` or `GETVAL`: it names a cell and is no link of the dependency graph.
+    pub address_only: bool,
+}
+
 /// The result of one walk of a formula.
 #[derive(Debug, Default)]
 pub(crate) struct Facts {
@@ -28,8 +48,9 @@ pub(crate) struct Facts {
     pub functions: Vec<String>,
     /// Whether a clock function (`NOW`, `RAND`, `DOC*`, `FILENAME`, `DIRECTORY`) is called anywhere, in a branch taken or not.
     pub calls_clock: bool,
-    /// The references with no sheet-returning call before them, which a walk of the cells a cell reads follows.
-    pub refs: Vec<CellRef>,
+    /// The references with no sheet-returning call before them, each with whether it is an address only (see [`Named`]); [`Facts::named`] and [`Facts::links`] are the two views
+    /// the walks take of them.
+    pub refs: Vec<Named>,
     /// The reads of shape text.
     pub text_reads: Vec<TextRead>,
     /// Whether a function that carries a point between frames is called (`PAR`, `LOC`, `LOCTOLOC`, `LOCTOPAR`, `ANGLETOLOC`, `ANGLETOPAR`): it
@@ -48,6 +69,17 @@ impl Facts {
     /// The bytes the facts hold, as accounted.
     fn size(&self) -> u64 {
         64 + (self.functions.len() as u64) * 32 + (self.refs.len() as u64) * 160 + (self.text_reads.len() as u64) * 160
+    }
+
+    /// **Every reference the formula names**, the addresses of `GETREF` and `GETVAL` too: the cells a walk of the cells a cell reads follows, so that they are worked out first.
+    pub fn named(&self) -> impl Iterator<Item = &CellRef> {
+        self.refs.iter().map(|named| &named.cell)
+    }
+
+    /// **The references that are links of the dependency graph**: the ones a change to the cell works the formula out again for. A cell named by `GETREF` or
+    /// `GETVAL` only is not among them; one that is also named anywhere else is, once for each place that names it.
+    pub fn links(&self) -> impl Iterator<Item = &CellRef> {
+        self.refs.iter().filter(|named| !named.address_only).map(|named| &named.cell)
     }
 }
 
@@ -73,7 +105,12 @@ pub(crate) const TEXT_MEASURES: [&str; 2] = ["TEXTHEIGHT", "TEXTWIDTH"];
 /// formulas, and the two that measure a shape's box, which read the geometry of the shape and of every member of a group, and their poses
 /// They are worked out after every edit that changed anything; no file holds either of the box
 /// functions, so no saved value is at risk of being rewritten by it.
-const DYNAMIC_FUNCTIONS: [&str; 13] = [
+///
+/// **`SETF` is not one of them**. It reads the cells its text names, as any call does, and none by a choice made at run time. It was in the
+/// list, so that it was worked out after every edit: a counter moved by sixteen on each edit, and an idempotent call asked for its write each time.
+/// Nothing in says a call is worked out on any edit but the ones that change what it reads.
+/// Where a `SETF` sits with a call that is dynamic (or is reached by an `EVALCELL` of its cell), it runs when that call does.
+const DYNAMIC_FUNCTIONS: [&str; 12] = [
     "EVALCELL",
     "EVALTEXT",
     "LISTSHEETREF",
@@ -84,7 +121,6 @@ const DYNAMIC_FUNCTIONS: [&str; 13] = [
     "CONTAINERMEMBERCOUNT",
     "CALLOUTTARGETREF",
     "CALLOUTCOUNT",
-    "SETF",
     "BOUNDINGBOXDIST",
     "BOUNDINGBOXRECT",
 ];
@@ -255,8 +291,10 @@ pub(crate) fn walk(expr: &Expr) -> Facts {
     let mut facts = Facts::default();
     // The names met so far, so that a formula of thousands of names is not searched once for each.
     let mut met: HashSet<String> = HashSet::new();
-    let mut stack: Vec<&Expr> = vec![expr];
-    while let Some(e) = stack.pop() {
+    // Each expression comes with whether it is the argument of `GETREF` or `GETVAL`: only a reference that is the argument itself is an address (a sum under the call is
+    // no name of a cell, and what it reads is read).
+    let mut stack: Vec<(&Expr, bool)> = vec![(expr, false)];
+    while let Some((e, address_only)) = stack.pop() {
         match e {
             Expr::Call(c) => {
                 let upper = c.name.to_ascii_uppercase();
@@ -270,13 +308,14 @@ pub(crate) fn walk(expr: &Expr) -> Facts {
                         _ => facts.text_reads.push(TextRead::Own),
                     }
                 }
+                let names_a_cell_only = ADDRESS_FUNCTIONS.contains(&upper.as_str());
                 if met.insert(upper.clone()) {
                     facts.functions.push(upper);
                 }
-                stack.extend(c.args.iter().flatten());
+                stack.extend(c.args.iter().flatten().map(|arg| (arg, names_a_cell_only)));
                 for q in &c.qualifiers {
                     if let Qualifier::Call { args, .. } = q {
-                        stack.extend(args.iter().flatten());
+                        stack.extend(args.iter().flatten().map(|arg| (arg, false)));
                     }
                 }
             }
@@ -285,18 +324,18 @@ pub(crate) fn walk(expr: &Expr) -> Facts {
                     facts.text_reads.push(TextRead::Of((**r).clone()));
                 }
                 if r.qualifiers.iter().all(|q| matches!(q, Qualifier::Path(_))) {
-                    facts.refs.push((**r).clone());
+                    facts.refs.push(Named { cell: (**r).clone(), address_only });
                 }
                 for q in &r.qualifiers {
                     if let Qualifier::Call { args, .. } = q {
-                        stack.extend(args.iter().flatten());
+                        stack.extend(args.iter().flatten().map(|arg| (arg, false)));
                     }
                 }
             }
-            Expr::Unary(_, x) | Expr::Percent(x) => stack.push(x),
+            Expr::Unary(_, x) | Expr::Percent(x) => stack.push((x, false)),
             Expr::Binary(_, a, b) => {
-                stack.push(a);
-                stack.push(b);
+                stack.push((a, false));
+                stack.push((b, false));
             }
             Expr::Number(_) | Expr::Bool(_) | Expr::Str(_) | Expr::Color { .. } | Expr::Currency { .. } | Expr::Guid(_) => {}
         }
@@ -360,6 +399,67 @@ mod tests {
         assert!(!reach_of("LOCTOPAR(PNT(1,2),Sheet.1!PinX,Sheet.2!PinX)").frame_own, "its frames are the references'");
         assert!(reach_of("SHEETREF()!Width").dynamic, "a call before a reference chooses the sheet at run time");
         assert!(reach_of("LISTMEMBERCOUNT()").dynamic && reach_of("evaltext(\"1+1\")").dynamic);
+    }
+
+    /// A `SETF` reads what its text names and nothing it does not, so it is not worked out after every edit; the calls that read cells chosen at run
+    /// time still are, also where a `SETF` sits beside them.
+    #[test]
+    fn a_setf_is_not_dynamic() {
+        for source in ["SETF(GETREF(User.N),User.N+1)", "SETF(\"Scratch.A1\",3)", "IF(Width>1,SETF(GETREF(Scratch.A1),Width*2),0)"] {
+            assert!(!reach_of(source).dynamic, "{source}");
+        }
+        assert!(reach_of("SETF(GETREF(User.N),EVALTEXT(\"1+1\"))").dynamic, "the call beside it reads what its text does not name");
+        assert!(reach_of("SETF(GETREF(User.N),SHEETREF()!Width)").dynamic, "so does a reference chosen by a call");
+    }
+
+    /// The references a formula names, as text, sorted: every one (`named`), and the ones that are links of the dependency graph (`links`).
+    fn named_and_links(source: &str) -> (Vec<String>, Vec<String>) {
+        let formula = diacraft_formula::parse(source);
+        let facts = walk(formula.ast.as_ref().unwrap());
+        let text = |r: &CellRef| diacraft_formula::print(&Expr::Ref(Box::new(r.clone())));
+        let sorted = |mut list: Vec<String>| {
+            list.sort();
+            list
+        };
+        (sorted(facts.named().map(text).collect()), sorted(facts.links().map(text).collect()))
+    }
+
+    /// The reference that is the argument of `GETREF` or `GETVAL` is named, so the cell is worked out first, and is no link of the dependency graph;
+    /// a reference anywhere else is both, and one that is named in both ways is a link once for the place that reads it.
+    #[test]
+    fn a_getref_or_getval_argument_is_named_and_is_no_link() {
+        let cases: [(&str, &[&str], &[&str]); 9] = [
+            // SETF's target ("No, which is why it goes through GETREF").
+            ("SETF(GETREF(Scratch.A1),Width*2)", &["Scratch.A1", "Width"], &["Width"]),
+            // Links on `PinX` and `Angle`, none on `PinY`.
+            ("PinX*2+GetVal(PinY)+DEPENDSON(Angle)", &["Angle", "PinX", "PinY"], &["Angle", "PinX"]),
+            // The formula: a link on `Width` alone.
+            ("GETVAL(PinX) + GETVAL(PinY) + Width", &["PinX", "PinY", "Width"], &["Width"]),
+            ("GETVAL(Sheet.4!PinX)", &["Sheet.4!PinX"], &[]),
+            ("getref(User.Q)*22", &["User.Q"], &[]),
+            // A cell a call names and reads too is read.
+            ("SETF(GETREF(User.N),User.N+User.Step)", &["User.N", "User.N", "User.Step"], &["User.N", "User.Step"]),
+            ("GETVAL(PinX)+PinX", &["PinX", "PinX"], &["PinX"]),
+            // Only the argument itself is an address: what a sum or a branch under the call reads is read.
+            ("GETREF(User.A*2)", &["User.A"], &["User.A"]),
+            ("GETVAL(IF(Width>1,User.A,User.B))", &["User.A", "User.B", "Width"], &["User.A", "User.B", "Width"]),
+        ];
+        for (source, named, links) in cases {
+            let (found_named, found_links) = named_and_links(source);
+            assert_eq!(
+                (found_named, found_links),
+                (named.iter().map(|s| (*s).to_owned()).collect(), links.iter().map(|s| (*s).to_owned()).collect()),
+                "{source}"
+            );
+        }
+    }
+
+    /// A reference chosen by a call is named by neither: it is not listed at all (a call before it makes the formula dynamic, `Reach::dynamic`, whatever it sits in).
+    #[test]
+    fn a_reference_chosen_by_a_call_is_no_address_either() {
+        let (named, links) = named_and_links("GETREF(LISTSHEETREF()!Width)");
+        assert!(named.is_empty() && links.is_empty(), "{named:?} {links:?}");
+        assert!(reach_of("GETREF(LISTSHEETREF()!Width)").dynamic);
     }
 
     /// A path function reads every row of the section it names, the shape's size and `Rounding`, none of which its text names. The
@@ -566,7 +666,7 @@ mod tests {
             assert_eq!(nodes, 2 * depth + 1, "left chain of {depth}");
             same_walk(&left, "left chain");
             // The same leaning to the right.
-            let mut right = call("SETF", vec![None]);
+            let mut right = call("EVALTEXT", vec![None]);
             for _ in 0..depth {
                 right = Expr::Binary(diacraft_formula::BinaryOp::Add, Box::new(Expr::Bool(false)), Box::new(right));
             }

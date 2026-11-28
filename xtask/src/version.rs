@@ -37,6 +37,25 @@ pub fn replace(manifest: &str, new: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// The downloads that older releases never had, each with the release it first came with (the site's ids, as `site/site.json` names them): the `.rpm` for Fedora first came with 0.2.4.
+/// The pages are made for the workspace's version and link the files of that release, so a page made for an older one must not link a file that release does not have.
+pub const DOWNLOAD_SINCE: [(&str, &str); 2] = [("linux-x86_64-rpm", "0.2.4"), ("linux-arm64-rpm", "0.2.4")];
+
+/// The numbers of a version, `MAJOR.MINOR.PATCH`, with any `-pre.release` left off; `None` for what is no version of that shape.
+fn core_of(version: &str) -> Option<(u64, u64, u64)> {
+    let core = version.split('-').next()?;
+    let mut numbers = core.split('.').map(|n| n.parse::<u64>().ok());
+    let found = (numbers.next()??, numbers.next()??, numbers.next()??);
+    numbers.next().is_none().then_some(found)
+}
+
+/// Whether the release of `version` has the download `id`: every download is in every release but those of [`DOWNLOAD_SINCE`], which are in the release they came with and the ones after it.
+/// A pre-release of that release has them too (a tag with a suffix builds the same files). A version that is no version has none of those.
+pub fn release_has(version: &str, id: &str) -> bool {
+    let Some((_, since)) = DOWNLOAD_SINCE.iter().find(|(download, _)| *download == id) else { return true };
+    matches!((core_of(version), core_of(since)), (Some(have), Some(first)) if have >= first)
+}
+
 /// Semver without build metadata: `MAJOR.MINOR.PATCH` plus an optional `-pre.release` tag.
 pub fn validate(v: &str) -> Result<(), String> {
     let bad = || Err(format!("`{v}` is not a version like 1.2.3 or 1.2.3-rc.1"));

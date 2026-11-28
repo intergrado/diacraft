@@ -191,7 +191,7 @@ static TEMPLATES: [TemplateSpec; 18] = [
         "chen_notation",
         "Chen's Database Notation",
         SOFTWARE,
-        "A blank landscape page for entity-relationship diagrams, based on Chen's notation, with the Chen shapes open beside the basic shapes: entities and weak entities, relationships and identifying relationships, attributes (key, multivalued and derived) and the links between them, and a double line for total participation.",
+        "A blank landscape page for entity-relationship diagrams, based on Chen's notation, with the Chen shapes open beside the basic shapes: entities, weak entities and associative entities, relationships and identifying relationships, attributes (key, multivalued and derived) and the links between them, and a double line for total participation.",
         &["chen", "basic"],
     ),
     blank(

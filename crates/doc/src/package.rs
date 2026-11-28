@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use crate::raw::{Passthrough, RawAttrs, RawElement};
+use crate::raw::{Passthrough, RawAttrs, RawElement, RawNode};
 
 /// The most parts a document holds in [`crate::Document::parts`]: 50,000, the package cap on entries. A project rule (the native format's global
 /// constraints); checked at the door by [`crate::Document::check_limits`].
@@ -220,7 +220,38 @@ pub struct VsdxHeld {
     pub windows: Option<Arc<RawElement>>,
 }
 
+/// The name DiaCraft states as the application that wrote a file (`docProps/app.xml`, `Application`): the writers of the VSDX format set it, and
+/// [`VsdxHeld::names_diacraft`] and the save into a file read it back.
+pub const DIACRAFT_APPLICATION: &str = "DiaCraft";
+
 impl VsdxHeld {
+    /// The text of the `Application` element of the extended properties the package held: the reader gives it to no field of the model, so it is held with the rest of the part (`props_rest`, under
+    /// `Properties`), whatever prefix the file gave the element. `None` when the package held no such element. Cut to 64 characters, as the read's report is (`ReadReport::application`).
+    #[must_use]
+    pub fn application(&self) -> Option<String> {
+        let (_, kept) = self.props_rest.iter().find(|(name, _)| &**name == "Properties")?;
+        kept.kept.iter().find_map(|placed| match &placed.node {
+            RawNode::Element(e) if e.name.rsplit(':').next() == Some("Application") => {
+                let text: String = e
+                    .children
+                    .iter()
+                    .filter_map(|node| match node {
+                        RawNode::Text(text) => Some(&**text),
+                        _ => None,
+                    })
+                    .collect();
+                Some(text.chars().take(64).collect())
+            }
+            _ => None,
+        })
+    }
+
+    /// Whether the package says DiaCraft wrote it: its `Application` is [`DIACRAFT_APPLICATION`] (white space round it is none), as the extended properties of every file the VSDX writers make say.
+    #[must_use]
+    pub fn names_diacraft(&self) -> bool {
+        self.application().is_some_and(|name| name.trim() == DIACRAFT_APPLICATION)
+    }
+
     /// Whether this holds a windows part and nothing else: no relationship row, no content-type row and no element of a property part. **A model read from a package
     /// never does**: no field says the package's own rows (to the document part and the property parts), so the reader holds them. One that holds a windows part alone
     /// came from no package: its window settings were set in DiaCraft, and the VSDX model writer writes it as a drawing made new, with that windows part.

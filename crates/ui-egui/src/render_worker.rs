@@ -26,7 +26,7 @@ use diacraft_engine::doc::Document;
 use diacraft_engine::guard;
 use diacraft_engine::measure::SharedFonts;
 use diacraft_fonts::FontDb;
-use diacraft_render::{Cancel, Limits, Parallel, Rendered, Renderer, View, default_threads};
+use diacraft_render::{Cancel, Limits, Parallel, Rendered, Renderer, View, WorkedCache, default_threads};
 use egui::ColorImage;
 use web_time::Instant;
 
@@ -79,33 +79,56 @@ pub trait Drawer: Send {
 
 /// The renderer, with the page's paper left clear: the window paints the paper and the grid first, and the picture goes over them
 /// (`canvas/page_drawing.rs`).
-struct RendererDrawer(Renderer);
+///
+/// **It keeps what the frames of a document work out for the cells that hold a formula and no saved value**: a [`WorkedCache`] made for the document of
+/// the job, which the frames of that document share (a pan, a zoom, the rough picture and the full one) and which an edit leaves behind, since an edit makes a new document
+/// and the next job's is not the one the cache is for. A page whose cells all hold a value never puts an answer in it.
+struct RendererDrawer {
+    renderer: Renderer,
+    cache: Option<Arc<WorkedCache>>,
+}
 
 impl RendererDrawer {
     /// A drawer over `renderer`, which draws a frame on the machine's cores less one (`DIACRAFT_THREADS` says otherwise: `diacraft_render::default_threads`).
     /// The frame is the same bytes at any count, and a page of a few shapes is drawn on one thread whatever the count (`Parallel::with_threads`).
     fn new(mut renderer: Renderer) -> RendererDrawer {
         renderer.set_parallel(Parallel::with_threads(default_threads()));
-        RendererDrawer(renderer)
+        RendererDrawer { renderer, cache: None }
+    }
+
+    /// The cache for `doc`: the one the last job's document had, when this job draws that very document, and else a new one for it (the last is let go, and the document
+    /// it held with it).
+    fn cache_for(&mut self, doc: &Arc<Document>) -> Arc<WorkedCache> {
+        match &self.cache {
+            Some(cache) if cache.is_for(doc) => Arc::clone(cache),
+            _ => {
+                let cache = WorkedCache::new(Arc::clone(doc));
+                self.cache = Some(Arc::clone(&cache));
+                cache
+            }
+        }
     }
 }
 
 impl Drawer for RendererDrawer {
     fn draw(&mut self, job: &Job) -> Rendered {
-        self.0.set_limits(job.limits);
-        self.0.set_paper(None);
-        self.0.set_cancel(job.cancel.clone());
+        let cache = self.cache_for(&job.doc);
+        self.renderer.set_worked_cache(Some(cache));
+        self.renderer.set_limits(job.limits);
+        self.renderer.set_paper(None);
+        self.renderer.set_cancel(job.cancel.clone());
         match job.sheet.as_deref() {
             Some((sheet, px_per_inch, color)) => {
-                self.0.set_print_color(*color);
-                self.0.render_sheet(&job.doc, sheet, *px_per_inch)
+                self.renderer.set_print_color(*color);
+                self.renderer.render_sheet(&job.doc, sheet, *px_per_inch)
             }
-            None => self.0.render(&job.doc, job.page, &job.view),
+            None => self.renderer.render(&job.doc, job.page, &job.view),
         }
     }
 
     fn clear_caches(&mut self) {
-        self.0.clear_caches();
+        self.renderer.clear_caches();
+        self.cache = None;
     }
 }
 
@@ -306,6 +329,30 @@ mod tests {
             cancel: None,
             sheet: None,
         }
+    }
+
+    /// What a document's frames work out is kept for the next frame of that very document, and a changed document gets a cache of its own: the cache is never used for a
+    /// document it was not made for, so an edit leaves nothing out of date behind.
+    #[test]
+    fn the_drawer_keeps_one_cache_for_a_document_and_makes_another_for_the_next_document() {
+        let (a, b) = (job(1), job(2));
+        let mut drawer = RendererDrawer::new(Renderer::new());
+        let first = drawer.cache_for(&a.doc);
+        assert!(first.is_for(&a.doc));
+        assert!(Arc::ptr_eq(&first, &drawer.cache_for(&a.doc)), "the same document: the same cache");
+        // A draw of the job gives the renderer the cache of the job's document.
+        drawer.draw(&a);
+        assert!(drawer.renderer.worked_cache().is_some_and(|c| Arc::ptr_eq(c, &first)));
+        // Another document value, equal or not: a cache of its own, and the first is let go (it held the document it was for).
+        let weak = Arc::downgrade(&first);
+        drop(first);
+        drawer.draw(&b);
+        let second = drawer.renderer.worked_cache().cloned().unwrap();
+        assert!(second.is_for(&b.doc) && !second.is_for(&a.doc));
+        assert!(weak.upgrade().is_none(), "the cache of the document before went with it");
+        // Another document replaced this one: nothing is kept for the old.
+        drawer.clear_caches();
+        assert!(drawer.renderer.worked_cache().is_none() && drawer.cache.is_none());
     }
 
     /// The window finds one database and every renderer it starts draws in that one: a shared drawer holds the very `Arc` the faces give (a

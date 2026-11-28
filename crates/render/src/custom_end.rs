@@ -192,7 +192,7 @@ pub(crate) fn build(cx: &Cx<'_, '_>, survey: &Survey, rows_left: usize) -> Resul
         rows = rows.saturating_add(geom.rows);
         // The shape's own look says whether it fills and whether it outlines (a fill pattern or a line pattern of 0 paints none of its sections).
         let no_fill = matches!(Looks::fill(cx, &sheet, None, &who), FillLook::None);
-        let outlined = Looks::line(cx, &sheet, None).is_some();
+        let outlined = Looks::line(cx, &sheet, None, &who).is_some();
         let filled = combined_fill(geom.sections.iter().filter(|s| s.flags.paint(no_fill).fill).map(|s| (&s.fill, s.flags)));
         fill.extend((affine * filled).elements().iter().copied());
         if outlined {

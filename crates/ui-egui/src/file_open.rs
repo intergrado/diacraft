@@ -171,6 +171,9 @@ pub fn refusal_text(name: &str, problem: OpenProblem) -> String {
         }
         OpenProblem::TooBig => format!("{name} is too big to open safely: it holds more than DiaCraft will read."),
         OpenProblem::Damaged => format!("{name} is damaged, so DiaCraft cannot read it."),
+        OpenProblem::NotGranted => {
+            format!("{name} could not be opened: it is outside the folders this window's control channel may read (--automation-read-root).")
+        }
     }
 }
 
@@ -227,9 +230,9 @@ impl DiacraftApp {
         self
     }
 
-    /// Whether there is a dialog to choose a file with, and nothing is being opened or chosen now: whether Open can be used.
+    /// Whether there is a dialog to choose a file with, and nothing is being opened and no file dialog is open now: whether Open can be used.
     pub fn can_pick_file(&self) -> bool {
-        (self.opening.picker.is_some() || self.has_file_host()) && self.opening.job.is_none() && self.opening.pick.is_none()
+        (self.opening.picker.is_some() || self.has_file_host()) && self.opening.job.is_none() && self.file_dialog().is_none()
     }
 
     /// Whether the Open dialog is on the screen (its thread has not answered yet). A caller that waits for a chosen file waits on this, then on
@@ -250,6 +253,10 @@ impl DiacraftApp {
 
     /// Shows the open dialog on a thread of its own, and opens what it chooses. The File view closes when a file is chosen.
     pub fn pick_and_open(&mut self, ctx: &Context) {
+        // One file dialog at a time (`file_dialog.rs`): a key or a click that comes while another is open says so and starts nothing.
+        if self.opening.job.is_none() && self.refuse_while_a_file_dialog_is_open() {
+            return;
+        }
         // With a host (the browser) the page chooses the file, and answers later with a path in the engine's memory (`file_host.rs`).
         if self.has_file_host() {
             if self.can_pick_file() {

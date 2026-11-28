@@ -43,8 +43,9 @@ fn the_installed_fonts_have_no_icon_font() {
 fn no_optional_faces_still_means_only_the_two_bundled_text_typefaces() {
     let definitions = font_definitions_with(&FontDb::empty());
     assert_eq!(definitions.font_data.keys().map(String::as_str).collect::<Vec<_>>(), ["Hack", "Ubuntu-Light"]);
-    assert_eq!(definitions.families.get(&FontFamily::Proportional), Some(&vec!["Ubuntu-Light".to_owned()]));
+    assert_eq!(definitions.families.get(&FontFamily::Proportional), Some(&vec!["Ubuntu-Light".to_owned(), "Hack".to_owned()]));
     assert_eq!(definitions.families.get(&FontFamily::Monospace), Some(&vec!["Hack".to_owned(), "Ubuntu-Light".to_owned()]));
+    assert_eq!(definitions.families.get(&strong_family()), Some(&vec!["Ubuntu-Light".to_owned(), "Hack".to_owned()]));
 }
 
 /// The behaviour, not only the list: no logo can be drawn, and the text the window shows still can.
@@ -88,10 +89,10 @@ fn open_interface_faces_have_a_fixed_preference_and_real_bold_chain() {
         add(&mut db, family, "Regular");
         add(&mut db, family, "Bold");
         let definitions = font_definitions_with(&db);
-        assert_eq!(proportional(&definitions), [format!("{family}-UI-Regular"), "Ubuntu-Light".to_owned()]);
+        assert_eq!(proportional(&definitions), [format!("{family}-UI-Regular"), "Ubuntu-Light".to_owned(), "Hack".to_owned()]);
         assert_eq!(
             definitions.families.get(&strong_family()).unwrap(),
-            &[format!("{family}-UI-Bold"), format!("{family}-UI-Regular"), "Ubuntu-Light".to_owned()]
+            &[format!("{family}-UI-Bold"), format!("{family}-UI-Regular"), "Ubuntu-Light".to_owned(), "Hack".to_owned()]
         );
         assert_eq!(definitions.families.get(&FontFamily::Monospace), font_definitions().families.get(&FontFamily::Monospace));
     }

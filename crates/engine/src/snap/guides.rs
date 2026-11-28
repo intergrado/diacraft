@@ -104,7 +104,7 @@ pub fn add_guide(doc: &mut Document, page: u32, axis: Axis, at: f64, above: u32)
         return Err(Problem::failed(format!("a page holds at most {} shapes", diacraft_doc::MAX_SHAPES_PER_PAGE)));
     }
     let id = highest.max(above).checked_add(1).ok_or_else(|| Problem::failed("no shape ids are left on the page"))?;
-    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.push(Arc::new(guide_shape(id, axis, drawing)));
+    page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.push_shape(Arc::new(guide_shape(id, axis, drawing)));
     Ok(GuideInfo { id, axis, at })
 }
 
@@ -153,7 +153,7 @@ pub fn delete_guide(doc: &mut Document, page: u32, id: u32) -> Result<(), Proble
         ));
     }
     let Some(index) = path.path.first().and_then(|i| usize::try_from(*i).ok()) else { return Err(Problem::failed("the guide went away")) };
-    let removed = page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.remove(index);
+    let removed = page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.remove_shape(index);
     removed.map(|_| ()).ok_or_else(|| Problem::failed("the guide went away"))
 }
 

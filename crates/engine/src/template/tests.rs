@@ -403,3 +403,88 @@ fn what_a_list_opens_is_its_ids_or_the_default_when_it_names_stencils_and_none_c
     assert!(set_stencil_names(&mut doc, &["flowchart", "basic"]));
     assert_eq!(stencils_opened_by(&doc), ["flowchart", "basic"]);
 }
+
+// ---- the list of a drawing -----------------------------------------------------------------------------------------
+
+#[test]
+fn a_list_that_named_more_than_is_looked_at_says_so() {
+    assert!(!parse("basic;flowchart").cut);
+    assert!(!parse("").cut);
+    assert!(parse(&"x;".repeat(MAX_NAMES + 1)).cut, "an entry past the 64th says something");
+    assert!(!parse(&"x;".repeat(MAX_NAMES)).cut, "the 64 are the 64, and what follows them is nothing");
+    assert!(!parse(&format!("{}{}", "x;".repeat(MAX_NAMES), ";; ;")).cut, "blank entries after them are nothing");
+    assert!(parse(&format!("{}basic", "x;".repeat(MAX_NAMES))).cut, "a name after them is cut");
+    // Past the first 4 KiB, the text is cut, and a cut inside a multi-byte letter is dropped and not split.
+    assert!(parse(&format!("{};basic", "é".repeat(2_100))).cut);
+    assert!(!parse(&format!("{};basic", "é".repeat(2_000))).cut);
+    // Half a million entries are one cut, and nothing walks them.
+    assert!(parse(&"nonsense;".repeat(500_000)).cut);
+}
+
+/// A drawing with masters of the stencils `ids` made as a drop makes them: the masters are the built-in ones, with their fixed `BaseID`.
+fn drawing_with_masters_of(ids: &[&str]) -> Document {
+    let mut doc = Document::new_blank();
+    for id in ids {
+        let spec = stencil::find_master(id).unwrap_or_else(|| panic!("no master {id}"));
+        stencil::ensure_master(&mut doc, spec).unwrap();
+    }
+    doc
+}
+
+#[test]
+fn the_stencils_the_masters_of_a_drawing_came_from_are_found_by_their_fixed_ids_in_the_order_of_the_catalogue() {
+    assert!(stencils_of_masters(&Document::new_blank()).is_empty());
+    assert_eq!(stencils_of_masters(&drawing_with_masters_of(&["network.router"])), ["network"]);
+    // Whatever the order the masters came in, the answer is the catalogue's order (Basic Flowchart before Computers and Devices), each stencil once.
+    let doc = drawing_with_masters_of(&["computers.server", "network.router", "network.switch", "process"]);
+    assert_eq!(stencils_of_masters(&doc), ["flowchart", "network", "computers"]);
+    // A master of the drawing's own, or of a stencil file, names none; so does one whose ids are not a built-in master's.
+    let mut doc = Document::new_blank();
+    let mut own = diacraft_doc::Master { id: 1, name: Some("Mine".into()), ..diacraft_doc::Master::default() };
+    own.unique_id = Some(std::sync::Arc::from("{00000000-0000-4000-8000-000000000001}"));
+    own.raw.push("BaseID", &"x".repeat(10_000));
+    doc.add_master(own).unwrap();
+    assert!(stencils_of_masters(&doc).is_empty());
+}
+
+#[test]
+fn a_master_is_known_by_its_unique_id_when_its_base_id_is_not_there_and_never_by_a_name() {
+    let mut doc = drawing_with_masters_of(&["network.router"]);
+    let mut named_only =
+        diacraft_doc::Master { id: 90, name: Some("Router".into()), name_u: Some("Router".into()), ..diacraft_doc::Master::default() };
+    named_only.unique_id = None;
+    doc.add_master(named_only).unwrap();
+    assert_eq!(stencils_of_masters(&doc), ["network"], "the master that holds the ids says it, the one with a name only says nothing");
+    let mut by_unique = Document::new_blank();
+    let guid = stencil::find_master("computers.server").map(|m| m.guid());
+    let Some(guid) = guid else { return };
+    let mut m = diacraft_doc::Master { id: 1, ..diacraft_doc::Master::default() };
+    m.unique_id = Some(std::sync::Arc::from(guid.to_ascii_lowercase().as_str()));
+    by_unique.add_master(m).unwrap();
+    assert_eq!(stencils_of_masters(&by_unique), ["computers"], "a `UniqueID` alone says it, in any case");
+}
+
+#[test]
+fn a_drawing_opens_the_stencils_its_list_names_or_with_none_the_defaults_and_those_its_masters_came_from() {
+    let default = vec!["basic", "flowchart", "decorative", "arrows", "gane-sarson", "cross-functional", "orgchart"];
+    // No list, no masters: the stencils a new drawing has, and the answer does not say it was a list.
+    let found = stencils_of_drawing(&Document::new_blank());
+    assert_eq!((found.ids, found.ignored, found.cut, found.listed), (default.clone(), 0, false, false));
+    // No list, masters of the network stencil: the defaults and that.
+    let found = stencils_of_drawing(&drawing_with_masters_of(&["network.router"]));
+    let mut with_network = default.clone();
+    with_network.push("network");
+    assert_eq!((found.ids, found.listed), (with_network.clone(), false));
+    // A list is what is opened, whatever the masters are.
+    let mut doc = drawing_with_masters_of(&["network.router"]);
+    assert!(set_stencil_names(&mut doc, &["flowchart", "basic"]));
+    let found = stencils_of_drawing(&doc);
+    assert_eq!((found.ids, found.listed), (vec!["flowchart", "basic"], true));
+    // An empty list opens none, as a template's does.
+    assert!(doc.set_diacraft_child(STENCILS_CHILD, Some(&[("open", "")])));
+    assert_eq!(stencils_of_drawing(&doc).ids, Vec::<&str>::new());
+    // A list of names that cannot be opened is no list: the defaults and the masters', and the names are counted.
+    assert!(doc.set_diacraft_child(STENCILS_CHILD, Some(&[("open", "/etc/passwd;file-1")])));
+    let found = stencils_of_drawing(&doc);
+    assert_eq!((found.ids, found.ignored, found.listed), (with_network, 2, false));
+}

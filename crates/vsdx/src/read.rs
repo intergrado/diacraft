@@ -41,7 +41,7 @@ use crate::reader::{Parsed, Reader, RelMap};
 use crate::report::{DiacraftPart, ReadReport, Variant};
 use crate::shape::PartState;
 use crate::sheet::{SheetTally, Took, style_link};
-use crate::theme::read_theme;
+use crate::theme::{CONVENTIONAL_THEME, CT_THEME, read_theme};
 use crate::unheld;
 
 const VIS: &str = "http://schemas.microsoft.com/visio/2010/relationships/"; // brand-ok: a URI the format defines
@@ -229,6 +229,15 @@ fn read_with_parts(
 
 /// The most threads that work ahead on the parts of a read: the read builds the model on its own thread and is the one that limits the speed, so a few threads keep ahead of it (`ahead.rs`).
 const AHEAD_THREADS_MOST: usize = 3;
+
+/// How a theme part was found: by a relationship of the document part, or, where the document part has no theme relationship at all, by its content type or by
+/// the place themes have (`Reader::read_themes`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ThemeFound {
+    Relationship,
+    ContentType,
+    Place,
+}
 
 impl<'p> Reader<'p> {
     /// The package's own warnings, as classes (`opc` words them; this counts them).
@@ -424,7 +433,7 @@ impl<'p> Reader<'p> {
         self.style_ids = doc.styles.iter().map(|s| s.id).collect();
         self.read_masters(&doc_rels, &mut doc)?;
         self.read_pages(&doc_rels, &mut doc)?;
-        self.read_themes(&doc_rels, &mut doc);
+        self.read_themes(&doc_name, &doc_rels, &mut doc);
         self.read_comments(&doc_rels, &mut doc)?;
         self.read_properties(&root_rels, &mut doc)?;
         self.read_windows(&doc_rels)?;
@@ -1228,65 +1237,134 @@ impl<'p> Reader<'p> {
 
     // ----------------------------------------------------------------------------------------------- themes and properties
 
-    fn read_themes(&mut self, doc_rels: &diacraft_opc::Rels, doc: &mut Document) {
+    /// The themes of the drawing: the parts the document part's theme relationships lead to. **A document part with no theme relationship at all**
+    /// has the theme parts the package lists by content type instead, in the order of their names, and failing that the part at the conventional place
+    /// ([`CONVENTIONAL_THEME`]): a file may list the part in its content types and leave the relationship out, and its drawing is themed all the same
+    /// (R26 once left such a part an unknown part). A part found so is taken for a theme only if it reads as one (an `a:theme` root): any other part is
+    /// left as it was, an unknown part held as the bytes it is. The report says each one found so (`theme_without_relationship`).
+    fn read_themes(&mut self, doc_name: &str, doc_rels: &diacraft_opc::Rels, doc: &mut Document) {
         let mut themes: Vec<Arc<Theme>> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         let mut bytes_kept = 0u64;
-        for rel in doc_rels.items.iter().filter(|r| r.ty == rel_type(OD, "theme")) {
-            let Some(target) = &rel.target else { continue };
-            if !seen.insert(diacraft_opc::name::fold(target)) {
-                continue;
-            }
-            if themes.len() >= self.limits.max_themes {
-                self.notes.warn("themes_over_budget", || format!("more than {} theme parts: the rest are not read", self.limits.max_themes));
+        let ty = rel_type(OD, "theme");
+        let mut any_relationship = false;
+        for target in doc_rels.items.iter().filter(|r| r.ty == ty).filter_map(|r| r.target.as_deref()) {
+            any_relationship = true;
+            if !self.take_theme(target, ThemeFound::Relationship, &mut seen, &mut themes, &mut bytes_kept) {
                 break;
             }
-            let Some(bytes) = self.bytes_of(target) else {
-                self.notes.warn("part_missing", || format!("the theme part {} is not in the package", target.escape_debug()));
-                continue;
-            };
-            let size = bytes.len() as u64;
-            if bytes_kept.saturating_add(size) > self.limits.max_theme_bytes {
-                self.notes.warn("themes_over_budget", || {
-                    format!("the theme parts would pass {} bytes: {} is not read", self.limits.max_theme_bytes, target.escape_debug())
-                });
-                continue;
+        }
+        if !any_relationship {
+            for (looked_at, (target, found)) in self.themes_without_relationship(doc_name).into_iter().enumerate() {
+                // A part that is no theme is looked at all the same: only so many are, as only so many themes are read.
+                if looked_at >= self.limits.max_themes {
+                    self.notes.warn("themes_over_budget", || {
+                        format!("more than {} parts that may be themes: the rest are not looked at", self.limits.max_themes)
+                    });
+                    break;
+                }
+                if !self.take_theme(&target, found, &mut seen, &mut themes, &mut bytes_kept) {
+                    break;
+                }
             }
-            // The part's bytes are kept, and what is read from them is lists of a few entries: charged at three times the part, at the least a few kilobytes. The tree
-            // of the parse is bounded by what the pool holds beside that, and is let go before anything else is made.
-            let Some(xml) = self.begin_small_part(bytes, size.saturating_mul(3).saturating_add(4096)) else {
-                self.notes.warn("themes_over_budget", || format!("the memory is spent: the theme part {} is not read", target.escape_debug()));
-                continue;
-            };
-            bytes_kept += size;
-            let read = read_theme(target, bytes, &xml);
-            if let Some(class) = read.problem {
-                self.notes.warn("theme_unreadable", || {
-                    format!("nothing could be read from the theme part {} ({class}); its bytes are kept", target.escape_debug())
-                });
-            }
-            if read.unread > 0 {
-                self.notes.warn("theme_entry_unreadable", || {
-                    format!(
-                        "{} entries of the theme part {} could not be read and are left unread; its bytes are kept",
-                        read.unread,
-                        target.escape_debug()
-                    )
-                });
-            }
-            if read.capped > 0 {
-                self.notes.warn("theme_list_capped", || {
-                    format!(
-                        "{} lists of the theme part {} are longer than the reader keeps; the rest are left unread",
-                        read.capped,
-                        target.escape_debug()
-                    )
-                });
-            }
-            themes.push(Arc::new(read.theme));
         }
         self.notes.report.stats.themes = themes.len();
         doc.themes = SharedVec::from_vec(themes);
+    }
+
+    /// The parts of the package that are theme parts with no relationship to say so: those whose content type is the theme's, by the order of their names, else the
+    /// part at the conventional place if the package has one. Names only: nothing is read of a part here.
+    fn themes_without_relationship(&self, doc_name: &str) -> Vec<(String, ThemeFound)> {
+        let pkg: &'p Package = self.pkg;
+        let mut by_type: Vec<String> = pkg
+            .parts()
+            .filter(|name| !diacraft_opc::name::is_rels_part(name) && pkg.content_type(name).is_some_and(|ct| ct.eq_ignore_ascii_case(CT_THEME)))
+            .map(str::to_owned)
+            .collect();
+        if !by_type.is_empty() {
+            by_type.sort_by_cached_key(|name| diacraft_opc::name::fold(name));
+            return by_type.into_iter().map(|name| (name, ThemeFound::ContentType)).collect();
+        }
+        match diacraft_opc::name::resolve(doc_name, CONVENTIONAL_THEME) {
+            Some(place) if pkg.part(&place).is_some() => vec![(place, ThemeFound::Place)],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Reads the theme part `target` into `themes`. `false` when the reader keeps no more themes, and the loop ends.
+    fn take_theme(
+        &mut self,
+        target: &str,
+        found: ThemeFound,
+        seen: &mut HashSet<String>,
+        themes: &mut Vec<Arc<Theme>>,
+        bytes_kept: &mut u64,
+    ) -> bool {
+        if !seen.insert(diacraft_opc::name::fold(target)) {
+            return true;
+        }
+        if themes.len() >= self.limits.max_themes {
+            self.notes.warn("themes_over_budget", || format!("more than {} theme parts: the rest are not read", self.limits.max_themes));
+            return false;
+        }
+        let Some(bytes) = self.bytes_of(target) else {
+            self.notes.warn("part_missing", || format!("the theme part {} is not in the package", target.escape_debug()));
+            return true;
+        };
+        let size = bytes.len() as u64;
+        if bytes_kept.saturating_add(size) > self.limits.max_theme_bytes {
+            self.notes.warn("themes_over_budget", || {
+                format!("the theme parts would pass {} bytes: {} is not read", self.limits.max_theme_bytes, target.escape_debug())
+            });
+            return true;
+        }
+        // The part's bytes are kept, and what is read from them is lists of a few entries: charged at three times the part, at the least a few kilobytes. The tree
+        // of the parse is bounded by what the pool holds beside that, and is let go before anything else is made.
+        let kept = size.saturating_mul(3).saturating_add(4096);
+        let Some(xml) = self.begin_small_part(bytes, kept) else {
+            self.notes.warn("themes_over_budget", || format!("the memory is spent: the theme part {} is not read", target.escape_debug()));
+            return true;
+        };
+        // The part is looked at whether or not it is a theme, and its bytes count against the budget of theme bytes: a package of parts that only say they are themes
+        // costs a parse of what the budget allows, as the same parts behind relationships would.
+        *bytes_kept += size;
+        let read = read_theme(target, bytes, &xml);
+        if found != ThemeFound::Relationship && read.problem.is_some() {
+            // Not a theme: a part nothing says is one, and it is not taken for one. It stays an unknown part, and its charge is given back.
+            self.give_bytes(price::with_margin(kept));
+            return true;
+        }
+        if let Some(class) = read.problem {
+            self.notes.warn("theme_unreadable", || {
+                format!("nothing could be read from the theme part {} ({class}); its bytes are kept", target.escape_debug())
+            });
+        }
+        if read.unread > 0 {
+            self.notes.warn("theme_entry_unreadable", || {
+                format!(
+                    "{} entries of the theme part {} could not be read and are left unread; its bytes are kept",
+                    read.unread,
+                    target.escape_debug()
+                )
+            });
+        }
+        if read.capped > 0 {
+            self.notes.warn("theme_list_capped", || {
+                format!(
+                    "{} lists of the theme part {} are longer than the reader keeps; the rest are left unread",
+                    read.capped,
+                    target.escape_debug()
+                )
+            });
+        }
+        if found != ThemeFound::Relationship {
+            self.notes.warn("theme_without_relationship", || {
+                let how = if found == ThemeFound::Place { "the place themes have" } else { "its content type" };
+                format!("the document part has no relationship to a theme part: {} is read as a theme, found by {how}", target.escape_debug())
+            });
+        }
+        themes.push(Arc::new(read.theme));
+        true
     }
 
     /// `docProps/core.xml` and `app.xml`, found by the package's relationships (never by name), and `custom.xml`. What a field of `DocProps` reads is the

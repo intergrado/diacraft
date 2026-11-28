@@ -30,7 +30,7 @@ pub const DESCRIPTION: &str = "Draw and edit diagrams, and open and save VSDX, O
 /// The site of the project, which the entry links.
 pub const WEBSITE: &str = "https://diacraft.dev";
 
-/// The most of a sums file that is read, in bytes: a release has twenty lines of some 100 bytes.
+/// The most of a sums file that is read, in bytes: a release has twenty-two lines of some 100 bytes.
 pub const MAX_SUMS: usize = 64 * 1024;
 
 /// The most lines of a sums file.

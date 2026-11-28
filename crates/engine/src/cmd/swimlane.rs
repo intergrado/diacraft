@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::params::{optional_number, optional_whole, page_for, required_ids, units_per_inch};
 use super::{CommandSpec, has_document, optional_text, required_u32};
 use crate::Session;
-use crate::draw::container::swimlane::{self, Create, DEFAULT_THICKNESS_INCHES, Inserted, MAX_NEW, Place, Sizes};
+use crate::draw::container::swimlane::{self, Create, DEFAULT_THICKNESS_INCHES, Inserted, MAX_NEW, POOL_LANE_LABEL, Place, PoolCreate, Sizes};
 use crate::draw::container::{Dir, MIN_INCHES};
 use crate::draw::{self, Problem};
 use crate::error::{Result, bad, failed};
@@ -112,13 +112,7 @@ fn page_of(s: &Session, p: &Value, ids: &[u32], cmd: &str) -> Result<u32> {
     match (named, ids.is_empty()) {
         (Some(page), _) => Ok(page),
         (None, false) => page_for(doc, None, ids, cmd),
-        (None, true) => doc
-            .pages
-            .iter()
-            .find(|pg| !pg.background)
-            .or_else(|| doc.pages.iter().next())
-            .map(|pg| pg.id)
-            .ok_or_else(|| bad(cmd, "the document has no pages")),
+        (None, true) => doc.first_foreground_page().map(|pg| pg.id).ok_or_else(|| bad(cmd, "the document has no pages")),
     }
 }
 
@@ -149,13 +143,40 @@ fn dir_word(dir: Dir) -> &'static str {
     }
 }
 
-/// A new part follows the page's theme and joins the active layers, and the page grows to take it in when its Auto Size is on, all in the command's own undo step.
+/// A new part follows the page's theme and joins the active layers, and the page grows to take it in when its Auto Size is on, all in the command's own undo step. **The page grows for the
+/// whole structure the part is in** ([`grow_for_structure`]), since a lane put in the list makes the lanes after it move.
 fn settle_new(doc: &mut diacraft_doc::Document, page: u32, ids: &[u32]) -> std::result::Result<(), Problem> {
     for id in ids {
         crate::theme::follow_page_theme(doc, page, *id)?;
         draw::layers::join_active(doc, page, *id)?;
     }
-    draw::fit_page(doc, page, ids).map(|_| ())
+    grow_for_structure(doc, page, ids)
+}
+
+/// Asks Auto Size (`draw::fit_page`: whole sheets of the printer paper) to take in the shapes `ids` **and the frame and the lists of the structure each is a part of**
+/// (ours, issue 4 of the demo video). Looks at the shapes a command named or made, and no others; a lane inserted before another, a lane made
+/// thicker and a structure turned over its diagonal put the lanes after it where there was none, and the lane that is pushed past the edge is not the one that was made. A list is the box of its
+/// lanes and the frame the box of its lists, so these two take in the lane that lies furthest. With Auto Size off nothing grows, as for any other shape (the page is the person's to size).
+fn grow_for_structure(doc: &mut diacraft_doc::Document, page: u32, ids: &[u32]) -> std::result::Result<(), Problem> {
+    let mut look: Vec<u32> = ids.to_vec();
+    if !ids.is_empty() {
+        // The structures are looked up to take in more than the parts made. A page whose structures cannot all be read (a hostile file's list of more members than are laid out) is grown for the parts
+        // made alone, as a growth that cannot be made is dropped and the command goes on (`draw::fit_page`).
+        for st in swimlane::describe(doc, page).unwrap_or_default() {
+            let part_of = |id: &u32| {
+                st.frame == Some(*id)
+                    || st.lane_list == *id
+                    || st.phase_list == Some(*id)
+                    || st.lanes.iter().chain(st.phases.iter()).any(|part| part.id == *id)
+            };
+            if ids.iter().any(part_of) {
+                look.extend(st.frame.into_iter().chain([st.lane_list]).chain(st.phase_list));
+            }
+        }
+    }
+    look.sort_unstable();
+    look.dedup();
+    draw::fit_page(doc, page, &look).map(|_| ())
 }
 
 fn whole_in(p: &Value, key: &str, cmd: &str, default: usize, most: usize) -> Result<usize> {
@@ -349,6 +370,9 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     s.edit_if("Resize swimlane", |doc| {
         let changed =
             swimlane::resize(doc, page, id, Sizes { size: size.map(|v| v * k), length: length.map(|v| v * k) }).map_err(|e| e.into_engine(ID))?;
+        if changed {
+            grow_for_structure(doc, page, &[id]).map_err(|e| e.into_engine(ID))?;
+        }
         Ok((json!({ "page": page, "id": id, "changed": changed, "least": MIN_INCHES }), changed))
     })
 }
@@ -371,6 +395,9 @@ fn orientation(s: &mut Session, p: &Value) -> Result<Value> {
     };
     s.edit_if("Swimlane orientation", |doc| {
         let changed = swimlane::set_orientation(doc, page, id, want).map_err(|e| e.into_engine(ID))?;
+        if changed {
+            grow_for_structure(doc, page, &[id]).map_err(|e| e.into_engine(ID))?;
+        }
         Ok((json!({ "page": page, "orientation": word, "changed": changed }), changed))
     })
 }
@@ -449,6 +476,72 @@ pub(super) fn drop_part(s: &mut Session, master: &str, page: u32, x: f64, y: f64
     })?;
     s.note_id(page, done.1.iter().copied().max().unwrap_or(0));
     Ok(Some(dropped_json(s, page, done.0, "Separator")))
+}
+
+/// A drop of BPMN's Pool at the paper-inch point (`x`, `y`) of page `page`, the master being `width` by `height` drawing units, an inch of the master's measure being `inch` drawing units
+/// (`shape.drop`, ours: puts a pool on the swimlane structure): **a structure is made**, a frame with the pool's name in a strip on its left and one lane, centred on the
+/// point, whatever the page holds. → `{id, master: null, name, page, width, height}` with the frame's `ID`.
+pub(super) fn drop_pool(s: &mut Session, page: u32, (x, y): (f64, f64), (width, height): (f64, f64), inch: f64) -> Result<Value> {
+    const ID: &str = "shape.drop";
+    // The master's size is in drawing units, as every master's is (a drop gives the shape that size): on a page drawn at 2 to 1 the pool is half the paper inches.
+    let k = s.document().map_or(1.0, |doc| units_per_inch(doc, page));
+    let above = s.id_floor(page);
+    let made = s.edit("Drop pool", |doc| {
+        let made = swimlane::create_pool(
+            doc,
+            page,
+            PoolCreate {
+                left: x * k - width / 2.0,
+                top: y * k + height / 2.0,
+                width,
+                height,
+                inch,
+                name: "Pool",
+                lane_label: POOL_LANE_LABEL,
+                above,
+            },
+        )
+        .map_err(|e| e.into_engine(ID))?;
+        let mut all = vec![made.frame, made.lane_list];
+        all.extend(&made.lanes);
+        settle_new(doc, page, &all).map_err(|e| e.into_engine(ID))?;
+        Ok(made)
+    })?;
+    let highest = made.lanes.iter().copied().chain([made.frame, made.lane_list]).max().unwrap_or(0);
+    s.note_id(page, highest);
+    Ok(json!({ "id": made.frame, "master": Value::Null, "name": "Pool", "page": page, "width": width / k, "height": height / k }))
+}
+
+/// A drop of BPMN's Lane at the paper-inch point (`x`, `y`): **put into the pool under the point**, as puts a Swimlane into a structure: before the lane it is dropped on when the
+/// point is in its first half and after it when it is in its second, a new lane as thick as that one. **Anywhere else it is no part of a structure** (`None`: the caller drops the master, a
+/// shape of the lane's outline), and so it is over a cross-functional flowchart that is no pool.
+pub(super) fn drop_lane(s: &mut Session, page: u32, x: f64, y: f64) -> Result<Option<Value>> {
+    const ID: &str = "shape.drop";
+    let found = {
+        let doc = s.document().ok_or_else(|| failed(ID, "no document open"))?;
+        swimlane::describe(doc, page).map_err(|e| e.into_engine(ID))?
+    };
+    let Some(here) = found.iter().find(|st| st.pool && within(&st.rect, x, y)) else { return Ok(None) };
+    let above = s.id_floor(page);
+    let under = here.lanes.iter().find(|l| within(&l.rect, x, y));
+    let (target, place) = match under {
+        Some(lane) => {
+            let [x0, y0, x1, y1] = lane.rect.unwrap_or([0.0; 4]);
+            let second = match here.dir {
+                Dir::Down => y < (y0 + y1) / 2.0,
+                Dir::Across => x > (x0 + x1) / 2.0,
+            };
+            (Some(lane.id), if second { Place::After } else { Place::Before })
+        }
+        None => (Some(here.lane_list), Place::After),
+    };
+    let done = s.edit("Drop lane", |doc| {
+        let done = swimlane::insert_lane(doc, page, target, place, POOL_LANE_LABEL, above).map_err(|e| e.into_engine(ID))?;
+        settle_new(doc, page, &[done.id]).map_err(|e| e.into_engine(ID))?;
+        Ok(done.id)
+    })?;
+    s.note_id(page, done);
+    Ok(Some(dropped_json(s, page, done, "Lane")))
 }
 
 /// The answer of a drop that inserted the part `id`: its box's size as the drop of a master tells it.

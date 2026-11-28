@@ -5,6 +5,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![forbid(unsafe_code)]
 
+mod alt_text;
 mod hostile;
+mod line_end_fill;
 mod support;
 mod svg;

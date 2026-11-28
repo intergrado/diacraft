@@ -231,7 +231,8 @@ pub(super) struct Page<'a> {
 pub(super) fn typed_container(reader: &Reader<'_>, sheet: &SheetRef) -> Option<&'static str> {
     let addr = CellAddr::in_row("User", None, RowKey::name("msvStructureType"), "Value");
     let found = reader.resolver().resolve(sheet, &addr)?;
-    let text = found.value.cell.and_then(|c| c.value.as_ref())?.text().trim().to_owned();
+    // A cell that holds a formula and no saved value is what the formula works out to, as the picture reads it.
+    let text = reader.worked().text_of(sheet, &addr, &found)?.trim().to_owned();
     match text.as_str() {
         "Container" => Some("Container"),
         "List" => Some("List"),

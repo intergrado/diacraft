@@ -1,6 +1,7 @@
 //! The scripts that make the downloads (`packaging/`): what a download is named after, and what they refuse. The programs here are not programs: each is the
 //! first bytes of a Linux or a Windows one, which is all the script reads to say what CPU they are for.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -23,6 +24,28 @@ pub(crate) fn pe(machine: u16) -> Vec<u8> {
     bytes[0x80..0x84].copy_from_slice(b"PE\0\0");
     bytes[0x84..0x86].copy_from_slice(&machine.to_le_bytes());
     bytes
+}
+
+/// A program of CPU `machine` (0x3e is x86-64, 0xb7 is AArch64) for the package. `make-deb.sh` and `make-rpm.sh` strip a program of the CPU it runs on with the machine's `strip`, which
+/// reads only a real program: so for this machine's own CPU it is a copy of `true`, a real and small one, and for the other CPU the first bytes of one, which the script
+/// leaves as it is, since this machine's `strip` cannot read it (a runner with `binutils` found this out; a machine without `strip` did not).
+pub(crate) fn program(machine: u8) -> Vec<u8> {
+    let own = match std::env::consts::ARCH {
+        "x86_64" => 0x3e,
+        "aarch64" => 0xb7,
+        _ => 0,
+    };
+    if machine == own {
+        for path in ["/bin/true", "/usr/bin/true"] {
+            if let Ok(bytes) = std::fs::read(path)
+                && bytes.starts_with(b"\x7fELF")
+                && bytes.get(18) == Some(&machine)
+            {
+                return bytes;
+            }
+        }
+    }
+    elf(machine)
 }
 
 /// Runs `packaging/package.sh PLATFORM dev-test OUT BIN` and gives what it printed. A plain `PATH`: a machine's own `od` or `tar` ahead of the system's is not what
@@ -56,6 +79,27 @@ pub(crate) fn names(dir: &Path) -> Vec<String> {
 pub(crate) fn programs(dir: &TempDir, program: &[u8], cli: &[u8], exe: &str) {
     dir.write_bytes(&format!("bin/diacraft{exe}"), program);
     dir.write_bytes(&format!("bin/diacraft-cli{exe}"), cli);
+}
+
+/// Writes the script `text` to `rel` under the directory and makes it a program.
+pub(crate) fn write_script(dir: &TempDir, rel: &str, text: &str) {
+    dir.write(rel, text);
+    std::fs::set_permissions(dir.path().join(rel), std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A command line that writes completions and manual pages as the one of does (`completions SHELL --program NAME`, `man --list`, `man PAGE`), for the tests of the .deb and the
+/// .rpm, which hand it to the script as `EXTRAS_CLI`: the real one is a program of the build that has those commands, and a program here is no program (the start of one) or a copy
+/// of `true`, which the script cannot ask, so that what a test says of the completions does not depend on the machine's CPU or on what it can run. `pages` is what `man --list`
+/// prints, as `printf` reads it (`diacraft-cli\ndiacraft\n`).
+pub(crate) fn stand_in_cli(dir: &TempDir, pages: &str) -> String {
+    write_script(
+        dir,
+        "extras/cli",
+        &format!(
+            "#!/bin/sh\ncase \"$1\" in\ncompletions) echo \"# $2 completions of $4\" ;;\nman) if [ \"$2\" = --list ]; then printf '{pages}'; else echo \".TH $2 1\"; fi ;;\n*) exit 2 ;;\nesac\n"
+        ),
+    );
+    dir.path().join("extras/cli").to_str().unwrap().to_owned()
 }
 
 #[test]

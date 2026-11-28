@@ -3,7 +3,8 @@
 //! A qualifier sets the reference context of the one call or reference right after it: `Sheet.12!PinX`, `Door!Width`,
 //! `Pages[Site-2]!Sheet.9!EndY`, `LISTSHEETREF()!Width`, `ThePage!User.Origin`, `TheDoc!User.Count`, `Styles!Callout!LineWeight`.
 //! A path is a cell directly under the sheet, or a section, a row and a cell (`Scratch.B3`, `Char.Size[2]`, `Geometry2.X4`,
-//! `Prop.Cost.Label`), with the row numbers.
+//! `Prop.Cost.Label`), with the row numbers. **A cell directly under the sheet that the catalogue lists is named in any letter case** (`WIDTH` reads
+//! the cell `Width`: the project's test PC showed the reference application do so); a row's name matches in any case too.
 //!
 //! **A reference outside a formula**: [`cell_address`] reads the text of one reference with no sheet before it, by the formula parser and
 //! the same mapping of its path, and [`reference_name`] is its inverse, so that a command names a cell as a formula does and gives back the name it was
@@ -14,8 +15,8 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use diacraft_doc::{
-    CellAddr, Keying, Lookup, MAX_NAME_BYTES, Owner, RowKey, SECTION_SPELLINGS, SectionKey, ShapeRef, SheetRef, cell_info, ix_to_row_number, keying,
-    listed_cells, row_number_to_ix, section_spelling,
+    CellAddr, Keying, Lookup, MAX_NAME_BYTES, Owner, RowKey, SECTION_SPELLINGS, SectionKey, ShapeRef, SheetRef, cell_info, direct_cell_spelling,
+    ix_to_row_number, keying, listed_cells, row_number_to_ix, section_spelling,
 };
 use diacraft_formula::{CellRef, Expr, Index, ParseError, ParseErrorKind, Qualifier, Segment};
 
@@ -75,7 +76,13 @@ fn read_path(path: &[Segment]) -> Result<CellAddr, RefError> {
             if one.index.is_some() {
                 return Err(RefError::CellTakesNoRow);
             }
-            Ok(CellAddr::direct(&one.name))
+            // A cell the catalogue lists is named in any letter case: `WIDTH` is `Width` (observed in the reference application). Any other name is as spelled. A name the model
+            // knows (the common case) is not looked for again: only one it holds an allocation of can be a listed cell in another case.
+            let addr = CellAddr::direct(&one.name);
+            match addr.cell.is_allocated().then(|| direct_cell_spelling(&one.name)).flatten() {
+                Some(listed) => Ok(CellAddr::direct(listed)),
+                None => Ok(addr),
+            }
         }
         [section, rest @ ..] => {
             if section.index.is_some() {

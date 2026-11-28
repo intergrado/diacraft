@@ -113,6 +113,18 @@ pub struct TextRun<'a> {
     pub to_paper: Affine,
 }
 
+/// What a shape says of itself to a reader who cannot see it: its alt text, as `diacraft_doc::alt_text::read` finds it (its own, or its master shape's), and its name.
+/// The texts are as the document holds them and may be empty or white space, and a target that writes them leaves out what holds nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShapeLabel<'a> {
+    /// The alt text's title.
+    pub title: &'a str,
+    /// The alt text's description.
+    pub description: &'a str,
+    /// The shape's `Name`, else its `NameU`, else empty.
+    pub name: &'a str,
+}
+
 /// What a page is drawn on. See the module documentation.
 pub trait Target {
     /// Paper inches (y up) to the target's units (y down).
@@ -168,6 +180,19 @@ pub trait Target {
     fn recorded(&self) -> usize {
         0
     }
+
+    /// Does this target write what each shape says of itself ([`ShapeLabel`])? If not, the walk neither reads it nor calls [`Target::begin_shape`] and [`Target::end_shape`]: a raster, a recording
+    /// and a PDF page have no use for it.
+    fn wants_labels(&self) -> bool {
+        false
+    }
+
+    /// A shape that is drawn begins: what is drawn until the matching [`Target::end_shape`], its own geometry and its members', belongs to it. Calls nest, as a group's members are inside the group, and
+    /// a drawing cut short is closed by [`Target::rewind`] with the clips and layers. Only called when [`Target::wants_labels`].
+    fn begin_shape(&mut self, _label: &ShapeLabel<'_>) {}
+
+    /// The shape the last [`Target::begin_shape`] opened ends.
+    fn end_shape(&mut self) {}
 
     /// Does this target write letters as text? If not, the walk does not build the source text.
     fn wants_text(&self) -> bool {

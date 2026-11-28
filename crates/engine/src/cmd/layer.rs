@@ -78,13 +78,7 @@ fn page_of(s: &Session, p: &Value, cmd: &str) -> Result<u32> {
     let doc = s.document().ok_or_else(|| failed(cmd, "no document open"))?;
     match optional_whole(p, "page", cmd)? {
         Some(page) => Ok(page),
-        None => doc
-            .pages
-            .iter()
-            .find(|page| !page.background)
-            .or_else(|| doc.pages.iter().next())
-            .map(|page| page.id)
-            .ok_or_else(|| bad(cmd, "the document has no pages")),
+        None => doc.first_foreground_page().map(|page| page.id).ok_or_else(|| bad(cmd, "the document has no pages")),
     }
 }
 

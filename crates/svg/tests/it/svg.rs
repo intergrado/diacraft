@@ -250,6 +250,33 @@ fn letters_are_a_text_element_with_the_characters_a_size_a_colour_and_an_x_for_e
 }
 
 #[test]
+fn a_right_to_left_paragraph_is_a_text_element_set_against_the_right_of_its_block() {
+    // The block is paper x 0.5 to 3.5, pixels 48 to 336. Left to right, alignment 0 puts the first letter at the block's left edge; right to left (`Flags` 1) it
+    // puts the line against the right edge, so the last letter ends there and every x of the element has moved with it.
+    let first_and_last = |flags: &str| {
+        let sb = label("Hello", 0.3).row_cell("Paragraph", None, RowKey::Ix(0), "HorzAlign", "0").row_cell(
+            "Paragraph",
+            None,
+            RowKey::Ix(0),
+            "Flags",
+            flags,
+        );
+        let (_, root) = export(&one_page(vec![sb]), &defaults());
+        let texts = named(&root, "text");
+        assert_eq!(texts.len(), 1);
+        let t = texts[0];
+        let (xs, ys) = (numbers(attr(t, "x")), numbers(attr(t, "y")));
+        assert_eq!(xs.len(), 5);
+        let m = matrix_of(attr(t, "transform"));
+        (apply(m, xs[0], ys[0]).0, apply(m, xs[4], ys[0]).0)
+    };
+    let (first, _) = first_and_last("0");
+    assert!((48.0..56.0).contains(&first), "left to right: the first letter at {first}");
+    let (first, last) = first_and_last("1");
+    assert!(last > 290.0 && last < 336.0 && first > 230.0, "right to left: letters from {first} to {last}");
+}
+
+#[test]
 fn vertical_text_is_outlines_since_its_letters_lie_on_their_sides() {
     // `TextDirection` 1: a letter on its side cannot be a `<text>` element, which a viewer sets upright, so it is drawn as outlines; the
     // same label across is a `<text>` element.
@@ -525,4 +552,31 @@ fn a_metafile_is_drawn_as_paths_and_the_page_says_nothing_of_it() {
     let b = bbox(attr(blue[0], "d"));
     assert!(close(b.0, 96.0) && close(b.2, 192.0) && close(b.1, 96.0) && close(b.3, 288.0), "{b:?}");
     assert!(named(&root, "image").is_empty());
+}
+
+/// A horizontal line 3 inches long at paper height 2, green, of weight 0.02 inch, with the text of the pattern's cell as given.
+fn line_with_pattern_text(pattern: &str) -> ShapeBuilder {
+    geometry_of(shape_at(1, 0.5, 2.0, 3.0, 0.0), vec![("MoveTo", vec![("X", 0.0), ("Y", 0.0)]), ("LineTo", vec![("X", 3.0), ("Y", 0.0)])])
+        .cell("FillPattern", "0")
+        .cell("LinePattern", pattern)
+        .cell("LineWeight", "0.02")
+        .cell("LineColor", "#008000")
+}
+
+#[test]
+fn a_line_pattern_outside_the_table_is_written_solid_and_the_file_says_so() {
+    // A fraction and a number the table has no row for draw solid, with a warning. A fraction was rounded to the number beside it: 2.5 was written with the dashes of
+    // pattern 3, 1.6 with those of 2, and 0.4 as no line at all.
+    for text in ["2.5", "1.6", "0.4", "24", "100", "-1"] {
+        let (out, root) = export(&one_page(vec![line_with_pattern_text(text)]), &defaults());
+        let line =
+            named(&root, "path").into_iter().find(|p| p.attr("stroke") == Some("#008000")).unwrap_or_else(|| panic!("{text}: the line is there"));
+        assert_eq!(line.attr("stroke-dasharray"), None, "{text}: a solid line has no dashes");
+        assert!(out.skipped.iter().any(|s| s.kind == SkipKind::PatternOutsideTable), "{text}: said so, got {:?}", out.skipped);
+    }
+    // A pattern of the table is dashed, and says nothing.
+    let (out, root) = export(&one_page(vec![line_with_pattern_text("2")]), &defaults());
+    let line = named(&root, "path").into_iter().find(|p| p.attr("stroke") == Some("#008000")).expect("the line");
+    assert!(line.attr("stroke-dasharray").is_some());
+    assert!(out.skipped.iter().all(|s| s.kind != SkipKind::PatternOutsideTable), "{:?}", out.skipped);
 }

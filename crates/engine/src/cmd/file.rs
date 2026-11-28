@@ -30,8 +30,9 @@ const WARNINGS_SHOWN: usize = 20;
 /// The warnings an open lists: **at most [`WARNINGS_SHOWN`] in all**, the notes the command makes itself (`first`, put in front of the reader's, and `last`, behind them)
 /// never cut, and the reader's own filling the room they leave (a note put in after the reader's 20 made 21, where the docs say "first 20"). The count that goes
 /// with the list is the whole, and the caller makes it.
-fn listed_warnings(first: Option<String>, reader: &[String], last: Option<String>) -> Vec<String> {
-    let room = WARNINGS_SHOWN.saturating_sub(usize::from(first.is_some()) + usize::from(last.is_some()));
+fn listed_warnings(first: Option<String>, reader: &[String], last: impl IntoIterator<Item = String>) -> Vec<String> {
+    let last: Vec<String> = last.into_iter().collect();
+    let room = WARNINGS_SHOWN.saturating_sub(usize::from(first.is_some()) + last.len());
     first.into_iter().chain(reader.iter().take(room).cloned()).chain(last).collect()
 }
 
@@ -92,7 +93,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             ["File"],
             None,
             "path: where to write the picture, and its extension (.png, .svg or .pdf, in any case) says which; \
-             page: the ID of the page to export (the first page when left out); \
+             page: the ID of the page to export (the first page that is not a background when left out); \
              dpi: pixels to the inch of a PNG (96 when left out, above 0 and at most 2400); \
              text: for an SVG or a PDF, `text` (the default: letters are text where the font allows it) or `outlines` (every letter as paths); \
              transparent: true for no white paper under the drawing",
@@ -204,7 +205,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.document().ok_or_else(|| failed(ID, "no document open"))?;
     let page = match page {
         Some(id) => doc.page(id).ok_or_else(|| bad(ID, format!("no page has id {id}")))?,
-        None => doc.pages.iter().next().ok_or_else(|| bad(ID, "the drawing has no pages"))?,
+        None => doc.first_foreground_page().ok_or_else(|| bad(ID, "the drawing has no pages"))?,
     };
     let paper = (!transparent).then_some(Rgba::WHITE);
     let title = Some(page.name.to_string());
@@ -511,9 +512,16 @@ fn make_save(s: &Session, cmd: &str, path: &Path, by_extension: bool, force: boo
     // **A Save with no edit into a file this session wrote writes the bytes the last save wrote**, the program's name in its properties included: the model writer keeps the
     // name of the program a drawing was read from while its content is as read (the unedited visit), and the splice named DiaCraft on every save.
     let resave_unedited = !from_model && !by_extension && !s.is_dirty() && source.as_ref().is_some_and(OpenFile::written_here);
-    let write_options =
+    let mut write_options =
         WriteOptions { variant, now: s.now(), recalc_document: false, drop_macros: asked.drop_macros, new_copy, content_unchanged, resave_unedited };
-    let (to_write, not_recorded) = with_template_stencils(s, &doc, named.kind == Kind::Template);
+    // **Background pages first**: a drawing with no file to splice into (a new one, and one written from the model alone) and a Save As, which writes a
+    // file of its own, list every background page before every foreground one, as all 70 files of the corpus that hold both kinds do. A drawing a session makes keeps them so and is
+    // not touched; the drawing of a file that has another order is put in order here, and **becomes the order the file holds** below, so that the next save compares the same order (no undo step).
+    // A Save into the drawing's own file changes only what was edited, and keeps the order the file has.
+    let ordered: Option<Arc<Document>> = if original.is_none() || by_extension { doc.pages_background_first().map(Arc::new) } else { None };
+    let reordered = ordered.is_some();
+    let settled: Arc<Document> = ordered.unwrap_or_else(|| Arc::clone(&doc));
+    let (to_write, not_recorded) = with_stencil_list(s, &settled, StencilList::of_vsdx(named.kind));
     // **A save across**: a drawing that stands on an `.odg` takes the package data of that file as it is now (as a save as `.diacraft` does), and the model writer is given the drawing
     // as the other format needs it: the objects left out when asked, and the picture box of a picture an `.odg` held (`across::onto`).
     // The drawing a Save As that leaves something out puts what it left out back on (`across::dropped::restore`): the drawing as the writer was given it, with the package data of the `.odg` it stands on
@@ -548,9 +556,53 @@ fn make_save(s: &Session, cmd: &str, path: &Path, by_extension: bool, force: boo
             Some(changed) => std::borrow::Cow::Owned(changed),
             None => to_write,
         };
-        (to_write, across::onto::Given { doc: None, left, boxed: 0 })
+        (to_write, across::onto::Given { doc: None, left, boxed: 0, dressed: 0, routable: 0, fielded: 0, texts: 0, unlinked: 0, stringed: 0 })
     };
     let to_write = if from_model { to_write } else { across::natively::without_parts(to_write, &natively) };
+    // **A drawing written from the model has the page names the program that opens a VSDX file keeps**: an `.odg`'s `page1` and a name two pages have are given the default
+    // form (`Page-N`, the lowest N no page has) before the writer is handed the drawing, so that the check after the save compares the file with the drawing it was written from, and the
+    // drawing becomes what the file reads as. The `.odg` and `.diacraft` writers keep the names as they are. A save into a file leaves the names the file holds, and its writer gives a page it writes new names.
+    let (to_write, names_said) = match from_model.then(|| diacraft_vsdx::keep_page_names(&to_write, None)).flatten() {
+        Some(kept) => {
+            let words = (!kept.renamed.is_empty()).then(|| kept.words());
+            // The formulas that named a renamed page already name its new name (the writer's rule, `diacraft_vsdx::keep_page_names`: the name is DiaCraft's choice and no formula may read `#REF!`
+            // for it). What reads the pages themselves, a cell that gives the page's name (`PAGENAME()`) and a field that shows it, and the cells that read a rewritten name, are worked out as `page.rename`
+            // works them out, so that the file holds what the drawing is then. **A field that shows anything else keeps the text the file held** (a page number or a page count a
+            // producer cached, a date, a file's name, until `text.update_fields`): the rename is the writer's, and no person edited the drawing. A budget the work does not fit leaves
+            // the drawing as it was named, and the save goes on.
+            let mut named = kept.doc.clone();
+            let named = match crate::draw::settle_pages(&mut named, &to_write) {
+                Ok(()) => {
+                    crate::draw::fields::refresh_page_name_fields(&mut named, &crate::draw::fields::Env::none());
+                    named
+                }
+                Err(_) => kept.doc,
+            };
+            // A page given a new name is a change of the content: the bookkeeping of an unedited visit is not kept for it.
+            write_options.content_unchanged = false;
+            (std::borrow::Cow::Owned(named), words)
+        }
+        None => (to_write, None),
+    };
+    // **A language cell of a drawing written from the model is the tag alone**: the files hold `V="fr-FR"` with no formula and no unit, and a cell that holds the string formula
+    // `"fr-FR"` is read by the program that opens the file as an error and falls back to a language of its own. The writer is handed the drawing with the cells so written, so that the check after the
+    // save compares the file with the drawing it was written from (a formula it did not keep would be a difference), and the drawing becomes what the file reads as. A save into a file writes the
+    // cells an edit wrote the same way, and leaves the ones the file holds as they are.
+    let to_write = match from_model.then(|| diacraft_vsdx::plain_languages(&to_write, None)).flatten() {
+        Some(plain) => std::borrow::Cow::Owned(plain),
+        None => to_write,
+    };
+    // **A built-in master of the old form has the `UniqueID` it has today in every VSDX file written** (owner ruling 2026-11-28, on every route: a save into the file, the model
+    // writer, a Save As, a stencil or a template type). The application that opens a file keeps the first three groups of a master's `UniqueID`, and 0.2.3 and the first builds of 0.2.4 wrote the
+    // `BaseID`'s text, which is one in those groups for every master of a stencil. The writer is handed the drawing with the `UniqueID` of such a master replaced (its `BaseID` stays, and every other
+    // master is as it was: `stencil::repair_old_ids`), so that a splice patches the master's row, the check after the save compares the file with the drawing it was written from, and the next save, which
+    // repairs the same masters again to the same ids, finds nothing to change. The drawing in the session keeps the ids it was read with (no edit, no undo step; a lookup of a master is by its `BaseID`),
+    // and the repair is **no edit of the content**: a drawing that is as it was read keeps the bookkeeping of an unedited visit (the program's name, the time and the thumbnail the file had), whose rule
+    // is about what the drawing says and shows, and a master's `UniqueID` is neither.
+    let to_write = match crate::stencil::repair_old_ids(&to_write) {
+        Some(repaired) => std::borrow::Cow::Owned(repaired),
+        None => to_write,
+    };
     let room = check_save_peak(cmd, s, &to_write)?;
     let mut written =
         write_with_threads(&to_write, original.as_ref(), &write_options, crate::threads::save_threads_within(room)).map_err(|e| match e {
@@ -570,14 +622,12 @@ fn make_save(s: &Session, cmd: &str, path: &Path, by_extension: bool, force: boo
     } else {
         Carried::none()
     };
-    // Said in words, before the writer's own: the template is saved without the list of stencils that are open (the file's DiaCraft data is of a later build's).
+    // Said in words, before the writer's own: the file is saved without the list of stencils that are open (its DiaCraft data is of a later build's).
     let mut said: Vec<String> = Vec::new();
-    if not_recorded {
-        said.push(
-            "the stencils open now were not recorded in the template: the file holds DiaCraft data of a version this build does not read, which it keeps as it is"
-                .to_owned(),
-        );
+    if let Some(what) = not_recorded {
+        said.push(not_recorded_words(what));
     }
+    said.extend(names_said);
     said.extend(across::onto::left_out_words(&given));
     said.extend(written.warnings.iter().cloned());
     let warnings: Vec<String> = said.iter().take(WARNINGS_SHOWN).cloned().collect();
@@ -609,13 +659,17 @@ fn make_save(s: &Session, cmd: &str, path: &Path, by_extension: bool, force: boo
         // drawing did but what was left out, and the file's baseline is the drawing as the writer is given it. A save into the file that left the shapes of objects out gives the same again.
         let restored =
             (!adopt && !asked.is_empty() && (from_model || given.left.shapes > 0) && (!from_model || check_clean) && across::came_back(&written))
-                .then(|| across::dropped::restore(written.document.clone(), restore_from.as_ref().unwrap_or(&doc), given.left, &written.natively))
+                .then(|| across::dropped::restore(written.document.clone(), restore_from.as_ref().unwrap_or(&settled), given.left, &written.natively))
                 .flatten();
         let file = file
             .with_extension(Some(named.extension()))
             .with_written_here()
             .with_asked(asked)
             .with_natively(across::natively::union(&natively, &written.natively));
+        // The drawing the save began with is clean once it is saved; a drawing that was put in order is the drawing in the session from now on (the order its file holds).
+        let marked = |s: &mut Session, file: OpenFile, baseline: Document| {
+            if reordered { s.adopt_saved_with(Document::clone(&settled), file, baseline) } else { s.mark_saved(&settled, file, baseline) }
+        };
         // **The drawing becomes what the file reads as** after a save across to VSDX, when that holds everything the drawing did (`across`, "the model after a save across"): the next save into the file
         // is a splice that compares the drawing with the file as it reads, and a drawing that held an `.odg`'s frame where the file holds an embedding would be refused ("a change to the picture of a shape").
         if adopt {
@@ -627,28 +681,79 @@ fn make_save(s: &Session, cmd: &str, path: &Path, by_extension: bool, force: boo
                     let baseline = baseline.into_owned();
                     s.adopt_saved_with(kept, file, baseline);
                 }
-                Err(_) => s.mark_saved(&doc, file, written.document),
+                Err(_) => marked(s, file, written.document),
             }
         } else {
-            s.mark_saved(&doc, file, written.document);
+            marked(s, file, written.document);
         }
     });
     Ok(Made::new(writer, FileFormat::Vsdx, result, bytes, path, target, settle))
 }
 
-/// Our rule: a template that is saved keeps the built-in stencils open at that moment, as the list in DiaCraft's part that names them, when they are not the ones its
-/// document already implies (its own list, or the stencils a new drawing has). A template opened and saved again with its stencils as it opened them is then written as it was, and one
-/// that has no list, whoever made it, is not given one for nothing. The list goes into the copy that is written and not into the drawing, which is no different for it (not dirty, no undo
-/// step); a list that is the stencils a new drawing has takes the child out of the copy, and the part with it when nothing else is in it. Stencils opened from files are not kept: a
-/// template never names a path. → the document to write, and `true` when the list could not be put in (the file's DiaCraft data is of a version this build does not read, which it keeps as
-/// it is and does not change). A copy shares every page and master with the drawing, so a `.diacraft` package copies what the copy did not change.
-fn with_template_stencils<'d>(s: &Session, doc: &'d Arc<Document>, is_template: bool) -> (std::borrow::Cow<'d, Document>, bool) {
-    if !is_template || s.stencils().open_builtins() == template::stencils_opened_by(doc) {
-        return (std::borrow::Cow::Borrowed(&**doc), false);
+/// Whose list of open built-in stencils a save keeps in DiaCraft's data: a template's and a drawing's, and no stencil file's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StencilList {
+    Template,
+    Drawing,
+    Stencil,
+}
+
+impl StencilList {
+    /// The list a VSDX type keeps.
+    fn of_vsdx(kind: Kind) -> StencilList {
+        match kind {
+            Kind::Template => StencilList::Template,
+            Kind::Drawing => StencilList::Drawing,
+            Kind::Stencil => StencilList::Stencil,
+        }
+    }
+
+    /// The list a kind of `.diacraft` file keeps.
+    fn of_native(kind: NativeKind) -> StencilList {
+        match kind {
+            NativeKind::Template => StencilList::Template,
+            NativeKind::Drawing => StencilList::Drawing,
+            NativeKind::Stencil => StencilList::Stencil,
+        }
+    }
+
+    /// The word the warning about a list that could not be written calls the file by.
+    fn word(self) -> &'static str {
+        if self == StencilList::Template { "template" } else { "file" }
+    }
+}
+
+/// The warning of a save that could not put the list of open stencils in the file: its DiaCraft data is of a version this build does not read, which it keeps as it is and does not
+/// interpret.
+fn not_recorded_words(what: &str) -> String {
+    format!(
+        "the stencils open now were not recorded in the {what}: the file holds DiaCraft data of a version this build does not read, which it keeps as it is"
+    )
+}
+
+/// Our rule: a template or a drawing that is saved keeps the built-in stencils open at that moment, as the list in DiaCraft's part that names them,
+/// when they are not the ones its document already implies (a template: its own list, or the stencils a new drawing has; a drawing: its own list, or, with none, the stencils a new drawing
+/// has and the ones its masters came from, `template::stencils_of_drawing`, which is what `file.open` opens for it). A file opened and saved again with its stencils as it opened them is
+/// then written as it was, and one that has no list, whoever made it, is not given one for nothing. The list goes into the copy that is written and not into the drawing, which is no different
+/// for it (not dirty, no undo step); a list that is the stencils a new drawing has takes the child out of the copy, and the part with it when nothing else is in it, and **a copy no different
+/// from the drawing is not a copy** (it is no edit). Stencils opened from files are not kept: a file never names a path. → the document to write, and the word the file is called by when the
+/// list could not be put in (the file's DiaCraft data is of a version this build does not read, which it keeps as it is and does not change). A copy shares every page and master with
+/// the drawing, so a `.diacraft` package copies what the copy did not change.
+fn with_stencil_list<'d>(s: &Session, doc: &'d Arc<Document>, kind: StencilList) -> (std::borrow::Cow<'d, Document>, Option<&'static str>) {
+    let implied = match kind {
+        StencilList::Stencil => return (std::borrow::Cow::Borrowed(&**doc), None),
+        StencilList::Template => template::stencils_opened_by(doc),
+        StencilList::Drawing => template::stencils_of_drawing(doc).ids,
+    };
+    if s.stencils().open_builtins() == implied {
+        return (std::borrow::Cow::Borrowed(&**doc), None);
     }
     let mut copy = Document::clone(doc);
-    let not_recorded = !template::set_stencil_names(&mut copy, s.stencils().open_builtins());
-    if not_recorded { (std::borrow::Cow::Borrowed(&**doc), true) } else { (std::borrow::Cow::Owned(copy), false) }
+    if !template::set_stencil_names(&mut copy, s.stencils().open_builtins()) {
+        return (std::borrow::Cow::Borrowed(&**doc), Some(kind.word()));
+    }
+    // The list of the stencils a new drawing has takes the child out, and a drawing that had none is as it was.
+    if copy.diacraft == doc.diacraft { (std::borrow::Cow::Borrowed(&**doc), None) } else { (std::borrow::Cow::Owned(copy), None) }
 }
 
 /// **The package data of the file a drawing stands on goes with the drawing**. A drawing opened from an `.odg` holds the package data of the file as it read it (the
@@ -824,8 +929,8 @@ pub(crate) fn save_native(s: &mut Session, cmd: &str, path: &Path, target: std::
 /// This is the making of it ([`make_save`]): the file in memory, the check after the save of a drawing that came from another format, and what the session is told when it is written. It writes no file and changes no session.
 fn make_native(s: &Session, cmd: &str, path: &Path, target: std::path::PathBuf, kind: NativeKind) -> Result<Made> {
     let crate::session::SaveInputs { doc, source, .. } = s.save_inputs().ok_or_else(|| failed(cmd, "no document open"))?;
-    // A template keeps the built-in stencils open at that moment, as a VSDX template does.
-    let (to_write, not_recorded) = with_template_stencils(s, &doc, kind == NativeKind::Template);
+    // A template and a drawing keep the built-in stencils open at that moment, as a VSDX file does.
+    let (to_write, not_recorded) = with_stencil_list(s, &doc, StencilList::of_native(kind));
     let edited = s.is_dirty() || matches!(to_write, std::borrow::Cow::Owned(_));
     // A drawing that stands on an `.odg` takes the package data of that file as it is now: it is no edit of the drawing.
     let to_write = with_file_package_data(cmd, source.as_ref(), to_write)?;
@@ -837,10 +942,8 @@ fn make_native(s: &Session, cmd: &str, path: &Path, target: std::path::PathBuf, 
     let checked =
         native_save_checked(source.as_ref().and_then(OpenFile::format), &to_write).then(|| check::check_native(&to_write, &saved.bytes, false));
     let mut said: Vec<String> = Vec::new();
-    if not_recorded {
-        said.push(
-            "the stencils open now were not recorded in the template: the file holds DiaCraft data of a version this build does not read, which it keeps as it is".to_owned(),
-        );
+    if let Some(what) = not_recorded {
+        said.push(not_recorded_words(what));
     }
     said.extend(saved.warnings.iter().cloned());
     let warnings: Vec<String> = said.iter().take(WARNINGS_SHOWN).cloned().collect();
@@ -1115,7 +1218,7 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
     // A blank drawing is answered as it always was; the keys below are there when a template was used.
     if let Some(started) = started {
         result["template"] = started.template;
-        result["stencils"] = stencils_json(s, started.ignored);
+        result["stencils"] = stencils_json(s, started.told.ignored);
         result["warnings"] = json!(started.warnings);
         if let Some(file) = started.file {
             result["file"] = file;
@@ -1127,10 +1230,47 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
 /// What starting a drawing from a template told.
 struct Started {
     template: Value,
-    /// How many stencil names in the template were not opened (not a built-in id).
-    ignored: usize,
+    /// What the template's list of stencils told: how many names were not opened (not a built-in id), and whether more were named than are looked at.
+    told: Told,
     warnings: Vec<String>,
     file: Option<Value>,
+}
+
+/// What a list of stencils in a file told when the file was opened: for the words of the answer and for its `stencils` field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Told {
+    /// How many names were not opened (a path, a stencil file's id, a repeat, nothing built in): counted and never followed.
+    ignored: usize,
+    /// Whether the list named more than is looked at (`template::MAX_NAMES` entries, the first 4 KiB).
+    cut: bool,
+    /// Whether the answer of `file.open` says which stencils were opened: for a template always, and for a drawing when its file named them or its masters made more open than
+    /// a new drawing has.
+    report: bool,
+    /// What the file is called in the words: `template` or `file`.
+    what: &'static str,
+}
+
+impl Told {
+    /// The one warning about the list, or `None` when it said nothing that was left: names that were not opened and that never are followed, and a list longer than is looked at.
+    fn words(self) -> Option<String> {
+        let mut said: Vec<String> = Vec::new();
+        if self.ignored > 0 {
+            let (n, what) = (self.ignored, self.what);
+            said.push(format!(
+                "{n} stencil name{} in the {what} {} not opened: a name is opened only when it is the id of a built-in stencil, and is never followed to a file (open a stencil file with stencil.open)",
+                if n == 1 { "" } else { "s" },
+                if n == 1 { "was" } else { "were" },
+            ));
+        }
+        if self.cut {
+            said.push(format!(
+                "the list of stencils in the {} names more than DiaCraft looks at: only the first {} names (within the first 4 KiB) were looked at",
+                self.what,
+                template::MAX_NAMES
+            ));
+        }
+        (!said.is_empty()).then(|| said.join("; "))
+    }
 }
 
 /// The built-in stencils that are open, and how many names the template that opened them gave that were not opened.
@@ -1138,37 +1278,69 @@ fn stencils_json(s: &Session, ignored: usize) -> Value {
     json!({ "open": s.stencils().open_builtins(), "ignored": ignored })
 }
 
-/// Opens the built-in stencils a template names → how many names were not opened. `None`, a document with no
+/// Opens the built-in stencils a template names → what the list told. `None`, a document with no
 /// list in DiaCraft's part (or a file that is not a template), opens the stencils a new drawing has.
-fn open_template_stencils(s: &mut Session, names: Option<template::StencilNames>) -> usize {
+fn open_template_stencils(s: &mut Session, names: Option<template::StencilNames>) -> Told {
     match names {
         Some(names) => {
             s.stencils_mut().set_builtins(&names.opens());
-            names.ignored
+            Told { ignored: names.ignored, cut: names.cut, report: true, what: "template" }
         }
         None => {
             s.stencils_mut().reset_builtins();
-            0
+            Told { report: true, what: "template", ..Told::default() }
+        }
+    }
+}
+
+/// The built-in stencils a file opens, worked out from its document **before** the drawing takes the document (the list is read from it, the masters looked at).
+enum Plan {
+    /// A template: exactly the stencils its list names, and the stencils a new drawing has when it has none.
+    Template(Option<template::StencilNames>),
+    /// A drawing: its list, or with none the stencils a new drawing has and the ones its masters came from.
+    Drawing(template::DrawingStencils),
+    /// A stencil, or anything that names none: the stencils a new drawing has.
+    Defaults,
+}
+
+impl Plan {
+    /// What a file of this kind opens: a template its list, a drawing its list or its masters', and a stencil file the defaults.
+    fn of(doc: &Document, kind: StencilList) -> Plan {
+        match kind {
+            StencilList::Template => Plan::Template(template::stencil_names(doc)),
+            StencilList::Drawing => Plan::Drawing(template::stencils_of_drawing(doc)),
+            StencilList::Stencil => Plan::Defaults,
+        }
+    }
+
+    /// Opens them → what the list told.
+    fn open(self, s: &mut Session) -> Told {
+        match self {
+            Plan::Template(names) => open_template_stencils(s, names),
+            Plan::Drawing(found) => {
+                s.stencils_mut().set_builtins(&found.ids);
+                Told {
+                    ignored: found.ignored,
+                    cut: found.cut,
+                    report: found.listed || found.ignored > 0 || found.ids != crate::stencil::default_open_ids(),
+                    what: "file",
+                }
+            }
+            Plan::Defaults => {
+                s.stencils_mut().reset_builtins();
+                Told { what: "file", ..Told::default() }
+            }
         }
     }
 }
 
 /// Makes `doc`, read from a template, the document as **a new unsaved drawing**, and opens the stencils it names. **A new drawing keeps no file's bytes** (NP10):
 /// the template's package is let go by the caller before this is called, and the model carries everything the package held (the parts the model has slots for, held whole). The drawing has no file,
-/// so its first save is `.diacraft` (the window's default) or, by Save As to a VSDX type, the VSDX model writer's. → how many names were not opened.
-fn begin_from_template(s: &mut Session, cmd: &str, doc: Document) -> Result<usize> {
+/// so its first save is `.diacraft` (the window's default) or, by Save As to a VSDX type, the VSDX model writer's. → what the template's list told.
+fn begin_from_template(s: &mut Session, cmd: &str, doc: Document) -> Result<Told> {
     let names = template::stencil_names(&doc);
     s.replace_document(cmd, doc)?;
     Ok(open_template_stencils(s, names))
-}
-
-/// The words for names a template gave that were not opened.
-fn ignored_words(ignored: usize) -> String {
-    format!(
-        "{ignored} stencil name{} in the template {} not opened: a name is opened only when it is the id of a built-in stencil, and is never followed to a file (open a stencil file with stencil.open)",
-        if ignored == 1 { "" } else { "s" },
-        if ignored == 1 { "was" } else { "were" },
-    )
 }
 
 /// The template `key` names (an id, or a file) as a new drawing.
@@ -1180,9 +1352,9 @@ fn start_from(s: &mut Session, cmd: &str, key: &str) -> Result<Started> {
         let built = template::build(cmd, spec)?;
         // The package the template was read back from is let go: a new drawing keeps its model and no bytes (NP10).
         drop(built.bytes);
-        let ignored = begin_from_template(s, cmd, built.document)?;
-        let warnings = listed_warnings(None, &built.warnings, (ignored > 0).then(|| ignored_words(ignored)));
-        return Ok(Started { template: json!({ "id": spec.id, "name": spec.name, "builtin": true }), ignored, warnings, file: None });
+        let told = begin_from_template(s, cmd, built.document)?;
+        let warnings = listed_warnings(None, &built.warnings, told.words());
+        return Ok(Started { template: json!({ "id": spec.id, "name": spec.name, "builtin": true }), told, warnings, file: None });
     }
     // Not an id: a path. A word with nothing of a path in it is most likely an id that is wrong, and is told so (`template::is_path`, the window's rule too).
     if !template::is_path(key) {
@@ -1219,16 +1391,16 @@ fn start_from(s: &mut Session, cmd: &str, key: &str) -> Result<Started> {
     let (variant, size, skipped_count) = (report.variant.map(|v| v.extension()), bytes.len(), report.skipped_counts.values().sum::<u64>());
     // A new drawing keeps no file's bytes (NP10): the template's package is let go before the drawing is made, and not held beside it until the command ends.
     drop(bytes);
-    let ignored = begin_from_template(s, cmd, doc)?;
+    let told = begin_from_template(s, cmd, doc)?;
     // The words about names that were not opened are one more warning, and are counted with the others (N3 of the re-review).
-    let ignored_note = (ignored > 0).then(|| ignored_words(ignored));
+    let ignored_note = told.words();
     if ignored_note.is_some() {
         warning_count = warning_count.saturating_add(1);
     }
     // The notes are listed with the reader's, at most `WARNINGS_SHOWN` in all, and none of them is cut.
     let warnings = listed_warnings(extension_note, &report.warnings, ignored_note);
     let file = json!({ "variant": variant, "kind": "template", "bytes": size, "warning_count": warning_count, "skipped_count": skipped_count });
-    Ok(Started { template: json!({ "id": null, "name": null, "builtin": false }), ignored, warnings, file: Some(file) })
+    Ok(Started { template: json!({ "id": null, "name": null, "builtin": false }), told, warnings, file: Some(file) })
 }
 
 /// The template file `key` (an `.otg`, told by its own type) as a new drawing (harvested): read by the `odg` reader, and **a new drawing keeps no file's bytes**
@@ -1252,15 +1424,15 @@ fn start_from_odg(s: &mut Session, cmd: &str, key: &str, bytes: Vec<u8>, variant
     let (size, skipped_count) = (bytes.len(), report.kept.values().sum::<u64>());
     // A new drawing keeps no file's bytes: the package is let go before the drawing is made.
     drop(bytes);
-    let ignored = begin_from_template(s, cmd, doc)?;
-    let ignored_note = (ignored > 0).then(|| ignored_words(ignored));
+    let told = begin_from_template(s, cmd, doc)?;
+    let ignored_note = told.words();
     if ignored_note.is_some() {
         warning_count = warning_count.saturating_add(1);
     }
     let warnings = listed_warnings(extension_note, &report.warnings, ignored_note);
     let file =
         json!({ "variant": variant.extension(), "kind": "template", "bytes": size, "warning_count": warning_count, "skipped_count": skipped_count });
-    Ok(Started { template: json!({ "id": null, "name": null, "builtin": false }), ignored, warnings, file: Some(file) })
+    Ok(Started { template: json!({ "id": null, "name": null, "builtin": false }), told, warnings, file: Some(file) })
 }
 
 /// A `.diacraft-template` as a new drawing (`file.new {template: path}`): read as `file.open` reads one, **a new drawing keeps no file's bytes** (NP10), and the stencils it names are open. A
@@ -1287,8 +1459,8 @@ fn start_from_native(s: &mut Session, cmd: &str, key: &str, bytes: &[u8], reserv
     let names = template::stencil_names(&doc);
     s.replace_document(cmd, doc)?;
     s.seed_ledger(&opened.state.ledger);
-    let ignored = open_template_stencils(s, names);
-    let ignored_note = (ignored > 0).then(|| ignored_words(ignored));
+    let told = open_template_stencils(s, names);
+    let ignored_note = told.words();
     if ignored_note.is_some() {
         warning_count = warning_count.saturating_add(1);
     }
@@ -1300,7 +1472,7 @@ fn start_from_native(s: &mut Session, cmd: &str, key: &str, bytes: &[u8], reserv
         "warning_count": warning_count,
         "skipped_count": opened.kept_parts,
     });
-    Ok(Started { template: json!({ "id": null, "name": null, "builtin": false }), ignored, warnings, file: Some(file) })
+    Ok(Started { template: json!({ "id": null, "name": null, "builtin": false }), told, warnings, file: Some(file) })
 }
 
 /// Reads the file at `path` and makes it the document, with a fresh history, as `file.new` does: the old document is replaced, and not
@@ -1361,14 +1533,14 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     // it one. The package's own type decides, not the extension; a template opened to be changed (`edit_template`) is the file itself.
     let is_template = report.variant.is_some_and(|v| v.kind == Kind::Template);
     let from_template = !edit_template && is_template;
-    // The stencils the template names are open in it, whether it is started from or opened to be changed, and a file that is
-    // not a template has every built-in stencil open again.
-    let ignored = if from_template {
+    // The stencils the template names are open in it, whether it is started from or opened to be changed, and the stencils a drawing names, or its masters came from, are open in
+    // it; a stencil file has the stencils a new drawing has.
+    let told = if from_template {
         // A new drawing keeps no file's bytes (NP10): the template's package is let go before the drawing is made.
         drop(bytes);
         begin_from_template(s, cmd, doc)?
     } else {
-        let names = if is_template { template::stencil_names(&doc) } else { None };
+        let plan = Plan::of(&doc, report.variant.map_or(StencilList::Drawing, |v| StencilList::of_vsdx(v.kind)));
         // The file the path leads to now, if it is a link, is the file a save writes: resolved once, here.
         // **The content stamp** (the design's 4.4): the fingerprint of the model as it was read from this foreign file is **pending** here, and made by the first thing that
         // needs it, from the document the drawing was read as, which the pending stamp keeps (`Session::content_stamp`, `Session::replace_document_from` gives it the `Arc`): a Save As to
@@ -1386,17 +1558,17 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(read) = as_read {
             s.set_read_baseline(read);
         }
-        open_template_stencils(s, names)
+        plan.open(s)
     };
-    let ignored_note = (ignored > 0).then(|| ignored_words(ignored));
+    let ignored_note = told.words();
     if ignored_note.is_some() {
         warning_count = warning_count.saturating_add(1);
     }
     // The notes are listed with the reader's, at most `WARNINGS_SHOWN` in all, and none of them is cut.
     let warnings = listed_warnings(extension_note, &report.warnings, ignored_note);
     let mut result = describe(cmd, s)?;
-    if is_template {
-        result["stencils"] = stencils_json(s, ignored);
+    if told.report {
+        result["stencils"] = stencils_json(s, told.ignored);
     }
     result["file"] = json!({
         "variant": variant,
@@ -1439,8 +1611,9 @@ fn open_native(
     }
     let is_template = kind == NativeKind::Template;
     let from_template = !edit_template && is_template;
-    // The stencils the template names are open in it, whether it is started from or opened to be changed, and a file that is not a template has every built-in stencil open again.
-    let names = if is_template { template::stencil_names(&doc) } else { None };
+    // The stencils the template names are open in it, whether it is started from or opened to be changed, the stencils a drawing names or its masters came from are open in it,
+    // and a stencil file has the stencils a new drawing has.
+    let plan = Plan::of(&doc, StencilList::of_native(kind));
     if from_template {
         // A new drawing keeps no file's bytes: the package is let go before the drawing is made, not held beside it until the command ends.
         drop(bytes);
@@ -1458,15 +1631,15 @@ fn open_native(
         s.replace_document_from(cmd, doc, source)?;
         s.seed_ledger(&opened.state.ledger);
     }
-    let ignored = open_template_stencils(s, names);
-    let ignored_note = (ignored > 0).then(|| ignored_words(ignored));
+    let told = plan.open(s);
+    let ignored_note = told.words();
     if ignored_note.is_some() {
         warning_count = warning_count.saturating_add(1);
     }
     let warnings = listed_warnings(extension_note, &reader_warnings, ignored_note);
     let mut result = describe(cmd, s)?;
-    if is_template {
-        result["stencils"] = stencils_json(s, ignored);
+    if told.report {
+        result["stencils"] = stencils_json(s, told.ignored);
     }
     result["file"] = json!({
         "variant": nativefile::variant_word(kind),
@@ -1520,9 +1693,10 @@ fn open_odg(
     if extension_note.is_some() {
         warning_count = warning_count.saturating_add(1);
     }
-    // The notes are listed with the reader's, at most `WARNINGS_SHOWN` in all.
-    let warnings = listed_warnings(flat.then(|| crate::odgfile::FLAT_OPEN_NOTE.to_owned()), &report.warnings, extension_note);
-    let ignored = if from_template {
+    // The stencils the template names are open in it, and the stencils a drawing names or its masters came from are open in it: the list rides in the DiaCraft data of the
+    // package. An `.otg` opened to be changed has the stencils a new drawing has (no save writes a list into an `.odg` yet).
+    let plan = if is_template { Plan::Defaults } else { Plan::of(&doc, StencilList::Drawing) };
+    let told = if from_template {
         // A new drawing keeps no file's bytes (NP10): the template's package is let go before the drawing is made.
         drop(bytes);
         begin_from_template(s, cmd, doc)?
@@ -1539,12 +1713,18 @@ fn open_odg(
             .with_extension(Some(variant.extension()))
             .with_pending_content_stamp();
         s.replace_document_from(cmd, doc, source)?;
-        // Like any drawing that is not a template with a list: every built-in stencil is open again.
-        open_template_stencils(s, None)
+        plan.open(s)
     };
+    let told_note = told.words();
+    if told_note.is_some() {
+        warning_count = warning_count.saturating_add(1);
+    }
+    // The notes are listed with the reader's, at most `WARNINGS_SHOWN` in all.
+    let warnings =
+        listed_warnings(flat.then(|| crate::odgfile::FLAT_OPEN_NOTE.to_owned()), &report.warnings, [extension_note, told_note].into_iter().flatten());
     let mut result = describe(cmd, s)?;
-    if is_template {
-        result["stencils"] = stencils_json(s, ignored);
+    if is_template || told.report {
+        result["stencils"] = stencils_json(s, told.ignored);
     }
     result["file"] = json!({
         "variant": variant.extension(),
@@ -1617,6 +1797,7 @@ pub(super) fn file_problem(e: &FileError) -> OpenProblem {
         FileError::TooLarge { .. } => OpenProblem::FileTooLarge,
         FileError::OutOfMemory => OpenProblem::OutOfMemory,
         FileError::Failed => OpenProblem::Unreadable,
+        FileError::Refused(_) => OpenProblem::NotGranted,
     }
 }
 

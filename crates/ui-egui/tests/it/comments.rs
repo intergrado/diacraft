@@ -85,6 +85,18 @@ fn ctrl_enter_posts_and_cancel_takes_the_box_away() {
     assert!(!drawn(&w, "comments.compose"), "the box is gone");
 }
 
+/// Ctrl+Enter posts and a press with Alt held too (AltGr is Ctrl and Alt) does not.
+#[test]
+fn ctrl_alt_enter_does_not_post_a_comment() {
+    let (mut w, _) = window_with_a_shape();
+    run_command(&mut w, "window.newComment", json!({}));
+    write(&mut w, "not yet");
+    key(&mut w, Key::Enter, Modifiers { alt: true, ..ctrl() });
+    assert!(comments(&w).is_empty(), "Ctrl+Alt+Enter posts nothing");
+    key(&mut w, Key::Enter, ctrl());
+    assert_eq!(comments(&w).len(), 1, "Ctrl+Enter posts");
+}
+
 #[test]
 fn a_reply_an_edit_and_a_delete_are_commands_of_the_pane_and_one_undo_step_each() {
     let (mut w, _) = window_with_a_shape();

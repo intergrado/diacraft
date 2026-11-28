@@ -86,8 +86,11 @@ fn a_swimlane_dropped_from_the_stencil_is_inserted_before_or_after_the_lane_it_i
     let new = u32::try_from(r["id"].as_u64().unwrap()).unwrap();
     assert_eq!(lane_ids(&mut s), [lanes[0], lanes[1], new, lanes[2]]);
     assert_eq!(r["name"], "Swimlane");
+    // The fourth lane does not fit under the page: the template's page has Auto Size on, so it grew by a sheet and the structure moved up with the origin.
+    let lift = run(&mut s, "page.setup", json!({}))["height"].as_f64().unwrap() - 8.5;
+    assert!(lift > 0.0);
     // In the upper half of lane 1: before it.
-    let r = run(&mut s, "shape.drop", json!({"master": "xfunc.swimlane", "page": 1, "x": 5.0, "y": 7.5}));
+    let r = run(&mut s, "shape.drop", json!({"master": "xfunc.swimlane", "page": 1, "x": 5.0, "y": 7.5 + lift}));
     let first = u32::try_from(r["id"].as_u64().unwrap()).unwrap();
     assert_eq!(lane_ids(&mut s)[0], first);
     assert_eq!(lane_ids(&mut s).len(), 5);
@@ -119,4 +122,131 @@ fn on_a_page_with_no_lanes_the_swimlane_and_the_separator_are_dropped_as_the_sha
     }
     assert!(run(&mut s, "swimlane.info", json!({}))["structures"].as_array().unwrap().is_empty());
     check_session(&s).unwrap();
+}
+
+// ---- lanes and the page (issue 4 of the demo video) ---------------------------------------------------------------------------------------
+
+/// The page's size in inches: `page.setup`'s `width` and `height`.
+fn page_size(s: &mut Session) -> (f64, f64) {
+    let setup = run(s, "page.setup", json!({}));
+    (setup["width"].as_f64().unwrap(), setup["height"].as_f64().unwrap())
+}
+
+/// The boxes of the lanes of the first structure as `swimlane.info` tells them: `[left, bottom, right, top]` in inches.
+fn lane_boxes(s: &mut Session) -> Vec<[f64; 4]> {
+    structure(s)["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            let r = l["rect"].as_array().unwrap();
+            [r[0].as_f64().unwrap(), r[1].as_f64().unwrap(), r[2].as_f64().unwrap(), r[3].as_f64().unwrap()]
+        })
+        .collect()
+}
+
+/// Every lane of the first structure lies on the page.
+fn assert_lanes_on_the_page(s: &mut Session, what: &str) {
+    let (w, h) = page_size(s);
+    let eps = 1e-6;
+    for (k, b) in lane_boxes(s).iter().enumerate() {
+        assert!(b[0] >= -eps && b[1] >= -eps && b[2] <= w + eps && b[3] <= h + eps, "{what}: lane {k} is {b:?} on a page of {w} by {h}");
+    }
+}
+
+#[test]
+fn the_template_page_has_auto_size_on_and_a_blank_page_has_it_off() {
+    // Our rule: the template's page grows by whole sheets, since a lane is added past its edge; a new drawing's page keeps the off.
+    let mut s = started();
+    assert_eq!(run(&mut s, "page.setup", json!({}))["auto_size"], true);
+    let mut blank = blank_session();
+    assert_eq!(run(&mut blank, "page.setup", json!({}))["auto_size"], false);
+}
+
+#[test]
+fn a_fourth_lane_inserted_in_the_template_is_on_the_page_because_the_page_grew_by_a_sheet() {
+    // The demo's steps: `file.new {template: "cross_functional_flowchart"}`, then `swimlane.insert {}`: the lane was at [0.5, -0.35, 10.5, 1.65] on a page 8.5 inches high.
+    let mut s = started();
+    assert_eq!(page_size(&mut s), (11.0, 8.5));
+    let r = run(&mut s, "swimlane.insert", json!({}));
+    assert_eq!(r["index"], 3);
+    assert_eq!(lane_boxes(&mut s).len(), 4);
+    assert_lanes_on_the_page(&mut s, "a fourth lane");
+    // Whole sheets of the printer paper (Letter, landscape: 11 by 8.5), as Auto Size grows any page.
+    assert_eq!(page_size(&mut s), (11.0, 17.0));
+    // The structure was carried with the page's origin: the lanes keep their order and thickness, and the first lane is still 0.5 inch below the top of the page.
+    let boxes = lane_boxes(&mut s);
+    assert!((boxes[0][3] - (17.0 - 0.5 - 0.35)).abs() < 1e-6, "the first lane's top: {boxes:?}");
+    for lane in &boxes {
+        assert!((lane[3] - lane[1] - 2.0).abs() < 1e-6, "every lane is 2 inches thick: {boxes:?}");
+    }
+    check_session(&s).unwrap();
+}
+
+#[test]
+fn a_lane_inserted_before_the_first_pushes_the_others_down_and_the_page_grows_for_them_too() {
+    // The new lane is on the page at the top; the lane that was the last is the one pushed past the bottom.
+    let mut s = started();
+    let lanes = lane_ids(&mut s);
+    run(&mut s, "swimlane.insert", json!({"lane": lanes[0], "where": "before"}));
+    assert_eq!(lane_boxes(&mut s).len(), 4);
+    assert_lanes_on_the_page(&mut s, "a lane before the first");
+    assert_eq!(page_size(&mut s), (11.0, 17.0));
+    check_session(&s).unwrap();
+}
+
+#[test]
+fn a_swimlane_dropped_from_the_stencil_grows_the_page_as_an_inserted_one_does() {
+    let mut s = started();
+    run(&mut s, "shape.drop", json!({"master": "xfunc.swimlane", "page": 1, "x": 5.0, "y": 4.0}));
+    assert_eq!(lane_boxes(&mut s).len(), 4);
+    assert_lanes_on_the_page(&mut s, "a dropped swimlane");
+}
+
+#[test]
+fn a_lane_made_thicker_and_lanes_turned_over_their_diagonal_take_the_page_with_them() {
+    // The two other commands that put lanes where there were none: a lane resized pushes the ones after it, and turning the structure makes a column of the lanes.
+    let mut s = started();
+    let lanes = lane_ids(&mut s);
+    run(&mut s, "swimlane.resize", json!({"id": lanes[0], "size": 5.0}));
+    assert_lanes_on_the_page(&mut s, "a thicker lane");
+    assert!(page_size(&mut s).1 > 8.5);
+    let mut t = started();
+    run(&mut t, "swimlane.orientation", json!({"orientation": "vertical"}));
+    assert_lanes_on_the_page(&mut t, "vertical lanes");
+    assert_eq!(page_size(&mut t), (11.0, 17.0), "ten inches of lanes under the top margin: one more sheet");
+}
+
+#[test]
+fn lanes_inserted_up_to_the_most_a_list_takes_all_stay_on_the_page_and_the_page_stays_in_whole_sheets() {
+    let mut s = started();
+    let mut made = 3;
+    loop {
+        match s.execute("swimlane.insert", &json!({})) {
+            Ok(_) => made += 1,
+            Err(e) => {
+                assert!(e.to_string().contains("at most 256 lanes"), "{e}");
+                break;
+            }
+        }
+        assert!(made <= 256, "the cap holds");
+    }
+    assert_eq!(made, 256);
+    assert_eq!(lane_boxes(&mut s).len(), 256);
+    assert_lanes_on_the_page(&mut s, "256 lanes");
+    let (w, h) = page_size(&mut s);
+    assert_eq!(w, 11.0);
+    assert!((h / 8.5 - (h / 8.5).round()).abs() < 1e-9, "a whole number of sheets of 8.5 inches: {h}");
+    check_session(&s).unwrap();
+}
+
+#[test]
+fn a_page_with_auto_size_off_does_not_grow_for_a_lane_as_the_rule_says() {
+    // Auto Size is the page's own choice (`page.auto_size`): off, a lane put past the edge stays there and the page is as it was (is about Auto Size on).
+    let mut s = started();
+    run(&mut s, "page.auto_size", json!({"on": false}));
+    run(&mut s, "swimlane.insert", json!({}));
+    assert_eq!(page_size(&mut s), (11.0, 8.5));
+    let boxes = lane_boxes(&mut s);
+    assert!(boxes[3][1] < 0.0, "the fourth lane is past the bottom edge: {boxes:?}");
 }

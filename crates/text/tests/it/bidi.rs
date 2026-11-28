@@ -64,9 +64,14 @@ fn a_wrapped_right_to_left_paragraph_is_reordered_a_line_at_a_time() {
 
 #[test]
 fn the_trailing_spaces_of_a_right_to_left_line_do_not_move_its_text() {
-    let p = ParaFormat { flags: 1, halign: 2, ..ParaFormat::default() };
+    // The start edge of a right-to-left paragraph is the right one, and alignment 0 puts the line against it.
+    let p = ParaFormat { flags: 1, halign: 0, ..ParaFormat::default() };
     let (laid, _) = lay("אבג   ", &p);
     close(laid.lines[0].x + laid.lines[0].width, 10.0);
+    // Alignment 2 puts it against the left.
+    let p = ParaFormat { flags: 1, halign: 2, ..ParaFormat::default() };
+    let (laid, _) = lay("אבג   ", &p);
+    close(laid.lines[0].x, 0.0);
 }
 
 #[test]

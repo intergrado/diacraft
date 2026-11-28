@@ -10,7 +10,8 @@
 //! shape changes nothing here. A point comes out tagged with that shape, so that `PAR` and `LOC` carry it from there.
 //!
 //! **What reads what.** These functions read every cell of the section, `Width`, `Height` and `Rounding`, none of which the
-//! formula names, so a formula that calls one is worked out after every edit (`facts.rs`, `DYNAMIC_FUNCTIONS`).
+//! formula names, so the dependency graph links a formula that calls one to them (`affected.rs` `path_reads`, `facts.rs` `PATH_FUNCTIONS`): it
+//! is worked out again when a cell of its section, its shape's size or its rounding changes, and **not after every edit** of the page.
 //!
 //! **Cost.** A call reads the section's rows once (a step a cell), draws them (a step for each step drawn, twice, and for the splines the
 //! multiplications they spend at 512 to a step) and walks them. A section of more than `diacraft_geom::MAX_ROWS` rows, or that draws more than

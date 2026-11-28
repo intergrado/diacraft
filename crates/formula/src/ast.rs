@@ -86,6 +86,40 @@ impl Expr {
         }
         count
     }
+
+    /// Whether a call of `name` (in any letter case) is anywhere in the tree: as the formula itself, inside an argument, an operand, or the arguments of a call that
+    /// a reference is qualified by. The walk keeps its own stack and does not recurse, so a tree of any depth is searched. A name in a string or a reference is no call.
+    pub fn calls(&self, name: &str) -> bool {
+        let mut stack: Vec<&Expr> = vec![self];
+        while let Some(e) = stack.pop() {
+            match e {
+                Expr::Unary(_, x) | Expr::Percent(x) => stack.push(x),
+                Expr::Binary(_, a, b) => {
+                    stack.push(a);
+                    stack.push(b);
+                }
+                Expr::Ref(r) => push_qualifier_args(&r.qualifiers, &mut stack),
+                Expr::Call(c) => {
+                    if c.is(name) {
+                        return true;
+                    }
+                    push_qualifier_args(&c.qualifiers, &mut stack);
+                    stack.extend(c.args.iter().flatten());
+                }
+                Expr::Number(_) | Expr::Bool(_) | Expr::Str(_) | Expr::Color { .. } | Expr::Currency { .. } | Expr::Guid(_) => {}
+            }
+        }
+        false
+    }
+}
+
+/// The argument expressions of the calls among some qualifiers, put on `stack`.
+fn push_qualifier_args<'a>(qualifiers: &'a [Qualifier], stack: &mut Vec<&'a Expr>) {
+    for q in qualifiers {
+        if let Qualifier::Call { args, .. } = q {
+            stack.extend(args.iter().flatten());
+        }
+    }
 }
 
 /// The nodes of some qualifiers that are not expressions (names, and empty slots), and their argument expressions put on `stack`.

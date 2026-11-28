@@ -37,11 +37,19 @@ pub fn pack(items: &[(String, Vec<u8>)]) -> Vec<u8> {
     zip(&items.iter().map(|(name, bytes)| ZipItem::stored(name, bytes)).collect::<Vec<_>>())
 }
 
+/// The namespace of the extended properties part.
+const OD_APP: &str = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties";
+
 /// A package that has a little of everything the reader reads (the seed of the proptest properties of `tests/it/fuzz.rs`).
 pub fn plain_package() -> Pkg {
     let shapes = r##"<Shape ID="1" Type="Group" Master="1" LineStyle="1"><Cell N="Width" V="2" F="Height*2" U="IN"/><Cell N="X" V="1" F="Inh"/><Section N="Geometry" IX="0"><Row T="MoveTo" IX="1"><Cell N="X" V="0"/></Row></Section><Section N="User"><Row N="a"><Cell N="Value" V="x" E="#N/A"/></Row></Section><Text><cp IX="0"/>ab<fld IX="0">3</fld></Text><Data1>d</Data1><Shapes><Shape ID="2" MasterShape="4"/><Shape ID="3" Type="Foreign"><ForeignData ForeignType="Bitmap"><Rel r:id="rId1"/></ForeignData></Shape></Shapes><Trigger N="RecalcColor"/><x:n xmlns:x="urn:z"/></Shape>"##;
     let theme = r#"<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="T"><a:themeElements><a:clrScheme name="C"><a:dk1><a:srgbClr val="000000"/></a:dk1></a:clrScheme><a:fontScheme name="F"><a:majorFont><a:latin typeface="X"/></a:majorFont></a:fontScheme></a:themeElements></a:theme>"#;
+    // A file DiaCraft wrote (its extended properties name it): a save into it gives the text of its `User` and `Field` rows the unit, which the seed's `User` row holds with none.
+    let app = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="{OD_APP}"><Application>DiaCraft</Application></Properties>"#
+    );
     VsdxBuilder::new()
+        .app(&app)
         .colors(r##"<ColorEntry IX="24" RGB="#123456"/>"##)
         .face_names(r#"<FaceName NameU="Sans" Panose="1"/>"#)
         .more_styles(r#"<StyleSheet ID="1" LineStyle="0"><Cell N="LineWeight" V="1" F="THEMEVAL()"/></StyleSheet>"#)

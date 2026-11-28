@@ -376,7 +376,7 @@ pub fn add_callouts(
         let id = u32::try_from(k_id).ok().and_then(|n| first.checked_add(n)).ok_or_else(|| Problem::failed("no shape ids are left on the page"))?;
         let frame = CalloutFrame { pin: *pin, width, height, tip: style.default_tip(width, k) };
         let shape = callout_shape(id, style, &frame, text);
-        page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.shapes.push(Arc::new(shape));
+        page_mut(doc, page).ok_or_else(|| Problem::failed("the page went away"))?.push_shape(Arc::new(shape));
         added.push(Added { id, target: *target });
     }
     // The ties are made with the shapes in the page, so that the formulas find their sheets.
